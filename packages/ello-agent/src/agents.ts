@@ -16,6 +16,7 @@ import { type ModelWrapper, resolveModel } from './models.js';
 import { MessageQueue } from './queue.js';
 import type {
   DeferredToolApprovalRequest,
+  DeferredToolApprovalResult,
   DeferredToolRequests,
   DeferredToolResults,
 } from './state.js';
@@ -245,7 +246,16 @@ export class AgentRuntime {
     }
 
     const options = pickGenerateOptions(input);
-    const messages = buildMessagesWithResume(options);
+    const resumeOptions = pickResumeOptions(input);
+    const resolvedDeferredResults = await this.resolveDeferredToolResults(
+      resumeOptions.messageHistory ?? options.messages ?? [],
+      resumeOptions.deferredToolResults,
+    );
+    const messages = buildMessagesWithResume(
+      input,
+      options.messages,
+      resolvedDeferredResults,
+    );
     if (options.messages !== undefined) {
       const result = await generateText({
         ...base,
@@ -327,6 +337,94 @@ export class AgentRuntime {
       allMessages: () => buildAllMessages(input, result),
     });
   }
+
+  private async resolveDeferredToolResults(
+    messageHistory: ModelMessage[],
+    deferredToolResults: DeferredToolResults | null | undefined,
+  ): Promise<ResolvedDeferredToolResult[]> {
+    if (deferredToolResults === null || deferredToolResults === undefined) {
+      return [];
+    }
+    if (this.ctx === null) {
+      throw new Error('AgentRuntime context is not available.');
+    }
+
+    const toolCalls = collectToolCallsFromMessages(messageHistory);
+    const runCtx = { deps: this.ctx };
+    const resolved: ResolvedDeferredToolResult[] = [];
+
+    for (const [toolCallId, approval] of Object.entries(
+      deferredToolResults.approvals,
+    )) {
+      const toolCall = toolCalls.get(toolCallId);
+      if (toolCall === undefined) {
+        resolved.push({
+          toolCallId,
+          toolName: 'approval',
+          output: `Error: deferred approval '${toolCallId}' has no matching tool call.`,
+        });
+        continue;
+      }
+
+      if (!isApprovalGranted(approval)) {
+        resolved.push({
+          toolCallId,
+          toolName: toolCall.toolName,
+          output: normalizeApprovalResult(approval),
+        });
+        continue;
+      }
+
+      const toolEntry = await this.findToolForCall(toolCall.toolName, runCtx);
+      if (toolEntry === null) {
+        resolved.push({
+          toolCallId,
+          toolName: toolCall.toolName,
+          output: `Error: tool '${toolCall.toolName}' not found for deferred approval.`,
+        });
+        continue;
+      }
+
+      const output = await toolEntry.toolset.callTool(
+        toolCall.toolName,
+        toolCall.input,
+        runCtx,
+        toolEntry.tool,
+      );
+      resolved.push({
+        toolCallId,
+        toolName: toolCall.toolName,
+        output,
+      });
+    }
+
+    for (const [toolCallId, output] of Object.entries(
+      deferredToolResults.calls,
+    )) {
+      const toolCall = toolCalls.get(toolCallId);
+      resolved.push({
+        toolCallId,
+        toolName: toolCall?.toolName ?? 'deferred_call',
+        output,
+      });
+    }
+
+    return resolved;
+  }
+
+  private async findToolForCall(
+    name: string,
+    runCtx: { deps: AgentContext },
+  ): Promise<{ toolset: RuntimeToolset; tool: ToolsetTool } | null> {
+    for (const toolset of this.toolsets) {
+      const tools = await toolset.getTools(runCtx);
+      const toolDef = tools[name];
+      if (toolDef !== undefined) {
+        return { toolset, tool: toolDef };
+      }
+    }
+    return null;
+  }
 }
 
 function pickGenerateOptions(input: AgentRuntimeGenerateInput) {
@@ -344,44 +442,49 @@ function pickGenerateOptions(input: AgentRuntimeGenerateInput) {
   return options;
 }
 
+function pickResumeOptions(input: AgentRuntimeGenerateInput): {
+  messageHistory: ModelMessage[] | null | undefined;
+  deferredToolResults: DeferredToolResults | null | undefined;
+} {
+  return {
+    messageHistory: input.messageHistory,
+    deferredToolResults: input.deferredToolResults,
+  };
+}
+
+interface ResolvedDeferredToolResult {
+  toolCallId: string;
+  toolName: string;
+  output: unknown;
+}
+
+interface DeferredToolCallSnapshot {
+  toolCallId: string;
+  toolName: string;
+  input: ToolArgs;
+}
+
 function buildMessagesWithResume(
   input: AgentRuntimeGenerateInput,
+  messages: ModelMessage[] | undefined,
+  resolvedDeferredResults: ResolvedDeferredToolResult[],
 ): ModelMessage[] {
-  const baseMessages = [...(input.messageHistory ?? input.messages ?? [])];
-  const deferredMessages = buildDeferredResultMessages(
-    input.deferredToolResults,
-  );
+  const baseMessages = [...(input.messageHistory ?? messages ?? [])];
+  const deferredMessages = buildDeferredResultMessages(resolvedDeferredResults);
   return [...baseMessages, ...deferredMessages];
 }
 
 function buildDeferredResultMessages(
-  results: DeferredToolResults | null | undefined,
+  results: ResolvedDeferredToolResult[],
 ): ModelMessage[] {
-  if (results === null || results === undefined) {
-    return [];
-  }
-
-  const toolResults = [
-    ...Object.entries(results.approvals).map(([toolCallId, approval]) => ({
-      toolCallId,
-      toolName: 'approval',
-      output: normalizeApprovalResult(approval),
-    })),
-    ...Object.entries(results.calls).map(([toolCallId, output]) => ({
-      toolCallId,
-      toolName: 'deferred_call',
-      output,
-    })),
-  ];
-
-  if (toolResults.length === 0) {
+  if (results.length === 0) {
     return [];
   }
 
   return [
     {
       role: 'tool',
-      content: toolResults.map((result) => ({
+      content: results.map((result) => ({
         type: 'tool-result' as const,
         toolCallId: result.toolCallId,
         toolName: result.toolName,
@@ -392,7 +495,7 @@ function buildDeferredResultMessages(
 }
 
 function normalizeApprovalResult(
-  approval: DeferredToolResults['approvals'][string],
+  approval: DeferredToolApprovalResult,
 ): unknown {
   if (typeof approval === 'boolean') {
     return approval ? 'approved' : 'denied';
@@ -400,6 +503,10 @@ function normalizeApprovalResult(
   return approval.approved
     ? 'approved'
     : `denied${approval.reason ? `: ${approval.reason}` : ''}`;
+}
+
+function isApprovalGranted(approval: DeferredToolApprovalResult): boolean {
+  return typeof approval === 'boolean' ? approval : approval.approved;
 }
 
 function collectDeferredRequests(
@@ -452,6 +559,55 @@ function normalizeInitialMessages(input: AgentRuntimeRunInput): ModelMessage[] {
     return [...history, { role: 'user', content: input.prompt }];
   }
   return [...history];
+}
+
+function collectToolCallsFromMessages(
+  messages: ModelMessage[],
+): Map<string, DeferredToolCallSnapshot> {
+  const result = new Map<string, DeferredToolCallSnapshot>();
+  for (const message of messages) {
+    if (message.role !== 'assistant' || !Array.isArray(message.content)) {
+      continue;
+    }
+    for (const part of message.content) {
+      if (isToolCallPart(part)) {
+        result.set(part.toolCallId, {
+          toolCallId: part.toolCallId,
+          toolName: part.toolName,
+          input: normalizeToolInput(part.input),
+        });
+      }
+    }
+  }
+  return result;
+}
+
+function isToolCallPart(part: unknown): part is {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  input?: unknown;
+} {
+  if (typeof part !== 'object' || part === null) {
+    return false;
+  }
+  const candidate = part as {
+    type?: unknown;
+    toolCallId?: unknown;
+    toolName?: unknown;
+  };
+  return (
+    candidate.type === 'tool-call' &&
+    typeof candidate.toolCallId === 'string' &&
+    typeof candidate.toolName === 'string'
+  );
+}
+
+function normalizeToolInput(input: unknown): ToolArgs {
+  if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
+    return input as ToolArgs;
+  }
+  return {};
 }
 
 /**

@@ -43,8 +43,8 @@ class RuntimeApprovalTool extends BaseTool {
   static override description = 'Dangerous action.';
   static override requiresApproval = true;
 
-  async call(_ctx: ToolRunContext, _args: ToolArgs): Promise<string> {
-    throw new Error('approval tool should not execute before approval');
+  async call(_ctx: ToolRunContext, args: ToolArgs): Promise<string> {
+    return `executed on ${String(args.target ?? 'default')}`;
   }
 }
 
@@ -318,6 +318,100 @@ describe('createAgent', () => {
         ],
         calls: [],
       });
+    } finally {
+      await runtime.exit();
+    }
+  });
+
+  it('executes approved deferred approval tool on resume', async () => {
+    const runtime = createAgent({ tools: [RuntimeApprovalTool] });
+    const messages = [
+      { role: 'user' as const, content: 'approve it' },
+      {
+        role: 'assistant' as const,
+        content: [
+          {
+            type: 'tool-call' as const,
+            toolCallId: 'call-1',
+            toolName: 'dangerous_action',
+            input: { target: 'prod' },
+          },
+        ],
+      },
+    ];
+
+    await runtime.enter();
+    try {
+      const result = (await runtime.run({
+        messages,
+        deferredToolResults: {
+          approvals: { 'call-1': true },
+          calls: {},
+        },
+      })) as unknown as { options: Record<string, unknown> };
+
+      expect(result.options.messages).toEqual([
+        ...messages,
+        {
+          role: 'tool',
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: 'call-1',
+              toolName: 'dangerous_action',
+              output: 'executed on prod',
+            },
+          ],
+        },
+      ]);
+    } finally {
+      await runtime.exit();
+    }
+  });
+
+  it('keeps denied deferred approval as denied tool result', async () => {
+    const runtime = createAgent({ tools: [RuntimeApprovalTool] });
+    const messages = [
+      { role: 'user' as const, content: 'approve it' },
+      {
+        role: 'assistant' as const,
+        content: [
+          {
+            type: 'tool-call' as const,
+            toolCallId: 'call-1',
+            toolName: 'dangerous_action',
+            input: { target: 'prod' },
+          },
+        ],
+      },
+    ];
+
+    await runtime.enter();
+    try {
+      const result = (await runtime.run({
+        messages,
+        deferredToolResults: {
+          approvals: {
+            'call-1': { approved: false, reason: 'not allowed' },
+          },
+          calls: {},
+        },
+      })) as unknown as { options: Record<string, unknown> };
+
+      expect(result.options.messages).toEqual([
+        ...messages,
+        {
+          role: 'tool',
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: 'call-1',
+              toolName: 'dangerous_action',
+              output: 'denied: not allowed',
+            },
+          ],
+        },
+      ]);
     } finally {
       await runtime.exit();
     }
