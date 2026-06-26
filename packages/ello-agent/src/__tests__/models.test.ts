@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BaseTool,
   createAgent,
+  getModelSettings,
   normalizeModelName,
   resolveModel,
   splitProviderAndModel,
@@ -165,6 +166,25 @@ describe('createAgent', () => {
     const runtime = createAgent({ systemPrompt: '  ' });
 
     expect(runtime.systemPrompt).toBe('');
+  });
+
+  it('passes model settings into generateText', async () => {
+    const runtime = createAgent({
+      modelSettings: 'openai_responses_high',
+    });
+
+    await runtime.enter();
+    try {
+      const result = (await runtime.run('hello')) as unknown as {
+        options: Record<string, unknown>;
+      };
+
+      expect(result.options).toMatchObject(
+        getModelSettings('openai_responses_high'),
+      );
+    } finally {
+      await runtime.exit();
+    }
   });
 
   it('requires enter before run', async () => {

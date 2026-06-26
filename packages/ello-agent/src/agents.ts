@@ -13,6 +13,7 @@ import { AgentContext } from './context.js';
 import { LocalEnvironment, type Environment } from './environment/index.js';
 import { buildMcpServers, MCPConfigSchema, type MCPConfig } from './mcp.js';
 import { type ModelWrapper, resolveModel } from './models.js';
+import { resolveModelSettings, type ModelSettings } from './presets.js';
 import { MessageQueue } from './queue.js';
 import type {
   DeferredToolApprovalRequest,
@@ -91,6 +92,8 @@ export interface CreateAgentOptions {
   tools?: BaseToolConstructor[] | null;
   toolsets?: RuntimeToolset[] | null;
   mcpConfig?: MCPConfig | null;
+  compact?: boolean;
+  modelSettings?: string | ModelSettings | null;
 }
 
 /** AgentRuntime 的构造参数。 */
@@ -102,6 +105,7 @@ export interface AgentRuntimeOptions {
   env: Environment;
   modelConfig: ModelConfig;
   toolConfig: ToolConfig;
+  modelSettings?: ModelSettings | null;
   modelWrapper?: ModelWrapper | null;
   coreToolset?: Toolset | null;
   toolsets?: RuntimeToolset[];
@@ -144,6 +148,7 @@ export class AgentRuntime {
   readonly env: Environment;
   readonly modelConfig: ModelConfig;
   readonly toolConfig: ToolConfig;
+  readonly modelSettings: ModelSettings | null;
   readonly modelWrapper: ModelWrapper | null;
   readonly coreToolset: Toolset | null;
   readonly toolsets: RuntimeToolset[];
@@ -161,6 +166,7 @@ export class AgentRuntime {
     this.env = options.env;
     this.modelConfig = options.modelConfig;
     this.toolConfig = options.toolConfig;
+    this.modelSettings = options.modelSettings ?? null;
     this.modelWrapper = options.modelWrapper ?? null;
     this.coreToolset = options.coreToolset ?? null;
     this.toolsets = options.toolsets ?? [];
@@ -279,6 +285,7 @@ export class AgentRuntime {
     const base = {
       model: this.model,
       tools: toolSets.tools,
+      ...(this.modelSettings !== null ? this.modelSettings : {}),
       ...(this.systemPrompt !== null ? { system: this.systemPrompt } : {}),
     };
     const steps: Array<StepResult<ToolSet, Record<string, unknown>>> = [];
@@ -352,6 +359,10 @@ export class AgentRuntime {
       }
     }
     return { tools: result };
+  }
+
+  get modelSettingsValue(): ModelSettings | null {
+    return this.modelSettings;
   }
 
   private createAiTool(
@@ -781,6 +792,7 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
   const effectiveModel = options.modelWrapper
     ? options.modelWrapper(selection.model, selection.modelName, wrapperContext)
     : selection.model;
+  const effectiveModelSettings = resolveModelSettings(options.modelSettings);
   const coreToolset = options.tools?.length
     ? new Toolset({ tools: options.tools })
     : null;
@@ -805,6 +817,7 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
     env: options.env ?? new LocalEnvironment(),
     modelConfig: options.modelConfig ?? new ModelConfig(),
     toolConfig: options.toolConfig ?? new ToolConfig(),
+    modelSettings: effectiveModelSettings,
     modelWrapper: options.modelWrapper ?? null,
     coreToolset,
     toolsets: allToolsets,
