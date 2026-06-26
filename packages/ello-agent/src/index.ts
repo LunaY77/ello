@@ -80,6 +80,21 @@ export {
   type SessionStorage,
 } from "./session/index.js";
 export {
+  BaseTool,
+  EmptyToolArgsSchema,
+  Instruction,
+  Toolset,
+  getToolMetadata,
+  tool,
+  type BaseToolConstructor,
+  type ToolArgs,
+  type ToolDecoratorOptions,
+  type ToolFunction,
+  type ToolRunContext,
+  type ToolsetOptions,
+  type ToolsetTool,
+} from "./toolsets/index.js";
+export {
   UsageSnapshot,
   addUsage,
   createEmptyUsage,

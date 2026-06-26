@@ -7,6 +7,7 @@ import { ModelConfig, ToolConfig } from "./config.js";
 import { LocalEnvironment, type Environment } from "./environment/index.js";
 import { MessageQueue } from "./queue.js";
 import { type ModelWrapper, resolveModel } from "./models.js";
+import { Toolset, type BaseToolConstructor } from "./toolsets/index.js";
 
 /** createAgent 的输入参数。 */
 export interface CreateAgentOptions {
@@ -18,6 +19,8 @@ export interface CreateAgentOptions {
   modelConfig?: ModelConfig | null;
   toolConfig?: ToolConfig | null;
   modelWrapper?: ModelWrapper | null;
+  tools?: BaseToolConstructor[] | null;
+  toolsets?: Toolset[] | null;
 }
 
 /** AgentRuntime 的构造参数。 */
@@ -30,6 +33,8 @@ export interface AgentRuntimeOptions {
   modelConfig: ModelConfig;
   toolConfig: ToolConfig;
   modelWrapper?: ModelWrapper | null;
+  coreToolset?: Toolset | null;
+  toolsets?: Toolset[];
 }
 
 /**
@@ -47,6 +52,8 @@ export class AgentRuntime {
   readonly modelConfig: ModelConfig;
   readonly toolConfig: ToolConfig;
   readonly modelWrapper: ModelWrapper | null;
+  readonly coreToolset: Toolset | null;
+  readonly toolsets: Toolset[];
   readonly steeringQueue = new MessageQueue();
   readonly followUpQueue = new MessageQueue();
   ctx: AgentContext | null = null;
@@ -61,6 +68,13 @@ export class AgentRuntime {
     this.modelConfig = options.modelConfig;
     this.toolConfig = options.toolConfig;
     this.modelWrapper = options.modelWrapper ?? null;
+    this.coreToolset = options.coreToolset ?? null;
+    this.toolsets = options.toolsets ?? [];
+  }
+
+  /** 是否存在需要审批的工具。 */
+  get hasApprovalTools(): boolean {
+    return this.toolsets.some((toolset) => toolset.hasApprovalTools);
   }
 
   /** 是否已进入运行时生命周期。 */
@@ -154,6 +168,8 @@ export class AgentRuntime {
  *   options.modelConfig: 可选模型配置。
  *   options.toolConfig: 可选工具配置。
  *   options.modelWrapper: 可选模型包装器。
+ *   options.tools: 可选 BaseTool 子类序列; 将被组装为核心 Toolset。
+ *   options.toolsets: 可选额外 Toolset 序列。
  *
  * Returns:
  *   需要通过 enter() 进入后再调用 run() 的 AgentRuntime。
@@ -171,6 +187,11 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
   const effectiveModel = options.modelWrapper
     ? options.modelWrapper(selection.model, selection.modelName, wrapperContext)
     : selection.model;
+  const coreToolset = options.tools?.length ? new Toolset({ tools: options.tools }) : null;
+  const allToolsets = [
+    ...(coreToolset !== null ? [coreToolset] : []),
+    ...(options.toolsets ?? []),
+  ];
 
   return new AgentRuntime({
     modelName: selection.modelName,
@@ -181,5 +202,7 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
     modelConfig: options.modelConfig ?? new ModelConfig(),
     toolConfig: options.toolConfig ?? new ToolConfig(),
     modelWrapper: options.modelWrapper ?? null,
+    coreToolset,
+    toolsets: allToolsets,
   });
 }
