@@ -168,6 +168,10 @@ export function tool(
   options: ToolDecoratorOptions,
   fn: ToolFunction,
 ): BaseToolConstructor {
+  if (!isAsyncFunction(fn)) {
+    throw new TypeError('tool() requires an async function.');
+  }
+
   class FunctionTool extends BaseTool {
     static override toolName = options.name;
     static override description = options.description;
@@ -223,6 +227,12 @@ export function getToolMetadata(toolClass: BaseToolConstructor): {
     requiresApproval: toolClass.requiresApproval ?? false,
     inputSchema: toolClass.inputSchema ?? z.object({}).passthrough(),
   };
+}
+
+function isAsyncFunction(value: unknown): boolean {
+  return (
+    typeof value === 'function' && value.constructor.name === 'AsyncFunction'
+  );
 }
 
 function isPromiseLike(value: unknown): value is Promise<unknown> {

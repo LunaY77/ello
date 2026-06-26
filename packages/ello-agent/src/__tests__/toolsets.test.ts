@@ -149,16 +149,25 @@ describe('tool helper', () => {
     expect(ShellTool.autoInherit).toBe(true);
   });
 
-  it('rejects non promise result at call time', async () => {
-    const BadTool = tool(
-      { name: 'bad', description: 'fails' },
-      (() => 'x') as never,
-    );
-    const instance = new BadTool();
+  it('rejects sync functions at definition time', () => {
+    expect(() =>
+      tool({ name: 'bad', description: 'fails' }, (() => 'x') as never),
+    ).toThrow('async function');
+  });
 
-    await expect(instance.call(makeCtx(), {})).rejects.toThrow(
-      'returns a Promise',
+  it('can instantiate function tools', () => {
+    const CalcTool = tool(
+      { name: 'calc', description: 'Calculate' },
+      async (_ctx, args) => String(args.expr ?? ''),
     );
+
+    const instance = new CalcTool();
+
+    expect(instance.name).toBe('calc');
+    expect(instance.description).toBe('Calculate');
+    expect(instance.supersededByTags).toEqual(new Set());
+    expect(instance.autoInherit).toBe(false);
+    expect(instance.requiresApproval).toBe(false);
   });
 });
 
