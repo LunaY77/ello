@@ -232,6 +232,7 @@ export class AgentRuntime {
         "AgentRuntime must be entered via 'await runtime.enter()' before calling run().",
       );
     }
+    assertRunInput(input);
 
     this.ctx = this.ctx.prepareNewRun();
     const approvalToolNames = new Set<string>();
@@ -464,6 +465,18 @@ function pickGenerateOptions(input: AgentRuntimeGenerateInput) {
     ...options
   } = inputWithRuntimeFields;
   return options;
+}
+
+function assertRunInput(input: unknown): asserts input is AgentRuntimeRunInput {
+  if (
+    typeof input === 'string' ||
+    (typeof input === 'object' && input !== null && !Array.isArray(input))
+  ) {
+    return;
+  }
+  throw new TypeError(
+    'AgentRuntime.run() input must be a prompt string or an AI SDK generateText options object.',
+  );
 }
 
 function pickResumeOptions(input: AgentRuntimeGenerateInput): {

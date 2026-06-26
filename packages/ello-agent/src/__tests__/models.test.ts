@@ -50,6 +50,7 @@ class RuntimeApprovalTool extends BaseTool {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.clearAllMocks();
 });
 
 describe('model parsing', () => {
@@ -145,6 +146,21 @@ describe('createAgent', () => {
     const runtime = createAgent();
 
     await expect(runtime.run('hello')).rejects.toThrow('must be entered');
+  });
+
+  it('rejects non string prompt before model call', async () => {
+    const { generateText } = await import('ai');
+    const runtime = createAgent();
+
+    await runtime.enter();
+    try {
+      await expect(runtime.run(123 as never)).rejects.toThrow(
+        'input must be a prompt string',
+      );
+      expect(generateText).not.toHaveBeenCalled();
+    } finally {
+      await runtime.exit();
+    }
   });
 
   it('accepts AI SDK generateText messages object', async () => {
