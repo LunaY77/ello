@@ -53,3 +53,9 @@ export {
   getDefaultStrategy,
   type SearchStrategy,
 } from './tool_search/index.js';
+export {
+  ProxyCallToolArgsSchema,
+  ProxySearchToolsArgsSchema,
+  ToolProxyToolset,
+  type ToolProxyToolsetOptions,
+} from './tool-proxy/index.js';

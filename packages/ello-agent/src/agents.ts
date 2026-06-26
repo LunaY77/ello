@@ -9,13 +9,27 @@ import {
 import { ModelConfig, ToolConfig } from './config.js';
 import { AgentContext } from './context.js';
 import { LocalEnvironment, type Environment } from './environment/index.js';
+import { buildMcpServers, MCPConfigSchema, type MCPConfig } from './mcp.js';
 import { type ModelWrapper, resolveModel } from './models.js';
 import { MessageQueue } from './queue.js';
 import {
   Toolset,
   type BaseToolConstructor,
+  type ToolArgs,
   type ToolsetTool,
 } from './toolsets/index.js';
+
+/** AgentRuntime 可接收的工具集结构。 */
+export interface RuntimeToolset {
+  readonly hasApprovalTools?: boolean;
+  getTools(ctx: { deps: AgentContext }): Promise<Record<string, ToolsetTool>>;
+  callTool(
+    name: string,
+    toolArgs: ToolArgs,
+    ctx: { deps: AgentContext },
+    tool?: ToolsetTool,
+  ): Promise<unknown>;
+}
 
 /** createAgent 的输入参数。 */
 export interface CreateAgentOptions {
@@ -28,7 +42,8 @@ export interface CreateAgentOptions {
   toolConfig?: ToolConfig | null;
   modelWrapper?: ModelWrapper | null;
   tools?: BaseToolConstructor[] | null;
-  toolsets?: Toolset[] | null;
+  toolsets?: RuntimeToolset[] | null;
+  mcpConfig?: MCPConfig | null;
 }
 
 /** AgentRuntime 的构造参数。 */
@@ -42,7 +57,7 @@ export interface AgentRuntimeOptions {
   toolConfig: ToolConfig;
   modelWrapper?: ModelWrapper | null;
   coreToolset?: Toolset | null;
-  toolsets?: Toolset[];
+  toolsets?: RuntimeToolset[];
 }
 
 /** AgentRuntime.run() 的 AI SDK 对齐输入。 */
@@ -71,7 +86,7 @@ export class AgentRuntime {
   readonly toolConfig: ToolConfig;
   readonly modelWrapper: ModelWrapper | null;
   readonly coreToolset: Toolset | null;
-  readonly toolsets: Toolset[];
+  readonly toolsets: RuntimeToolset[];
   readonly steeringQueue = new MessageQueue();
   readonly followUpQueue = new MessageQueue();
   ctx: AgentContext | null = null;
@@ -92,7 +107,7 @@ export class AgentRuntime {
 
   /** 是否存在需要审批的工具。 */
   get hasApprovalTools(): boolean {
-    return this.toolsets.some((toolset) => toolset.hasApprovalTools);
+    return this.toolsets.some((toolset) => toolset.hasApprovalTools === true);
   }
 
   /** 是否已进入运行时生命周期。 */
@@ -220,7 +235,7 @@ export class AgentRuntime {
   }
 
   private createAiTool(
-    toolset: Toolset,
+    toolset: RuntimeToolset,
     name: string,
     toolDef: ToolsetTool,
   ): ToolSet[string] {
@@ -290,6 +305,11 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
     ...(coreToolset !== null ? [coreToolset] : []),
     ...(options.toolsets ?? []),
   ];
+  if (options.mcpConfig !== undefined && options.mcpConfig !== null) {
+    allToolsets.push(
+      ...buildMcpServers(MCPConfigSchema.parse(options.mcpConfig)),
+    );
+  }
 
   return new AgentRuntime({
     modelName: selection.modelName,

@@ -88,6 +88,19 @@ export {
 } from './filters/index.js';
 export { MessageQueue, type MessageQueueMode } from './queue.js';
 export {
+  MCPConfigSchema,
+  MCPServerConfigSchema,
+  MCPServerSpecSchema,
+  MCPToolset,
+  MCPTransport,
+  buildMcpServer,
+  buildMcpServers,
+  loadMcpConfigFile,
+  type MCPConfig,
+  type MCPServerConfig,
+  type MCPServerSpec,
+} from './mcp.js';
+export {
   DEFAULT_MODEL_NAME,
   normalizeModelName,
   resolveModel,
@@ -184,7 +197,10 @@ export {
   WebSearchTool,
   BM25SearchStrategy,
   KeywordSearchStrategy,
+  ProxyCallToolArgsSchema,
+  ProxySearchToolsArgsSchema,
   ToolSearchToolset,
+  ToolProxyToolset,
   getDefaultStrategy,
   Toolset,
   WriteFileArgsSchema,
@@ -199,6 +215,7 @@ export {
   type ToolsetOptions,
   type ToolsetTool,
   type SearchStrategy,
+  type ToolProxyToolsetOptions,
 } from './toolsets/index.js';
 export {
   UsageSnapshot,
