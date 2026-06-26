@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BaseTool,
   createAgent,
+  createMessageEntry,
+  InMemorySessionStorage,
   getModelSettings,
   normalizeModelName,
   resolveModel,
@@ -564,5 +566,46 @@ describe('createAgent', () => {
       await runtime.exit();
     }
     expect(runtime.ctx).toBeNull();
+  });
+
+  it('uses session history when no explicit message history is provided', async () => {
+    const session = new InMemorySessionStorage({
+      entries: [
+        createMessageEntry({
+          message: { role: 'user', content: 'session hello' },
+        }),
+      ],
+    });
+    const runtime = createAgent({ session });
+
+    await runtime.enter();
+    try {
+      const result = (await runtime.run('follow up')) as unknown as {
+        options: Record<string, unknown>;
+      };
+
+      expect(JSON.stringify(result.options.messages)).toContain(
+        'session hello',
+      );
+      expect(JSON.stringify(result.options.messages)).toContain('follow up');
+    } finally {
+      await runtime.exit();
+    }
+  });
+
+  it('persists run messages into session storage', async () => {
+    const session = new InMemorySessionStorage();
+    const runtime = createAgent({ session });
+
+    await runtime.enter();
+    try {
+      await runtime.run('hello');
+
+      const entries = await session.getEntries();
+      expect(entries.some((entry) => entry.type === 'message')).toBe(true);
+      expect(entries.at(-1)?.type).toBe('message');
+    } finally {
+      await runtime.exit();
+    }
   });
 });

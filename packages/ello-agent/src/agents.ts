@@ -21,6 +21,11 @@ import { buildMcpServers, MCPConfigSchema, type MCPConfig } from './mcp.js';
 import { type ModelWrapper, resolveModel } from './models.js';
 import { resolveModelSettings, type ModelSettings } from './presets.js';
 import { MessageQueue } from './queue.js';
+import {
+  createMessageEntry,
+  type SessionEntry,
+  type SessionStorage,
+} from './session/index.js';
 import type {
   DeferredToolApprovalRequest,
   DeferredToolApprovalResult,
@@ -92,6 +97,7 @@ export interface CreateAgentOptions {
   systemPrompt?: string | null;
   systemPromptTemplateVars?: Record<string, unknown> | null;
   env?: Environment | null;
+  session?: SessionStorage | null;
   modelConfig?: ModelConfig | null;
   toolConfig?: ToolConfig | null;
   modelWrapper?: ModelWrapper | null;
@@ -110,6 +116,7 @@ export interface AgentRuntimeOptions {
   systemPrompt: string | null;
   model: LanguageModel;
   env: Environment;
+  session?: SessionStorage | null;
   modelConfig: ModelConfig;
   toolConfig: ToolConfig;
   modelSettings?: ModelSettings | null;
@@ -155,6 +162,7 @@ export class AgentRuntime {
   readonly systemPrompt: string | null;
   readonly model: LanguageModel;
   readonly env: Environment;
+  readonly session: SessionStorage | null;
   readonly modelConfig: ModelConfig;
   readonly toolConfig: ToolConfig;
   readonly modelSettings: ModelSettings | null;
@@ -175,6 +183,7 @@ export class AgentRuntime {
     this.systemPrompt = options.systemPrompt;
     this.model = options.model;
     this.env = options.env;
+    this.session = options.session ?? null;
     this.modelConfig = options.modelConfig;
     this.toolConfig = options.toolConfig;
     this.modelSettings = options.modelSettings ?? null;
@@ -307,8 +316,9 @@ export class AgentRuntime {
     };
 
     if (typeof input === 'string') {
+      const sessionHistory = await this.loadSessionHistory();
       const initialMessages = await applyHistoryFilters(
-        resolveInitialMessages(input, null, null, null),
+        resolveInitialMessages(input, null, null, null, sessionHistory),
         this.ctx,
         this.env,
       );
@@ -317,16 +327,19 @@ export class AgentRuntime {
         messages: initialMessages,
         onStepEnd,
       });
+      await this.persistSessionRun(input, result);
       return this.wrapRunResult(result, input, steps, approvalToolNames);
     }
 
     const runtimeInput = splitRuntimeInput(input);
+    const sessionHistory = await this.loadSessionHistory();
     const initialMessages = await applyHistoryFilters(
       resolveInitialMessages(
         runtimeInput.promptText,
         runtimeInput.promptMessages,
         runtimeInput.messages,
         input.messageHistory ?? null,
+        sessionHistory,
       ),
       this.ctx,
       this.env,
@@ -351,6 +364,7 @@ export class AgentRuntime {
       messages,
       onStepEnd,
     });
+    await this.persistSessionRun(input, result);
     return this.wrapRunResult(result, input, steps, approvalToolNames);
   }
 
@@ -509,6 +523,40 @@ export class AgentRuntime {
     return null;
   }
 
+  private async loadSessionHistory(): Promise<ModelMessage[] | null> {
+    if (this.session === null) {
+      return null;
+    }
+
+    const leafId = await this.session.getLeafId();
+    const entries = await this.session.getPathToRoot(leafId);
+    return entries
+      .filter(
+        (entry): entry is Extract<SessionEntry, { type: 'message' }> =>
+          entry.type === 'message',
+      )
+      .map((entry) => entry.message as ModelMessage);
+  }
+
+  private async persistSessionRun(
+    input: AgentRuntimeRunInput,
+    result: Awaited<ReturnType<typeof generateText>>,
+  ): Promise<void> {
+    if (this.session === null) {
+      return;
+    }
+
+    for (const message of normalizeRunMessages(input).concat(
+      result.responseMessages,
+    )) {
+      await this.session.appendEntry(
+        createMessageEntry({
+          message: message as Record<string, unknown>,
+        }),
+      );
+    }
+  }
+
   private async withEnterLock<T>(fn: () => Promise<T>): Promise<T> {
     const previous = this.enterLock;
     let release!: () => void;
@@ -582,14 +630,31 @@ function resolveInitialMessages(
   promptMessages: ModelMessage[] | null,
   messages: ModelMessage[] | null,
   messageHistory: ModelMessage[] | null | undefined,
+  sessionHistory: ModelMessage[] | null,
 ): ModelMessage[] {
   const baseMessages = [
-    ...(messageHistory ?? messages ?? promptMessages ?? []),
+    ...(messageHistory ?? messages ?? promptMessages ?? sessionHistory ?? []),
   ];
   if (runtimeInput !== null && messages === null && promptMessages === null) {
     return [...baseMessages, { role: 'user', content: runtimeInput }];
   }
   return baseMessages;
+}
+
+function normalizeRunMessages(input: AgentRuntimeRunInput): ModelMessage[] {
+  if (typeof input === 'string') {
+    return [{ role: 'user', content: input }];
+  }
+  if (input.messages !== undefined) {
+    return [...input.messages];
+  }
+  if (Array.isArray(input.prompt)) {
+    return [...input.prompt];
+  }
+  if (typeof input.prompt === 'string') {
+    return [{ role: 'user', content: input.prompt }];
+  }
+  return [];
 }
 
 async function applyHistoryFilters(
@@ -865,6 +930,7 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
     }),
     model: effectiveModel,
     env: options.env ?? new LocalEnvironment(),
+    session: options.session ?? null,
     modelConfig: options.modelConfig ?? new ModelConfig(),
     toolConfig: options.toolConfig ?? new ToolConfig(),
     modelSettings: effectiveModelSettings,
