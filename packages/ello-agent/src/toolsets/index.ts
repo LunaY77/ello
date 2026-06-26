@@ -35,4 +35,16 @@ export {
   ShellExecTool,
   WriteFileArgsSchema,
   WriteFileTool,
+  MAX_CONTENT_LENGTH,
+  WebFetchArgsSchema,
+  WebFetchTool,
+  WebSearchArgsSchema,
+  WebSearchTool,
 } from "./tools/index.js";
+export {
+  BM25SearchStrategy,
+  KeywordSearchStrategy,
+  ToolSearchToolset,
+  getDefaultStrategy,
+  type SearchStrategy,
+} from "./tool_search/index.js";

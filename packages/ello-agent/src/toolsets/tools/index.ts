@@ -23,3 +23,10 @@ export {
 } from "./read-file.js";
 export { ShellExecArgsSchema, ShellExecTool } from "./shell-exec.js";
 export { WriteFileArgsSchema, WriteFileTool } from "./write-file.js";
+export {
+  MAX_CONTENT_LENGTH,
+  WebFetchArgsSchema,
+  WebFetchTool,
+  WebSearchArgsSchema,
+  WebSearchTool,
+} from "./web/index.js";
