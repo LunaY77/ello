@@ -66,11 +66,15 @@ async function runStream(
           allMessages: () => buildInputMessages(currentInput),
         };
         result = await runtime.run(currentInput);
+        const currentMessages = buildMessages(
+          currentInput,
+          extractText(result),
+        );
         const steering = drainQueue(runtime, 'steeringQueue');
         if (steering.length > 0) {
           currentInput = {
             prompt: steering.join('\n'),
-            messageHistory: buildMessages(currentInput, extractText(result)),
+            messageHistory: currentMessages,
           };
           attempts = 0;
           continue;
@@ -80,7 +84,7 @@ async function runStream(
         if (followUps.length > 0) {
           currentInput = {
             prompt: followUps.join('\n'),
-            messageHistory: buildMessages(currentInput, extractText(result)),
+            messageHistory: currentMessages,
           };
           attempts = 0;
           continue;
