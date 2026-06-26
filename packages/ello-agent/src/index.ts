@@ -254,10 +254,15 @@ export {
 export {
   UsageSnapshot,
   addUsage,
+  coerceRunUsage,
   createEmptyUsage,
   type RunUsage,
+  type RunUsageLike,
+  type PythonRunUsageLike,
+  type PythonUsageSnapshotEntryLike,
   type UsageAgentTotal,
   type UsageSnapshotEntry,
+  type UsageSnapshotEntryLike,
 } from './usage.js';
 export {
   applyModelWrapper,
