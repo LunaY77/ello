@@ -106,6 +106,7 @@ export interface AgentRuntimeOptions {
   modelConfig: ModelConfig;
   toolConfig: ToolConfig;
   modelSettings?: ModelSettings | null;
+  compact?: boolean;
   modelWrapper?: ModelWrapper | null;
   coreToolset?: Toolset | null;
   toolsets?: RuntimeToolset[];
@@ -149,6 +150,7 @@ export class AgentRuntime {
   readonly modelConfig: ModelConfig;
   readonly toolConfig: ToolConfig;
   readonly modelSettings: ModelSettings | null;
+  readonly compact: boolean;
   readonly modelWrapper: ModelWrapper | null;
   readonly coreToolset: Toolset | null;
   readonly toolsets: RuntimeToolset[];
@@ -167,6 +169,7 @@ export class AgentRuntime {
     this.modelConfig = options.modelConfig;
     this.toolConfig = options.toolConfig;
     this.modelSettings = options.modelSettings ?? null;
+    this.compact = options.compact ?? false;
     this.modelWrapper = options.modelWrapper ?? null;
     this.coreToolset = options.coreToolset ?? null;
     this.toolsets = options.toolsets ?? [];
@@ -818,6 +821,7 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
     modelConfig: options.modelConfig ?? new ModelConfig(),
     toolConfig: options.toolConfig ?? new ToolConfig(),
     modelSettings: effectiveModelSettings,
+    compact: options.compact ?? false,
     modelWrapper: options.modelWrapper ?? null,
     coreToolset,
     toolsets: allToolsets,

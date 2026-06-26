@@ -187,6 +187,12 @@ describe('createAgent', () => {
     }
   });
 
+  it('keeps compact configuration on runtime', () => {
+    const runtime = createAgent({ compact: true });
+
+    expect(runtime.compact).toBe(true);
+  });
+
   it('requires enter before run', async () => {
     const runtime = createAgent();
 
