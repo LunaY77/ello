@@ -63,6 +63,18 @@ export {
   type SubagentStartEvent,
   type UsageSnapshotEvent,
 } from './events.js';
+export {
+  coldStartTrim,
+  createEnvironmentInstructionsFilter,
+  getIdleSeconds,
+  getLastResponseIndex,
+  injectRuntimeInstructions,
+  trimToolReturns,
+  truncateToolContent,
+  type EnvironmentInstructionRunContext,
+  type HistoryRunContext,
+  type RuntimeInstructionRunContext,
+} from './filters/index.js';
 export { MessageQueue, type MessageQueueMode } from './queue.js';
 export {
   DEFAULT_MODEL_NAME,
