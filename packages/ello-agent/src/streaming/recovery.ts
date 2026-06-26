@@ -1,6 +1,10 @@
 import type { ModelMessage } from 'ai';
 
-import type { RecoverableStreamEvent, StreamTextPart } from './events.js';
+import type {
+  RecoverableStreamEvent,
+  StreamTextDelta,
+  StreamTextPart,
+} from './events.js';
 
 /** 从流事件中积累 partial response parts。 */
 export class PartialTextAccumulator {
@@ -8,27 +12,28 @@ export class PartialTextAccumulator {
 
   /** 观察一个流事件, 积累 part 数据。 */
   observe(event: unknown): void {
-    if (!isRecoverableStreamEvent(event)) {
+    const normalized = normalizeRecoverableStreamEvent(event);
+    if (normalized === null) {
       return;
     }
 
-    if (event.eventKind === 'part_start') {
-      this.parts.set(event.index, event.part);
+    if (normalized.eventKind === 'part_start') {
+      this.parts.set(normalized.index, normalized.part);
       return;
     }
 
-    if (event.eventKind === 'part_delta') {
-      const existing = this.parts.get(event.index);
-      if (existing !== undefined && event.delta.deltaKind === 'text') {
-        this.parts.set(event.index, {
+    if (normalized.eventKind === 'part_delta') {
+      const existing = this.parts.get(normalized.index);
+      if (existing !== undefined && normalized.delta.deltaKind === 'text') {
+        this.parts.set(normalized.index, {
           type: 'text',
-          text: existing.text + event.delta.contentDelta,
+          text: existing.text + normalized.delta.contentDelta,
         });
       }
       return;
     }
 
-    this.parts.set(event.index, event.part);
+    this.parts.set(normalized.index, normalized.part);
   }
 
   /** 从已观察的 parts 构建 partial assistant message。 */
@@ -100,12 +105,86 @@ export function closeUnreturnedToolCalls(
   ];
 }
 
-function isRecoverableStreamEvent(
+function normalizeRecoverableStreamEvent(
   event: unknown,
-): event is RecoverableStreamEvent {
+): RecoverableStreamEvent | null {
   if (typeof event !== 'object' || event === null) {
-    return false;
+    return null;
   }
-  const kind = (event as { eventKind?: unknown }).eventKind;
-  return kind === 'part_start' || kind === 'part_delta' || kind === 'part_end';
+  const source = event as {
+    eventKind?: unknown;
+    event_kind?: unknown;
+    index?: unknown;
+    part?: unknown;
+    delta?: unknown;
+  };
+  const kind = source.eventKind ?? source.event_kind;
+  const index = typeof source.index === 'number' ? source.index : null;
+
+  if (
+    (kind === 'part_start' || kind === 'part_end') &&
+    index !== null &&
+    source.part !== undefined
+  ) {
+    return {
+      eventKind: kind,
+      index,
+      part: normalizeTextPart(source.part),
+    };
+  }
+
+  if (kind === 'part_delta' && index !== null && source.delta !== undefined) {
+    const delta = normalizeTextDelta(source.delta);
+    if (delta === null) {
+      return null;
+    }
+    return {
+      eventKind: 'part_delta',
+      index,
+      delta,
+    };
+  }
+
+  return null;
+}
+
+function normalizeTextPart(part: unknown): StreamTextPart {
+  if (typeof part !== 'object' || part === null) {
+    return { type: 'text', text: '' };
+  }
+  const source = part as { type?: unknown; text?: unknown; content?: unknown };
+  return {
+    type: 'text',
+    text:
+      typeof source.text === 'string'
+        ? source.text
+        : typeof source.content === 'string'
+          ? source.content
+          : '',
+  };
+}
+
+function normalizeTextDelta(delta: unknown): StreamTextDelta | null {
+  if (typeof delta !== 'object' || delta === null) {
+    return null;
+  }
+  const source = delta as {
+    deltaKind?: unknown;
+    delta_kind?: unknown;
+    contentDelta?: unknown;
+    content_delta?: unknown;
+  };
+  const kind = source.deltaKind ?? source.delta_kind;
+  if (kind !== 'text') {
+    return null;
+  }
+  return {
+    deltaKind: 'text',
+    contentDelta:
+      typeof source.contentDelta === 'string'
+        ? source.contentDelta
+        : typeof source.content_delta === 'string'
+          ? source.content_delta
+          : '',
+  };
 }

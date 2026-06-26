@@ -45,6 +45,36 @@ describe('PartialTextAccumulator', () => {
     });
   });
 
+  it('accepts Python-style snake_case stream events', () => {
+    const accumulator = new PartialTextAccumulator();
+
+    accumulator.observe({
+      event_kind: 'part_start',
+      index: 0,
+      part: { content: '' },
+    });
+    accumulator.observe({
+      event_kind: 'part_delta',
+      index: 0,
+      delta: { delta_kind: 'text', content_delta: 'hel' },
+    });
+    accumulator.observe({
+      event_kind: 'part_delta',
+      index: 0,
+      delta: { delta_kind: 'text', content_delta: 'lo' },
+    });
+    accumulator.observe({
+      event_kind: 'part_end',
+      index: 0,
+      part: { content: 'hello!' },
+    });
+
+    expect(accumulator.buildResponse()).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hello!' }],
+    });
+  });
+
   it('sorts parts and can reset', () => {
     const accumulator = new PartialTextAccumulator();
 
