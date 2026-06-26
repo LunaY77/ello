@@ -1,6 +1,7 @@
 export {
   AgentRuntime,
   createAgent,
+  createAgentAsync,
   type CreateAgentOptions,
 } from './agents.js';
 export {

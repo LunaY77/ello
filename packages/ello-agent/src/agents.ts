@@ -40,6 +40,7 @@ import {
   type ToolArgs,
   type ToolsetTool,
 } from './toolsets/index.js';
+import { applyModelWrapper } from './wrappers.js';
 
 const DEFAULT_SYSTEM_PROMPT = `# System
 
@@ -947,6 +948,49 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
   const effectiveModel = options.modelWrapper
     ? options.modelWrapper(selection.model, selection.modelName, wrapperContext)
     : selection.model;
+  return buildAgentRuntime(selection, effectiveModel, options);
+}
+
+/**
+ * 创建 ello agent runtime, 支持异步 model wrapper。
+ *
+ * Args:
+ *   options: createAgent 同样的配置项。
+ *
+ * Returns:
+ *   已完成 model wrapper 解析的 AgentRuntime。
+ */
+export async function createAgentAsync(
+  options: CreateAgentOptions = {},
+): Promise<AgentRuntime> {
+  const selection = resolveModel({
+    ...(options.modelName !== undefined
+      ? { modelName: options.modelName }
+      : {}),
+    ...(options.baseUrl !== undefined ? { baseUrl: options.baseUrl } : {}),
+  });
+
+  const wrapperContext = {
+    modelName: selection.modelName,
+    baseUrl: selection.baseUrl,
+  };
+  const effectiveModel = await applyModelWrapper(
+    options.modelWrapper ?? null,
+    selection.model,
+    selection.modelName,
+    wrapperContext,
+  );
+  return buildAgentRuntime(selection, effectiveModel, options);
+}
+
+function buildAgentRuntime(
+  selection: {
+    modelName: string;
+    baseUrl: string | null;
+  },
+  effectiveModel: LanguageModel,
+  options: CreateAgentOptions,
+): AgentRuntime {
   const effectiveModelSettings = resolveModelSettings(options.modelSettings);
   const coreToolset = options.tools?.length
     ? new Toolset({ tools: options.tools })

@@ -4,6 +4,7 @@ import {
   applyModelWrapper,
   applySubagentWrapper,
   createAgent,
+  createAgentAsync,
 } from '../index.js';
 
 describe('applyModelWrapper', () => {
@@ -37,6 +38,19 @@ describe('applyModelWrapper', () => {
     await applyModelWrapper(wrapper, model, 'my_agent', meta);
 
     expect(wrapper).toHaveBeenCalledWith(model, 'my_agent', meta);
+  });
+});
+
+describe('createAgentAsync', () => {
+  it('supports async model wrappers', async () => {
+    const wrapper = vi.fn(async (model) => model);
+
+    const runtime = await createAgentAsync({
+      modelWrapper: wrapper,
+    });
+
+    expect(wrapper).toHaveBeenCalled();
+    expect(runtime.model).toBeDefined();
   });
 });
 
