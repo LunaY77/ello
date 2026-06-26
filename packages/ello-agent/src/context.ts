@@ -87,6 +87,7 @@ export class AgentContext {
       userPrompts: this.userPrompts,
       steeringMessages: this.steeringMessages,
       compactDepth: this.compactDepth,
+      forceInjectInstructions: false,
       subagentHistory: this.subagentHistory,
     });
   }
