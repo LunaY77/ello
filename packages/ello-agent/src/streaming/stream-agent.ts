@@ -66,6 +66,26 @@ async function runStream(
           allMessages: () => buildInputMessages(currentInput),
         };
         result = await runtime.run(currentInput);
+        const steering = drainQueue(runtime, 'steeringQueue');
+        if (steering.length > 0) {
+          currentInput = {
+            prompt: steering.join('\n'),
+            messageHistory: buildMessages(currentInput, extractText(result)),
+          };
+          attempts = 0;
+          continue;
+        }
+
+        const followUps = drainQueue(runtime, 'followUpQueue');
+        if (followUps.length > 0) {
+          currentInput = {
+            prompt: followUps.join('\n'),
+            messageHistory: buildMessages(currentInput, extractText(result)),
+          };
+          attempts = 0;
+          continue;
+        }
+
         break;
       } catch (error) {
         attempts += 1;
@@ -208,4 +228,12 @@ function inputPreview(input: AgentRuntimeRunInput): string {
           ? JSON.stringify(input.messages).slice(0, 100)
           : '(stream)';
   return text.length > 100 ? `${text.slice(0, 100)}...` : text;
+}
+
+function drainQueue(
+  runtime: AgentRuntime,
+  key: 'steeringQueue' | 'followUpQueue',
+): string[] {
+  const queue = runtime[key] as { drain(): string[] } | undefined;
+  return queue === undefined ? [] : queue.drain();
 }

@@ -340,6 +340,23 @@ describe('streamAgent', () => {
     ]);
     expect(runtime.lastPrompts()).toEqual(['input', 'resume please']);
   });
+
+  it('drains steering and follow-up queues between turns', async () => {
+    const runtime = new FakeRuntime('done');
+    await runtime.enter();
+    runtime.steer('steer one');
+    runtime.followUp('follow up one');
+    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'input');
+
+    await collectEvents(streamer);
+
+    expect(runtime.runCalls).toBe(3);
+    expect(runtime.lastPrompts()).toEqual([
+      'input',
+      'steer one',
+      'follow up one',
+    ]);
+  });
 });
 
 function textEvent(text: string): StreamEvent {
@@ -365,11 +382,40 @@ async function collectEvents(streamer: AgentStreamer): Promise<StreamEvent[]> {
 class FakeRuntime {
   readonly env = new LocalEnvironment();
   ctx: AgentContext | null = null;
+  runtime: AgentRuntime | null = null;
   enterCalls = 0;
   exitCalls = 0;
   runCalls = 0;
   private readonly contexts: AgentContext[] = [];
   private readonly errors: Array<Error | null>;
+  readonly steeringQueue = new (class {
+    private readonly items: string[] = [];
+    enqueue(message: string): void {
+      this.items.push(message);
+    }
+    drain(): string[] {
+      const items = [...this.items];
+      this.items.length = 0;
+      return items;
+    }
+    clear(): void {
+      this.items.length = 0;
+    }
+  })();
+  readonly followUpQueue = new (class {
+    private readonly items: string[] = [];
+    enqueue(message: string): void {
+      this.items.push(message);
+    }
+    drain(): string[] {
+      const items = [...this.items];
+      this.items.length = 0;
+      return items;
+    }
+    clear(): void {
+      this.items.length = 0;
+    }
+  })();
 
   constructor(
     private readonly text: string,
@@ -392,14 +438,24 @@ class FakeRuntime {
     this.enterCalls += 1;
     await this.env.enter();
     this.ctx = new AgentContext({ env: this.env });
+    this.runtime = this as unknown as AgentRuntime;
     this.contexts.push(this.ctx);
     return this;
+  }
+
+  steer(message: string): void {
+    this.steeringQueue.enqueue(message);
+  }
+
+  followUp(message: string): void {
+    this.followUpQueue.enqueue(message);
   }
 
   async exit(): Promise<void> {
     this.exitCalls += 1;
     await this.env.exit();
     this.ctx = null;
+    this.runtime = null;
   }
 
   async run(_input: AgentRuntimeRunInput): Promise<{ text: string }> {
