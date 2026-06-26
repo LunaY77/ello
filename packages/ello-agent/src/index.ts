@@ -44,13 +44,24 @@ export {
   type AgentContextOptions,
 } from './context.js';
 export {
+  CommandAction,
+  DockerFileOperator,
+  DockerShell,
   Environment,
   LocalEnvironment,
   LocalFileOperator,
   LocalShell,
+  SandboxEnvironment,
+  SandboxShell,
+  ShellPolicy,
+  ShellPolicyRule,
+  createDefaultPolicy,
   type FileOperator,
+  type Mount,
   type Shell,
   type ShellResult,
+  type ShellPolicyOptions,
+  type ShellPolicyRuleOptions,
 } from './environment/index.js';
 export {
   LifecycleStatus,
