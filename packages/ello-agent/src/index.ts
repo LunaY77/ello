@@ -165,6 +165,23 @@ export {
   type SkillToolsetOptions,
 } from './skills/index.js';
 export {
+  DelegateArgsSchema,
+  INHERIT,
+  buildSubagentAgent,
+  createDelegateTool,
+  executeSubagent,
+  loadSubagentFromFile,
+  loadSubagentsFromDir,
+  parseSubagentMarkdown,
+  resolveSubagentModel,
+  type BuildSubagentAgentOptions,
+  type CreateDelegateToolOptions,
+  type SubagentConfig,
+  type SubagentEntry,
+  type SubagentRunResult,
+  type SubagentRunner,
+} from './subagents/index.js';
+export {
   BaseTool,
   DEFAULT_GLOB_MAX_RESULTS,
   DEFAULT_GREP_MAX_RESULTS,
