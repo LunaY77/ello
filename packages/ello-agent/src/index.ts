@@ -156,6 +156,23 @@ export {
   type RunStateOptions,
 } from './state.js';
 export {
+  AgentInterrupted,
+  AgentStreamer,
+  PartialTextAccumulator,
+  closeUnreturnedToolCalls,
+  streamAgent,
+  type AgentStreamerOptions,
+  type PartDeltaEvent,
+  type PartEndEvent,
+  type PartStartEvent,
+  type RecoverableStreamEvent,
+  type StreamAgentOptions,
+  type StreamEvent,
+  type StreamRunLike,
+  type StreamTextDelta,
+  type StreamTextPart,
+} from './streaming/index.js';
+export {
   ActivateSkillArgsSchema,
   SkillToolset,
   loadSkillFromFile,
