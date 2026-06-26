@@ -1,15 +1,16 @@
-import { z } from "zod";
-import type { AgentContext } from "../../context.js";
-import { Toolset, type ToolsetTool } from "../toolset.js";
-import type { SearchStrategy } from "./strategies/base.js";
-import { BM25SearchStrategy } from "./strategies/bm25.js";
-import { KeywordSearchStrategy } from "./strategies/keyword.js";
+import { z } from 'zod';
+
+import type { AgentContext } from '../../context.js';
+import { Toolset, type ToolsetTool } from '../toolset.js';
+
+import type { SearchStrategy } from './strategies/base.js';
+import { BM25SearchStrategy } from './strategies/bm25.js';
 
 /**
  * 获取默认搜索策略: BM25 可用时使用 BM25, 否则回退到关键词。
  */
 export function getDefaultStrategy(): SearchStrategy {
-  return new BM25SearchStrategy() ?? new KeywordSearchStrategy();
+  return new BM25SearchStrategy();
 }
 
 /**
@@ -49,11 +50,14 @@ export class ToolSearchToolset {
     this.indexBuilt = true;
   }
 
-  async getTools(ctx: { deps: AgentContext }): Promise<Record<string, ToolsetTool>> {
+  async getTools(ctx: {
+    deps: AgentContext;
+  }): Promise<Record<string, ToolsetTool>> {
     const tools: Record<string, ToolsetTool> = {
       search_tools: {
-        name: "search_tools",
-        description: "Search for available tools by keyword. Matched tools become available in the next turn.",
+        name: 'search_tools',
+        description:
+          'Search for available tools by keyword. Matched tools become available in the next turn.',
         inputSchema: z.object({ query: z.string() }),
         requiresApproval: false,
         maxRetries: 3,
@@ -68,8 +72,13 @@ export class ToolSearchToolset {
     return tools;
   }
 
-  async callTool(name: string, toolArgs: Record<string, unknown>, ctx: { deps: AgentContext }, tool?: ToolsetTool): Promise<unknown> {
-    if (name === "search_tools") {
+  async callTool(
+    name: string,
+    toolArgs: Record<string, unknown>,
+    ctx: { deps: AgentContext },
+    tool?: ToolsetTool,
+  ): Promise<unknown> {
+    if (name === 'search_tools') {
       const parsed = z.object({ query: z.string() }).parse(toolArgs);
       return this.searchTools(parsed.query);
     }
@@ -82,10 +91,14 @@ export class ToolSearchToolset {
       name,
       this.source.getToolInstance(name).description,
     ]) as Array<[string, string]>;
-    const results = await this.strategy.search(query, candidates, this.maxResults);
+    const results = await this.strategy.search(
+      query,
+      candidates,
+      this.maxResults,
+    );
     const filtered = results.filter(([score]) => score >= this.minScore);
     if (filtered.length === 0) {
-      return "No matching tools found. Try different keywords.";
+      return 'No matching tools found. Try different keywords.';
     }
 
     const loaded: string[] = [];
@@ -94,6 +107,6 @@ export class ToolSearchToolset {
       loaded.push(`- ${name}: ${desc}`);
     }
 
-    return `Found and loaded ${loaded.length} tools (available next turn):\n${loaded.join("\n")}`;
+    return `Found and loaded ${loaded.length} tools (available next turn):\n${loaded.join('\n')}`;
   }
 }

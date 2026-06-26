@@ -1,5 +1,6 @@
-import { z } from "zod";
-import { BaseTool, type ToolArgs, type ToolRunContext } from "../base.js";
+import { z } from 'zod';
+
+import { BaseTool, type ToolArgs, type ToolRunContext } from '../base.js';
 
 /** write_file 工具输入 schema。 */
 export const WriteFileArgsSchema = z.object({
@@ -11,8 +12,9 @@ export const WriteFileArgsSchema = z.object({
  * 写入文本文件, 父目录不存在时自动创建。
  */
 export class WriteFileTool extends BaseTool {
-  static override toolName = "write_file";
-  static override description = "Write text content to a file. Creates parent directories if needed.";
+  static override toolName = 'write_file';
+  static override description =
+    'Write text content to a file. Creates parent directories if needed.';
   static override inputSchema = WriteFileArgsSchema;
 
   /**
@@ -33,7 +35,7 @@ export class WriteFileTool extends BaseTool {
     const parsed = WriteFileArgsSchema.parse(args);
     const fileOperator = ctx.deps.env.fileOperator;
     if (fileOperator === null) {
-      return "Error: file_operator not available.";
+      return 'Error: file_operator not available.';
     }
 
     try {

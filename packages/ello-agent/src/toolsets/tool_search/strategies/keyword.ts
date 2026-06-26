@@ -1,11 +1,11 @@
-import type { SearchStrategy } from "./base.js";
+import type { SearchStrategy } from './base.js';
 
 /**
  * 基于关键词匹配的搜索策略。
  */
 export class KeywordSearchStrategy implements SearchStrategy {
   getSearchHint(): string {
-    return "Search uses keyword matching. Use specific tool names or action verbs.";
+    return 'Search uses keyword matching. Use specific tool names or action verbs.';
   }
 
   async buildIndex(_tools: Array<[string, string]>): Promise<void> {
@@ -25,7 +25,10 @@ export class KeywordSearchStrategy implements SearchStrategy {
     const results: Array<[number, string, string]> = [];
     for (const [name, desc] of candidates) {
       const text = `${name} ${desc}`.toLowerCase();
-      const matches = terms.reduce((count, term) => count + (text.includes(term) ? 1 : 0), 0);
+      const matches = terms.reduce(
+        (count, term) => count + (text.includes(term) ? 1 : 0),
+        0,
+      );
       const score = matches / terms.length;
       if (score > 0) {
         results.push([score, name, desc]);

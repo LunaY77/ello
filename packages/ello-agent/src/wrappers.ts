@@ -1,4 +1,4 @@
-import type { LanguageModel } from "ai";
+import type { LanguageModel } from 'ai';
 
 /** 在 Agent 创建时包装 Model, 返回包装后的实例。支持同步和异步。 */
 export type AsyncModelWrapper = (

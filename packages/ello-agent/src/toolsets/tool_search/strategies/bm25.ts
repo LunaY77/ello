@@ -1,5 +1,5 @@
-import type { SearchStrategy } from "./base.js";
-import { KeywordSearchStrategy } from "./keyword.js";
+import type { SearchStrategy } from './base.js';
+import { KeywordSearchStrategy } from './keyword.js';
 
 /**
  * BM25 搜索策略。

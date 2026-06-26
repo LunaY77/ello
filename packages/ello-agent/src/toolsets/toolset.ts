@@ -1,13 +1,15 @@
-import { z, type ZodTypeAny } from "zod";
-import type { AgentContext } from "../context.js";
-import { ToolHooks, type RunContextLike } from "../hooks.js";
+import { z, type ZodTypeAny } from 'zod';
+
+import type { AgentContext } from '../context.js';
+import { ToolHooks, type RunContextLike } from '../hooks.js';
+
 import {
   BaseTool,
   getToolMetadata,
   Instruction,
   type BaseToolConstructor,
   type ToolArgs,
-} from "./base.js";
+} from './base.js';
 
 /** Toolset 可执行工具描述。 */
 export interface ToolsetTool {
@@ -83,14 +85,19 @@ export class Toolset {
    *
    * 始终包含 autoInherit=true 的工具。排除带有 excludeTags 中任意 tag 的工具。
    */
-  subset(options: {
-    toolNames?: string[] | null;
-    excludeTags?: ReadonlySet<string> | null;
-  } = {}): Toolset {
+  subset(
+    options: {
+      toolNames?: string[] | null;
+      excludeTags?: ReadonlySet<string> | null;
+    } = {},
+  ): Toolset {
     const selected: BaseToolConstructor[] = [];
     for (const [name, toolClass] of this.toolClasses) {
       const metadata = getToolMetadata(toolClass);
-      if (options.excludeTags && intersects(metadata.tags, options.excludeTags)) {
+      if (
+        options.excludeTags &&
+        intersects(metadata.tags, options.excludeTags)
+      ) {
         continue;
       }
       if (
@@ -134,7 +141,9 @@ export class Toolset {
    * 1. 检查基础可用性, 收集能力标签。
    * 2. 过滤被活跃标签 supersede 的工具。
    */
-  async getTools(ctx: RunContextLike<AgentContext>): Promise<Record<string, ToolsetTool>> {
+  async getTools(
+    ctx: RunContextLike<AgentContext>,
+  ): Promise<Record<string, ToolsetTool>> {
     const availableNames = new Set<string>();
     const collectedTags = new Set<string>();
 
@@ -209,7 +218,9 @@ export class Toolset {
   /**
    * 收集所有工具的指令, 按 group 去重。
    */
-  async getInstructions(ctx: RunContextLike<AgentContext>): Promise<string | null> {
+  async getInstructions(
+    ctx: RunContextLike<AgentContext>,
+  ): Promise<string | null> {
     const availableNames: string[] = [];
     const collectedTags = new Set<string>();
 
@@ -238,21 +249,25 @@ export class Toolset {
       if (result === null) {
         continue;
       }
-      const group = result instanceof Instruction ? result.group : toolInstance.name;
+      const group =
+        result instanceof Instruction ? result.group : toolInstance.name;
       const content = result instanceof Instruction ? result.content : result;
       if (!instructions.has(group)) {
-        instructions.set(group, `<tool-instruction name="${escapeXml(group)}">${content}</tool-instruction>`);
+        instructions.set(
+          group,
+          `<tool-instruction name="${escapeXml(group)}">${content}</tool-instruction>`,
+        );
       }
     }
 
-    return instructions.size > 0 ? [...instructions.values()].join("\n") : null;
+    return instructions.size > 0 ? [...instructions.values()].join('\n') : null;
   }
 }
 
 function parseToolArgs(schema: ZodTypeAny, args: ToolArgs): ToolArgs {
   const parsed = schema.parse(args);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("Tool input schema must parse to an object.");
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Tool input schema must parse to an object.');
   }
   return parsed as ToolArgs;
 }
@@ -268,10 +283,10 @@ function intersects(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
 
 function escapeXml(value: string): string {
   return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
 /** 空工具参数 schema。 */

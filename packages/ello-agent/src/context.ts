@@ -1,14 +1,15 @@
-import { randomUUID } from "node:crypto";
-import { ModelConfig, ToolConfig } from "./config.js";
-import type { Environment } from "./environment/index.js";
-import type { AgentEvent } from "./events.js";
-import { UsageSnapshot, type UsageSnapshotEntry } from "./usage.js";
+import { randomUUID } from 'node:crypto';
+
+import { ModelConfig, ToolConfig } from './config.js';
+import type { Environment } from './environment/index.js';
+import type { AgentEvent } from './events.js';
+import { UsageSnapshot, type UsageSnapshotEntry } from './usage.js';
 
 /**
  * 生成 12 位十六进制的唯一运行 ID。
  */
 export function generateRunId(): string {
-  return randomUUID().replaceAll("-", "").slice(0, 12);
+  return randomUUID().replaceAll('-', '').slice(0, 12);
 }
 
 /**
@@ -55,7 +56,9 @@ export class AgentContext {
     this.env = options.env;
     this.modelConfig = options.modelConfig ?? new ModelConfig();
     this.toolConfig = options.toolConfig ?? new ToolConfig();
-    this.injectedContextTags = options.injectedContextTags ?? ["runtime-context"];
+    this.injectedContextTags = options.injectedContextTags ?? [
+      'runtime-context',
+    ];
     this.userPrompts = options.userPrompts ?? [];
     this.steeringMessages = options.steeringMessages ?? [];
     this.runId = options.runId ?? generateRunId();
@@ -118,20 +121,22 @@ export class AgentContext {
    */
   getContextInstructions(): string {
     const parts = [
-      "<runtime-context>",
+      '<runtime-context>',
       `  <run-id>${escapeXml(this.runId)}</run-id>`,
-      `  <current-time>${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}</current-time>`,
+      `  <current-time>${new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')}</current-time>`,
       `  <elapsed-time>${(this.elapsedMilliseconds / 1000).toFixed(1)}s</elapsed-time>`,
     ];
 
     if (this.modelConfig.contextWindow !== null) {
-      parts.push("  <model-config>");
-      parts.push(`    <context-window>${this.modelConfig.contextWindow}</context-window>`);
-      parts.push("  </model-config>");
+      parts.push('  <model-config>');
+      parts.push(
+        `    <context-window>${this.modelConfig.contextWindow}</context-window>`,
+      );
+      parts.push('  </model-config>');
     }
 
-    parts.push("</runtime-context>");
-    return parts.join("\n");
+    parts.push('</runtime-context>');
+    return parts.join('\n');
   }
 }
 
@@ -140,7 +145,7 @@ export class AgentContext {
  */
 function escapeXml(value: string): string {
   return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
 }

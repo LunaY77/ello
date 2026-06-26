@@ -1,5 +1,6 @@
-import { z } from "zod";
-import { BaseTool, type ToolArgs, type ToolRunContext } from "../../base.js";
+import { z } from 'zod';
+
+import { BaseTool, type ToolArgs, type ToolRunContext } from '../../base.js';
 
 /** edit_file 工具输入 schema。 */
 export const EditFileArgsSchema = z.object({
@@ -13,9 +14,9 @@ export const EditFileArgsSchema = z.object({
  * 通过精确文本替换编辑文件。
  */
 export class EditFileTool extends BaseTool {
-  static override toolName = "edit_file";
+  static override toolName = 'edit_file';
   static override description =
-    "Edit a file by replacing an exact string match. Use empty oldString to create a new file.";
+    'Edit a file by replacing an exact string match. Use empty oldString to create a new file.';
   static override inputSchema = EditFileArgsSchema;
 
   /**
@@ -36,7 +37,7 @@ export class EditFileTool extends BaseTool {
     const parsed = EditFileArgsSchema.parse(args);
     const fileOperator = ctx.deps.env.fileOperator;
     if (fileOperator === null) {
-      return "Error: file_operator not available.";
+      return 'Error: file_operator not available.';
     }
 
     if (!parsed.oldString) {
@@ -53,14 +54,14 @@ export class EditFileTool extends BaseTool {
       content = await fileOperator.readText(parsed.path);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("ENOENT") || message.includes("not found")) {
+      if (message.includes('ENOENT') || message.includes('not found')) {
         return `Error: File not found: ${parsed.path}`;
       }
       return `Error: ${message}`;
     }
 
     if (!content.includes(parsed.oldString)) {
-      return "Error: old_string not found in file. Ensure exact match including whitespace.";
+      return 'Error: old_string not found in file. Ensure exact match including whitespace.';
     }
 
     if (!parsed.replaceAll) {
@@ -68,7 +69,7 @@ export class EditFileTool extends BaseTool {
       if (occurrences > 1) {
         return (
           `Error: old_string appears ${occurrences} times. ` +
-          "Add more context to make it unique, or set replaceAll=true."
+          'Add more context to make it unique, or set replaceAll=true.'
         );
       }
     }

@@ -64,7 +64,10 @@ export interface Shell {
    * Returns:
    *   包含 exitCode, stdout, stderr 的执行结果。
    */
-  run(command: string, options?: { cwd?: string; timeout?: number }): Promise<ShellResult>;
+  run(
+    command: string,
+    options?: { cwd?: string; timeout?: number },
+  ): Promise<ShellResult>;
 
   /** 释放资源。 */
   close?(): Promise<void>;
@@ -93,7 +96,7 @@ export abstract class Environment {
    */
   get fileOperator(): FileOperator | null {
     if (!this.enteredValue) {
-      throw new Error("Environment has not been entered.");
+      throw new Error('Environment has not been entered.');
     }
     return this.fileOperatorValue;
   }
@@ -106,7 +109,7 @@ export abstract class Environment {
    */
   get shell(): Shell | null {
     if (!this.enteredValue) {
-      throw new Error("Environment has not been entered.");
+      throw new Error('Environment has not been entered.');
     }
     return this.shellValue;
   }
@@ -122,9 +125,9 @@ export abstract class Environment {
    */
   async getContextInstructions(): Promise<string> {
     if (!this.enteredValue) {
-      throw new Error("Environment has not been entered.");
+      throw new Error('Environment has not been entered.');
     }
-    return "";
+    return '';
   }
 
   /**
@@ -135,7 +138,7 @@ export abstract class Environment {
    */
   async enter(): Promise<this> {
     if (this.enteredValue) {
-      throw new Error("Environment has already been entered.");
+      throw new Error('Environment has already been entered.');
     }
     this.enteredValue = true;
     await this.setup();

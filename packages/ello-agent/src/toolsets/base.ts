@@ -1,6 +1,7 @@
-import { z, type ZodTypeAny } from "zod";
-import type { AgentContext } from "../context.js";
-import type { RunContextLike } from "../hooks.js";
+import { z, type ZodTypeAny } from 'zod';
+
+import type { AgentContext } from '../context.js';
+import type { RunContextLike } from '../hooks.js';
 
 /** 工具参数字典类型。 */
 export type ToolArgs = Record<string, unknown>;
@@ -85,7 +86,8 @@ export abstract class BaseTool {
 
   /** 被哪些标签 supersede。 */
   get supersededByTags(): ReadonlySet<string> {
-    return getToolMetadata(this.constructor as BaseToolConstructor).supersededByTags;
+    return getToolMetadata(this.constructor as BaseToolConstructor)
+      .supersededByTags;
   }
 
   /** 是否自动被 subagent 继承。 */
@@ -95,7 +97,8 @@ export abstract class BaseTool {
 
   /** 是否需要人工审批才能执行。 */
   get requiresApproval(): boolean {
-    return getToolMetadata(this.constructor as BaseToolConstructor).requiresApproval;
+    return getToolMetadata(this.constructor as BaseToolConstructor)
+      .requiresApproval;
   }
 
   /** 工具输入参数 schema。 */
@@ -122,7 +125,9 @@ export abstract class BaseTool {
    * Returns:
    *   返回 string 时以工具名去重; 返回 Instruction 时按 group 去重。
    */
-  async getInstruction(_ctx: ToolRunContext): Promise<string | Instruction | null> {
+  async getInstruction(
+    _ctx: ToolRunContext,
+  ): Promise<string | Instruction | null> {
     return null;
   }
 
@@ -148,7 +153,10 @@ export interface ToolDecoratorOptions {
 }
 
 /** 工具函数类型。 */
-export type ToolFunction = (ctx: ToolRunContext, args: ToolArgs) => Promise<unknown>;
+export type ToolFunction = (
+  ctx: ToolRunContext,
+  args: ToolArgs,
+) => Promise<unknown>;
 
 /**
  * 函数式工具定义 helper。
@@ -156,26 +164,33 @@ export type ToolFunction = (ctx: ToolRunContext, args: ToolArgs) => Promise<unkn
  * 将异步函数转换为 BaseTool 子类, 与 Toolset 兼容。TS 无法可靠区分
  * async 函数和返回 Promise 的函数, 因此在 call() 时校验返回值是否为 Promise。
  */
-export function tool(options: ToolDecoratorOptions, fn: ToolFunction): BaseToolConstructor {
+export function tool(
+  options: ToolDecoratorOptions,
+  fn: ToolFunction,
+): BaseToolConstructor {
   class FunctionTool extends BaseTool {
     static override toolName = options.name;
     static override description = options.description;
     static override tags = options.tags ?? new Set<string>();
-    static override supersededByTags = options.supersededByTags ?? new Set<string>();
+    static override supersededByTags =
+      options.supersededByTags ?? new Set<string>();
     static override autoInherit = options.autoInherit ?? false;
     static override requiresApproval = options.requiresApproval ?? false;
-    static override inputSchema = options.inputSchema ?? z.object({}).passthrough();
+    static override inputSchema =
+      options.inputSchema ?? z.object({}).passthrough();
 
     async call(ctx: ToolRunContext, args: ToolArgs): Promise<unknown> {
       const result = fn(ctx, args);
       if (!isPromiseLike(result)) {
-        throw new TypeError("tool() requires a function that returns a Promise.");
+        throw new TypeError(
+          'tool() requires a function that returns a Promise.',
+        );
       }
       return result;
     }
   }
 
-  Object.defineProperty(FunctionTool, "name", { value: options.name });
+  Object.defineProperty(FunctionTool, 'name', { value: options.name });
   return FunctionTool;
 }
 
@@ -194,7 +209,7 @@ export function getToolMetadata(toolClass: BaseToolConstructor): {
   const name = toolClass.toolName;
   const description = toolClass.description;
   if (!name) {
-    throw new Error("Tool class must define static toolName.");
+    throw new Error('Tool class must define static toolName.');
   }
   if (!description) {
     throw new Error(`Tool ${name} must define static description.`);
@@ -211,5 +226,5 @@ export function getToolMetadata(toolClass: BaseToolConstructor): {
 }
 
 function isPromiseLike(value: unknown): value is Promise<unknown> {
-  return typeof value === "object" && value !== null && "then" in value;
+  return typeof value === 'object' && value !== null && 'then' in value;
 }

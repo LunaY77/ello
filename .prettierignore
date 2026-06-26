@@ -1,0 +1,9 @@
+*.hbs
+dist
+build
+coverage
+node_modules
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+*.min.*

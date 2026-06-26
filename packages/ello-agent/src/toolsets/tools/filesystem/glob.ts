@@ -1,5 +1,6 @@
-import { z } from "zod";
-import { BaseTool, type ToolArgs, type ToolRunContext } from "../../base.js";
+import { z } from 'zod';
+
+import { BaseTool, type ToolArgs, type ToolRunContext } from '../../base.js';
 
 /** 默认最大搜索结果数。 */
 export const DEFAULT_GLOB_MAX_RESULTS = 200;
@@ -7,7 +8,7 @@ export const DEFAULT_GLOB_MAX_RESULTS = 200;
 /** glob 工具输入 schema。 */
 export const GlobArgsSchema = z.object({
   pattern: z.string(),
-  root: z.string().default("."),
+  root: z.string().default('.'),
   maxResults: z.number().int().positive().default(DEFAULT_GLOB_MAX_RESULTS),
 });
 
@@ -15,8 +16,9 @@ export const GlobArgsSchema = z.object({
  * 通过 glob pattern 搜索文件。
  */
 export class GlobTool extends BaseTool {
-  static override toolName = "glob";
-  static override description = "Find files matching a glob pattern. Returns matching file paths.";
+  static override toolName = 'glob';
+  static override description =
+    'Find files matching a glob pattern. Returns matching file paths.';
   static override inputSchema = GlobArgsSchema;
 
   /**
@@ -33,11 +35,14 @@ export class GlobTool extends BaseTool {
   /**
    * 搜索匹配 pattern 的文件。
    */
-  async call(ctx: ToolRunContext, args: ToolArgs): Promise<string[] | Record<string, unknown>> {
+  async call(
+    ctx: ToolRunContext,
+    args: ToolArgs,
+  ): Promise<string[] | Record<string, unknown>> {
     const parsed = GlobArgsSchema.parse(args);
     const shell = ctx.deps.env.shell;
     if (shell === null) {
-      return { error: "shell not available" };
+      return { error: 'shell not available' };
     }
 
     const result = await shell.run(

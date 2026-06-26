@@ -1,5 +1,10 @@
-import { randomUUID } from "node:crypto";
-import { generateEntryId, type SessionEntry, type SessionStorage } from "./types.js";
+import { randomUUID } from 'node:crypto';
+
+import {
+  generateEntryId,
+  type SessionEntry,
+  type SessionStorage,
+} from './types.js';
 
 /**
  * 基于内存的 session tree 存储。
@@ -14,12 +19,15 @@ export class InMemorySessionStorage implements SessionStorage {
 
   constructor(options: { sessionId?: string; entries?: SessionEntry[] } = {}) {
     this.metadata = {
-      id: options.sessionId ?? randomUUID().replaceAll("-", ""),
+      id: options.sessionId ?? randomUUID().replaceAll('-', ''),
       createdAt: new Date().toISOString(),
     };
     this.entries = options.entries ? [...options.entries] : [];
     this.byId = new Map(this.entries.map((entry) => [entry.id, entry]));
-    this.leafId = this.entries.length > 0 ? this.entries[this.entries.length - 1]?.id ?? null : null;
+    this.leafId =
+      this.entries.length > 0
+        ? (this.entries[this.entries.length - 1]?.id ?? null)
+        : null;
   }
 
   async getMetadata(): Promise<Record<string, unknown>> {

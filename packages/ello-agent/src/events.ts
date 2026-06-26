@@ -2,13 +2,14 @@
  * Agent 生命周期状态枚举。
  */
 export const LifecycleStatus = {
-  started: "started",
-  completed: "completed",
-  error: "error",
+  started: 'started',
+  completed: 'completed',
+  error: 'error',
 } as const;
 
 /** Agent 生命周期状态字符串类型。 */
-export type LifecycleStatus = (typeof LifecycleStatus)[keyof typeof LifecycleStatus];
+export type LifecycleStatus =
+  (typeof LifecycleStatus)[keyof typeof LifecycleStatus];
 
 /**
  * Agent 事件基类。

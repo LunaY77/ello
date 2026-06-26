@@ -1,13 +1,21 @@
 import {
   generateText,
   type LanguageModel,
-} from "ai";
-import { AgentContext } from "./context.js";
-import { ModelConfig, ToolConfig } from "./config.js";
-import { LocalEnvironment, type Environment } from "./environment/index.js";
-import { MessageQueue } from "./queue.js";
-import { type ModelWrapper, resolveModel } from "./models.js";
-import { Toolset, type BaseToolConstructor } from "./toolsets/index.js";
+  type ModelMessage,
+  tool as aiTool,
+  type ToolSet,
+} from 'ai';
+
+import { ModelConfig, ToolConfig } from './config.js';
+import { AgentContext } from './context.js';
+import { LocalEnvironment, type Environment } from './environment/index.js';
+import { type ModelWrapper, resolveModel } from './models.js';
+import { MessageQueue } from './queue.js';
+import {
+  Toolset,
+  type BaseToolConstructor,
+  type ToolsetTool,
+} from './toolsets/index.js';
 
 /** createAgent 的输入参数。 */
 export interface CreateAgentOptions {
@@ -35,6 +43,29 @@ export interface AgentRuntimeOptions {
   modelWrapper?: ModelWrapper | null;
   coreToolset?: Toolset | null;
   toolsets?: Toolset[];
+}
+
+/** AgentRuntime.run() 的 AI SDK 对齐输入。 */
+export type AgentRuntimeRunInput =
+  | string
+  | ({
+      prompt: string | ModelMessage[];
+      messages?: never;
+    } & AgentRuntimeGenerateOptions)
+  | ({
+      messages: ModelMessage[];
+      prompt?: never;
+    } & AgentRuntimeGenerateOptions);
+
+/** AgentRuntime.run() 透传给 generateText 的通用选项。 */
+export interface AgentRuntimeGenerateOptions {
+  system?: string;
+  instructions?: string;
+  allowSystemInMessages?: boolean;
+  maxRetries?: number;
+  abortSignal?: AbortSignal;
+  headers?: Record<string, string | undefined>;
+  timeout?: number;
 }
 
 /**
@@ -80,6 +111,29 @@ export class AgentRuntime {
   /** 是否已进入运行时生命周期。 */
   get entered(): boolean {
     return this.enterCount > 0;
+  }
+
+  /**
+   * 将 ello Toolset 转换为 Vercel AI SDK ToolSet。
+   *
+   * 该方法依赖当前 run 的 AgentContext, 因为工具可用性和执行都需要
+   * runtime 上下文。PydanticAI 的 ToolsetTool 概念在 TS 版中被桥接为
+   * AI SDK 的 `tool({ inputSchema, execute })`。
+   */
+  async toAiToolSet(): Promise<ToolSet> {
+    if (this.ctx === null) {
+      return {};
+    }
+
+    const result: ToolSet = {};
+    const runCtx = { deps: this.ctx };
+    for (const toolset of this.toolsets) {
+      const tools = await toolset.getTools(runCtx);
+      for (const [name, toolDef] of Object.entries(tools)) {
+        result[name] = this.createAiTool(toolset, name, toolDef);
+      }
+    }
+    return result;
   }
 
   /**
@@ -134,27 +188,94 @@ export class AgentRuntime {
    * 执行一轮非流式调用。
    *
    * Args:
-   *   prompt: 本轮发送给模型的用户输入。
+   *   input: prompt 字符串, 或 Vercel AI SDK generateText 的 prompt/messages 选项。
    *
    * Returns:
    *   Vercel AI SDK generateText 的结果。
    */
-  async run(prompt: string): Promise<Awaited<ReturnType<typeof generateText>>> {
+  async run(
+    input: AgentRuntimeRunInput,
+  ): Promise<Awaited<ReturnType<typeof generateText>>> {
     if (!this.entered || this.ctx === null) {
-      throw new Error("AgentRuntime must be entered via 'await runtime.enter()' before calling run().");
-    }
-    if (typeof prompt !== "string") {
-      throw new TypeError("prompt must be a string.");
+      throw new Error(
+        "AgentRuntime must be entered via 'await runtime.enter()' before calling run().",
+      );
     }
 
     this.ctx = this.ctx.prepareNewRun();
-    const params = {
+    const base = {
       model: this.model,
-      prompt,
+      tools: await this.toAiToolSet(),
       ...(this.systemPrompt !== null ? { system: this.systemPrompt } : {}),
     };
-    return generateText(params);
+
+    if (typeof input === 'string') {
+      return generateText({
+        ...base,
+        prompt: input,
+      });
+    }
+
+    const options = pickGenerateOptions(input);
+    if (input.messages !== undefined) {
+      return generateText({
+        ...base,
+        ...options,
+        messages: input.messages,
+      });
+    }
+
+    return generateText({
+      ...base,
+      ...options,
+      prompt: input.prompt,
+    });
   }
+
+  private createAiTool(
+    toolset: Toolset,
+    name: string,
+    toolDef: ToolsetTool,
+  ): ToolSet[string] {
+    return aiTool({
+      description: toolDef.description,
+      inputSchema: toolDef.inputSchema,
+      execute: async (input) => {
+        if (this.ctx === null) {
+          throw new Error('AgentRuntime context is not available.');
+        }
+        return toolset.callTool(
+          name,
+          input as Record<string, unknown>,
+          { deps: this.ctx },
+          toolDef,
+        );
+      },
+    });
+  }
+}
+
+function pickGenerateOptions(
+  input: AgentRuntimeRunInput,
+): AgentRuntimeGenerateOptions {
+  if (typeof input === 'string') {
+    return {};
+  }
+  return {
+    ...(input.system !== undefined ? { system: input.system } : {}),
+    ...(input.instructions !== undefined
+      ? { instructions: input.instructions }
+      : {}),
+    ...(input.allowSystemInMessages !== undefined
+      ? { allowSystemInMessages: input.allowSystemInMessages }
+      : {}),
+    ...(input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {}),
+    ...(input.abortSignal !== undefined
+      ? { abortSignal: input.abortSignal }
+      : {}),
+    ...(input.headers !== undefined ? { headers: input.headers } : {}),
+    ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
+  };
 }
 
 /**
@@ -176,7 +297,9 @@ export class AgentRuntime {
  */
 export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
   const selection = resolveModel({
-    ...(options.modelName !== undefined ? { modelName: options.modelName } : {}),
+    ...(options.modelName !== undefined
+      ? { modelName: options.modelName }
+      : {}),
     ...(options.baseUrl !== undefined ? { baseUrl: options.baseUrl } : {}),
   });
 
@@ -187,7 +310,9 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
   const effectiveModel = options.modelWrapper
     ? options.modelWrapper(selection.model, selection.modelName, wrapperContext)
     : selection.model;
-  const coreToolset = options.tools?.length ? new Toolset({ tools: options.tools }) : null;
+  const coreToolset = options.tools?.length
+    ? new Toolset({ tools: options.tools })
+    : null;
   const allToolsets = [
     ...(coreToolset !== null ? [coreToolset] : []),
     ...(options.toolsets ?? []),

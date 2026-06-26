@@ -1,5 +1,6 @@
-import { z } from "zod";
-import { BaseTool, type ToolArgs, type ToolRunContext } from "../../base.js";
+import { z } from 'zod';
+
+import { BaseTool, type ToolArgs, type ToolRunContext } from '../../base.js';
 
 /** delete_file 工具输入 schema。 */
 export const DeleteFileArgsSchema = z.object({
@@ -10,8 +11,8 @@ export const DeleteFileArgsSchema = z.object({
  * 删除文件。
  */
 export class DeleteFileTool extends BaseTool {
-  static override toolName = "delete_file";
-  static override description = "Delete a file from the filesystem.";
+  static override toolName = 'delete_file';
+  static override description = 'Delete a file from the filesystem.';
   static override inputSchema = DeleteFileArgsSchema;
 
   /**
@@ -32,12 +33,14 @@ export class DeleteFileTool extends BaseTool {
     const parsed = DeleteFileArgsSchema.parse(args);
     const shell = ctx.deps.env.shell;
     if (shell === null) {
-      return "Error: shell not available.";
+      return 'Error: shell not available.';
     }
 
-    const result = await shell.run(`rm -f ${shellQuote(parsed.path)}`, { timeout: 10_000 });
+    const result = await shell.run(`rm -f ${shellQuote(parsed.path)}`, {
+      timeout: 10_000,
+    });
     if (result.exitCode !== 0) {
-      return `Error: ${result.stderr.trim() || "Failed to delete file."}`;
+      return `Error: ${result.stderr.trim() || 'Failed to delete file.'}`;
     }
     return `Successfully deleted: ${parsed.path}`;
   }

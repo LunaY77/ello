@@ -40,7 +40,12 @@ export class GlobalHooks<TDeps = unknown> {
   readonly pre: GlobalPreHookFunc<TDeps> | null;
   readonly post: GlobalPostHookFunc<TDeps> | null;
 
-  constructor(options: { pre?: GlobalPreHookFunc<TDeps> | null; post?: GlobalPostHookFunc<TDeps> | null } = {}) {
+  constructor(
+    options: {
+      pre?: GlobalPreHookFunc<TDeps> | null;
+      post?: GlobalPostHookFunc<TDeps> | null;
+    } = {},
+  ) {
     this.pre = options.pre ?? null;
     this.post = options.post ?? null;
   }
@@ -59,11 +64,13 @@ export class ToolHooks<TDeps = unknown> {
   readonly postHooks: Record<string, PostHookFunc<TDeps>>;
   readonly globalHooks: GlobalHooks<TDeps>;
 
-  constructor(options: {
-    preHooks?: Record<string, PreHookFunc<TDeps>>;
-    postHooks?: Record<string, PostHookFunc<TDeps>>;
-    globalHooks?: GlobalHooks<TDeps>;
-  } = {}) {
+  constructor(
+    options: {
+      preHooks?: Record<string, PreHookFunc<TDeps>>;
+      postHooks?: Record<string, PostHookFunc<TDeps>>;
+      globalHooks?: GlobalHooks<TDeps>;
+    } = {},
+  ) {
     this.preHooks = options.preHooks ?? {};
     this.postHooks = options.postHooks ?? {};
     this.globalHooks = options.globalHooks ?? new GlobalHooks<TDeps>();
@@ -108,7 +115,11 @@ export class ToolHooks<TDeps = unknown> {
    * Returns:
    *   可能被修改的结果。
    */
-  async runPost(ctx: RunContextLike<TDeps>, toolName: string, result: unknown): Promise<unknown> {
+  async runPost(
+    ctx: RunContextLike<TDeps>,
+    toolName: string,
+    result: unknown,
+  ): Promise<unknown> {
     const metadata: Record<string, unknown> = { toolName };
     let current = result;
 

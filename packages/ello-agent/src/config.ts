@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 /**
  * 模型支持的能力枚举。
@@ -7,14 +7,15 @@ import { z } from "zod";
  * 多模态输入限制和后续工具筛选逻辑复用。
  */
 export const ModelCapability = {
-  vision: "vision",
-  videoUnderstanding: "video_understanding",
-  documentUnderstanding: "document_understanding",
-  audioUnderstanding: "audio_understanding",
+  vision: 'vision',
+  videoUnderstanding: 'video_understanding',
+  documentUnderstanding: 'document_understanding',
+  audioUnderstanding: 'audio_understanding',
 } as const;
 
 /** 模型能力字符串类型。 */
-export type ModelCapability = (typeof ModelCapability)[keyof typeof ModelCapability];
+export type ModelCapability =
+  (typeof ModelCapability)[keyof typeof ModelCapability];
 
 /** 模型能力的 Zod 校验器。 */
 export const ModelCapabilitySchema = z.enum([
@@ -28,10 +29,20 @@ export const ModelCapabilitySchema = z.enum([
 export const ModelConfigSchema = z
   .object({
     contextWindow: z.number().int().positive().nullable().default(null),
-    proactiveContextManagementThreshold: z.number().min(0).max(1).nullable().default(0.65),
+    proactiveContextManagementThreshold: z
+      .number()
+      .min(0)
+      .max(1)
+      .nullable()
+      .default(0.65),
     compactThreshold: z.number().min(0).max(1).default(0.9),
     maxImages: z.number().int().nonnegative().default(20),
-    coldStartTrimSeconds: z.number().int().nonnegative().nullable().default(3600),
+    coldStartTrimSeconds: z
+      .number()
+      .int()
+      .nonnegative()
+      .nullable()
+      .default(3600),
     capabilities: z
       .array(ModelCapabilitySchema)
       .or(z.set(ModelCapabilitySchema))
@@ -58,7 +69,11 @@ export const SecurityConfigSchema = z.object({
 /** ToolConfig 的输入结构。 */
 export const ToolConfigSchema = z
   .object({
-    viewMaxTextFileSize: z.number().int().positive().default(10 * 1024 * 1024),
+    viewMaxTextFileSize: z
+      .number()
+      .int()
+      .positive()
+      .default(10 * 1024 * 1024),
     shellOutputTruncateLimit: z.number().int().positive().default(20_000),
     shellDefaultTimeoutSeconds: z.number().positive().default(120),
     security: SecurityConfigSchema.nullable().default(null),
@@ -108,21 +123,24 @@ export class ModelConfig {
   constructor(input: Partial<ModelConfigData> & Record<string, unknown> = {}) {
     const parsed = ModelConfigSchema.parse(input);
     this.contextWindow = parsed.contextWindow;
-    this.proactiveContextManagementThreshold = parsed.proactiveContextManagementThreshold;
+    this.proactiveContextManagementThreshold =
+      parsed.proactiveContextManagementThreshold;
     this.compactThreshold = parsed.compactThreshold;
     this.maxImages = parsed.maxImages;
     this.coldStartTrimSeconds = parsed.coldStartTrimSeconds;
     this.capabilities = parsed.capabilities;
 
     const known = new Set([
-      "contextWindow",
-      "proactiveContextManagementThreshold",
-      "compactThreshold",
-      "maxImages",
-      "coldStartTrimSeconds",
-      "capabilities",
+      'contextWindow',
+      'proactiveContextManagementThreshold',
+      'compactThreshold',
+      'maxImages',
+      'coldStartTrimSeconds',
+      'capabilities',
     ]);
-    this.extra = Object.fromEntries(Object.entries(parsed).filter(([key]) => !known.has(key)));
+    this.extra = Object.fromEntries(
+      Object.entries(parsed).filter(([key]) => !known.has(key)),
+    );
   }
 
   /**
@@ -189,11 +207,13 @@ export class ToolConfig {
     this.security = parsed.security;
 
     const known = new Set([
-      "viewMaxTextFileSize",
-      "shellOutputTruncateLimit",
-      "shellDefaultTimeoutSeconds",
-      "security",
+      'viewMaxTextFileSize',
+      'shellOutputTruncateLimit',
+      'shellDefaultTimeoutSeconds',
+      'security',
     ]);
-    this.extra = Object.fromEntries(Object.entries(parsed).filter(([key]) => !known.has(key)));
+    this.extra = Object.fromEntries(
+      Object.entries(parsed).filter(([key]) => !known.has(key)),
+    );
   }
 }

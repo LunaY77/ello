@@ -1,5 +1,5 @@
 /** 消息队列取出模式。 */
-export type MessageQueueMode = "all" | "one-at-a-time";
+export type MessageQueueMode = 'all' | 'one-at-a-time';
 
 /**
  * 消息队列, 支持在 agent 运行过程中注入 steering/follow-up 消息。
@@ -11,7 +11,7 @@ export class MessageQueue {
   private readonly messages: string[] = [];
   readonly mode: MessageQueueMode;
 
-  constructor(mode: MessageQueueMode = "one-at-a-time") {
+  constructor(mode: MessageQueueMode = 'one-at-a-time') {
     this.mode = mode;
   }
 
@@ -35,7 +35,7 @@ export class MessageQueue {
     if (this.messages.length === 0) {
       return [];
     }
-    if (this.mode === "all") {
+    if (this.mode === 'all') {
       const drained = [...this.messages];
       this.messages.length = 0;
       return drained;

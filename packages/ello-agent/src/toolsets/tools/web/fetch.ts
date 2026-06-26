@@ -1,5 +1,6 @@
-import { z } from "zod";
-import { BaseTool, type ToolArgs, type ToolRunContext } from "../../base.js";
+import { z } from 'zod';
+
+import { BaseTool, type ToolArgs, type ToolRunContext } from '../../base.js';
 
 /** web_fetch 工具输入 schema。 */
 export const WebFetchArgsSchema = z.object({
@@ -14,15 +15,16 @@ export const MAX_CONTENT_LENGTH = 50_000;
  * 抓取 URL 内容并转为文本。
  */
 export class WebFetchTool extends BaseTool {
-  static override toolName = "web_fetch";
-  static override description = "Fetch a URL and return content as markdown. Requires built-in fetch.";
+  static override toolName = 'web_fetch';
+  static override description =
+    'Fetch a URL and return content as markdown. Requires built-in fetch.';
   static override inputSchema = WebFetchArgsSchema;
 
   /**
    * 检查 fetch 是否可用。
    */
   override isAvailable(): boolean {
-    return typeof globalThis.fetch === "function";
+    return typeof globalThis.fetch === 'function';
   }
 
   /**
@@ -30,13 +32,13 @@ export class WebFetchTool extends BaseTool {
    */
   async call(_ctx: ToolRunContext, args: ToolArgs): Promise<string> {
     const parsed = WebFetchArgsSchema.parse(args);
-    if (typeof globalThis.fetch !== "function") {
-      return "Error: fetch not installed.";
+    if (typeof globalThis.fetch !== 'function') {
+      return 'Error: fetch not installed.';
     }
 
     let response: Response;
     try {
-      response = await fetch(parsed.url, { redirect: "follow" });
+      response = await fetch(parsed.url, { redirect: 'follow' });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -44,9 +46,9 @@ export class WebFetchTool extends BaseTool {
       return `Error fetching URL: ${error instanceof Error ? error.message : String(error)}`;
     }
 
-    const contentType = response.headers.get("content-type") ?? "";
+    const contentType = response.headers.get('content-type') ?? '';
     let text = await response.text();
-    if (contentType.includes("text/html")) {
+    if (contentType.includes('text/html')) {
       text = stripHtml(text);
     }
 
@@ -59,10 +61,10 @@ export class WebFetchTool extends BaseTool {
 
 function stripHtml(html: string): string {
   return html
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<img[\s\S]*?>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<img[\s\S]*?>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }

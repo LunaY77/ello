@@ -1,9 +1,15 @@
-import { exec } from "node:child_process";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { cwd as processCwd } from "node:process";
-import { promisify } from "node:util";
-import path from "node:path";
-import { Environment, type FileOperator, type Shell, type ShellResult } from "./base.js";
+import { exec } from 'node:child_process';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { cwd as processCwd } from 'node:process';
+import { promisify } from 'node:util';
+
+import {
+  Environment,
+  type FileOperator,
+  type Shell,
+  type ShellResult,
+} from './base.js';
 
 const execAsync = promisify(exec);
 
@@ -20,9 +26,9 @@ export class LocalFileOperator implements FileOperator {
 
   constructor(defaultPath: string, allowedPaths?: string[]) {
     this.defaultPath = path.resolve(defaultPath);
-    this.allowedPaths = (allowedPaths?.length ? allowedPaths : [this.defaultPath]).map((item) =>
-      path.resolve(item),
-    );
+    this.allowedPaths = (
+      allowedPaths?.length ? allowedPaths : [this.defaultPath]
+    ).map((item) => path.resolve(item));
   }
 
   /**
@@ -42,7 +48,10 @@ export class LocalFileOperator implements FileOperator {
   private checkAllowed(resolved: string): void {
     const allowed = this.allowedPaths.some((allowedPath) => {
       const relative = path.relative(allowedPath, resolved);
-      return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+      return (
+        relative === '' ||
+        (!relative.startsWith('..') && !path.isAbsolute(relative))
+      );
     });
     if (!allowed) {
       throw new Error(`Path not allowed: ${resolved}`);
@@ -50,13 +59,13 @@ export class LocalFileOperator implements FileOperator {
   }
 
   async readText(targetPath: string): Promise<string> {
-    return readFile(this.resolvePath(targetPath), "utf8");
+    return readFile(this.resolvePath(targetPath), 'utf8');
   }
 
   async writeText(targetPath: string, content: string): Promise<void> {
     const resolved = this.resolvePath(targetPath);
     await mkdir(path.dirname(resolved), { recursive: true });
-    await writeFile(resolved, content, "utf8");
+    await writeFile(resolved, content, 'utf8');
   }
 
   async listDir(targetPath: string): Promise<string[]> {
@@ -74,7 +83,10 @@ export class LocalFileOperator implements FileOperator {
 export class LocalShell implements Shell {
   constructor(private readonly defaultCwd: string | null = null) {}
 
-  async run(command: string, options: { cwd?: string; timeout?: number } = {}): Promise<ShellResult> {
+  async run(
+    command: string,
+    options: { cwd?: string; timeout?: number } = {},
+  ): Promise<ShellResult> {
     try {
       const result = await execAsync(command, {
         cwd: options.cwd ?? this.defaultCwd ?? undefined,
@@ -93,9 +105,9 @@ export class LocalShell implements Shell {
         killed?: boolean;
       };
       return {
-        exitCode: err.killed ? -1 : typeof err.code === "number" ? err.code : 1,
-        stdout: err.stdout ?? "",
-        stderr: err.killed ? "timeout" : err.stderr ?? err.message,
+        exitCode: err.killed ? -1 : typeof err.code === 'number' ? err.code : 1,
+        stdout: err.stdout ?? '',
+        stderr: err.killed ? 'timeout' : (err.stderr ?? err.message),
       };
     }
   }
@@ -119,7 +131,10 @@ export class LocalEnvironment extends Environment {
   }
 
   protected async setup(): Promise<void> {
-    this.fileOperatorValue = new LocalFileOperator(this.defaultPath, this.allowedPaths);
+    this.fileOperatorValue = new LocalFileOperator(
+      this.defaultPath,
+      this.allowedPaths,
+    );
     this.shellValue = new LocalShell(this.defaultPath);
   }
 
@@ -129,7 +144,7 @@ export class LocalEnvironment extends Environment {
 
   async getContextInstructions(): Promise<string> {
     if (!this.entered) {
-      throw new Error("Environment has not been entered.");
+      throw new Error('Environment has not been entered.');
     }
     return `<environment-context>\n  <working-directory>${this.defaultPath}</working-directory>\n</environment-context>`;
   }

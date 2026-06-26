@@ -1,5 +1,6 @@
-import { z } from "zod";
-import { BaseTool, type ToolArgs, type ToolRunContext } from "../base.js";
+import { z } from 'zod';
+
+import { BaseTool, type ToolArgs, type ToolRunContext } from '../base.js';
 
 /** 默认读取行数。 */
 export const DEFAULT_LINE_LIMIT = 300;
@@ -19,9 +20,9 @@ export const ReadFileArgsSchema = z.object({
  * 读取文件内容, 支持分页。
  */
 export class ReadFileTool extends BaseTool {
-  static override toolName = "read_file";
+  static override toolName = 'read_file';
   static override description =
-    "Read a text file from the filesystem. Supports lineOffset and lineLimit for paginated reading of large files.";
+    'Read a text file from the filesystem. Supports lineOffset and lineLimit for paginated reading of large files.';
   static override inputSchema = ReadFileArgsSchema;
 
   /**
@@ -38,11 +39,14 @@ export class ReadFileTool extends BaseTool {
   /**
    * 读取文件内容。
    */
-  async call(ctx: ToolRunContext, args: ToolArgs): Promise<string | Record<string, unknown>> {
+  async call(
+    ctx: ToolRunContext,
+    args: ToolArgs,
+  ): Promise<string | Record<string, unknown>> {
     const parsed = ReadFileArgsSchema.parse(args);
     const fileOperator = ctx.deps.env.fileOperator;
     if (fileOperator === null) {
-      return "Error: file_operator not available.";
+      return 'Error: file_operator not available.';
     }
 
     let content: string;
@@ -50,25 +54,28 @@ export class ReadFileTool extends BaseTool {
       content = await fileOperator.readText(parsed.path);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("ENOENT") || message.includes("no such file")) {
+      if (message.includes('ENOENT') || message.includes('no such file')) {
         return `Error: File not found: ${parsed.path}`;
       }
       return `Error: ${message}`;
     }
 
     const maxFileSize = ctx.deps.toolConfig.viewMaxTextFileSize;
-    const contentBytes = Buffer.byteLength(content, "utf8");
+    const contentBytes = Buffer.byteLength(content, 'utf8');
     if (contentBytes > maxFileSize) {
       return (
         `Error: File is too large (${formatSize(contentBytes)}). ` +
         `Maximum supported size is ${formatSize(maxFileSize)}. ` +
-        "Use shell tools (e.g. `head`, `tail`) to read portions of this file."
+        'Use shell tools (e.g. `head`, `tail`) to read portions of this file.'
       );
     }
 
     const allLines = splitLinesKeepEnds(content);
     const totalLines = allLines.length;
-    const start = parsed.lineOffset !== null && parsed.lineOffset !== undefined ? parsed.lineOffset : 0;
+    const start =
+      parsed.lineOffset !== null && parsed.lineOffset !== undefined
+        ? parsed.lineOffset
+        : 0;
     const selected = allLines.slice(start, start + parsed.lineLimit);
     let truncatedLines = false;
     const processed = selected.map((line) => {
@@ -79,7 +86,7 @@ export class ReadFileTool extends BaseTool {
       return line;
     });
 
-    const resultText = processed.join("");
+    const resultText = processed.join('');
     const hasMore = start + parsed.lineLimit < totalLines;
     const needsMetadata = start > 0 || hasMore || truncatedLines;
 

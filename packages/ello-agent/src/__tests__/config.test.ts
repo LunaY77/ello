@@ -1,17 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { ModelCapability, ModelConfig, ToolConfig } from "../index.js";
+import { describe, expect, it } from 'vitest';
 
-describe("ModelCapability", () => {
-  it("keeps Python enum values", () => {
-    expect(ModelCapability.vision).toBe("vision");
-    expect(ModelCapability.videoUnderstanding).toBe("video_understanding");
-    expect(ModelCapability.documentUnderstanding).toBe("document_understanding");
-    expect(ModelCapability.audioUnderstanding).toBe("audio_understanding");
+import { ModelCapability, ModelConfig, ToolConfig } from '../index.js';
+
+describe('ModelCapability', () => {
+  it('keeps Python enum values', () => {
+    expect(ModelCapability.vision).toBe('vision');
+    expect(ModelCapability.videoUnderstanding).toBe('video_understanding');
+    expect(ModelCapability.documentUnderstanding).toBe(
+      'document_understanding',
+    );
+    expect(ModelCapability.audioUnderstanding).toBe('audio_understanding');
   });
 });
 
-describe("ModelConfig", () => {
-  it("uses Python defaults", () => {
+describe('ModelConfig', () => {
+  it('uses Python defaults', () => {
     const cfg = new ModelConfig();
 
     expect(cfg.contextWindow).toBeNull();
@@ -21,7 +24,7 @@ describe("ModelConfig", () => {
     expect(cfg.capabilities.size).toBe(0);
   });
 
-  it("checks capabilities", () => {
+  it('checks capabilities', () => {
     const cfg = new ModelConfig({ capabilities: [ModelCapability.vision] });
 
     expect(cfg.hasCapability(ModelCapability.vision)).toBe(true);
@@ -29,19 +32,19 @@ describe("ModelConfig", () => {
     expect(cfg.hasVision).toBe(true);
   });
 
-  it("allows extra fields like pydantic extra=allow", () => {
-    const cfg = new ModelConfig({ customField: "hello" });
+  it('allows extra fields like pydantic extra=allow', () => {
+    const cfg = new ModelConfig({ customField: 'hello' });
 
-    expect(cfg.extra.customField).toBe("hello");
+    expect(cfg.extra.customField).toBe('hello');
   });
 
-  it("validates thresholds", () => {
+  it('validates thresholds', () => {
     expect(() => new ModelConfig({ compactThreshold: 1.5 })).toThrow();
   });
 });
 
-describe("ToolConfig", () => {
-  it("uses Python defaults", () => {
+describe('ToolConfig', () => {
+  it('uses Python defaults', () => {
     const cfg = new ToolConfig();
 
     expect(cfg.viewMaxTextFileSize).toBe(10 * 1024 * 1024);
@@ -49,9 +52,9 @@ describe("ToolConfig", () => {
     expect(cfg.shellDefaultTimeoutSeconds).toBe(120);
   });
 
-  it("preserves extra fields", () => {
-    const cfg = new ToolConfig({ myApiKey: "secret" });
+  it('preserves extra fields', () => {
+    const cfg = new ToolConfig({ myApiKey: 'secret' });
 
-    expect(cfg.extra.myApiKey).toBe("secret");
+    expect(cfg.extra.myApiKey).toBe('secret');
   });
 });
