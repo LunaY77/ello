@@ -14,10 +14,18 @@ vi.mock('ai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ai')>();
   return {
     ...actual,
-    generateText: vi.fn(async (options: Record<string, unknown>) => ({
-      text: 'mocked',
-      options,
-    })),
+    generateText: vi.fn(async (options: Record<string, unknown>) => {
+      if (typeof options.onStepEnd === 'function') {
+        options.onStepEnd({
+          toolCalls: [],
+        });
+      }
+      return {
+        text: 'mocked',
+        responseMessages: [{ role: 'assistant', content: 'mocked' }],
+        options,
+      };
+    }),
   };
 });
 
@@ -27,6 +35,16 @@ class RuntimeEchoTool extends BaseTool {
 
   async call(_ctx: ToolRunContext, args: ToolArgs): Promise<string> {
     return `echo:${String(args.value ?? '')}`;
+  }
+}
+
+class RuntimeApprovalTool extends BaseTool {
+  static override toolName = 'dangerous_action';
+  static override description = 'Dangerous action.';
+  static override requiresApproval = true;
+
+  async call(_ctx: ToolRunContext, _args: ToolArgs): Promise<string> {
+    throw new Error('approval tool should not execute before approval');
   }
 }
 
@@ -143,6 +161,23 @@ describe('createAgent', () => {
     }
   });
 
+  it('adds Python-compatible output and allMessages to run result', async () => {
+    const runtime = createAgent();
+
+    await runtime.enter();
+    try {
+      const result = await runtime.run('hello');
+
+      expect(result.output).toBe('mocked');
+      expect(result.allMessages()).toEqual([
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: 'mocked' },
+      ]);
+    } finally {
+      await runtime.exit();
+    }
+  });
+
   it('accepts AI SDK generateText prompt object', async () => {
     const runtime = createAgent({ systemPrompt: 'You are concise.' });
 
@@ -203,6 +238,86 @@ describe('createAgent', () => {
       await expect(
         result.options.tools.runtime_echo.execute({ value: 'x' }),
       ).resolves.toBe('echo:x');
+    } finally {
+      await runtime.exit();
+    }
+  });
+
+  it('marks approval tools as deferred without executing them', async () => {
+    const runtime = createAgent({ tools: [RuntimeApprovalTool] });
+
+    await runtime.enter();
+    try {
+      const result = (await runtime.run('hello')) as unknown as {
+        options: {
+          tools: Record<
+            string,
+            { execute: (args: Record<string, unknown>) => Promise<unknown> }
+          >;
+        };
+      };
+
+      await expect(
+        result.options.tools.dangerous_action.execute({ target: 'prod' }),
+      ).resolves.toEqual({
+        status: 'deferred',
+        reason: 'Tool execution requires approval.',
+      });
+    } finally {
+      await runtime.exit();
+    }
+  });
+
+  it('returns DeferredToolRequests when approval tools are called', async () => {
+    const { generateText } = await import('ai');
+    vi.mocked(generateText).mockImplementationOnce(
+      async (options: Record<string, unknown>) => {
+        if (typeof options.onStepEnd === 'function') {
+          options.onStepEnd({
+            toolCalls: [
+              {
+                toolCallId: 'call-1',
+                toolName: 'dangerous_action',
+                input: { target: 'prod' },
+              },
+            ],
+          });
+        }
+        return {
+          text: '',
+          responseMessages: [
+            {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool-call',
+                  toolCallId: 'call-1',
+                  toolName: 'dangerous_action',
+                  input: { target: 'prod' },
+                },
+              ],
+            },
+          ],
+          options,
+        } as never;
+      },
+    );
+    const runtime = createAgent({ tools: [RuntimeApprovalTool] });
+
+    await runtime.enter();
+    try {
+      const result = await runtime.run('approve it');
+
+      expect(result.output).toEqual({
+        approvals: [
+          {
+            toolCallId: 'call-1',
+            toolName: 'dangerous_action',
+            input: { target: 'prod' },
+          },
+        ],
+        calls: [],
+      });
     } finally {
       await runtime.exit();
     }

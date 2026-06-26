@@ -1,7 +1,9 @@
 import {
   generateText,
   type LanguageModel,
+  type ModelMessage,
   type Prompt,
+  type StepResult,
   tool as aiTool,
   type ToolSet,
 } from 'ai';
@@ -12,6 +14,11 @@ import { LocalEnvironment, type Environment } from './environment/index.js';
 import { buildMcpServers, MCPConfigSchema, type MCPConfig } from './mcp.js';
 import { type ModelWrapper, resolveModel } from './models.js';
 import { MessageQueue } from './queue.js';
+import type {
+  DeferredToolApprovalRequest,
+  DeferredToolRequests,
+  DeferredToolResults,
+} from './state.js';
 import {
   Toolset,
   type BaseToolConstructor,
@@ -68,7 +75,20 @@ export type AgentRuntimeGenerateInput = Omit<
   Parameters<typeof generateText>[0],
   'model' | 'tools' | 'prompt' | 'messages'
 > &
-  Prompt;
+  Prompt & {
+    /** Python 兼容: 历史消息, 会被转换为 AI SDK messages。 */
+    messageHistory?: ModelMessage[] | null;
+    /** Python 兼容: resume 时传入的 deferred tool 结果。 */
+    deferredToolResults?: DeferredToolResults | null;
+  };
+
+/** AgentRuntime.run() 返回值, 在 AI SDK 结果上补充 Python 兼容字段。 */
+export type AgentRuntimeRunResult = Awaited<ReturnType<typeof generateText>> & {
+  /** Python AgentRunResult 兼容输出; 普通调用为 text, 审批暂停时为 DeferredToolRequests。 */
+  output: string | DeferredToolRequests;
+  /** Python AgentRunResult.all_messages() 对齐方法。 */
+  allMessages(): ModelMessage[];
+};
 
 /**
  * Agent 运行时, 管理 env -> ctx -> model 调用生命周期。
@@ -195,9 +215,7 @@ export class AgentRuntime {
    * Returns:
    *   Vercel AI SDK generateText 的结果。
    */
-  async run(
-    input: AgentRuntimeRunInput,
-  ): Promise<Awaited<ReturnType<typeof generateText>>> {
+  async run(input: AgentRuntimeRunInput): Promise<AgentRuntimeRunResult> {
     if (!this.entered || this.ctx === null) {
       throw new Error(
         "AgentRuntime must be entered via 'await runtime.enter()' before calling run().",
@@ -205,33 +223,67 @@ export class AgentRuntime {
     }
 
     this.ctx = this.ctx.prepareNewRun();
+    const approvalToolNames = new Set<string>();
+    const toolSets = await this.collectToolSets(approvalToolNames);
     const base = {
       model: this.model,
-      tools: await this.toAiToolSet(),
+      tools: toolSets.tools,
       ...(this.systemPrompt !== null ? { system: this.systemPrompt } : {}),
+    };
+    const steps: Array<StepResult<ToolSet, Record<string, unknown>>> = [];
+    const onStepEnd = (step: StepResult<ToolSet, Record<string, unknown>>) => {
+      steps.push(step);
     };
 
     if (typeof input === 'string') {
-      return generateText({
+      const result = await generateText({
         ...base,
         prompt: input,
+        onStepEnd,
       });
+      return this.wrapRunResult(result, input, steps, approvalToolNames);
     }
 
     const options = pickGenerateOptions(input);
+    const messages = buildMessagesWithResume(options);
     if (options.messages !== undefined) {
-      return generateText({
+      const result = await generateText({
         ...base,
         ...options,
-        messages: options.messages,
+        messages,
+        onStepEnd,
       });
+      return this.wrapRunResult(result, input, steps, approvalToolNames);
     }
 
-    return generateText({
+    const result = await generateText({
       ...base,
       ...options,
       prompt: options.prompt,
+      onStepEnd,
     });
+    return this.wrapRunResult(result, input, steps, approvalToolNames);
+  }
+
+  private async collectToolSets(approvalToolNames: Set<string>): Promise<{
+    tools: ToolSet;
+  }> {
+    if (this.ctx === null) {
+      return { tools: {} };
+    }
+
+    const result: ToolSet = {};
+    const runCtx = { deps: this.ctx };
+    for (const toolset of this.toolsets) {
+      const tools = await toolset.getTools(runCtx);
+      for (const [name, toolDef] of Object.entries(tools)) {
+        if (toolDef.requiresApproval) {
+          approvalToolNames.add(name);
+        }
+        result[name] = this.createAiTool(toolset, name, toolDef);
+      }
+    }
+    return { tools: result };
   }
 
   private createAiTool(
@@ -243,6 +295,12 @@ export class AgentRuntime {
       description: toolDef.description,
       inputSchema: toolDef.inputSchema,
       execute: async (input) => {
+        if (toolDef.requiresApproval) {
+          return {
+            status: 'deferred',
+            reason: 'Tool execution requires approval.',
+          };
+        }
         if (this.ctx === null) {
           throw new Error('AgentRuntime context is not available.');
         }
@@ -255,6 +313,20 @@ export class AgentRuntime {
       },
     });
   }
+
+  private wrapRunResult(
+    result: Awaited<ReturnType<typeof generateText>>,
+    input: AgentRuntimeRunInput,
+    steps: Array<StepResult<ToolSet, Record<string, unknown>>>,
+    approvalToolNames: ReadonlySet<string>,
+  ): AgentRuntimeRunResult {
+    const pending = collectDeferredRequests(steps, approvalToolNames);
+    const output = pending !== null ? pending : result.text;
+    return Object.assign(result, {
+      output,
+      allMessages: () => buildAllMessages(input, result),
+    });
+  }
 }
 
 function pickGenerateOptions(input: AgentRuntimeGenerateInput) {
@@ -262,8 +334,124 @@ function pickGenerateOptions(input: AgentRuntimeGenerateInput) {
     model?: unknown;
     tools?: unknown;
   };
-  const { model: _model, tools: _tools, ...options } = inputWithRuntimeFields;
+  const {
+    model: _model,
+    tools: _tools,
+    messageHistory: _messageHistory,
+    deferredToolResults: _deferredToolResults,
+    ...options
+  } = inputWithRuntimeFields;
   return options;
+}
+
+function buildMessagesWithResume(
+  input: AgentRuntimeGenerateInput,
+): ModelMessage[] {
+  const baseMessages = [...(input.messageHistory ?? input.messages ?? [])];
+  const deferredMessages = buildDeferredResultMessages(
+    input.deferredToolResults,
+  );
+  return [...baseMessages, ...deferredMessages];
+}
+
+function buildDeferredResultMessages(
+  results: DeferredToolResults | null | undefined,
+): ModelMessage[] {
+  if (results === null || results === undefined) {
+    return [];
+  }
+
+  const toolResults = [
+    ...Object.entries(results.approvals).map(([toolCallId, approval]) => ({
+      toolCallId,
+      toolName: 'approval',
+      output: normalizeApprovalResult(approval),
+    })),
+    ...Object.entries(results.calls).map(([toolCallId, output]) => ({
+      toolCallId,
+      toolName: 'deferred_call',
+      output,
+    })),
+  ];
+
+  if (toolResults.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      role: 'tool',
+      content: toolResults.map((result) => ({
+        type: 'tool-result' as const,
+        toolCallId: result.toolCallId,
+        toolName: result.toolName,
+        output: result.output,
+      })),
+    },
+  ] as ModelMessage[];
+}
+
+function normalizeApprovalResult(
+  approval: DeferredToolResults['approvals'][string],
+): unknown {
+  if (typeof approval === 'boolean') {
+    return approval ? 'approved' : 'denied';
+  }
+  return approval.approved
+    ? 'approved'
+    : `denied${approval.reason ? `: ${approval.reason}` : ''}`;
+}
+
+function collectDeferredRequests(
+  steps: Array<StepResult<ToolSet, Record<string, unknown>>>,
+  approvalToolNames: ReadonlySet<string>,
+): DeferredToolRequests | null {
+  const approvals = new Map<string, DeferredToolApprovalRequest>();
+  for (const step of steps) {
+    for (const toolCall of step.toolCalls) {
+      if (approvalToolNames.has(toolCall.toolName)) {
+        approvals.set(toolCall.toolCallId, {
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          input: toolCall.input,
+        });
+      }
+    }
+  }
+
+  if (approvals.size === 0) {
+    return null;
+  }
+
+  return {
+    approvals: [...approvals.values()],
+    calls: [],
+  };
+}
+
+function buildAllMessages(
+  input: AgentRuntimeRunInput,
+  result: Awaited<ReturnType<typeof generateText>>,
+): ModelMessage[] {
+  const initialMessages = normalizeInitialMessages(input);
+  return [...initialMessages, ...result.responseMessages];
+}
+
+function normalizeInitialMessages(input: AgentRuntimeRunInput): ModelMessage[] {
+  if (typeof input === 'string') {
+    return [{ role: 'user', content: input }];
+  }
+  const history = input.messageHistory ?? [];
+  if (input.messages !== undefined) {
+    return [...history, ...input.messages];
+  }
+  if (Array.isArray(input.prompt)) {
+    return [...history, ...input.prompt];
+  }
+  if (typeof input.prompt === 'string') {
+    return [...history, { role: 'user', content: input.prompt }];
+  }
+  return [...history];
 }
 
 /**
