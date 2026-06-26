@@ -143,6 +143,15 @@ export {
   type RunStateOptions,
 } from './state.js';
 export {
+  ActivateSkillArgsSchema,
+  SkillToolset,
+  loadSkillFromFile,
+  loadSkillsFromDir,
+  parseSkillMarkdown,
+  type SkillConfig,
+  type SkillToolsetOptions,
+} from './skills/index.js';
+export {
   BaseTool,
   DEFAULT_GLOB_MAX_RESULTS,
   DEFAULT_GREP_MAX_RESULTS,
