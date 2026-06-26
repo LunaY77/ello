@@ -25,6 +25,14 @@ vi.mock('ai', async (importOriginal) => {
       }
       return {
         text: 'mocked',
+        usage: {
+          requests: 1,
+          inputTokens: 11,
+          outputTokens: 7,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          toolCalls: 0,
+        },
         responseMessages: [{ role: 'assistant', content: 'mocked' }],
         options,
       };
@@ -285,6 +293,14 @@ describe('createAgent', () => {
         { role: 'user', content: 'hello' },
         { role: 'assistant', content: 'mocked' },
       ]);
+      expect(runtime.ctx?.usageSnapshot.entries).toHaveLength(1);
+      expect(runtime.ctx?.usageSnapshot.totalUsage).toEqual(
+        expect.objectContaining({
+          requests: 1,
+          inputTokens: 11,
+          outputTokens: 7,
+        }),
+      );
     } finally {
       await runtime.exit();
     }

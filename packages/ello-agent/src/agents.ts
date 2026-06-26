@@ -40,6 +40,7 @@ import {
   type ToolArgs,
   type ToolsetTool,
 } from './toolsets/index.js';
+import { coerceRunUsage, type RunUsage } from './usage.js';
 import { applyModelWrapper } from './wrappers.js';
 
 const DEFAULT_SYSTEM_PROMPT = `# System
@@ -331,6 +332,7 @@ export class AgentRuntime {
         messages: initialMessages,
         onStepEnd,
       });
+      this.recordUsageFromResult(result, 'main', this.modelName);
       await this.persistSessionRun(input, result);
       return this.wrapRunResult(result, input, steps, approvalToolNames);
     }
@@ -369,6 +371,7 @@ export class AgentRuntime {
       messages,
       onStepEnd,
     });
+    this.recordUsageFromResult(result, 'main', this.modelName);
     await this.persistSessionRun(input, result);
     return this.wrapRunResult(result, input, steps, approvalToolNames);
   }
@@ -598,6 +601,31 @@ export class AgentRuntime {
     );
   }
 
+  private recordUsageFromResult(
+    result: Awaited<ReturnType<typeof generateText>>,
+    agentId: string,
+    modelId: string,
+    source = 'model_request',
+  ): void {
+    if (this.ctx === null) {
+      return;
+    }
+
+    const usage = (result as { usage?: unknown }).usage;
+    if (usage === undefined || usage === null) {
+      return;
+    }
+
+    const normalized = coerceRunUsage(usage as never);
+    this.ctx.recordUsage({
+      agentId,
+      agentName: agentId,
+      modelId,
+      usage: usageToRunUsage(normalized),
+      source,
+    });
+  }
+
   private async withEnterLock<T>(fn: () => Promise<T>): Promise<T> {
     const previous = this.enterLock;
     let release!: () => void;
@@ -696,6 +724,24 @@ function normalizeRunMessages(input: AgentRuntimeRunInput): ModelMessage[] {
     return [{ role: 'user', content: input.prompt }];
   }
   return [];
+}
+
+function usageToRunUsage(usage: {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  toolCalls: number;
+}): RunUsage {
+  return {
+    requests: usage.requests,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheWriteTokens: usage.cacheWriteTokens,
+    toolCalls: usage.toolCalls,
+  };
 }
 
 async function applyHistoryFilters(

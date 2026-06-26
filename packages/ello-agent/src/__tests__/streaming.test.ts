@@ -254,6 +254,7 @@ describe('streamAgent', () => {
 
     expect(runtime.enterCalls).toBe(1);
     expect(runtime.exitCalls).toBe(1);
+    expect(runtime.usageEntryCount()).toBeGreaterThan(0);
     expect(events.map((item) => item.event.eventKind)).toEqual([
       'part_start',
       'part_delta',
@@ -476,7 +477,18 @@ class FakeRuntime {
     if (nextError !== null) {
       throw nextError;
     }
-    return { text: this.text, usage: { totalTokens: 42 } };
+    return {
+      text: this.text,
+      usage: {
+        requests: 1,
+        inputTokens: 5,
+        outputTokens: 7,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        toolCalls: 0,
+        totalTokens: 42,
+      },
+    };
   }
 
   lastEvents(): unknown[] {
@@ -485,5 +497,9 @@ class FakeRuntime {
 
   lastPrompts(): Array<string | null> {
     return [...this.prompts];
+  }
+
+  usageEntryCount(): number {
+    return this.contexts.at(-1)?.usageSnapshot.entries.length ?? 0;
   }
 }

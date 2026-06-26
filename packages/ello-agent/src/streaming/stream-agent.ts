@@ -2,6 +2,7 @@ import type { ModelMessage } from 'ai';
 
 import type { AgentRuntime, AgentRuntimeRunInput } from '../agents.js';
 import type { StreamCompleteEvent, StreamStartEvent } from '../events.js';
+import { coerceRunUsage } from '../usage.js';
 
 import { AgentStreamer } from './streamer.js';
 
@@ -115,6 +116,7 @@ async function runStream(
       result: { output: text },
       allMessages: () => messages,
     };
+    recordUsage(runtime, result, agentId, agentName);
 
     streamer.enqueue({
       agentId,
@@ -191,6 +193,31 @@ function extractTotalTokens(
   const usage = (result as { usage?: { totalTokens?: unknown } }).usage;
   const total = usage?.totalTokens;
   return typeof total === 'number' ? total : null;
+}
+
+function recordUsage(
+  runtime: AgentRuntime,
+  result: Awaited<ReturnType<AgentRuntime['run']>>,
+  agentId: string,
+  agentName: string,
+): void {
+  const ctx = runtime.ctx;
+  if (ctx === null || typeof result !== 'object' || result === null) {
+    return;
+  }
+
+  const usage = (result as { usage?: unknown }).usage;
+  if (usage === undefined || usage === null) {
+    return;
+  }
+
+  ctx.recordUsage({
+    agentId,
+    agentName,
+    modelId: runtime.modelName,
+    usage: coerceRunUsage(usage as never),
+    source: 'model_request',
+  });
 }
 
 function buildMessages(
