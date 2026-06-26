@@ -49,6 +49,11 @@ export class MessageQueue {
     return this.messages.length > 0;
   }
 
+  /** Python 兼容命名: 是否有待处理消息。 */
+  get has_items(): boolean {
+    return this.hasItems;
+  }
+
   /** 清空队列中全部待处理消息。 */
   clear(): void {
     this.messages.length = 0;

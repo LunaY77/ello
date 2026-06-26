@@ -27,10 +27,13 @@ describe('MessageQueue', () => {
     const q = new MessageQueue();
 
     expect(q.hasItems).toBe(false);
+    expect(q.has_items).toBe(false);
     q.enqueue('x');
     expect(q.hasItems).toBe(true);
+    expect(q.has_items).toBe(true);
     q.clear();
     expect(q.hasItems).toBe(false);
+    expect(q.has_items).toBe(false);
     expect(q.drain()).toEqual([]);
   });
 });
