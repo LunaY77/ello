@@ -121,6 +121,17 @@ export {
   type SessionStorage,
 } from './session/index.js';
 export {
+  RunState,
+  isDeferredToolRequests,
+  type DeferredToolApprovalRequest,
+  type DeferredToolApprovalResult,
+  type DeferredToolCallRequest,
+  type DeferredToolRequests,
+  type DeferredToolResults,
+  type RunResultLike,
+  type RunStateOptions,
+} from './state.js';
+export {
   BaseTool,
   DEFAULT_GLOB_MAX_RESULTS,
   DEFAULT_GREP_MAX_RESULTS,
