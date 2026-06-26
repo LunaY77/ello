@@ -11,6 +11,11 @@ import {
 import { ModelConfig, ToolConfig } from './config.js';
 import { AgentContext } from './context.js';
 import { LocalEnvironment, type Environment } from './environment/index.js';
+import {
+  coldStartTrim,
+  createEnvironmentInstructionsFilter,
+  injectRuntimeInstructions,
+} from './filters/index.js';
 import { buildMcpServers, MCPConfigSchema, type MCPConfig } from './mcp.js';
 import { type ModelWrapper, resolveModel } from './models.js';
 import { resolveModelSettings, type ModelSettings } from './presets.js';
@@ -312,10 +317,14 @@ export class AgentRuntime {
       resumeOptions.deferredToolResults != null
     ) {
       const runtimePrompt = pickRuntimePrompt(input);
-      const initialMessages = resolveInitialMessages(
-        runtimePrompt,
-        options,
-        resumeOptions.messageHistory,
+      const initialMessages = await applyHistoryFilters(
+        resolveInitialMessages(
+          runtimePrompt,
+          options,
+          resumeOptions.messageHistory,
+        ),
+        this.ctx,
+        this.env,
       );
       const resolvedDeferredResults = await this.resolveDeferredToolResults(
         initialMessages,
@@ -580,6 +589,20 @@ function resolveInitialMessages(
     return [...baseMessages, { role: 'user', content: runtimeInput }];
   }
   return baseMessages;
+}
+
+async function applyHistoryFilters(
+  messageHistory: ModelMessage[],
+  ctx: AgentContext,
+  env: Environment,
+): Promise<ModelMessage[]> {
+  let history = coldStartTrim({ deps: ctx }, messageHistory);
+  history = await createEnvironmentInstructionsFilter(env)(
+    { deps: ctx },
+    history,
+  );
+  history = await injectRuntimeInstructions({ deps: ctx }, history);
+  return history;
 }
 
 function buildMessagesWithResume(
