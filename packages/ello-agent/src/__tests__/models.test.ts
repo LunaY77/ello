@@ -193,6 +193,37 @@ describe('createAgent', () => {
     expect(runtime.compact).toBe(true);
   });
 
+  it('applies compact filter when compact is enabled', async () => {
+    const runtime = createAgent({
+      compact: true,
+      modelConfig: { contextWindow: 1_000, compactThreshold: 0.9 },
+      systemPrompt: 'You are concise.',
+    });
+
+    await runtime.enter();
+    try {
+      const result = (await runtime.run({
+        messages: Array.from({ length: 20 }, (_, index) => [
+          { role: 'user', content: `question ${index} `.repeat(50) },
+          { role: 'assistant', content: `answer ${index} `.repeat(50) },
+        ])
+          .flatMap((pair) => pair)
+          .concat({
+            role: 'assistant',
+            content: 'latest answer',
+            usage: { totalTokens: 950 },
+          } as never),
+      })) as unknown as { options: Record<string, unknown> };
+
+      expect(JSON.stringify(result.options.messages)).toContain(
+        'Context was compacted',
+      );
+      expect(JSON.stringify(result.options.messages)).toContain('mocked');
+    } finally {
+      await runtime.exit();
+    }
+  });
+
   it('requires enter before run', async () => {
     const runtime = createAgent();
 
@@ -228,10 +259,13 @@ describe('createAgent', () => {
         system: 'You are concise.',
         maxRetries: 0,
       });
-      expect(result.options.messages).toEqual([
-        { role: 'user', content: 'hello' },
-      ]);
-      expect(result.options).not.toHaveProperty('prompt');
+      expect(JSON.stringify(result.options.messages)).toContain('hello');
+      expect(JSON.stringify(result.options.messages)).toContain(
+        '<environment-context>',
+      );
+      expect(JSON.stringify(result.options.messages)).toContain(
+        '<runtime-context>',
+      );
     } finally {
       await runtime.exit();
     }
@@ -267,11 +301,16 @@ describe('createAgent', () => {
 
       expect(result.options).toMatchObject({
         system: 'You are concise.',
-        prompt: 'hello',
         maxRetries: 0,
         temperature: 0.2,
       });
-      expect(result.options).not.toHaveProperty('messages');
+      expect(JSON.stringify(result.options.messages)).toContain('hello');
+      expect(JSON.stringify(result.options.messages)).toContain(
+        '<environment-context>',
+      );
+      expect(JSON.stringify(result.options.messages)).toContain(
+        '<runtime-context>',
+      );
     } finally {
       await runtime.exit();
     }

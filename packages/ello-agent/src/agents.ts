@@ -8,6 +8,7 @@ import {
   type ToolSet,
 } from 'ai';
 
+import { createCompactFilter, type SummaryAgent } from './compression/index.js';
 import { ModelConfig, ToolConfig } from './config.js';
 import { AgentContext } from './context.js';
 import { LocalEnvironment, type Environment } from './environment/index.js';
@@ -99,6 +100,7 @@ export interface CreateAgentOptions {
   mcpConfig?: MCPConfig | null;
   compact?: boolean;
   modelSettings?: string | ModelSettings | null;
+  summaryModel?: LanguageModel | null;
 }
 
 /** AgentRuntime 的构造参数。 */
@@ -115,6 +117,7 @@ export interface AgentRuntimeOptions {
   modelWrapper?: ModelWrapper | null;
   coreToolset?: Toolset | null;
   toolsets?: RuntimeToolset[];
+  summaryModel?: LanguageModel | null;
 }
 
 /** AgentRuntime.run() 的 AI SDK 对齐输入。 */
@@ -123,7 +126,7 @@ export type AgentRuntimeRunInput = string | AgentRuntimeGenerateInput;
 /** AgentRuntime.run() 允许调用方传入的 generateText 选项。 */
 export type AgentRuntimeGenerateInput = Omit<
   Parameters<typeof generateText>[0],
-  'model' | 'tools' | 'prompt' | 'messages'
+  'model' | 'tools'
 > &
   Prompt & {
     /** Python 兼容: 历史消息, 会被转换为 AI SDK messages。 */
@@ -159,6 +162,7 @@ export class AgentRuntime {
   readonly modelWrapper: ModelWrapper | null;
   readonly coreToolset: Toolset | null;
   readonly toolsets: RuntimeToolset[];
+  readonly summaryModel: LanguageModel | null;
   readonly steeringQueue = new MessageQueue();
   readonly followUpQueue = new MessageQueue();
   ctx: AgentContext | null = null;
@@ -178,6 +182,7 @@ export class AgentRuntime {
     this.modelWrapper = options.modelWrapper ?? null;
     this.coreToolset = options.coreToolset ?? null;
     this.toolsets = options.toolsets ?? [];
+    this.summaryModel = options.summaryModel ?? null;
   }
 
   /** 是否存在需要审批的工具。 */
@@ -302,51 +307,48 @@ export class AgentRuntime {
     };
 
     if (typeof input === 'string') {
-      const result = await generateText({
-        ...base,
-        prompt: input,
-        onStepEnd,
-      });
-      return this.wrapRunResult(result, input, steps, approvalToolNames);
-    }
-
-    const options = pickGenerateOptions(input);
-    const resumeOptions = pickResumeOptions(input);
-    if (
-      resumeOptions.messageHistory != null ||
-      resumeOptions.deferredToolResults != null
-    ) {
-      const runtimePrompt = pickRuntimePrompt(input);
       const initialMessages = await applyHistoryFilters(
-        resolveInitialMessages(
-          runtimePrompt,
-          options,
-          resumeOptions.messageHistory,
-        ),
+        resolveInitialMessages(input, null, null, null),
         this.ctx,
         this.env,
       );
-      const resolvedDeferredResults = await this.resolveDeferredToolResults(
-        initialMessages,
-        resumeOptions.deferredToolResults,
-      );
-      const messages = buildMessagesWithResume(
-        initialMessages,
-        resolvedDeferredResults,
-      );
-      const { prompt: _prompt, messages: _messages, ...sdkOptions } = options;
       const result = await generateText({
         ...base,
-        ...sdkOptions,
-        messages,
+        messages: initialMessages,
         onStepEnd,
       });
       return this.wrapRunResult(result, input, steps, approvalToolNames);
     }
 
+    const runtimeInput = splitRuntimeInput(input);
+    const initialMessages = await applyHistoryFilters(
+      resolveInitialMessages(
+        runtimeInput.promptText,
+        runtimeInput.promptMessages,
+        runtimeInput.messages,
+        input.messageHistory ?? null,
+      ),
+      this.ctx,
+      this.env,
+    );
+    const compactedMessages = await maybeApplyCompactFilter(
+      initialMessages,
+      this.ctx,
+      this.compact,
+      this.summaryModel ?? this.model,
+    );
+    const resolvedDeferredResults = await this.resolveDeferredToolResults(
+      compactedMessages,
+      input.deferredToolResults,
+    );
+    const messages = buildMessagesWithResume(
+      compactedMessages,
+      resolvedDeferredResults,
+    );
     const result = await generateText({
       ...base,
-      ...options,
+      ...runtimeInput.sdkOptions,
+      messages,
       onStepEnd,
     });
     return this.wrapRunResult(result, input, steps, approvalToolNames);
@@ -522,27 +524,33 @@ export class AgentRuntime {
   }
 }
 
-function pickGenerateOptions(input: AgentRuntimeGenerateInput) {
+function splitRuntimeInput(input: AgentRuntimeGenerateInput) {
   const inputWithRuntimeFields = input as AgentRuntimeGenerateInput & {
     model?: unknown;
     tools?: unknown;
+    prompt?: unknown;
+    messages?: unknown;
+    messageHistory?: unknown;
+    deferredToolResults?: unknown;
   };
   const {
     model: _model,
     tools: _tools,
+    prompt,
+    messages,
     messageHistory: _messageHistory,
     deferredToolResults: _deferredToolResults,
     ...options
   } = inputWithRuntimeFields;
-  return options;
-}
-
-function pickRuntimePrompt(input: AgentRuntimeGenerateInput): string | null {
-  if (typeof input.prompt === 'string') {
-    return input.prompt;
-  }
-
-  return null;
+  return {
+    promptText: typeof prompt === 'string' ? prompt : null,
+    promptMessages: Array.isArray(prompt) ? (prompt as ModelMessage[]) : null,
+    messages: Array.isArray(messages) ? (messages as ModelMessage[]) : null,
+    sdkOptions: options as Omit<
+      AgentRuntimeGenerateInput,
+      'prompt' | 'messages' | 'messageHistory' | 'deferredToolResults'
+    >,
+  };
 }
 
 function assertRunInput(input: unknown): asserts input is AgentRuntimeRunInput {
@@ -555,16 +563,6 @@ function assertRunInput(input: unknown): asserts input is AgentRuntimeRunInput {
   throw new TypeError(
     'AgentRuntime.run() input must be a prompt string or an AI SDK generateText options object.',
   );
-}
-
-function pickResumeOptions(input: AgentRuntimeGenerateInput): {
-  messageHistory: ModelMessage[] | null | undefined;
-  deferredToolResults: DeferredToolResults | null | undefined;
-} {
-  return {
-    messageHistory: input.messageHistory,
-    deferredToolResults: input.deferredToolResults,
-  };
 }
 
 interface ResolvedDeferredToolResult {
@@ -581,11 +579,14 @@ interface DeferredToolCallSnapshot {
 
 function resolveInitialMessages(
   runtimeInput: string | null,
-  options: ReturnType<typeof pickGenerateOptions>,
+  promptMessages: ModelMessage[] | null,
+  messages: ModelMessage[] | null,
   messageHistory: ModelMessage[] | null | undefined,
 ): ModelMessage[] {
-  const baseMessages = [...(messageHistory ?? options.messages ?? [])];
-  if (runtimeInput !== null && options.messages === undefined) {
+  const baseMessages = [
+    ...(messageHistory ?? messages ?? promptMessages ?? []),
+  ];
+  if (runtimeInput !== null && messages === null && promptMessages === null) {
     return [...baseMessages, { role: 'user', content: runtimeInput }];
   }
   return baseMessages;
@@ -603,6 +604,29 @@ async function applyHistoryFilters(
   );
   history = await injectRuntimeInstructions({ deps: ctx }, history);
   return history;
+}
+
+async function maybeApplyCompactFilter(
+  messageHistory: ModelMessage[],
+  ctx: AgentContext,
+  compact: boolean,
+  summaryModel: LanguageModel,
+): Promise<ModelMessage[]> {
+  if (!compact) {
+    return messageHistory;
+  }
+
+  const summaryAgent: SummaryAgent = {
+    run: async (input) => {
+      const summaryResult = await generateText({
+        model: summaryModel,
+        messages: [...input.messages, { role: 'user', content: input.prompt }],
+      });
+      return summaryResult.text;
+    },
+  };
+  const filter = createCompactFilter();
+  return filter({ deps: ctx, agent: summaryAgent }, messageHistory);
 }
 
 function buildMessagesWithResume(
@@ -848,5 +872,6 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
     modelWrapper: options.modelWrapper ?? null,
     coreToolset,
     toolsets: allToolsets,
+    summaryModel: options.summaryModel ?? null,
   });
 }
