@@ -258,19 +258,28 @@ export class AgentRuntime {
 
     const options = pickGenerateOptions(input);
     const resumeOptions = pickResumeOptions(input);
-    const resolvedDeferredResults = await this.resolveDeferredToolResults(
-      resumeOptions.messageHistory ?? options.messages ?? [],
-      resumeOptions.deferredToolResults,
-    );
-    const messages = buildMessagesWithResume(
-      input,
-      options.messages,
-      resolvedDeferredResults,
-    );
-    if (options.messages !== undefined) {
+    if (
+      resumeOptions.messageHistory != null ||
+      resumeOptions.deferredToolResults != null
+    ) {
+      const runtimePrompt = pickRuntimePrompt(input);
+      const initialMessages = resolveInitialMessages(
+        runtimePrompt,
+        options,
+        resumeOptions.messageHistory,
+      );
+      const resolvedDeferredResults = await this.resolveDeferredToolResults(
+        initialMessages,
+        resumeOptions.deferredToolResults,
+      );
+      const messages = buildMessagesWithResume(
+        initialMessages,
+        resolvedDeferredResults,
+      );
+      const { prompt: _prompt, messages: _messages, ...sdkOptions } = options;
       const result = await generateText({
         ...base,
-        ...options,
+        ...sdkOptions,
         messages,
         onStepEnd,
       });
@@ -280,7 +289,6 @@ export class AgentRuntime {
     const result = await generateText({
       ...base,
       ...options,
-      prompt: options.prompt,
       onStepEnd,
     });
     return this.wrapRunResult(result, input, steps, approvalToolNames);
@@ -467,6 +475,14 @@ function pickGenerateOptions(input: AgentRuntimeGenerateInput) {
   return options;
 }
 
+function pickRuntimePrompt(input: AgentRuntimeGenerateInput): string | null {
+  if (typeof input.prompt === 'string') {
+    return input.prompt;
+  }
+
+  return null;
+}
+
 function assertRunInput(input: unknown): asserts input is AgentRuntimeRunInput {
   if (
     typeof input === 'string' ||
@@ -501,12 +517,23 @@ interface DeferredToolCallSnapshot {
   input: ToolArgs;
 }
 
+function resolveInitialMessages(
+  runtimeInput: string | null,
+  options: ReturnType<typeof pickGenerateOptions>,
+  messageHistory: ModelMessage[] | null | undefined,
+): ModelMessage[] {
+  const baseMessages = [...(messageHistory ?? options.messages ?? [])];
+  if (runtimeInput !== null && options.messages === undefined) {
+    return [...baseMessages, { role: 'user', content: runtimeInput }];
+  }
+  return baseMessages;
+}
+
 function buildMessagesWithResume(
-  input: AgentRuntimeGenerateInput,
-  messages: ModelMessage[] | undefined,
+  messages: ModelMessage[],
   resolvedDeferredResults: ResolvedDeferredToolResult[],
 ): ModelMessage[] {
-  const baseMessages = [...(input.messageHistory ?? messages ?? [])];
+  const baseMessages = [...messages];
   const deferredMessages = buildDeferredResultMessages(resolvedDeferredResults);
   return [...baseMessages, ...deferredMessages];
 }

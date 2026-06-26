@@ -226,6 +226,30 @@ describe('createAgent', () => {
     }
   });
 
+  it('uses messages when message history is provided', async () => {
+    const runtime = createAgent({ systemPrompt: 'You are concise.' });
+
+    await runtime.enter();
+    try {
+      const result = (await runtime.run({
+        prompt: 'hello',
+        messageHistory: [{ role: 'user', content: 'history' }],
+      })) as unknown as { options: Record<string, unknown> };
+
+      expect(result.options).toMatchObject({
+        system: 'You are concise.',
+      });
+      expect(result.options).toHaveProperty('messages');
+      expect(result.options.messages).toEqual([
+        { role: 'user', content: 'history' },
+        { role: 'user', content: 'hello' },
+      ]);
+      expect(result.options).not.toHaveProperty('prompt');
+    } finally {
+      await runtime.exit();
+    }
+  });
+
   it('keeps runtime-owned model and tools when options include them', async () => {
     const runtime = createAgent({ tools: [RuntimeEchoTool] });
     const externalModel = { provider: 'external', modelId: 'external' };
