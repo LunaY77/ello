@@ -112,6 +112,7 @@ export class AgentRuntime {
   readonly followUpQueue = new MessageQueue();
   ctx: AgentContext | null = null;
   private enterCount = 0;
+  private enterLock: Promise<void> = Promise.resolve();
 
   constructor(options: AgentRuntimeOptions) {
     this.modelName = options.modelName;
@@ -134,6 +135,11 @@ export class AgentRuntime {
   /** 是否已进入运行时生命周期。 */
   get entered(): boolean {
     return this.enterCount > 0;
+  }
+
+  /** 当前进入计数, 主要用于测试和调试嵌套生命周期。 */
+  get enterCountValue(): number {
+    return this.enterCount;
   }
 
   /**
@@ -183,15 +189,17 @@ export class AgentRuntime {
    * 进入 runtime 生命周期。
    */
   async enter(): Promise<this> {
-    if (this.enterCount === 0) {
-      await this.env.enter();
-      this.ctx = new AgentContext({
-        env: this.env,
-        modelConfig: this.modelConfig,
-        toolConfig: this.toolConfig,
-      });
-    }
-    this.enterCount += 1;
+    await this.withEnterLock(async () => {
+      if (this.enterCount === 0) {
+        await this.env.enter();
+        this.ctx = new AgentContext({
+          env: this.env,
+          modelConfig: this.modelConfig,
+          toolConfig: this.toolConfig,
+        });
+      }
+      this.enterCount += 1;
+    });
     return this;
   }
 
@@ -199,12 +207,14 @@ export class AgentRuntime {
    * 退出 runtime 生命周期。
    */
   async exit(): Promise<void> {
-    this.enterCount -= 1;
-    if (this.enterCount <= 0) {
-      this.enterCount = 0;
-      this.ctx = null;
-      await this.env.exit();
-    }
+    await this.withEnterLock(async () => {
+      this.enterCount -= 1;
+      if (this.enterCount <= 0) {
+        this.enterCount = 0;
+        this.ctx = null;
+        await this.env.exit();
+      }
+    });
   }
 
   /**
@@ -424,6 +434,20 @@ export class AgentRuntime {
       }
     }
     return null;
+  }
+
+  private async withEnterLock<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.enterLock;
+    let release!: () => void;
+    this.enterLock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
   }
 }
 
