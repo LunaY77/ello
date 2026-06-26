@@ -1,7 +1,7 @@
 import {
   generateText,
   type LanguageModel,
-  type ModelMessage,
+  type Prompt,
   tool as aiTool,
   type ToolSet,
 } from 'ai';
@@ -46,33 +46,20 @@ export interface AgentRuntimeOptions {
 }
 
 /** AgentRuntime.run() 的 AI SDK 对齐输入。 */
-export type AgentRuntimeRunInput =
-  | string
-  | ({
-      prompt: string | ModelMessage[];
-      messages?: never;
-    } & AgentRuntimeGenerateOptions)
-  | ({
-      messages: ModelMessage[];
-      prompt?: never;
-    } & AgentRuntimeGenerateOptions);
+export type AgentRuntimeRunInput = string | AgentRuntimeGenerateInput;
 
-/** AgentRuntime.run() 透传给 generateText 的通用选项。 */
-export interface AgentRuntimeGenerateOptions {
-  system?: string;
-  instructions?: string;
-  allowSystemInMessages?: boolean;
-  maxRetries?: number;
-  abortSignal?: AbortSignal;
-  headers?: Record<string, string | undefined>;
-  timeout?: number;
-}
+/** AgentRuntime.run() 允许调用方传入的 generateText 选项。 */
+export type AgentRuntimeGenerateInput = Omit<
+  Parameters<typeof generateText>[0],
+  'model' | 'tools' | 'prompt' | 'messages'
+> &
+  Prompt;
 
 /**
  * Agent 运行时, 管理 env -> ctx -> model 调用生命周期。
  *
- * 必须通过 enter() 进入后才能调用 run()。后续迁移 toolsets、streaming、
- * session 时继续在此类上扩展, 保持 Python 版 AgentRuntime 的入口形态。
+ * 必须通过 enter() 进入后才能调用 run()。后续扩展 toolsets、streaming、
+ * session 时继续在此类上扩展, 保持 AgentRuntime 的统一入口形态。
  */
 export class AgentRuntime {
   readonly modelName: string;
@@ -217,18 +204,18 @@ export class AgentRuntime {
     }
 
     const options = pickGenerateOptions(input);
-    if (input.messages !== undefined) {
+    if (options.messages !== undefined) {
       return generateText({
         ...base,
         ...options,
-        messages: input.messages,
+        messages: options.messages,
       });
     }
 
     return generateText({
       ...base,
       ...options,
-      prompt: input.prompt,
+      prompt: options.prompt,
     });
   }
 
@@ -255,27 +242,13 @@ export class AgentRuntime {
   }
 }
 
-function pickGenerateOptions(
-  input: AgentRuntimeRunInput,
-): AgentRuntimeGenerateOptions {
-  if (typeof input === 'string') {
-    return {};
-  }
-  return {
-    ...(input.system !== undefined ? { system: input.system } : {}),
-    ...(input.instructions !== undefined
-      ? { instructions: input.instructions }
-      : {}),
-    ...(input.allowSystemInMessages !== undefined
-      ? { allowSystemInMessages: input.allowSystemInMessages }
-      : {}),
-    ...(input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {}),
-    ...(input.abortSignal !== undefined
-      ? { abortSignal: input.abortSignal }
-      : {}),
-    ...(input.headers !== undefined ? { headers: input.headers } : {}),
-    ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
+function pickGenerateOptions(input: AgentRuntimeGenerateInput) {
+  const inputWithRuntimeFields = input as AgentRuntimeGenerateInput & {
+    model?: unknown;
+    tools?: unknown;
   };
+  const { model: _model, tools: _tools, ...options } = inputWithRuntimeFields;
+  return options;
 }
 
 /**

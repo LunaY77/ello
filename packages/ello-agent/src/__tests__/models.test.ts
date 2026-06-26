@@ -120,7 +120,7 @@ describe('createAgent', () => {
     await expect(runtime.run('hello')).rejects.toThrow('must be entered');
   });
 
-  it('accepts AI SDK generateText options object', async () => {
+  it('accepts AI SDK generateText messages object', async () => {
     const runtime = createAgent({ systemPrompt: 'You are concise.' });
 
     await runtime.enter();
@@ -138,6 +138,48 @@ describe('createAgent', () => {
         { role: 'user', content: 'hello' },
       ]);
       expect(result.options).not.toHaveProperty('prompt');
+    } finally {
+      await runtime.exit();
+    }
+  });
+
+  it('accepts AI SDK generateText prompt object', async () => {
+    const runtime = createAgent({ systemPrompt: 'You are concise.' });
+
+    await runtime.enter();
+    try {
+      const result = (await runtime.run({
+        prompt: 'hello',
+        maxRetries: 0,
+        temperature: 0.2,
+      })) as unknown as { options: Record<string, unknown> };
+
+      expect(result.options).toMatchObject({
+        system: 'You are concise.',
+        prompt: 'hello',
+        maxRetries: 0,
+        temperature: 0.2,
+      });
+      expect(result.options).not.toHaveProperty('messages');
+    } finally {
+      await runtime.exit();
+    }
+  });
+
+  it('keeps runtime-owned model and tools when options include them', async () => {
+    const runtime = createAgent({ tools: [RuntimeEchoTool] });
+    const externalModel = { provider: 'external', modelId: 'external' };
+
+    await runtime.enter();
+    try {
+      const result = (await runtime.run({
+        prompt: 'hello',
+        model: externalModel as never,
+        tools: {} as never,
+      })) as unknown as { options: Record<string, unknown> };
+
+      expect(result.options.model).not.toBe(externalModel);
+      expect(result.options.tools).toHaveProperty('runtime_echo');
     } finally {
       await runtime.exit();
     }
