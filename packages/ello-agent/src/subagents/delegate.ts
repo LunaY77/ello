@@ -51,12 +51,16 @@ export function createDelegateTool(
   }
 
   const registry: Record<string, SubagentEntry> = {};
-  for (const config of configs) {
-    registry[config.name] = {
-      config,
-      agent:
-        options.runners?.[config.name] ??
-        buildSubagentAgent(config, parentToolset, {
+  const registryReady = Promise.all(
+    configs.map(async (config) => {
+      const existing = options.runners?.[config.name];
+      if (existing !== undefined) {
+        registry[config.name] = { config, agent: existing };
+        return;
+      }
+      registry[config.name] = {
+        config,
+        agent: await buildSubagentAgent(config, parentToolset, {
           ...(options.model === undefined ? {} : { model: options.model }),
           ...(options.parentAgentName === undefined
             ? {}
@@ -65,8 +69,9 @@ export function createDelegateTool(
             ? {}
             : { subagentWrapper: options.subagentWrapper }),
         }),
-    };
-  }
+      };
+    }),
+  );
 
   const toolName = options.name ?? 'delegate';
   const toolDescription =
@@ -79,10 +84,11 @@ export function createDelegateTool(
     static override inputSchema = DelegateArgsSchema;
 
     override isAvailable(): boolean {
-      return Object.keys(registry).length > 0;
+      return configs.length > 0;
     }
 
     override async getInstruction(): Promise<Instruction | null> {
+      await registryReady;
       if (Object.keys(registry).length === 0) {
         return null;
       }
@@ -104,6 +110,7 @@ export function createDelegateTool(
       ctx: RunContextLike<AgentContext>,
       args: ToolArgs,
     ): Promise<string> {
+      await registryReady;
       const parsed = DelegateArgsSchema.parse(args);
       const entry = registry[parsed.subagentName];
       if (entry === undefined) {

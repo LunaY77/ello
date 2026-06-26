@@ -202,18 +202,21 @@ describe('load subagents', () => {
 });
 
 describe('buildSubagentAgent', () => {
-  it('builds child toolset excluding delegation tagged tools', () => {
+  it('builds child toolset excluding delegation tagged tools', async () => {
     const parent = new Toolset({ tools: [DummyTool, DelegationTaggedTool] });
-    const agent = buildSubagentAgent(makeConfig('worker'), parent);
+    const agent = await buildSubagentAgent(makeConfig('worker'), parent);
 
     expect(agent.name).toBe('worker');
     expect(agent.toolset.toolNames).toContain('dummy');
     expect(agent.toolset.toolNames).not.toContain('delegate_like');
   });
 
-  it('respects explicit tool subset', () => {
+  it('respects explicit tool subset', async () => {
     const parent = new Toolset({ tools: [DummyTool, DelegationTaggedTool] });
-    const agent = buildSubagentAgent(makeConfig('worker', ['dummy']), parent);
+    const agent = await buildSubagentAgent(
+      makeConfig('worker', ['dummy']),
+      parent,
+    );
 
     expect(agent.toolset.toolNames).toEqual(['dummy']);
   });
@@ -222,7 +225,7 @@ describe('buildSubagentAgent', () => {
     const parent = new Toolset({ tools: [DummyTool] });
     const wrapper: SubagentWrapper = vi.fn(async (model) => model);
 
-    buildSubagentAgent(makeConfig('worker'), parent, {
+    await buildSubagentAgent(makeConfig('worker'), parent, {
       parentAgentName: 'main',
       subagentWrapper: wrapper,
     });
@@ -236,6 +239,19 @@ describe('buildSubagentAgent', () => {
         description: 'Test subagent worker',
       }),
     );
+  });
+
+  it('supports async subagent wrapper results', async () => {
+    const parent = new Toolset({ tools: [DummyTool] });
+    const wrapper: SubagentWrapper = vi.fn(async (model) => model);
+
+    const agent = await buildSubagentAgent(makeConfig('worker'), parent, {
+      parentAgentName: 'main',
+      subagentWrapper: wrapper,
+    });
+
+    expect(agent.name).toBe('worker');
+    expect(wrapper).toHaveBeenCalled();
   });
 });
 

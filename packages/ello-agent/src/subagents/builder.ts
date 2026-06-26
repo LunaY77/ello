@@ -39,11 +39,11 @@ export interface BuildSubagentAgentOptions {
  * TS 版先提供一个可注入、可测试的 runner 抽象, 后续可替换为完整
  * AgentRuntime 驱动实现。
  */
-export function buildSubagentAgent(
+export async function buildSubagentAgent(
   config: SubagentConfig,
   parentToolset: Toolset,
   options: BuildSubagentAgentOptions = {},
-): SubagentRunner {
+): Promise<SubagentRunner> {
   const effectiveModel = resolveSubagentModel(config, options.model ?? null);
   const selection = resolveModel({ modelName: effectiveModel });
   const childToolset = parentToolset.subset({
@@ -51,7 +51,7 @@ export function buildSubagentAgent(
     excludeTags: new Set(['delegation']),
   });
   const wrappedModel = options.subagentWrapper
-    ? options.subagentWrapper(
+    ? await options.subagentWrapper(
         selection.model,
         options.parentAgentName ?? 'main',
         config.name,
