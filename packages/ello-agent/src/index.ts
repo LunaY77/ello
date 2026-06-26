@@ -18,6 +18,27 @@ export {
   type ToolConfigData,
 } from './config.js';
 export {
+  SUMMARIZATION_PROMPT,
+  UPDATE_SUMMARIZATION_PROMPT,
+  buildCompactedMessages,
+  createCompactFilter,
+  createTrimOptions,
+  estimateMessagesTokens,
+  estimateTokens,
+  extractFileOperations,
+  extractPreviousSummary,
+  findCutPoint,
+  generateSummary,
+  getLatestTotalTokens,
+  needCompact,
+  trimHistory,
+  type CompactRunContext,
+  type CutPointResult,
+  type SummaryAgent,
+  type TrimOptions,
+  type TrimResult,
+} from './compression/index.js';
+export {
   AgentContext,
   generateRunId,
   type AgentContextOptions,
