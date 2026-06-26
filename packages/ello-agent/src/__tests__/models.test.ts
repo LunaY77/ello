@@ -602,8 +602,47 @@ describe('createAgent', () => {
       await runtime.run('hello');
 
       const entries = await session.getEntries();
+      expect(entries.some((entry) => entry.type === 'model_change')).toBe(true);
       expect(entries.some((entry) => entry.type === 'message')).toBe(true);
       expect(entries.at(-1)?.type).toBe('message');
+    } finally {
+      await runtime.exit();
+    }
+  });
+
+  it('records compaction entries when compacting session-backed runs', async () => {
+    const session = new InMemorySessionStorage({
+      entries: [
+        createMessageEntry({
+          message: { role: 'user', content: 'session hello' },
+        }),
+      ],
+    });
+    const runtime = createAgent({
+      session,
+      compact: true,
+      modelConfig: { contextWindow: 1_000, compactThreshold: 0.9 },
+      systemPrompt: 'You are concise.',
+    });
+
+    await runtime.enter();
+    try {
+      await runtime.run({
+        messages: Array.from({ length: 20 }, (_, index) => [
+          { role: 'user', content: `question ${index} `.repeat(50) },
+          { role: 'assistant', content: `answer ${index} `.repeat(50) },
+        ])
+          .flatMap((pair) => pair)
+          .concat({
+            role: 'assistant',
+            content: 'latest answer',
+            usage: { totalTokens: 950 },
+          } as never),
+      });
+
+      const entries = await session.getEntries();
+      expect(entries.some((entry) => entry.type === 'compaction')).toBe(true);
+      expect(entries.some((entry) => entry.type === 'model_change')).toBe(true);
     } finally {
       await runtime.exit();
     }

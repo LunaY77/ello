@@ -22,7 +22,9 @@ import { type ModelWrapper, resolveModel } from './models.js';
 import { resolveModelSettings, type ModelSettings } from './presets.js';
 import { MessageQueue } from './queue.js';
 import {
+  createCompactionEntry,
   createMessageEntry,
+  createModelChangeEntry,
   type SessionEntry,
   type SessionStorage,
 } from './session/index.js';
@@ -310,6 +312,7 @@ export class AgentRuntime {
       ...(this.modelSettings !== null ? this.modelSettings : {}),
       ...(this.systemPrompt !== null ? { system: this.systemPrompt } : {}),
     };
+    await this.persistModelChange();
     const steps: Array<StepResult<ToolSet, Record<string, unknown>>> = [];
     const onStepEnd = (step: StepResult<ToolSet, Record<string, unknown>>) => {
       steps.push(step);
@@ -350,6 +353,7 @@ export class AgentRuntime {
       this.compact,
       this.summaryModel ?? this.model,
     );
+    await this.persistCompactionIfNeeded(initialMessages, compactedMessages);
     const resolvedDeferredResults = await this.resolveDeferredToolResults(
       compactedMessages,
       input.deferredToolResults,
@@ -555,6 +559,42 @@ export class AgentRuntime {
         }),
       );
     }
+  }
+
+  private async persistModelChange(): Promise<void> {
+    if (this.session === null || this.ctx === null) {
+      return;
+    }
+
+    await this.session.appendEntry(
+      createModelChangeEntry({
+        modelName: this.modelName,
+      }),
+    );
+  }
+
+  private async persistCompactionIfNeeded(
+    before: ModelMessage[],
+    after: ModelMessage[],
+  ): Promise<void> {
+    if (this.session === null || this.ctx === null) {
+      return;
+    }
+    if (after.length >= before.length) {
+      return;
+    }
+
+    await this.session.appendEntry(
+      createCompactionEntry({
+        summary: 'Context was compacted',
+        firstKeptEntryId: '',
+        tokensBefore: before.length,
+        details: {
+          originalMessageCount: before.length,
+          compactedMessageCount: after.length,
+        },
+      }),
+    );
   }
 
   private async withEnterLock<T>(fn: () => Promise<T>): Promise<T> {
