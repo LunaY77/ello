@@ -15,6 +15,7 @@ import {
   loadSubagentFromFile,
   loadSubagentsFromDir,
   parseSubagentMarkdown,
+  type SubagentWrapper,
   type SubagentConfig,
   type SubagentRunResult,
   type SubagentRunner,
@@ -215,6 +216,26 @@ describe('buildSubagentAgent', () => {
     const agent = buildSubagentAgent(makeConfig('worker', ['dummy']), parent);
 
     expect(agent.toolset.toolNames).toEqual(['dummy']);
+  });
+
+  it('applies subagent wrapper when provided', async () => {
+    const parent = new Toolset({ tools: [DummyTool] });
+    const wrapper: SubagentWrapper = vi.fn(async (model) => model);
+
+    buildSubagentAgent(makeConfig('worker'), parent, {
+      parentAgentName: 'main',
+      subagentWrapper: wrapper,
+    });
+
+    expect(wrapper).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      'worker',
+      expect.objectContaining({
+        modelName: 'test',
+        description: 'Test subagent worker',
+      }),
+    );
   });
 });
 

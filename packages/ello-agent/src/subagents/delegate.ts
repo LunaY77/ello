@@ -56,11 +56,15 @@ export function createDelegateTool(
       config,
       agent:
         options.runners?.[config.name] ??
-        buildSubagentAgent(
-          config,
-          parentToolset,
-          options.model === undefined ? {} : { model: options.model },
-        ),
+        buildSubagentAgent(config, parentToolset, {
+          ...(options.model === undefined ? {} : { model: options.model }),
+          ...(options.parentAgentName === undefined
+            ? {}
+            : { parentAgentName: options.parentAgentName }),
+          ...(options.subagentWrapper === undefined
+            ? {}
+            : { subagentWrapper: options.subagentWrapper }),
+        }),
     };
   }
 

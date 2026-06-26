@@ -3,6 +3,7 @@ import type { ModelMessage } from 'ai';
 import type { AgentContext } from '../context.js';
 import { resolveModel } from '../models.js';
 import { Toolset } from '../toolsets/index.js';
+import type { SubagentWrapper } from '../wrappers.js';
 
 import type { SubagentConfig } from './config.js';
 
@@ -28,6 +29,8 @@ export interface SubagentRunner {
 /** buildSubagentAgent 的构造参数。 */
 export interface BuildSubagentAgentOptions {
   model?: string | null;
+  parentAgentName?: string | null;
+  subagentWrapper?: SubagentWrapper | null;
 }
 
 /**
@@ -42,12 +45,23 @@ export function buildSubagentAgent(
   options: BuildSubagentAgentOptions = {},
 ): SubagentRunner {
   const effectiveModel = resolveSubagentModel(config, options.model ?? null);
-  resolveModel({ modelName: effectiveModel });
+  const selection = resolveModel({ modelName: effectiveModel });
   const childToolset = parentToolset.subset({
     toolNames: config.tools,
     excludeTags: new Set(['delegation']),
   });
-  return new StaticSubagentRunner(config, childToolset);
+  const wrappedModel = options.subagentWrapper
+    ? options.subagentWrapper(
+        selection.model,
+        options.parentAgentName ?? 'main',
+        config.name,
+        {
+          modelName: selection.modelName,
+          description: config.description,
+        },
+      )
+    : selection.model;
+  return new StaticSubagentRunner(config, childToolset, wrappedModel);
 }
 
 /** 解析 subagent 使用的 model。 */
@@ -67,6 +81,7 @@ class StaticSubagentRunner implements SubagentRunner {
   constructor(
     readonly config: SubagentConfig,
     readonly toolset: Toolset,
+    readonly model: unknown = null,
   ) {
     this.name = config.name;
   }
