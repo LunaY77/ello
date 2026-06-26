@@ -127,6 +127,7 @@ async function runStream(
         runId: runtime.ctx.runId,
         timestamp: new Date(),
         success: true,
+        totalTokens: extractTotalTokens(result),
       };
       runtime.ctx.emitEvent(completeEvent);
     }
@@ -154,6 +155,18 @@ function extractText(result: Awaited<ReturnType<AgentRuntime['run']>>): string {
     return String((result as { text?: unknown }).text ?? '');
   }
   return String(result ?? '');
+}
+
+function extractTotalTokens(
+  result: Awaited<ReturnType<AgentRuntime['run']>>,
+): number | null {
+  if (typeof result !== 'object' || result === null) {
+    return null;
+  }
+
+  const usage = (result as { usage?: { totalTokens?: unknown } }).usage;
+  const total = usage?.totalTokens;
+  return typeof total === 'number' ? total : null;
 }
 
 function buildMessages(

@@ -294,6 +294,18 @@ describe('streamAgent', () => {
     ]);
   });
 
+  it('includes total tokens when available on success', async () => {
+    const runtime = new FakeRuntime('done');
+    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'input');
+
+    await collectEvents(streamer);
+
+    expect(runtime.lastEvents()).toMatchObject([
+      { promptPreview: 'input' },
+      { success: true, totalTokens: 42 },
+    ]);
+  });
+
   it('propagates run errors and still exits auto-entered runtime', async () => {
     const runtime = new FakeRuntime('unused', new Error('model failed'));
     const streamer = streamAgent(runtime as unknown as AgentRuntime, 'input');
@@ -408,7 +420,7 @@ class FakeRuntime {
     if (nextError !== null) {
       throw nextError;
     }
-    return { text: this.text };
+    return { text: this.text, usage: { totalTokens: 42 } };
   }
 
   lastEvents(): unknown[] {
