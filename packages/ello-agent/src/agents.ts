@@ -27,6 +27,45 @@ import {
   type ToolsetTool,
 } from './toolsets/index.js';
 
+const DEFAULT_SYSTEM_PROMPT = `# System
+
+You are ello, a helpful AI assistant.
+
+You have access to tools that let you interact with the user's environment. Use them proactively when relevant to the task.
+
+{% if instructions %}
+## Additional Instructions
+
+{{ instructions }}
+{% endif %}
+
+## Principles
+
+- Be concise and direct. Avoid unnecessary preambles or repetition.
+- When asked to perform a task, do it rather than explaining how to do it.
+- If a tool call fails, analyze the error and retry with a corrected approach before asking the user for help.
+- Prefer showing results (file contents, command output) over describing what you found.
+- When multiple steps are needed, proceed through them without asking for confirmation at each step unless the action is destructive or ambiguous.
+
+## Tool Usage
+
+- Use tools to gather information before answering questions about the environment (files, directories, running processes).
+- When reading files, check the output before summarizing - don't assume content.
+- When executing commands, use appropriate timeouts and handle errors gracefully.
+- For file modifications, read the current content first to understand context.
+
+## Communication
+
+- Match the user's language. If they write in Chinese, respond in Chinese. If in English, respond in English.
+- Keep responses focused on the task. Don't add unsolicited advice or warnings unless there's a genuine risk.
+- When reporting results, lead with the outcome, then provide details if needed.
+
+## Context Management
+
+- You are operating within a managed context window. If you notice the conversation is getting long and complex, focus on the most recent task rather than re-explaining earlier context.
+- Runtime context (time, run ID, model configuration) is injected automatically - use it when relevant but don't echo it back to the user.
+`;
+
 /** AgentRuntime 可接收的工具集结构。 */
 export interface RuntimeToolset {
   readonly hasApprovalTools?: boolean;
@@ -674,6 +713,42 @@ function normalizeToolInput(input: unknown): ToolArgs {
   return {};
 }
 
+function renderSystemPrompt(options: {
+  template: string | null;
+  templateVars: Record<string, unknown> | null;
+}): string {
+  const template = options.template ?? DEFAULT_SYSTEM_PROMPT;
+  if (template.trim().length === 0) {
+    return '';
+  }
+  return renderTemplate(template, options.templateVars ?? {});
+}
+
+function renderTemplate(
+  template: string,
+  vars: Record<string, unknown>,
+): string {
+  return template
+    .replace(
+      /\{%\s*if\s+instructions\s*%\}([\s\S]*?)\{%\s*endif\s*%\}/g,
+      (_match, block: string) =>
+        hasNonEmptyValue(vars.instructions)
+          ? block.replace(
+              /\{\{\s*instructions\s*\}\}/g,
+              String(vars.instructions),
+            )
+          : '',
+    )
+    .replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => {
+      const value = vars[key];
+      return value === undefined || value === null ? '' : String(value);
+    });
+}
+
+function hasNonEmptyValue(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 /**
  * 创建 ello agent runtime。
  *
@@ -722,7 +797,10 @@ export function createAgent(options: CreateAgentOptions = {}): AgentRuntime {
   return new AgentRuntime({
     modelName: selection.modelName,
     baseUrl: selection.baseUrl,
-    systemPrompt: options.systemPrompt ?? null,
+    systemPrompt: renderSystemPrompt({
+      template: options.systemPrompt ?? null,
+      templateVars: options.systemPromptTemplateVars ?? null,
+    }),
     model: effectiveModel,
     env: options.env ?? new LocalEnvironment(),
     modelConfig: options.modelConfig ?? new ModelConfig(),

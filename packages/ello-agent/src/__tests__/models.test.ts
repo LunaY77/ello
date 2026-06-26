@@ -128,6 +128,7 @@ describe('createAgent', () => {
     expect(runtime.modelName).toBe('openai-chat:gpt-4o-mini');
     expect(runtime.baseUrl).toBeNull();
     expect(runtime.env.constructor.name).toBe('LocalEnvironment');
+    expect(runtime.systemPrompt).toContain('You are ello');
   });
 
   it('preserves explicit model base url and system prompt', () => {
@@ -140,6 +141,30 @@ describe('createAgent', () => {
     expect(runtime.modelName).toBe('openai-chat:gpt-4.1-mini');
     expect(runtime.baseUrl).toBe('https://gateway.example.com/v1');
     expect(runtime.systemPrompt).toBe('You are concise.');
+  });
+
+  it('renders system prompt template variables', () => {
+    const runtime = createAgent({
+      systemPrompt: 'Hello {{ name }}. {{ missing }}',
+      systemPromptTemplateVars: { name: 'ello' },
+    });
+
+    expect(runtime.systemPrompt).toBe('Hello ello. ');
+  });
+
+  it('renders default additional instructions block', () => {
+    const runtime = createAgent({
+      systemPromptTemplateVars: { instructions: 'Always inspect files first.' },
+    });
+
+    expect(runtime.systemPrompt).toContain('## Additional Instructions');
+    expect(runtime.systemPrompt).toContain('Always inspect files first.');
+  });
+
+  it('keeps blank system prompt blank', () => {
+    const runtime = createAgent({ systemPrompt: '  ' });
+
+    expect(runtime.systemPrompt).toBe('');
   });
 
   it('requires enter before run', async () => {
