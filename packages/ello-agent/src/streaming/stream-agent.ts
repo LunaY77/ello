@@ -9,6 +9,9 @@ import { AgentStreamer } from './streamer.js';
 export interface StreamAgentOptions {
   agentId?: string;
   agentName?: string;
+  resumeOnError?: boolean;
+  resumeMaxAttempts?: number;
+  resumePrompt?: string | null;
 }
 
 /** 流式执行 agent。 */
@@ -32,6 +35,10 @@ async function runStream(
   const autoEnter = !runtime.entered;
   const agentId = options.agentId ?? 'main';
   const agentName = options.agentName ?? 'main';
+  const resumeOnError = options.resumeOnError ?? false;
+  const resumeMaxAttempts = options.resumeMaxAttempts ?? 2;
+  const defaultResumePrompt =
+    'The previous execution was interrupted. Continue from where you left off.';
 
   if (autoEnter) {
     await runtime.enter();
@@ -48,9 +55,38 @@ async function runStream(
   }
 
   try {
-    const result = await runtime.run(input);
+    let currentInput = input;
+    let attempts = 0;
+    let result: Awaited<ReturnType<AgentRuntime['run']>>;
+
+    while (true) {
+      try {
+        streamer.run = {
+          result: null,
+          allMessages: () => buildInputMessages(currentInput),
+        };
+        result = await runtime.run(currentInput);
+        break;
+      } catch (error) {
+        attempts += 1;
+        if (!resumeOnError || attempts >= resumeMaxAttempts) {
+          throw error;
+        }
+
+        const recovered = streamer.recoverableMessages();
+        if (recovered === null) {
+          throw error;
+        }
+
+        currentInput = {
+          prompt: options.resumePrompt ?? defaultResumePrompt,
+          messageHistory: recovered,
+        };
+      }
+    }
+
     const text = extractText(result);
-    const messages = buildMessages(input, text);
+    const messages = buildMessages(currentInput, text);
     streamer.run = {
       result: { output: text },
       allMessages: () => messages,
@@ -124,17 +160,28 @@ function buildMessages(
   input: AgentRuntimeRunInput,
   text: string,
 ): ModelMessage[] {
+  return [...buildInputMessages(input), { role: 'assistant', content: text }];
+}
+
+function buildInputMessages(input: AgentRuntimeRunInput): ModelMessage[] {
   const messages: ModelMessage[] = [];
   if (typeof input === 'string') {
     messages.push({ role: 'user', content: input });
-  } else if ('messages' in input && input.messages !== undefined) {
+    return messages;
+  }
+
+  messages.push(...(input.messageHistory ?? []));
+  if ('messages' in input && input.messages !== undefined) {
     messages.push(...input.messages);
-  } else if ('prompt' in input && typeof input.prompt === 'string') {
+    return messages;
+  }
+
+  if ('prompt' in input && typeof input.prompt === 'string') {
     messages.push({ role: 'user', content: input.prompt });
   } else if ('prompt' in input && Array.isArray(input.prompt)) {
     messages.push(...input.prompt);
   }
-  messages.push({ role: 'assistant', content: text });
+
   return messages;
 }
 

@@ -305,6 +305,29 @@ describe('streamAgent', () => {
       { success: false, error: 'model failed' },
     ]);
   });
+
+  it('retries with recoverable messages when resume_on_error is enabled', async () => {
+    const runtime = new FakeRuntime('recovered', [new Error('first fail')]);
+    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'input', {
+      resumeOnError: true,
+      resumePrompt: 'resume please',
+    });
+
+    const events = await collectEvents(streamer);
+
+    expect(runtime.runCalls).toBe(2);
+    expect(events.map((item) => item.event.eventKind)).toEqual([
+      'part_start',
+      'part_delta',
+      'part_end',
+    ]);
+    expect(streamer.run?.allMessages()).toEqual([
+      { role: 'user', content: 'input' },
+      { role: 'user', content: 'resume please' },
+      { role: 'assistant', content: 'recovered' },
+    ]);
+    expect(runtime.lastPrompts()).toEqual(['input', 'resume please']);
+  });
 });
 
 function textEvent(text: string): StreamEvent {
@@ -332,12 +355,22 @@ class FakeRuntime {
   ctx: AgentContext | null = null;
   enterCalls = 0;
   exitCalls = 0;
+  runCalls = 0;
   private readonly contexts: AgentContext[] = [];
+  private readonly errors: Array<Error | null>;
 
   constructor(
     private readonly text: string,
-    private readonly error: Error | null = null,
-  ) {}
+    error: Error | Array<Error | null> | null = null,
+  ) {
+    this.errors = Array.isArray(error)
+      ? [...error]
+      : error === null
+        ? []
+        : [error];
+  }
+
+  private readonly prompts: Array<string | null> = [];
 
   get entered(): boolean {
     return this.ctx !== null;
@@ -358,18 +391,31 @@ class FakeRuntime {
   }
 
   async run(_input: AgentRuntimeRunInput): Promise<{ text: string }> {
+    this.runCalls += 1;
     if (this.ctx === null) {
       throw new Error('runtime is not entered');
     }
+    this.prompts.push(
+      typeof _input === 'string'
+        ? _input
+        : 'prompt' in _input && typeof _input.prompt === 'string'
+          ? _input.prompt
+          : null,
+    );
     this.ctx = this.ctx.prepareNewRun();
     this.contexts.push(this.ctx);
-    if (this.error !== null) {
-      throw this.error;
+    const nextError = this.errors.shift() ?? null;
+    if (nextError !== null) {
+      throw nextError;
     }
     return { text: this.text };
   }
 
   lastEvents(): unknown[] {
     return this.contexts.flatMap((ctx) => ctx.events);
+  }
+
+  lastPrompts(): Array<string | null> {
+    return [...this.prompts];
   }
 }
