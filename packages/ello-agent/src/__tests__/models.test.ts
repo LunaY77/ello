@@ -92,6 +92,15 @@ describe('model parsing', () => {
     expect(selection.baseUrl).toBe('https://anthropic.example.com');
   });
 
+  it('rejects unsupported provider base url overrides', () => {
+    expect(() =>
+      resolveModel({
+        modelName: 'google:gemini-2.5-flash',
+        baseUrl: 'https://gateway.example.com/v1',
+      }),
+    ).toThrow('base_url is not supported');
+  });
+
   it('reads gateway credentials', () => {
     vi.stubEnv('MYGATEWAY_API_KEY', 'test-key');
     vi.stubEnv('MYGATEWAY_BASE_URL', 'https://gateway.example.com/v1');

@@ -14,6 +14,8 @@ export const DEFAULT_MODEL_NAME = 'openai-chat:gpt-4o-mini';
 
 const AMBIGUOUS_OPENAI_PROVIDER_ERROR =
   "Model provider 'openai:' is ambiguous. Use 'openai-chat:<model>' for Chat Completions or 'openai-responses:<model>' for the Responses API.";
+const BASE_URL_UNSUPPORTED_PROVIDER_ERROR =
+  'base_url is not supported for this model provider. Use openai-chat, openai-responses, or anthropic.';
 const GATEWAY_PREFIX = 'gateway@';
 
 /**
@@ -140,6 +142,30 @@ function createLanguageModel(
 }
 
 /**
+ * 校验直接传入 baseUrl 时的 provider 范围。
+ *
+ * Python 版只允许支持显式 provider client 配置的模型使用 base_url,
+ * 避免调用方误以为任意 provider 都能被 base_url 覆盖。
+ */
+function assertBaseUrlSupported(
+  providerName: string | null,
+  baseUrl?: string | null,
+): void {
+  if (!baseUrl?.trim()) {
+    return;
+  }
+  if (
+    providerName === null ||
+    providerName === 'openai-chat' ||
+    providerName === 'openai-responses' ||
+    providerName === 'anthropic'
+  ) {
+    return;
+  }
+  throw new Error(BASE_URL_UNSUPPORTED_PROVIDER_ERROR);
+}
+
+/**
  * 构造 provider options, 避免在 exactOptionalPropertyTypes 下传入 undefined。
  */
 function providerOptions(options: {
@@ -197,6 +223,7 @@ export function resolveModel(
 
   const normalized = normalizeModelName(rawName);
   const [providerName, modelId] = splitProviderAndModel(normalized);
+  assertBaseUrlSupported(providerName, options.baseUrl);
   const effectiveBaseUrl = resolveAnthropicBaseUrl(normalized, options.baseUrl);
   return {
     modelName: normalized,
