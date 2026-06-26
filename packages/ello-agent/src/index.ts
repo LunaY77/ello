@@ -44,6 +44,42 @@ export {
   type ModelWrapper,
 } from "./models.js";
 export {
+  GlobalHooks,
+  ToolHooks,
+  type GlobalPostHookFunc,
+  type GlobalPreHookFunc,
+  type PostHookFunc,
+  type PreHookFunc,
+  type RunContextLike,
+} from "./hooks.js";
+export {
+  ANTHROPIC_1M_BETA,
+  ANTHROPIC_CONTEXT_MANAGEMENT_BETA,
+  K_TOKENS,
+  ModelSettingsPreset,
+  buildAnthropicBetas,
+  buildContextManagement,
+  getModelSettings,
+  listPresets,
+  resolveModelSettings,
+  withContextManagement,
+  type ModelSettings,
+} from "./presets.js";
+export {
+  InMemorySessionStorage,
+  createCompactionEntry,
+  createMessageEntry,
+  createMetadataEntry,
+  createModelChangeEntry,
+  generateEntryId,
+  type CompactionEntry,
+  type MessageEntry,
+  type MetadataEntry,
+  type ModelChangeEntry,
+  type SessionEntry,
+  type SessionStorage,
+} from "./session/index.js";
+export {
   UsageSnapshot,
   addUsage,
   createEmptyUsage,
@@ -51,3 +87,9 @@ export {
   type UsageAgentTotal,
   type UsageSnapshotEntry,
 } from "./usage.js";
+export {
+  applyModelWrapper,
+  applySubagentWrapper,
+  type AsyncModelWrapper,
+  type SubagentWrapper,
+} from "./wrappers.js";
