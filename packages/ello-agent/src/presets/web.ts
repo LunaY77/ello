@@ -1,15 +1,15 @@
 import { z } from 'zod';
 
 import { defineTool } from '../public/tool.js';
-import type { AgentTool } from '../public/types.js';
+import type { AnyAgentTool } from '../public/types.js';
 
 /**
  * 创建网络工具。
  *
  * Returns:
- *   包含 web_fetch 的 AgentTool[]。网络工具默认要求审批。
+ *   包含 web_fetch 的 AnyAgentTool[]。网络工具默认要求审批。
  */
-export function createWebTools(): AgentTool<any, unknown>[] {
+export function createWebTools(): AnyAgentTool[] {
   return [
     defineTool({
       name: 'web_fetch',

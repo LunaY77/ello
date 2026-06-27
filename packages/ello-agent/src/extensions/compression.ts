@@ -1,3 +1,4 @@
+import { trimHistoryReducer } from '../core/reducers.js';
 import type { AgentExtension, AgentMessage } from '../public/types.js';
 
 export interface CreateCompressionExtensionOptions {
@@ -20,8 +21,10 @@ export function createCompressionExtension(
   options: CreateCompressionExtensionOptions = {},
 ): AgentExtension {
   const maxMessages = options.maxMessages ?? 40;
+  const reducer = trimHistoryReducer({ maxMessages });
   return {
     name: 'compression',
+    reducer,
     transformMessages(messages: AgentMessage[]) {
       if (messages.length <= maxMessages) {
         return messages;

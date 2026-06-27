@@ -1,6 +1,7 @@
 import type {
   ModelMessage as AiModelMessage,
   LanguageModel,
+  ToolChoice,
   ToolSet,
 } from 'ai';
 import type { z } from 'zod';
@@ -83,6 +84,9 @@ export interface AgentRunOptions {
   readonly signal?: AbortSignal;
   readonly metadata?: Record<string, unknown>;
   readonly messages?: AgentMessage[];
+  readonly sessionId?: string;
+  readonly context?: unknown;
+  readonly resume?: DeferredRunResults;
 }
 
 /**
@@ -205,11 +209,14 @@ export interface AgentToolCall {
  */
 export interface AgentRunResult {
   readonly id: string;
+  readonly text?: string;
   readonly output: string;
   readonly messages: AgentMessage[];
   readonly usage: AgentUsage;
   readonly finishReason: AgentFinishReason;
   readonly toolCalls: AgentToolCall[];
+  readonly pending?: DeferredRunItem[];
+  readonly diagnostics?: AgentRunDiagnostics;
   readonly metadata: Record<string, unknown>;
 }
 
@@ -219,8 +226,12 @@ export interface AgentRunResult {
 export interface AgentModelRequest {
   readonly runId: string;
   readonly model: AgentModel;
+  readonly system?: string;
   readonly messages: AgentMessage[];
   readonly tools: ToolSet;
+  readonly activeTools?: string[];
+  readonly toolChoice?: AgentToolChoice;
+  readonly providerOptions?: Record<string, unknown>;
   readonly modelSettings: Record<string, unknown>;
   readonly signal?: AbortSignal;
 }
@@ -313,12 +324,12 @@ export interface AgentTool<TInput = unknown, TOutput = unknown> {
   readonly name: string;
   readonly description: string;
   readonly input: z.ZodType<TInput>;
-  readonly execute: (
-    input: TInput,
-    ctx: AgentToolContext,
-  ) => MaybePromise<TOutput>;
-  readonly approval?: AgentApprovalPolicy<TInput>;
+  execute(input: TInput, ctx: AgentToolContext): MaybePromise<TOutput>;
+  approval?(input: TInput, ctx: AgentToolContext): MaybePromise<AgentApprovalDecision>;
+  readonly inherit?: boolean;
 }
+
+export type AnyAgentTool = AgentTool<unknown, unknown>;
 
 /** 工具执行上下文。 */
 export interface AgentToolContext {
@@ -333,16 +344,324 @@ export interface AgentSetupContext {
 }
 
 /** 单次运行扩展上下文。 */
-export interface AgentRunContext {
+export interface AgentRunContext<TContext = unknown> {
   readonly runId: string;
+  readonly agentName: string;
+  readonly sessionId?: string;
   readonly input: AgentInput;
+  readonly context: TContext;
   readonly options: AgentRunOptions;
   readonly environment: AgentEnvironment;
   readonly metadata: Record<string, unknown>;
+  readonly signal?: AbortSignal;
+  readonly state: AgentRunState;
+  readonly trace: AgentTrace;
 }
 
 /** 扩展与工具共享的运行上下文别名。 */
 export type AgentContext = AgentRunContext;
+
+export interface AgentRunState {
+  readonly messages: AgentMessage[];
+  readonly budget: ContextBudget;
+  readonly turn: number;
+  readonly queueDiagnostics: QueueDrainDiagnostic[];
+}
+
+export interface AgentTrace {
+  readonly events: AgentStreamEvent[];
+  readonly metadata: Record<string, unknown>;
+}
+
+export type AgentToolSet = ToolSet;
+export type AgentToolChoice = ToolChoice<ToolSet>;
+
+export type ContextBundle =
+  | SystemContextBundle
+  | MessageContextBundle
+  | MemoryContextBundle
+  | ToolContextBundle
+  | MetadataContextBundle;
+
+export interface BaseContextBundle {
+  readonly id?: string;
+  readonly source: string;
+  readonly priority: number;
+  readonly scope: 'run' | 'session' | 'user' | 'workspace';
+  readonly retention: 'fixed' | 'compressible' | 'droppable';
+  readonly persist: 'never' | 'session' | 'memory';
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface SystemContextBundle extends BaseContextBundle {
+  readonly kind: 'system';
+  readonly text: string;
+}
+
+export interface MessageContextBundle extends BaseContextBundle {
+  readonly kind: 'message';
+  readonly message: AgentMessage;
+}
+
+export interface MemoryContextBundle extends BaseContextBundle {
+  readonly kind: 'memory';
+  readonly text: string;
+  readonly memoryType: 'working' | 'episodic' | 'semantic';
+}
+
+export interface ToolContextBundle extends BaseContextBundle {
+  readonly kind: 'tool-context';
+  readonly activeTools?: string[];
+  readonly toolInstructions?: string;
+}
+
+export interface MetadataContextBundle extends BaseContextBundle {
+  readonly kind: 'metadata';
+  readonly data: Record<string, unknown>;
+}
+
+export interface ContextSource<TContext = unknown> {
+  readonly name: string;
+  load(ctx: AgentRunContext<TContext>): MaybePromise<ContextBundle[]>;
+}
+
+export interface ContextReducer<TContext = unknown> {
+  readonly name: string;
+  reduce(
+    input: ContextReductionInput<TContext>,
+  ): MaybePromise<ContextReductionOutput>;
+}
+
+export interface ContextReductionInput<TContext = unknown> {
+  readonly bundles: ContextBundle[];
+  readonly ctx: AgentRunContext<TContext>;
+  readonly budget: ContextBudget;
+}
+
+export interface ContextReductionOutput {
+  readonly bundles: ContextBundle[];
+  readonly report: ContextReductionReport;
+}
+
+export interface ContextBudget {
+  readonly maxInputTokens?: number;
+  readonly reservedOutputTokens?: number;
+  readonly lanes?: {
+    readonly system?: number;
+    readonly memory?: number;
+    readonly history?: number;
+    readonly retrieval?: number;
+    readonly input?: number;
+  };
+}
+
+export interface ContextReductionReport {
+  readonly reducer: string;
+  readonly beforeBundleCount: number;
+  readonly afterBundleCount: number;
+  readonly beforeTokenEstimate?: number;
+  readonly afterTokenEstimate?: number;
+  readonly summaryCount?: number;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface ModelCallPlanner<TContext = unknown> {
+  plan(ctx: AgentRunContext<TContext>): MaybePromise<ModelCallPlan>;
+}
+
+export interface ModelCallPlan {
+  readonly system?: string;
+  readonly messages: AgentMessage[];
+  readonly tools?: AgentToolSet;
+  readonly activeTools?: string[];
+  readonly toolChoice?: AgentToolChoice;
+  readonly providerOptions?: Record<string, unknown>;
+  readonly diagnostics: ContextDiagnostics;
+}
+
+export interface ContextDiagnostics {
+  readonly bundles: Array<{
+    readonly source: string;
+    readonly kind: ContextBundle['kind'];
+    readonly priority: number;
+    readonly scope: ContextBundle['scope'];
+    readonly retention: ContextBundle['retention'];
+    readonly persist: ContextBundle['persist'];
+    readonly tokenEstimate?: number;
+  }>;
+  readonly reducerReports: ContextReductionReport[];
+  readonly summaryCount: number;
+  readonly beforeMessageCount: number;
+  readonly afterMessageCount: number;
+  readonly beforeTokenEstimate?: number;
+  readonly afterTokenEstimate?: number;
+}
+
+export interface SessionStore {
+  load(sessionId: string): Promise<AgentMessage[]>;
+  append(
+    sessionId: string,
+    messages: AgentMessage[],
+    metadata?: Record<string, unknown>,
+  ): Promise<void>;
+  replace?(
+    sessionId: string,
+    messages: AgentMessage[],
+    metadata?: Record<string, unknown>,
+  ): Promise<void>;
+}
+
+export interface AgentMemory<TContext = unknown> {
+  retrieve(ctx: AgentRunContext<TContext>): MaybePromise<ContextBundle[]>;
+  observe?(
+    event: MemoryObserveEvent,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  compact?(ctx: AgentRunContext<TContext>): MaybePromise<MemoryCompactResult>;
+}
+
+export interface MemoryObserveEvent {
+  readonly type: 'run.completed' | 'run.failed';
+  readonly result?: AgentRunResult;
+  readonly error?: AgentError;
+  readonly diagnostics?: AgentRunDiagnostics;
+}
+
+export interface MemoryCompactResult {
+  readonly changed: boolean;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface AgentObserver<TContext = unknown> {
+  onContextLoaded?(
+    event: ContextLoadedEvent,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  onContextReduced?(
+    event: ContextReducedEvent,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  onModelCallPlanned?(
+    plan: ModelCallPlan,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+}
+
+export interface ContextLoadedEvent {
+  readonly bundles: ContextBundle[];
+}
+
+export interface ContextReducedEvent {
+  readonly before: ContextBundle[];
+  readonly after: ContextBundle[];
+  readonly report: ContextReductionReport;
+}
+
+export interface SessionCompactor<TContext = unknown> {
+  readonly name: string;
+  maybeCompact(
+    sessionId: string,
+    store: SessionStore,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<SessionCompactionReport | null>;
+}
+
+export interface SessionCompactionReport {
+  readonly compactor: string;
+  readonly beforeMessageCount: number;
+  readonly afterMessageCount: number;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export type AgentMessageQueueMode = 'all' | 'one-at-a-time';
+
+export interface AgentMessageQueue<T = AgentMessage> {
+  readonly mode: AgentMessageQueueMode;
+  readonly size: number;
+  readonly hasItems: boolean;
+  push(item: T): void;
+  drain(): T[];
+  clear(): void;
+}
+
+export type AgentRunControlStatus =
+  | 'running'
+  | 'waiting_approval'
+  | 'interrupted'
+  | 'completed'
+  | 'failed';
+
+export type DeferredRunItem =
+  | DeferredApprovalItem
+  | DeferredToolCallItem
+  | InterruptedRunItem;
+
+export interface DeferredApprovalItem {
+  readonly kind: 'approval';
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly input?: unknown;
+  readonly reason?: string;
+}
+
+export interface DeferredToolCallItem {
+  readonly kind: 'tool-call';
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly input?: unknown;
+}
+
+export interface InterruptedRunItem {
+  readonly kind: 'interrupted';
+  readonly messages: AgentMessage[];
+  readonly reason?: string;
+}
+
+export interface DeferredRunResults {
+  readonly approvals?: Record<
+    string,
+    boolean | { readonly approved: boolean; readonly reason?: string }
+  >;
+  readonly toolResults?: Record<string, unknown>;
+}
+
+export interface QueueDrainDiagnostic {
+  readonly queue: string;
+  readonly count: number;
+}
+
+export interface AgentRunDiagnostics {
+  readonly context?: ContextDiagnostics;
+  readonly queueDrains: QueueDrainDiagnostic[];
+  readonly pendingCount: number;
+  readonly resumeSource?: 'options.resume';
+  readonly compactions?: SessionCompactionReport[];
+  readonly subagents?: SubagentRunSummary[];
+}
+
+export interface AgentSkill {
+  readonly name: string;
+  readonly description: string;
+  readonly instructions: string;
+  readonly tools?: readonly AnyAgentTool[];
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface SubagentDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly instructions: string;
+  readonly inheritTools?: boolean;
+  readonly tools?: readonly AnyAgentTool[];
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface SubagentRunSummary {
+  readonly name: string;
+  readonly runId: string;
+  readonly usage: AgentUsage;
+  readonly finishReason: AgentFinishReason;
+}
 
 /**
  * 统一扩展 SPI。
@@ -360,6 +679,7 @@ export type AgentContext = AgentRunContext;
  */
 export interface AgentExtension {
   readonly name: string;
+  readonly reducer?: ContextReducer;
   setup?(ctx: AgentSetupContext): MaybePromise<void>;
   beforeRun?(ctx: AgentRunContext): MaybePromise<void>;
   transformMessages?(
@@ -433,11 +753,19 @@ export interface AgentEnvironment {
  */
 export interface CreateAgentOptions {
   readonly model: AgentModel;
+  readonly name?: string;
   readonly instructions?: string;
   readonly modelSettings?: Record<string, unknown>;
   readonly modelAdapter?: ModelAdapter;
   readonly environment?: AgentEnvironment;
-  readonly tools?: readonly AgentTool<any, unknown>[];
+  readonly tools?: readonly AnyAgentTool[];
   readonly extensions?: readonly AgentExtension[];
+  readonly context?: readonly ContextSource[];
+  readonly reducers?: readonly ContextReducer[];
+  readonly session?: SessionStore;
+  readonly memory?: AgentMemory;
+  readonly observers?: readonly AgentObserver[];
+  readonly planner?: ModelCallPlanner;
+  readonly compactor?: SessionCompactor;
   readonly metadata?: Record<string, unknown>;
 }

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { defineTool } from '../public/tool.js';
-import type { AgentTool } from '../public/types.js';
+import type { AnyAgentTool } from '../public/types.js';
 
 /**
  * 创建文件系统工具。
@@ -14,7 +14,7 @@ import type { AgentTool } from '../public/types.js';
  * 少量递归搜索工具直接使用 Node fs。
  *
  * Returns:
- *   AgentTool[]，可直接传给 createAgent({ tools })。
+ *   AnyAgentTool[]，可直接传给 createAgent({ tools })。
  *
  * @example
  * ```ts
@@ -25,7 +25,7 @@ import type { AgentTool } from '../public/types.js';
  * });
  * ```
  */
-export function createFilesystemTools(): AgentTool<any, unknown>[] {
+export function createFilesystemTools(): AnyAgentTool[] {
   return [
     defineTool({
       name: 'read_file',

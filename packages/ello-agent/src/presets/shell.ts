@@ -1,15 +1,15 @@
 import { z } from 'zod';
 
 import { defineTool } from '../public/tool.js';
-import type { AgentTool } from '../public/types.js';
+import type { AnyAgentTool } from '../public/types.js';
 
 /**
  * 创建 shell 工具。
  *
  * Returns:
- *   包含 shell_exec 的 AgentTool[]。shell_exec 默认要求审批。
+ *   包含 shell_exec 的 AnyAgentTool[]。shell_exec 默认要求审批。
  */
-export function createShellTools(): AgentTool<any, unknown>[] {
+export function createShellTools(): AnyAgentTool[] {
   return [
     defineTool({
       name: 'shell_exec',

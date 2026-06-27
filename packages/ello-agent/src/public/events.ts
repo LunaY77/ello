@@ -1,5 +1,6 @@
 import type {
   AgentApprovalRequest,
+  DeferredApprovalItem,
   AgentError,
   AgentMessage,
   AgentRunResult,
@@ -22,13 +23,19 @@ import type {
 export type AgentStreamEvent =
   | { type: 'run.started'; runId: string }
   | { type: 'turn.started'; runId: string; turnIndex: number }
+  | { type: 'queue.drained'; runId: string; queue: string; count: number }
   | { type: 'message.started'; messageId: string; role: 'assistant' }
   | { type: 'message.delta'; messageId: string; text: string }
   | { type: 'tool.started'; toolCallId: string; name: string; input: unknown }
   | { type: 'tool.approval_requested'; request: AgentApprovalRequest }
+  | { type: 'approval.required'; runId: string; item: DeferredApprovalItem }
   | { type: 'tool.completed'; toolCallId: string; output: unknown }
   | { type: 'tool.failed'; toolCallId: string; error: AgentError }
   | { type: 'turn.completed'; turnIndex: number }
+  | { type: 'run.interrupted'; runId: string; messages: AgentMessage[] }
+  | { type: 'subagent.started'; runId: string; name: string; parentRunId: string }
+  | { type: 'subagent.completed'; runId: string; name: string; result: AgentRunResult }
+  | { type: 'subagent.failed'; runId: string; name: string; error: AgentError }
   | { type: 'run.completed'; result: AgentRunResult }
   | {
       type: 'run.failed';

@@ -36,8 +36,14 @@ export class AiSdkModelAdapter implements ModelAdapter {
   async generate(request: AgentModelRequest): Promise<AgentModelResponse> {
     const result = await generateText({
       model: resolveLanguageModel(request.model),
+      ...(request.system !== undefined ? { system: request.system } : {}),
       messages: request.messages as ModelMessage[],
       tools: request.tools,
+      ...(request.activeTools !== undefined ? { activeTools: request.activeTools } : {}),
+      ...(request.toolChoice !== undefined ? { toolChoice: request.toolChoice } : {}),
+      ...(request.providerOptions !== undefined
+        ? { providerOptions: request.providerOptions as never }
+        : {}),
       ...(request.signal !== undefined ? { abortSignal: request.signal } : {}),
       ...(request.modelSettings as object),
     });
@@ -62,8 +68,14 @@ export class AiSdkModelAdapter implements ModelAdapter {
   async *stream(request: AgentModelRequest): AsyncIterable<AgentModelEvent> {
     const result = streamText({
       model: resolveLanguageModel(request.model),
+      ...(request.system !== undefined ? { system: request.system } : {}),
       messages: request.messages as ModelMessage[],
       tools: request.tools,
+      ...(request.activeTools !== undefined ? { activeTools: request.activeTools } : {}),
+      ...(request.toolChoice !== undefined ? { toolChoice: request.toolChoice } : {}),
+      ...(request.providerOptions !== undefined
+        ? { providerOptions: request.providerOptions as never }
+        : {}),
       ...(request.signal !== undefined ? { abortSignal: request.signal } : {}),
       ...(request.modelSettings as object),
     });

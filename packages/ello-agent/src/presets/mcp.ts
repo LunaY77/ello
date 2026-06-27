@@ -1,4 +1,4 @@
-import type { AgentTool } from '../public/types.js';
+import type { AnyAgentTool } from '../public/types.js';
 
 export interface CreateMcpToolsOptions {
   readonly config?: unknown;
@@ -16,6 +16,6 @@ export interface CreateMcpToolsOptions {
  * Returns:
  *   当前返回空数组。
  */
-export function createMcpTools(_options: CreateMcpToolsOptions = {}): AgentTool<any, unknown>[] {
+export function createMcpTools(_options: CreateMcpToolsOptions = {}): AnyAgentTool[] {
   return [];
 }

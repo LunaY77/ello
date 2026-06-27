@@ -3,20 +3,38 @@ import { tool, type ToolSet } from 'ai';
 import { normalizeAgentError } from '../public/errors.js';
 import type {
   AgentEnvironment,
-  AgentTool,
+  AnyAgentTool,
   AgentToolCall,
   AgentToolContext,
 } from '../public/types.js';
 
 export interface BuildToolSetOptions {
   readonly runId: string;
-  readonly tools: readonly AgentTool<any, unknown>[];
+  readonly tools: readonly AnyAgentTool[];
   readonly environment: AgentEnvironment;
   readonly metadata: Record<string, unknown>;
   readonly toolCalls: AgentToolCall[];
   readonly emitToolStarted: (toolCallId: string, name: string, input: unknown) => void;
+  readonly emitApprovalRequired?: (
+    toolCallId: string,
+    name: string,
+    input: unknown,
+  ) => void;
   readonly emitToolCompleted: (toolCallId: string, output: unknown) => void;
   readonly emitToolFailed: (toolCallId: string, error: Error) => void;
+}
+
+export class AgentApprovalRequiredError extends Error {
+  readonly kind = 'approval-required';
+
+  constructor(
+    readonly toolCallId: string,
+    readonly toolName: string,
+    readonly input: unknown,
+  ) {
+    super(`Tool '${toolName}' requires approval.`);
+    this.name = 'AgentApprovalRequiredError';
+  }
 }
 
 /**
@@ -43,12 +61,13 @@ export function buildToolSet(options: BuildToolSetOptions): ToolSet {
       inputSchema: agentTool.input,
       execute: async (input, executionOptions) => {
         const toolCallId = executionOptions.toolCallId;
-        const decision = await agentTool.approval?.(
-          input,
-          createToolContext(options),
-        );
+        const decision = await agentTool.approval?.(input, createToolContext(options));
         if (decision === 'denied') {
           throw new Error(`Tool '${agentTool.name}' was denied by approval policy.`);
+        }
+        if (decision === 'required') {
+          options.emitApprovalRequired?.(toolCallId, agentTool.name, input);
+          throw new AgentApprovalRequiredError(toolCallId, agentTool.name, input);
         }
         options.emitToolStarted(toolCallId, agentTool.name, input);
         try {

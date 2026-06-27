@@ -1,6 +1,31 @@
 export { createAgent } from './public/create-agent.js';
 export { defineTool } from './public/tool.js';
 export {
+  DefaultAgentMessageQueue,
+  AgentRunControl,
+} from './core/run-control.js';
+export {
+  DefaultModelCallPlanner,
+  compileModelCallPlan,
+  createEnvironmentContextSource,
+  createStateContextSource,
+} from './core/planner.js';
+export {
+  createSummarySessionCompactor,
+  summarizeHistoryReducer,
+  tokenBudgetReducer,
+  trimHistoryReducer,
+} from './core/reducers.js';
+export {
+  activeSkillsContext,
+  createSkillTools,
+  loadSkillsFromDir,
+} from './core/skills.js';
+export {
+  createDelegateTool,
+  defineSubagent,
+} from './core/subagent.js';
+export {
   createApprovalExtension,
   createCompressionExtension,
   createEnvironmentExtension,
@@ -18,7 +43,9 @@ export type {
   AgentApprovalDecision,
   AgentApprovalPolicy,
   AgentApprovalRequest,
+  AnyAgentTool,
   AgentContext,
+  AgentMemory,
   AgentEnvironment,
   AgentError,
   AgentExtension,
@@ -28,6 +55,7 @@ export type {
   AgentMessage,
   AgentModel,
   AgentRunContext,
+  AgentRunDiagnostics,
   AgentRunOptions,
   AgentRunResult,
   AgentSetupContext,
@@ -35,16 +63,41 @@ export type {
   AgentShellResult,
   AgentStream,
   AgentTool,
+  AgentToolChoice,
   AgentToolCall,
   AgentToolContext,
+  AgentToolSet,
   AgentUsage,
   AssistantMessage,
+  ContextBundle,
+  ContextBudget,
+  ContextDiagnostics,
+  ContextReducer,
+  ContextReductionInput,
+  ContextReductionOutput,
+  ContextReductionReport,
+  ContextSource,
   CreateAgentOptions,
+  DeferredApprovalItem,
+  DeferredRunItem,
+  DeferredRunResults,
+  DeferredToolCallItem,
+  InterruptedRunItem,
   MaybePromise,
+  MemoryCompactResult,
+  MemoryObserveEvent,
+  ModelCallPlan,
+  ModelCallPlanner,
   AgentModelEvent,
   AgentModelRequest,
   AgentModelResponse,
   AgentSessionExtension,
+  QueueDrainDiagnostic,
+  SessionCompactionReport,
+  SessionCompactor,
+  SessionStore,
+  SubagentDefinition,
+  SubagentRunSummary,
   ModelAdapter,
   UserMessage,
 } from './public/types.js';
