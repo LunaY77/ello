@@ -9,21 +9,26 @@ import type {
   AgentExtension,
   AgentInput,
   AgentMessage,
+  AgentModelRequest,
+  AgentModelResponse,
   AgentRunContext,
   AgentRunDiagnostics,
-  AgentRunState,
   AgentRunOptions,
   AgentRunResult,
+  AgentRunState,
   AgentSessionExtension,
   AgentStream,
   AgentToolCall,
+  AgentTrace,
+  AgentTurnDiagnostics,
+  ContextDiagnostics,
   CreateAgentOptions,
   ModelAdapter,
-  AgentModelRequest,
-  AgentTrace,
+  ModelCallPlan,
+  QueueDrainDiagnostic,
 } from '../public/types.js';
 
-import { normalizeInput } from './messages.js';
+import { diffNewMessages, normalizeInput } from './messages.js';
 import {
   createEnvironmentContextSource,
   createStateContextSource,
@@ -31,13 +36,33 @@ import {
 } from './planner.js';
 import { AgentRunControl } from './run-control.js';
 import { AgentEventStream } from './stream.js';
-import { buildToolSet } from './tool-runner.js';
-import { AgentApprovalRequiredError } from './tool-runner.js';
+import { AgentApprovalRequiredError, buildToolSet } from './tool-runner.js';
+import { addUsage, createEmptyUsage } from './usage.js';
+
+type LoopStopReason =
+  | 'natural-completed'
+  | 'max-turns'
+  | 'waiting-approval'
+  | 'interrupted'
+  | 'no-progress'
+  | 'error';
+
+type LoopDecision =
+  | { readonly type: 'continue'; readonly reason: string }
+  | { readonly type: 'stop'; readonly reason: LoopStopReason };
+
+interface ExecuteTurnResult {
+  readonly response?: AgentModelResponse;
+  readonly diagnostics: AgentTurnDiagnostics;
+  readonly newMessages: AgentMessage[];
+  readonly toolCalls: AgentToolCall[];
+  readonly stopReason?: LoopStopReason;
+}
 
 /**
- * 新框架 Agent 实现。
+ * Agent 具体实现。
  *
- * CoreAgent 负责把 public API 组合成完整运行流程：
+ * ElloAgent 负责把 public API 组合成完整运行流程：
  * 1. 规范化输入消息；
  * 2. 注入 instructions、environment instructions 和 session 历史；
  * 3. 执行 extension hooks；
@@ -48,7 +73,7 @@ import { AgentApprovalRequiredError } from './tool-runner.js';
  * Args:
  *   config: createAgent() 传入的完整配置。
  */
-export class CoreAgent implements Agent {
+export class ElloAgent implements Agent {
   private readonly environment: AgentEnvironment;
   private readonly extensions: readonly AgentExtension[];
   private readonly modelAdapter: ModelAdapter;
@@ -83,6 +108,17 @@ export class CoreAgent implements Agent {
    */
   stream(input: AgentInput, options: AgentRunOptions = {}): AgentStream {
     const abortController = new AbortController();
+    if (options.signal !== undefined) {
+      if (options.signal.aborted) {
+        abortController.abort(options.signal.reason);
+      } else {
+        options.signal.addEventListener(
+          'abort',
+          () => abortController.abort(options.signal?.reason),
+          { once: true },
+        );
+      }
+    }
     const stream = new AgentEventStream(abortController);
     void this.execute(input, options, abortController.signal, stream);
     return stream;
@@ -111,6 +147,9 @@ export class CoreAgent implements Agent {
     const metadata = {
       ...(this.config.metadata ?? {}),
       ...(options.metadata ?? {}),
+      ...(options.sessionId !== undefined
+        ? { sessionId: options.sessionId }
+        : {}),
     };
     const state: AgentRunState = {
       messages: [] as AgentMessage[],
@@ -125,9 +164,15 @@ export class CoreAgent implements Agent {
     const ctx: AgentRunContext = {
       runId,
       agentName: this.config.name ?? 'agent',
-      ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+      ...(options.sessionId !== undefined
+        ? { sessionId: options.sessionId }
+        : {}),
       input,
-      context: options.context ?? (typeof input === 'object' && !Array.isArray(input) ? input.context : undefined),
+      context:
+        options.context ??
+        (typeof input === 'object' && !Array.isArray(input)
+          ? input.context
+          : undefined),
       options,
       environment: this.environment,
       metadata,
@@ -139,7 +184,6 @@ export class CoreAgent implements Agent {
     try {
       await this.setup();
       await this.emit({ type: 'run.started', runId }, stream, ctx);
-      await this.emit({ type: 'turn.started', runId, turnIndex: 0 }, stream, ctx);
       for (const extension of this.extensions) {
         await extension.beforeRun?.(ctx);
       }
@@ -155,16 +199,6 @@ export class CoreAgent implements Agent {
       for (const message of options.messages ?? []) {
         runControl.pushInput(message);
       }
-
-      const drained = runControl.drainNextTurn(options.resume);
-      state.queueDiagnostics.push(...drained.diagnostics);
-      state.messages.push(...drained.messages);
-
-      let messages = [...state.messages];
-      for (const extension of this.extensions) {
-        messages = (await extension.transformMessages?.(messages, ctx)) ?? messages;
-      }
-      state.messages.splice(0, state.messages.length, ...messages);
 
       const toolCalls: AgentToolCall[] = [];
       const tools = buildToolSet({
@@ -203,11 +237,19 @@ export class CoreAgent implements Agent {
           );
         },
         emitToolCompleted: (toolCallId, output) => {
-          void this.emit({ type: 'tool.completed', toolCallId, output }, stream, ctx);
+          void this.emit(
+            { type: 'tool.completed', toolCallId, output },
+            stream,
+            ctx,
+          );
         },
         emitToolFailed: (toolCallId, error) => {
           void this.emit(
-            { type: 'tool.failed', toolCallId, error: normalizeAgentError(error) },
+            {
+              type: 'tool.failed',
+              toolCallId,
+              error: normalizeAgentError(error),
+            },
             stream,
             ctx,
           );
@@ -219,9 +261,24 @@ export class CoreAgent implements Agent {
         ...(this.config.context ?? []),
       ];
       if (this.config.memory !== undefined) {
+        let retrieved = false;
+        let cached = [] as Awaited<
+          ReturnType<NonNullable<CreateAgentOptions['memory']>['retrieve']>
+        >;
+        const retrievePolicy =
+          this.config.memory.retrievePolicy ?? 'once-per-run';
         contextSources.push({
           name: 'agent.memory',
-          load: (runContext) => this.config.memory?.retrieve(runContext) ?? [],
+          load: async (runContext) => {
+            if (retrievePolicy === 'once-per-turn') {
+              return this.config.memory?.retrieve(runContext) ?? [];
+            }
+            if (!retrieved) {
+              cached = await (this.config.memory?.retrieve(runContext) ?? []);
+              retrieved = true;
+            }
+            return cached;
+          },
         });
       }
       const planner =
@@ -242,51 +299,89 @@ export class CoreAgent implements Agent {
             ? { observers: this.config.observers }
             : {}),
         });
-      const plan = await planner.plan(ctx);
 
-      const messageId = randomUUID();
-      await this.emit({ type: 'message.started', messageId, role: 'assistant' }, stream, ctx);
-      let finalResponse = null as Awaited<ReturnType<ModelAdapter['generate']>> | null;
-      const modelRequest = this.createModelRequest(runId, plan, tools, options, signal);
-      for await (const event of this.modelAdapter.stream(modelRequest)) {
-        if (event.type === 'text-delta') {
-          await this.emit({ type: 'message.delta', messageId, text: event.text }, stream, ctx);
-        } else {
-          finalResponse = event.response;
+      const maxTurns = Math.max(1, options.maxTurns ?? 8);
+      const turns: AgentTurnDiagnostics[] = [];
+      let usage = createEmptyUsage();
+      let finalResponse: AgentModelResponse | undefined;
+      let stopReason: LoopStopReason = 'no-progress';
+
+      for (let turnIndex = 0; ; turnIndex += 1) {
+        const turn = await this.executeTurn({
+          turnIndex,
+          runId,
+          runControl,
+          planner,
+          tools,
+          options,
+          signal,
+          stream,
+          ctx,
+          resume: turnIndex === 0 ? options.resume : undefined,
+        });
+        turns.push(turn.diagnostics);
+        toolCalls.push(...turn.toolCalls);
+        if (turn.response !== undefined) {
+          finalResponse = turn.response;
+          usage = addUsage(usage, turn.response.usage);
         }
-      }
-      if (finalResponse === null) {
-        finalResponse = await this.modelAdapter.generate(modelRequest);
+
+        const decision =
+          turn.stopReason === undefined
+            ? this.decideNextTurn({
+                turnIndex,
+                maxTurns,
+                runControl,
+                newMessageCount: turn.newMessages.length,
+                hasAssistantFinalAnswer: hasAssistantFinalAnswer(
+                  turn.newMessages,
+                ),
+                signal,
+                ...(turn.response !== undefined
+                  ? { response: turn.response }
+                  : {}),
+              })
+            : { type: 'stop' as const, reason: turn.stopReason };
+        if (decision.type === 'stop') {
+          stopReason = decision.reason;
+          break;
+        }
       }
 
       const compactions = await this.compactSession(options.sessionId, ctx);
+      usage = {
+        ...usage,
+        toolCalls: usage.toolCalls + toolCalls.length,
+      };
+      const lastContext = turns.at(-1)?.context;
       const diagnostics: AgentRunDiagnostics = {
-        context: plan.diagnostics,
+        turns,
         queueDrains: [...state.queueDiagnostics],
         pendingCount: runControl.deferredQueue.size,
-        ...(options.resume !== undefined ? { resumeSource: 'options.resume' } : {}),
+        ...(lastContext !== undefined ? { context: lastContext } : {}),
+        ...(options.resume !== undefined
+          ? { resumeSource: 'options.resume' }
+          : {}),
         ...(compactions.length > 0 ? { compactions } : {}),
       };
       const result: AgentRunResult = {
         id: runId,
-        text: finalResponse.text,
-        output: finalResponse.text,
-        messages: finalResponse.messages as AgentMessage[],
-        usage: {
-          ...finalResponse.usage,
-          toolCalls: finalResponse.usage.toolCalls + toolCalls.length,
-        },
-        finishReason: finalResponse.finishReason,
+        text: finalResponse?.text ?? '',
+        output: finalResponse?.text ?? '',
+        messages: [...state.messages],
+        usage,
+        finishReason: this.finishReasonForStop(stopReason, finalResponse),
         toolCalls,
         pending: runControl.deferredQueue.snapshot(),
         diagnostics,
         metadata: {
           ...metadata,
-          provider: finalResponse.provider,
+          ...(finalResponse !== undefined
+            ? { provider: finalResponse.provider }
+            : {}),
           diagnostics,
         },
       };
-      await this.emit({ type: 'turn.completed', turnIndex: 0 }, stream, ctx);
       for (const extension of this.extensions) {
         await extension.afterRun?.(result, ctx);
       }
@@ -295,45 +390,17 @@ export class CoreAgent implements Agent {
         { type: 'run.completed', result, diagnostics },
         ctx,
       );
+      if (stopReason === 'interrupted') {
+        await this.emit(
+          { type: 'run.interrupted', runId, messages: [...state.messages] },
+          stream,
+          ctx,
+        );
+      }
       await this.emit({ type: 'run.completed', result }, stream, ctx);
       stream.complete(result);
     } catch (error) {
       const normalized = normalizeAgentError(error);
-      if (error instanceof AgentApprovalRequiredError) {
-        const diagnostics: AgentRunDiagnostics = {
-          queueDrains: state.queueDiagnostics,
-          pendingCount: 1,
-        };
-        const result: AgentRunResult = {
-          id: runId,
-          text: '',
-          output: '',
-          messages: [...state.messages],
-          usage: {
-            requests: 0,
-            inputTokens: 0,
-            outputTokens: 0,
-            cacheReadTokens: 0,
-            cacheWriteTokens: 0,
-            toolCalls: 0,
-          },
-          finishReason: 'tool-calls',
-          toolCalls: [],
-          pending: [
-            {
-              kind: 'approval',
-              toolCallId: error.toolCallId,
-              toolName: error.toolName,
-              input: error.input,
-            },
-          ],
-          diagnostics,
-          metadata: { ...metadata, diagnostics },
-        };
-        await this.emit({ type: 'run.completed', result }, stream, ctx);
-        stream.complete(result);
-        return;
-      }
       await this.config.memory?.observe?.(
         {
           type: 'run.failed',
@@ -352,6 +419,280 @@ export class CoreAgent implements Agent {
       );
       stream.fail(error);
     }
+  }
+
+  private async executeTurn(args: {
+    readonly turnIndex: number;
+    readonly runId: string;
+    readonly runControl: AgentRunControl;
+    readonly planner: {
+      plan(ctx: AgentRunContext): PromiseLike<ModelCallPlan> | ModelCallPlan;
+    };
+    readonly tools: AgentModelRequest['tools'];
+    readonly options: AgentRunOptions;
+    readonly signal: AbortSignal;
+    readonly stream: AgentEventStream;
+    readonly ctx: AgentRunContext;
+    readonly resume?: AgentRunOptions['resume'];
+  }): Promise<ExecuteTurnResult> {
+    (args.ctx.state as { turn: number }).turn = args.turnIndex;
+    await this.emit(
+      { type: 'turn.started', runId: args.runId, turnIndex: args.turnIndex },
+      args.stream,
+      args.ctx,
+    );
+
+    if (args.signal.aborted) {
+      args.runControl.pushDeferred({
+        kind: 'interrupted',
+        messages: [...args.ctx.state.messages],
+        reason: String(args.signal.reason ?? 'Agent stream aborted.'),
+      });
+      await this.emit(
+        { type: 'turn.completed', turnIndex: args.turnIndex },
+        args.stream,
+        args.ctx,
+      );
+      return this.emptyTurn(args.turnIndex, args.ctx, 'interrupted');
+    }
+
+    const drained = args.runControl.drainNextTurn(args.resume);
+    args.ctx.state.queueDiagnostics.push(...drained.diagnostics);
+    args.ctx.state.messages.push(...drained.messages);
+    for (const diagnostic of drained.diagnostics) {
+      await this.emit(
+        {
+          type: 'queue.drained',
+          runId: args.runId,
+          queue: diagnostic.queue,
+          count: diagnostic.count,
+        },
+        args.stream,
+        args.ctx,
+      );
+    }
+
+    const plan = await args.planner.plan(args.ctx);
+    const transformedMessages = await this.transformModelMessages(
+      [...plan.messages],
+      args.ctx,
+    );
+    const callPlan: ModelCallPlan = {
+      ...plan,
+      messages: transformedMessages,
+    };
+    const beforeCallMessages = [...args.ctx.state.messages];
+    const messageId = randomUUID();
+    await this.emit(
+      { type: 'message.started', messageId, role: 'assistant' },
+      args.stream,
+      args.ctx,
+    );
+
+    let finalResponse: AgentModelResponse | null = null;
+    const modelRequest = this.createModelRequest(
+      args.runId,
+      callPlan,
+      args.tools,
+      args.options,
+      args.signal,
+    );
+    try {
+      for await (const event of this.modelAdapter.stream(modelRequest)) {
+        if (event.type === 'text-delta') {
+          await this.emit(
+            { type: 'message.delta', messageId, text: event.text },
+            args.stream,
+            args.ctx,
+          );
+        } else {
+          finalResponse = event.response;
+        }
+      }
+      if (finalResponse === null) {
+        finalResponse = await this.modelAdapter.generate(modelRequest);
+      }
+    } catch (error) {
+      if (error instanceof AgentApprovalRequiredError) {
+        const wasAlreadyPending = hasDeferredApproval(
+          args.runControl,
+          error.toolCallId,
+        );
+        if (!wasAlreadyPending) {
+          args.runControl.pushDeferred({
+            kind: 'approval',
+            toolCallId: error.toolCallId,
+            toolName: error.toolName,
+            input: error.input,
+          });
+        }
+        if (!wasAlreadyPending) {
+          await this.emit(
+            {
+              type: 'approval.required',
+              runId: args.runId,
+              item: {
+                kind: 'approval',
+                toolCallId: error.toolCallId,
+                toolName: error.toolName,
+                input: error.input,
+              },
+            },
+            args.stream,
+            args.ctx,
+          );
+        }
+        await this.emit(
+          { type: 'turn.completed', turnIndex: args.turnIndex },
+          args.stream,
+          args.ctx,
+        );
+        return this.emptyTurn(
+          args.turnIndex,
+          args.ctx,
+          'waiting-approval',
+          plan.diagnostics,
+          drained.diagnostics,
+        );
+      }
+      if (args.signal.aborted || isAbortError(error)) {
+        args.runControl.pushDeferred({
+          kind: 'interrupted',
+          messages: [...args.ctx.state.messages],
+          reason: String(args.signal.reason ?? 'Agent stream aborted.'),
+        });
+        await this.emit(
+          { type: 'turn.completed', turnIndex: args.turnIndex },
+          args.stream,
+          args.ctx,
+        );
+        return this.emptyTurn(
+          args.turnIndex,
+          args.ctx,
+          'interrupted',
+          plan.diagnostics,
+          drained.diagnostics,
+        );
+      }
+      throw error;
+    }
+
+    const newMessages =
+      finalResponse.newMessages ??
+      diffNewMessages(beforeCallMessages, finalResponse.messages);
+    args.ctx.state.messages.push(...newMessages);
+    await this.emit(
+      { type: 'turn.completed', turnIndex: args.turnIndex },
+      args.stream,
+      args.ctx,
+    );
+
+    return {
+      response: finalResponse,
+      diagnostics: {
+        turn: args.turnIndex,
+        context: plan.diagnostics,
+        queueDrains: drained.diagnostics,
+        finishReason: finalResponse.finishReason,
+        newMessageCount: newMessages.length,
+      },
+      newMessages,
+      toolCalls: [],
+    };
+  }
+
+  private async transformModelMessages(
+    messages: AgentMessage[],
+    ctx: AgentRunContext,
+  ): Promise<AgentMessage[]> {
+    let transformed = [...messages];
+    for (const extension of this.extensions) {
+      transformed =
+        (await extension.transformMessages?.(transformed, ctx)) ?? transformed;
+    }
+    return transformed;
+  }
+
+  private emptyTurn(
+    turnIndex: number,
+    ctx: AgentRunContext,
+    stopReason: LoopStopReason,
+    context = emptyContextDiagnostics(),
+    queueDrains: QueueDrainDiagnostic[] = [],
+  ): ExecuteTurnResult {
+    return {
+      diagnostics: {
+        turn: turnIndex,
+        context,
+        queueDrains,
+        finishReason: this.finishReasonForStop(stopReason),
+        newMessageCount: 0,
+      },
+      newMessages: [],
+      toolCalls: [],
+      stopReason,
+    };
+  }
+
+  private decideNextTurn(input: {
+    readonly turnIndex: number;
+    readonly maxTurns: number;
+    readonly runControl: AgentRunControl;
+    readonly response?: AgentModelResponse;
+    readonly newMessageCount: number;
+    readonly hasAssistantFinalAnswer: boolean;
+    readonly signal: AbortSignal;
+  }): LoopDecision {
+    if (input.signal.aborted) {
+      return { type: 'stop', reason: 'interrupted' };
+    }
+    if (input.runControl.status === 'waiting_approval') {
+      return { type: 'stop', reason: 'waiting-approval' };
+    }
+    if (input.turnIndex + 1 >= input.maxTurns) {
+      return { type: 'stop', reason: 'max-turns' };
+    }
+    if (input.runControl.hasQueuedWork()) {
+      return { type: 'continue', reason: 'queued-work' };
+    }
+    if (input.response?.finishReason === 'tool-calls') {
+      if (input.newMessageCount > 0) {
+        return { type: 'continue', reason: 'tool-calls' };
+      }
+      return { type: 'stop', reason: 'no-progress' };
+    }
+    if (
+      input.response?.finishReason === 'stop' &&
+      input.hasAssistantFinalAnswer
+    ) {
+      return { type: 'stop', reason: 'natural-completed' };
+    }
+    if (input.newMessageCount === 0) {
+      return { type: 'stop', reason: 'no-progress' };
+    }
+    return { type: 'continue', reason: 'progress' };
+  }
+
+  private finishReasonForStop(
+    stopReason: LoopStopReason,
+    response?: AgentModelResponse,
+  ): AgentRunResult['finishReason'] {
+    if (stopReason === 'natural-completed') {
+      return 'stop';
+    }
+    if (stopReason === 'max-turns') {
+      return 'length';
+    }
+    if (stopReason === 'waiting-approval') {
+      return 'approval-required';
+    }
+    if (stopReason === 'interrupted') {
+      return 'interrupted';
+    }
+    if (stopReason === 'no-progress') {
+      return 'no-progress';
+    }
+    return response?.finishReason ?? 'error';
   }
 
   /**
@@ -388,7 +729,9 @@ export class CoreAgent implements Agent {
    * Returns:
    *   按扩展顺序拼接后的消息历史。
    */
-  private async loadSessionMessages(sessionId?: string): Promise<AgentMessage[]> {
+  private async loadSessionMessages(
+    sessionId?: string,
+  ): Promise<AgentMessage[]> {
     const messages: AgentMessage[] = [];
     if (this.config.session !== undefined && sessionId !== undefined) {
       messages.push(...(await this.config.session.load(sessionId)));
@@ -402,9 +745,15 @@ export class CoreAgent implements Agent {
 
   private async saveSessionResult(result: AgentRunResult): Promise<void> {
     const sessionId =
-      typeof result.metadata.sessionId === 'string' ? result.metadata.sessionId : undefined;
+      typeof result.metadata.sessionId === 'string'
+        ? result.metadata.sessionId
+        : undefined;
     if (this.config.session !== undefined && sessionId !== undefined) {
-      await this.config.session.append(sessionId, result.messages, result.metadata);
+      await this.config.session.append(
+        sessionId,
+        result.messages,
+        result.metadata,
+      );
     }
     for (const extension of this.extensions) {
       const session = extension as AgentSessionExtension;
@@ -433,7 +782,14 @@ export class CoreAgent implements Agent {
 
   private createModelRequest(
     runId: string,
-    plan: { system?: string; messages: AgentMessage[]; tools?: AgentModelRequest['tools']; activeTools?: string[]; toolChoice?: AgentModelRequest['toolChoice']; providerOptions?: Record<string, unknown> },
+    plan: {
+      system?: string;
+      messages: AgentMessage[];
+      tools?: AgentModelRequest['tools'];
+      activeTools?: string[];
+      toolChoice?: AgentModelRequest['toolChoice'];
+      providerOptions?: Record<string, unknown>;
+    },
     fallbackTools: AgentModelRequest['tools'],
     options: AgentRunOptions,
     signal: AbortSignal,
@@ -444,7 +800,9 @@ export class CoreAgent implements Agent {
       ...(plan.system !== undefined ? { system: plan.system } : {}),
       messages: plan.messages,
       tools: plan.tools ?? fallbackTools,
-      ...(plan.activeTools !== undefined ? { activeTools: plan.activeTools } : {}),
+      ...(plan.activeTools !== undefined
+        ? { activeTools: plan.activeTools }
+        : {}),
       ...(plan.toolChoice !== undefined ? { toolChoice: plan.toolChoice } : {}),
       ...(plan.providerOptions !== undefined
         ? { providerOptions: plan.providerOptions }
@@ -456,4 +814,43 @@ export class CoreAgent implements Agent {
       signal,
     };
   }
+}
+
+function hasAssistantFinalAnswer(messages: readonly AgentMessage[]): boolean {
+  return messages.some((message) => {
+    if (message.role !== 'assistant') {
+      return false;
+    }
+    const content = (message as { content?: unknown }).content;
+    if (typeof content === 'string') {
+      return content.length > 0;
+    }
+    return Array.isArray(content) && content.length > 0;
+  });
+}
+
+function hasDeferredApproval(
+  runControl: AgentRunControl,
+  toolCallId: string,
+): boolean {
+  return runControl.deferredQueue
+    .snapshot()
+    .some((item) => item.kind === 'approval' && item.toolCallId === toolCallId);
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === 'AbortError' || error.name === 'TimeoutError')
+  );
+}
+
+function emptyContextDiagnostics(): ContextDiagnostics {
+  return {
+    bundles: [],
+    reducerReports: [],
+    summaryCount: 0,
+    beforeMessageCount: 0,
+    afterMessageCount: 0,
+  };
 }

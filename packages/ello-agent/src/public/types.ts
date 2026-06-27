@@ -177,6 +177,9 @@ export type AgentFinishReason =
   | 'stop'
   | 'length'
   | 'tool-calls'
+  | 'approval-required'
+  | 'interrupted'
+  | 'no-progress'
   | 'content-filter'
   | 'error'
   | 'unknown';
@@ -240,6 +243,9 @@ export interface AgentModelRequest {
 export interface AgentModelResponse {
   readonly text: string;
   readonly messages: AgentMessage[];
+  readonly newMessages?: AgentMessage[];
+  readonly toolCalls?: AgentToolCall[];
+  readonly toolResults?: unknown[];
   readonly usage: AgentUsage;
   readonly finishReason: AgentFinishReason;
   readonly provider: unknown;
@@ -512,6 +518,7 @@ export interface SessionStore {
 }
 
 export interface AgentMemory<TContext = unknown> {
+  readonly retrievePolicy?: MemoryRetrievePolicy;
   retrieve(ctx: AgentRunContext<TContext>): MaybePromise<ContextBundle[]>;
   observe?(
     event: MemoryObserveEvent,
@@ -519,6 +526,11 @@ export interface AgentMemory<TContext = unknown> {
   ): MaybePromise<void>;
   compact?(ctx: AgentRunContext<TContext>): MaybePromise<MemoryCompactResult>;
 }
+
+export type MemoryRetrievePolicy =
+  | 'once-per-run'
+  | 'once-per-turn'
+  | 'on-context-change';
 
 export interface MemoryObserveEvent {
   readonly type: 'run.completed' | 'run.failed';
@@ -618,6 +630,7 @@ export interface InterruptedRunItem {
 }
 
 export interface DeferredRunResults {
+  readonly deferred?: readonly DeferredRunItem[];
   readonly approvals?: Record<
     string,
     boolean | { readonly approved: boolean; readonly reason?: string }
@@ -632,11 +645,20 @@ export interface QueueDrainDiagnostic {
 
 export interface AgentRunDiagnostics {
   readonly context?: ContextDiagnostics;
+  readonly turns?: AgentTurnDiagnostics[];
   readonly queueDrains: QueueDrainDiagnostic[];
   readonly pendingCount: number;
   readonly resumeSource?: 'options.resume';
   readonly compactions?: SessionCompactionReport[];
   readonly subagents?: SubagentRunSummary[];
+}
+
+export interface AgentTurnDiagnostics {
+  readonly turn: number;
+  readonly context: ContextDiagnostics;
+  readonly queueDrains: QueueDrainDiagnostic[];
+  readonly finishReason: AgentFinishReason;
+  readonly newMessageCount: number;
 }
 
 export interface AgentSkill {

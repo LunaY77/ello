@@ -1,4 +1,4 @@
-import { CoreAgent } from '../core/agent.js';
+import { ElloAgent } from '../core/agent.js';
 
 import type { Agent, CreateAgentOptions } from './types.js';
 
@@ -24,5 +24,5 @@ import type { Agent, CreateAgentOptions } from './types.js';
  * ```
  */
 export function createAgent(options: CreateAgentOptions): Agent {
-  return new CoreAgent(options);
+  return new ElloAgent(options);
 }

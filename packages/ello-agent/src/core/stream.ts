@@ -94,7 +94,6 @@ export class AgentEventStream implements AgentStream {
 
   abort(reason?: unknown): void {
     this.abortController.abort(reason);
-    this.fail(reason ?? new Error('Agent stream aborted.'));
   }
 
   private close(): void {

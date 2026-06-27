@@ -257,7 +257,450 @@ describe('createAgent', () => {
       toolCallId: 'call_1',
       toolName: 'danger',
     });
-    expect(result.finishReason).toBe('tool-calls');
+    expect(result.pending).toHaveLength(1);
+    expect(result.finishReason).toBe('approval-required');
+    await agent.close();
+  });
+
+  it('continues the loop after tool-calls and plans once per turn', async () => {
+    const requests: AgentModelRequest[] = [];
+    const observed: string[] = [];
+    const agent = createAgent({
+      model: 'test:model',
+      observers: [
+        {
+          onModelCallPlanned: () => observed.push('planned'),
+        },
+      ],
+      modelAdapter: {
+        async generate(request) {
+          requests.push(request);
+          if (requests.length === 1) {
+            return {
+              text: '',
+              messages: [
+                ...request.messages,
+                { role: 'assistant', content: 'tool result ready' },
+              ],
+              newMessages: [{ role: 'assistant', content: 'tool result ready' }],
+              usage: {
+                requests: 1,
+                inputTokens: 1,
+                outputTokens: 1,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                toolCalls: 0,
+              },
+              finishReason: 'tool-calls',
+              provider: null,
+            };
+          }
+          return {
+            text: 'done',
+            messages: [...request.messages, { role: 'assistant', content: 'done' }],
+            newMessages: [{ role: 'assistant', content: 'done' }],
+            usage: {
+              requests: 1,
+              inputTokens: 1,
+              outputTokens: 2,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: 'stop',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('hi');
+
+    expect(result.output).toBe('done');
+    expect(result.finishReason).toBe('stop');
+    expect(requests).toHaveLength(2);
+    expect(observed).toEqual(['planned', 'planned']);
+    expect(result.diagnostics?.turns).toHaveLength(2);
+    await agent.close();
+  });
+
+  it('loads session history once and does not duplicate it on the second plan', async () => {
+    const seen = [] as string[][];
+    let loads = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      session: {
+        async load() {
+          loads += 1;
+          return [{ role: 'user', content: 'history' }];
+        },
+        async append() {},
+      },
+      modelAdapter: {
+        async generate(request) {
+          seen.push(request.messages.map((message) => String(message.content)));
+          const isFirst = seen.length === 1;
+          return {
+            text: isFirst ? '' : 'done',
+            messages: [
+              ...request.messages,
+              { role: 'assistant', content: isFirst ? 'tool result' : 'done' },
+            ],
+            newMessages: [
+              { role: 'assistant', content: isFirst ? 'tool result' : 'done' },
+            ],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: isFirst ? 'tool-calls' : 'stop',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    await agent.run('current', { sessionId: 'sess_1' });
+
+    expect(loads).toBe(1);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]?.filter((content) => content === 'history')).toHaveLength(1);
+    expect(seen[1]?.filter((content) => content === 'history')).toHaveLength(1);
+    await agent.close();
+  });
+
+  it('stops at maxTurns without a second model call', async () => {
+    let calls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          calls += 1;
+          return {
+            text: '',
+            messages: [...request.messages, { role: 'assistant', content: 'again' }],
+            newMessages: [{ role: 'assistant', content: 'again' }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: 'tool-calls',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('hi', { maxTurns: 1 });
+
+    expect(calls).toBe(1);
+    expect(result.finishReason).toBe('length');
+    await agent.close();
+  });
+
+  it('stops tool-calls without new messages as no-progress', async () => {
+    let calls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          calls += 1;
+          return {
+            text: '',
+            messages: [...request.messages],
+            newMessages: [],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: 'tool-calls',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('hi');
+
+    expect(calls).toBe(1);
+    expect(result.finishReason).toBe('no-progress');
+    await agent.close();
+  });
+
+  it('prefers response.newMessages over diff fallback', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          return {
+            text: 'from-new-messages',
+            messages: [...request.messages],
+            newMessages: [{ role: 'assistant', content: 'from-new-messages' }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: 'stop',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('hi');
+
+    expect(result.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'from-new-messages',
+    });
+    expect(result.finishReason).toBe('stop');
+    await agent.close();
+  });
+
+  it('resume approval injects a tool result and continues the loop', async () => {
+    const firstAgent = createAgent({
+      model: 'test:model',
+      tools: [
+        defineTool({
+          name: 'danger',
+          description: 'Dangerous tool',
+          input: z.object({ value: z.string() }),
+          approval: () => 'required',
+          execute: () => 'should not run',
+        }),
+      ],
+      modelAdapter: {
+        async generate(request) {
+          const execute = request.tools.danger?.execute;
+          if (execute === undefined) {
+            throw new Error('missing tool');
+          }
+          await execute({ value: 'x' }, { toolCallId: 'call_1', messages: [] });
+          return new EchoAdapter().generate(request);
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+    const pending = await firstAgent.run('use tool');
+    const resumedRequests: AgentModelRequest[] = [];
+    const resumedAgent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          resumedRequests.push(request);
+          return {
+            text: 'approved',
+            messages: [...request.messages, { role: 'assistant', content: 'approved' }],
+            newMessages: [{ role: 'assistant', content: 'approved' }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: 'stop',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await resumedAgent.run([], {
+      resume: {
+        deferred: pending.pending ?? [],
+        approvals: { call_1: true },
+      },
+    });
+
+    expect(result.output).toBe('approved');
+    expect(resumedRequests[0]?.messages[0]).toMatchObject({ role: 'tool' });
+    expect(result.diagnostics?.resumeSource).toBe('options.resume');
+    await firstAgent.close();
+    await resumedAgent.close();
+  });
+
+  it('stream emits turn and queue events across multiple turns', async () => {
+    let calls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          calls += 1;
+          const first = calls === 1;
+          return {
+            text: first ? '' : 'done',
+            messages: [
+              ...request.messages,
+              { role: 'assistant', content: first ? 'tool result' : 'done' },
+            ],
+            newMessages: [
+              { role: 'assistant', content: first ? 'tool result' : 'done' },
+            ],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: first ? 'tool-calls' : 'stop',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'text-delta', text: 'x' };
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const stream = agent.stream('hi');
+    const events = [];
+    for await (const event of stream) {
+      events.push(event.type);
+    }
+    const result = await stream.final;
+
+    expect(result.diagnostics?.turns).toHaveLength(2);
+    expect(events.filter((event) => event === 'turn.started')).toHaveLength(2);
+    expect(events.filter((event) => event === 'queue.drained').length).toBeGreaterThan(4);
+    expect(events.filter((event) => event === 'turn.completed')).toHaveLength(2);
+    expect(events).toContain('run.completed');
+    await agent.close();
+  });
+
+  it('uses diffNewMessages as a fallback when adapter omits newMessages', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: new EchoAdapter(),
+    });
+
+    const result = await agent.run('hi');
+
+    expect(result.messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'hello',
+    });
+    expect(result.finishReason).toBe('stop');
+    await agent.close();
+  });
+
+  it('honors memory retrieve policies', async () => {
+    let oncePerRun = 0;
+    let oncePerTurn = 0;
+    const adapter: ModelAdapter = {
+      async generate(request) {
+        const first = !request.messages.some(
+          (message) => message.role === 'assistant',
+        );
+        return {
+          text: first ? '' : 'done',
+          messages: [
+            ...request.messages,
+            { role: 'assistant', content: first ? 'tool result' : 'done' },
+          ],
+          newMessages: [
+            { role: 'assistant', content: first ? 'tool result' : 'done' },
+          ],
+          usage: {
+            requests: 1,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            toolCalls: 0,
+          },
+          finishReason: first ? 'tool-calls' : 'stop',
+          provider: null,
+        };
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+    const runAgent = createAgent({
+      model: 'test:model',
+      modelAdapter: adapter,
+      memory: {
+        retrievePolicy: 'once-per-run',
+        retrieve: () => {
+          oncePerRun += 1;
+          return [];
+        },
+      },
+    });
+    const turnAgent = createAgent({
+      model: 'test:model',
+      modelAdapter: adapter,
+      memory: {
+        retrievePolicy: 'once-per-turn',
+        retrieve: () => {
+          oncePerTurn += 1;
+          return [];
+        },
+      },
+    });
+
+    await runAgent.run('hi');
+    await turnAgent.run('hi');
+
+    expect(oncePerRun).toBe(1);
+    expect(oncePerTurn).toBe(2);
+    await runAgent.close();
+    await turnAgent.close();
+  });
+
+  it('stream abort resolves final as interrupted instead of failing', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: new EchoAdapter(),
+    });
+
+    const stream = agent.stream('hi');
+    stream.abort('stop now');
+    const result = await stream.final;
+
+    expect(result.finishReason).toBe('interrupted');
+    expect(result.pending?.[0]).toMatchObject({ kind: 'interrupted' });
     await agent.close();
   });
 

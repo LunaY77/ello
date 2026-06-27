@@ -47,9 +47,11 @@ export class AiSdkModelAdapter implements ModelAdapter {
       ...(request.signal !== undefined ? { abortSignal: request.signal } : {}),
       ...(request.modelSettings as object),
     });
+    const newMessages: ModelMessage[] = [{ role: 'assistant', content: result.text }];
     return {
       text: result.text,
-      messages: [...request.messages, { role: 'assistant', content: result.text }],
+      messages: [...request.messages, ...newMessages],
+      newMessages,
       usage: coerceUsage(result.usage),
       finishReason: normalizeFinishReason(result.finishReason),
       provider: result,
@@ -83,11 +85,13 @@ export class AiSdkModelAdapter implements ModelAdapter {
       yield { type: 'text-delta', text: delta };
     }
     const text = await result.text;
+    const newMessages: ModelMessage[] = [{ role: 'assistant', content: text }];
     yield {
       type: 'final',
       response: {
         text,
-        messages: [...request.messages, { role: 'assistant', content: text }],
+        messages: [...request.messages, ...newMessages],
+        newMessages,
         usage: coerceUsage(await result.usage),
         finishReason: normalizeFinishReason(await result.finishReason),
         provider: await result.response,

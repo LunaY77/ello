@@ -24,3 +24,33 @@ export function normalizeInput(input: AgentInput): AgentMessage[] {
   }
   return [];
 }
+
+export function diffNewMessages(
+  before: readonly AgentMessage[],
+  after: readonly AgentMessage[],
+): AgentMessage[] {
+  if (after.length >= before.length) {
+    const prefixMatches = before.every((message, index) =>
+      messagesEqual(message, after[index]),
+    );
+    if (prefixMatches) {
+      return after.slice(before.length);
+    }
+  }
+  return after.length === 0 ? [] : after.slice(-1);
+}
+
+function messagesEqual(left: AgentMessage, right: AgentMessage | undefined): boolean {
+  if (right === undefined || left.role !== right.role) {
+    return false;
+  }
+  return stableContent(left) === stableContent(right);
+}
+
+function stableContent(message: AgentMessage): string {
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === 'string') {
+    return content;
+  }
+  return JSON.stringify(content ?? null);
+}

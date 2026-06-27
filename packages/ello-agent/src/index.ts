@@ -85,6 +85,7 @@ export type {
   InterruptedRunItem,
   MaybePromise,
   MemoryCompactResult,
+  MemoryRetrievePolicy,
   MemoryObserveEvent,
   ModelCallPlan,
   ModelCallPlanner,

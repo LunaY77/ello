@@ -102,6 +102,15 @@ export class AgentRunControl {
     }
   }
 
+  hasQueuedWork(): boolean {
+    return (
+      this.inputQueue.hasItems ||
+      this.followUpQueue.hasItems ||
+      this.steeringQueue.hasItems ||
+      (!this.sessionDrained && this.sessionQueue.hasItems)
+    );
+  }
+
   drainNextTurn(resume?: DeferredRunResults): DrainNextTurnResult {
     const diagnostics: QueueDrainDiagnostic[] = [];
     const messages: AgentMessage[] = [];
@@ -158,6 +167,9 @@ export class AgentRunControl {
   private createRecoveryMessages(resume?: DeferredRunResults): AgentMessage[] {
     if (resume === undefined) {
       return [];
+    }
+    if (resume.deferred !== undefined) {
+      this.deferredQueue.restore(resume.deferred);
     }
     const messages: AgentMessage[] = [];
     for (const item of this.deferredQueue.drain()) {

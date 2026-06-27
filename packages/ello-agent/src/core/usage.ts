@@ -44,6 +44,17 @@ export function coerceUsage(usage: unknown): AgentUsage {
   };
 }
 
+export function addUsage(left: AgentUsage, right: AgentUsage): AgentUsage {
+  return {
+    requests: left.requests + right.requests,
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
+    cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
+    toolCalls: left.toolCalls + right.toolCalls,
+  };
+}
+
 function numberValue(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
