@@ -107,19 +107,6 @@ describe('RunState', () => {
     expect(loaded.pendingRequests).toEqual(state.pendingRequests);
   });
 
-  it('loads snake_case envelopes for Python compatibility', () => {
-    const json = JSON.stringify({
-      messages: [user('hello')],
-      pending_requests: pendingRequests(),
-      run_id: 'snake-case',
-    });
-
-    const loaded = RunState.loadJson(json);
-
-    expect(loaded.runId).toBe('snake-case');
-    expect(loaded.needsApproval).toBe(true);
-  });
-
   it('creates state from run result with deferred requests output', () => {
     const result: RunResultLike = {
       output: pendingRequests(),

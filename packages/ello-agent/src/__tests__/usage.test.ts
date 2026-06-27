@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { UsageSnapshot, addUsage, coerceRunUsage } from '../index.js';
 
 describe('usage helpers', () => {
-  it('coerces camelCase, snake_case and callable usage', () => {
+  it('coerces partial and callable usage', () => {
     expect(
       coerceRunUsage({
         requests: 1,
@@ -25,11 +25,11 @@ describe('usage helpers', () => {
     expect(
       coerceRunUsage(() => ({
         requests: 1,
-        input_tokens: 2,
-        output_tokens: 3,
-        cache_read_tokens: 4,
-        cache_write_tokens: 5,
-        tool_calls: 6,
+        inputTokens: 2,
+        outputTokens: 3,
+        cacheReadTokens: 4,
+        cacheWriteTokens: 5,
+        toolCalls: 6,
       })),
     ).toEqual({
       requests: 1,
@@ -41,11 +41,11 @@ describe('usage helpers', () => {
     });
   });
 
-  it('adds usage from compatible shapes', () => {
+  it('adds usage from partial shapes', () => {
     expect(
       addUsage(
         { requests: 1, inputTokens: 2 },
-        { requests: 3, input_tokens: 4, tool_calls: 5 },
+        { requests: 3, inputTokens: 4, toolCalls: 5 },
       ),
     ).toEqual({
       requests: 4,
@@ -59,25 +59,26 @@ describe('usage helpers', () => {
 });
 
 describe('UsageSnapshot', () => {
-  it('records snake_case entries and exposes Python aliases', () => {
+  it('records entries and exposes totals', () => {
     const snapshot = new UsageSnapshot('run-1');
 
     snapshot.record({
-      agent_id: 'main',
-      agent_name: 'Main',
-      model_id: 'model-a',
-      usage: { requests: 1, input_tokens: 2, output_tokens: 3 },
+      agentId: 'main',
+      agentName: 'Main',
+      modelId: 'model-a',
+      usage: { requests: 1, inputTokens: 2, outputTokens: 3 },
+      source: 'model_request',
     });
     snapshot.record({
-      agent_id: 'main',
-      agent_name: 'Main',
-      model_id: 'model-a',
+      agentId: 'main',
+      agentName: 'Main',
+      modelId: 'model-a',
       usage: { requests: 2, inputTokens: 4, toolCalls: 1 },
       source: 'tool',
     });
 
-    expect(snapshot.run_id).toBe('run-1');
-    expect(snapshot.total_usage).toEqual({
+    expect(snapshot.runId).toBe('run-1');
+    expect(snapshot.totalUsage).toEqual({
       requests: 3,
       inputTokens: 6,
       outputTokens: 3,
@@ -92,7 +93,7 @@ describe('UsageSnapshot', () => {
       modelId: 'model-a',
       source: 'model_request',
     });
-    expect(snapshot.agent_usages.main.usage.requests).toBe(3);
-    expect(snapshot.model_usages['model-a'].inputTokens).toBe(6);
+    expect(snapshot.agentUsageTotals.main.usage.requests).toBe(3);
+    expect(snapshot.modelUsageTotals['model-a']?.inputTokens).toBe(6);
   });
 });

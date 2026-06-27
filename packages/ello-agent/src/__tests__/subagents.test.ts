@@ -348,7 +348,7 @@ describe('executeSubagent', () => {
     expect(result).toContain('<id>worker-abcd</id>');
     expect(testRunner.run).toHaveBeenCalledWith('continue', {
       deps: expect.any(AgentContext),
-      messageHistory: previous,
+      messages: previous,
     });
     expect(agentContext.subagentHistory.get('worker-abcd')).toEqual(next);
   });

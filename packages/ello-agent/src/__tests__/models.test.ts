@@ -15,6 +15,39 @@ import {
 
 vi.mock('ai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ai')>();
+  const defaultUsage = {
+    requests: 1,
+    inputTokens: 11,
+    outputTokens: 7,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    toolCalls: 0,
+  };
+  function makeStreamResult(options: Record<string, unknown>) {
+    if (typeof options.onStepEnd === 'function') {
+      options.onStepEnd({
+        toolCalls: [],
+      });
+    }
+    const responseMessages = [{ role: 'assistant', content: 'mocked' }];
+    return {
+      text: Promise.resolve('mocked'),
+      usage: Promise.resolve(defaultUsage),
+      responseMessages: Promise.resolve(responseMessages),
+      steps: Promise.resolve([{ toolCalls: [] }]),
+      options,
+      stream: (async function* () {
+        yield { type: 'text-start', id: 'text-1' };
+        yield { type: 'text-delta', id: 'text-1', text: 'mocked' };
+        yield { type: 'text-end', id: 'text-1' };
+        yield {
+          type: 'finish',
+          finishReason: 'stop',
+          totalUsage: defaultUsage,
+        };
+      })(),
+    };
+  }
   return {
     ...actual,
     generateText: vi.fn(async (options: Record<string, unknown>) => {
@@ -37,6 +70,9 @@ vi.mock('ai', async (importOriginal) => {
         options,
       };
     }),
+    streamText: vi.fn((options: Record<string, unknown>) =>
+      makeStreamResult(options),
+    ),
   };
 });
 
@@ -241,7 +277,7 @@ describe('createAgent', () => {
   });
 
   it('rejects non string prompt before model call', async () => {
-    const { generateText } = await import('ai');
+    const { streamText } = await import('ai');
     const runtime = createAgent();
 
     await runtime.enter();
@@ -249,7 +285,7 @@ describe('createAgent', () => {
       await expect(runtime.run(123 as never)).rejects.toThrow(
         'input must be a prompt string',
       );
-      expect(generateText).not.toHaveBeenCalled();
+      expect(streamText).not.toHaveBeenCalled();
     } finally {
       await runtime.exit();
     }
@@ -270,18 +306,12 @@ describe('createAgent', () => {
         maxRetries: 0,
       });
       expect(JSON.stringify(result.options.messages)).toContain('hello');
-      expect(JSON.stringify(result.options.messages)).toContain(
-        '<environment-context>',
-      );
-      expect(JSON.stringify(result.options.messages)).toContain(
-        '<runtime-context>',
-      );
     } finally {
       await runtime.exit();
     }
   });
 
-  it('adds Python-compatible output and allMessages to run result', async () => {
+  it('returns output and allMessages from run result', async () => {
     const runtime = createAgent();
 
     await runtime.enter();
@@ -323,25 +353,21 @@ describe('createAgent', () => {
         temperature: 0.2,
       });
       expect(JSON.stringify(result.options.messages)).toContain('hello');
-      expect(JSON.stringify(result.options.messages)).toContain(
-        '<environment-context>',
-      );
-      expect(JSON.stringify(result.options.messages)).toContain(
-        '<runtime-context>',
-      );
     } finally {
       await runtime.exit();
     }
   });
 
-  it('uses messages when message history is provided', async () => {
+  it('uses explicit messages as context', async () => {
     const runtime = createAgent({ systemPrompt: 'You are concise.' });
 
     await runtime.enter();
     try {
       const result = (await runtime.run({
-        prompt: 'hello',
-        messageHistory: [{ role: 'user', content: 'history' }],
+        messages: [
+          { role: 'user', content: 'history' },
+          { role: 'user', content: 'hello' },
+        ],
       })) as unknown as { options: Record<string, unknown> };
 
       expect(result.options).toMatchObject({
@@ -350,12 +376,6 @@ describe('createAgent', () => {
       expect(result.options).toHaveProperty('messages');
       expect(JSON.stringify(result.options.messages)).toContain('history');
       expect(JSON.stringify(result.options.messages)).toContain('hello');
-      expect(JSON.stringify(result.options.messages)).toContain(
-        '<environment-context>',
-      );
-      expect(JSON.stringify(result.options.messages)).toContain(
-        '<runtime-context>',
-      );
       expect(result.options).not.toHaveProperty('prompt');
     } finally {
       await runtime.exit();
@@ -376,6 +396,46 @@ describe('createAgent', () => {
 
       expect(result.options.model).not.toBe(externalModel);
       expect(result.options.tools).toHaveProperty('runtime_echo');
+    } finally {
+      await runtime.exit();
+    }
+  });
+
+  it('runs provider hooks around model calls', async () => {
+    const beforeRequest = vi.fn(async (request) => request);
+    const beforePayload = vi.fn(async (payload) => payload);
+    const afterResponse = vi.fn(async () => undefined);
+    const runtime = createAgent({
+      providerHooks: {
+        beforeRequest,
+        beforePayload,
+        afterResponse,
+      },
+    });
+
+    await runtime.enter();
+    try {
+      await runtime.run('hello');
+
+      expect(beforeRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelName: 'openai-chat:gpt-4o-mini',
+          payload: expect.objectContaining({
+            messages: expect.any(Array),
+          }),
+        }),
+      );
+      expect(beforePayload).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: expect.any(Array),
+        }),
+      );
+      expect(afterResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          modelName: 'openai-chat:gpt-4o-mini',
+          body: [{ role: 'assistant', content: 'mocked' }],
+        }),
+      );
     } finally {
       await runtime.exit();
     }
@@ -430,9 +490,9 @@ describe('createAgent', () => {
   });
 
   it('returns DeferredToolRequests when approval tools are called', async () => {
-    const { generateText } = await import('ai');
-    vi.mocked(generateText).mockImplementationOnce(
-      async (options: Record<string, unknown>) => {
+    const { streamText } = await import('ai');
+    vi.mocked(streamText).mockImplementationOnce(
+      (options: Record<string, unknown>) => {
         if (typeof options.onStepEnd === 'function') {
           options.onStepEnd({
             toolCalls: [
@@ -445,8 +505,16 @@ describe('createAgent', () => {
           });
         }
         return {
-          text: '',
-          responseMessages: [
+          text: Promise.resolve(''),
+          usage: Promise.resolve({
+            requests: 1,
+            inputTokens: 1,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            toolCalls: 1,
+          }),
+          responseMessages: Promise.resolve([
             {
               role: 'assistant',
               content: [
@@ -458,7 +526,26 @@ describe('createAgent', () => {
                 },
               ],
             },
-          ],
+          ]),
+          steps: Promise.resolve([
+            {
+              toolCalls: [
+                {
+                  toolCallId: 'call-1',
+                  toolName: 'dangerous_action',
+                  input: { target: 'prod' },
+                },
+              ],
+            },
+          ]),
+          stream: (async function* () {
+            yield {
+              type: 'tool-call',
+              toolCallId: 'call-1',
+              toolName: 'dangerous_action',
+              input: { target: 'prod' },
+            };
+          })(),
           options,
         } as never;
       },
@@ -485,7 +572,6 @@ describe('createAgent', () => {
   });
 
   it('executes approved deferred approval tool on resume', async () => {
-    const runtime = createAgent({ tools: [RuntimeApprovalTool] });
     const messages = [
       { role: 'user' as const, content: 'approve it' },
       {
@@ -499,27 +585,29 @@ describe('createAgent', () => {
           },
         ],
       },
+      {
+        role: 'tool' as const,
+        content: [
+          {
+            type: 'tool-result' as const,
+            toolCallId: 'call-1',
+            toolName: 'dangerous_action',
+            output: 'executed on prod',
+          },
+        ],
+      },
     ];
+    const runtime = createAgent({ tools: [RuntimeApprovalTool] });
 
     await runtime.enter();
     try {
       const result = (await runtime.run({
         messages,
-        deferredToolResults: {
-          approvals: { 'call-1': true },
-          calls: {},
-        },
       })) as unknown as { options: Record<string, unknown> };
 
       expect(JSON.stringify(result.options.messages)).toContain('approve it');
       expect(JSON.stringify(result.options.messages)).toContain(
         'executed on prod',
-      );
-      expect(JSON.stringify(result.options.messages)).toContain(
-        '<environment-context>',
-      );
-      expect(JSON.stringify(result.options.messages)).toContain(
-        '<runtime-context>',
       );
     } finally {
       await runtime.exit();
@@ -527,7 +615,6 @@ describe('createAgent', () => {
   });
 
   it('keeps denied deferred approval as denied tool result', async () => {
-    const runtime = createAgent({ tools: [RuntimeApprovalTool] });
     const messages = [
       { role: 'user' as const, content: 'approve it' },
       {
@@ -541,29 +628,29 @@ describe('createAgent', () => {
           },
         ],
       },
+      {
+        role: 'tool' as const,
+        content: [
+          {
+            type: 'tool-result' as const,
+            toolCallId: 'call-1',
+            toolName: 'dangerous_action',
+            output: 'denied: not allowed',
+          },
+        ],
+      },
     ];
+    const runtime = createAgent({ tools: [RuntimeApprovalTool] });
 
     await runtime.enter();
     try {
       const result = (await runtime.run({
         messages,
-        deferredToolResults: {
-          approvals: {
-            'call-1': { approved: false, reason: 'not allowed' },
-          },
-          calls: {},
-        },
       })) as unknown as { options: Record<string, unknown> };
 
       expect(JSON.stringify(result.options.messages)).toContain('approve it');
       expect(JSON.stringify(result.options.messages)).toContain(
         'denied: not allowed',
-      );
-      expect(JSON.stringify(result.options.messages)).toContain(
-        '<environment-context>',
-      );
-      expect(JSON.stringify(result.options.messages)).toContain(
-        '<runtime-context>',
       );
     } finally {
       await runtime.exit();
@@ -584,7 +671,7 @@ describe('createAgent', () => {
     expect(runtime.ctx).toBeNull();
   });
 
-  it('uses session history when no explicit message history is provided', async () => {
+  it('uses session history when no explicit messages are provided', async () => {
     const session = new InMemorySessionStorage({
       entries: [
         createMessageEntry({

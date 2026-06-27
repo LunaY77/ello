@@ -1,100 +1,49 @@
-import type { ModelMessage } from 'ai';
 import { describe, expect, it } from 'vitest';
 
 import type { AgentRuntime, AgentRuntimeRunInput } from '../agents.js';
-import { AgentContext } from '../context.js';
-import { LocalEnvironment } from '../environment/index.js';
 import {
   AgentInterrupted,
   AgentStreamer,
   PartialTextAccumulator,
-  closeUnreturnedToolCalls,
   streamAgent,
-  type StreamEvent,
+  type AgentStreamEvent,
 } from '../index.js';
 
 describe('PartialTextAccumulator', () => {
-  it('returns null without observed parts', () => {
-    const accumulator = new PartialTextAccumulator();
-
-    expect(accumulator.buildResponse()).toBeNull();
-  });
-
-  it('accumulates start, delta and end events', () => {
+  it('accumulates TS-first message events', () => {
     const accumulator = new PartialTextAccumulator();
 
     accumulator.observe({
-      eventKind: 'part_start',
-      index: 0,
-      part: { type: 'text', text: 'hel' },
+      type: 'message_start',
+      message: { role: 'assistant', content: '' },
     });
     accumulator.observe({
-      eventKind: 'part_delta',
-      index: 0,
-      delta: { deltaKind: 'text', contentDelta: 'lo' },
+      type: 'message_delta',
+      delta: { type: 'text', text: 'hel' },
+      partial: { role: 'assistant', content: 'hel' },
     });
     accumulator.observe({
-      eventKind: 'part_end',
-      index: 0,
-      part: { type: 'text', text: 'hello!' },
+      type: 'message_delta',
+      delta: { type: 'text', text: 'lo' },
+      partial: { role: 'assistant', content: 'hello' },
     });
 
     expect(accumulator.buildResponse()).toEqual({
       role: 'assistant',
-      content: [{ type: 'text', text: 'hello!' }],
+      content: 'hello',
     });
   });
 
-  it('accepts Python-style snake_case stream events', () => {
+  it('resets accumulated partial message', () => {
     const accumulator = new PartialTextAccumulator();
 
     accumulator.observe({
-      event_kind: 'part_start',
-      index: 0,
-      part: { content: '' },
+      type: 'message_end',
+      message: { role: 'assistant', content: 'done' },
     });
-    accumulator.observe({
-      event_kind: 'part_delta',
-      index: 0,
-      delta: { delta_kind: 'text', content_delta: 'hel' },
-    });
-    accumulator.observe({
-      event_kind: 'part_delta',
-      index: 0,
-      delta: { delta_kind: 'text', content_delta: 'lo' },
-    });
-    accumulator.observe({
-      event_kind: 'part_end',
-      index: 0,
-      part: { content: 'hello!' },
-    });
-
     expect(accumulator.buildResponse()).toEqual({
       role: 'assistant',
-      content: [{ type: 'text', text: 'hello!' }],
-    });
-  });
-
-  it('sorts parts and can reset', () => {
-    const accumulator = new PartialTextAccumulator();
-
-    accumulator.observe({
-      eventKind: 'part_start',
-      index: 1,
-      part: { type: 'text', text: 'b' },
-    });
-    accumulator.observe({
-      eventKind: 'part_start',
-      index: 0,
-      part: { type: 'text', text: 'a' },
-    });
-
-    expect(accumulator.buildResponse()).toEqual({
-      role: 'assistant',
-      content: [
-        { type: 'text', text: 'a' },
-        { type: 'text', text: 'b' },
-      ],
+      content: 'done',
     });
 
     accumulator.reset();
@@ -104,13 +53,14 @@ describe('PartialTextAccumulator', () => {
 });
 
 describe('closeUnreturnedToolCalls', () => {
-  it('keeps messages unchanged when all tool calls returned', () => {
-    const messages: ModelMessage[] = [
+  it('keeps messages unchanged when all tool calls returned', async () => {
+    const { closeUnreturnedToolCalls } = await import('../index.js');
+    const messages = [
       {
-        role: 'assistant',
+        role: 'assistant' as const,
         content: [
           {
-            type: 'tool-call',
+            type: 'tool-call' as const,
             toolCallId: 'call-1',
             toolName: 'lookup',
             input: {},
@@ -118,13 +68,13 @@ describe('closeUnreturnedToolCalls', () => {
         ],
       },
       {
-        role: 'tool',
+        role: 'tool' as const,
         content: [
           {
-            type: 'tool-result',
+            type: 'tool-result' as const,
             toolCallId: 'call-1',
             toolName: 'lookup',
-            output: { type: 'text', value: 'ok' },
+            output: { type: 'text' as const, value: 'ok' },
           },
         ],
       },
@@ -133,7 +83,8 @@ describe('closeUnreturnedToolCalls', () => {
     expect(closeUnreturnedToolCalls(messages)).toBe(messages);
   });
 
-  it('adds failure results for pending tool calls', () => {
+  it('adds failure results for pending tool calls', async () => {
+    const { closeUnreturnedToolCalls } = await import('../index.js');
     const result = closeUnreturnedToolCalls([
       {
         role: 'assistant',
@@ -186,7 +137,7 @@ describe('closeUnreturnedToolCalls', () => {
 describe('AgentStreamer', () => {
   it('iterates queued events and finishes', async () => {
     const streamer = new AgentStreamer();
-    const event = textEvent('done');
+    const event: AgentStreamEvent = { type: 'agent_start', runId: 'run-1' };
 
     streamer.enqueue(event);
     streamer.finish();
@@ -229,151 +180,62 @@ describe('AgentStreamer', () => {
       },
     });
 
-    streamer.enqueue(textEvent('partial'));
+    streamer.enqueue({
+      type: 'message_delta',
+      delta: { type: 'text', text: 'partial' },
+      partial: { role: 'assistant', content: 'partial' },
+    });
     streamer.finish();
     await streamer.next();
 
     expect(streamer.recoverableMessages()).toEqual([
       { role: 'user', content: 'hello' },
-      {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'partial' }],
-      },
+      { role: 'assistant', content: 'partial' },
     ]);
     expect(streamer.state?.messages).toEqual([
       { role: 'user', content: 'hello' },
     ]);
   });
+
+  it('resolves final result', async () => {
+    const streamer = new AgentStreamer<string>();
+
+    streamer.setResult('done');
+
+    await expect(streamer.result()).resolves.toBe('done');
+  });
 });
 
 describe('streamAgent', () => {
-  it('auto-enters runtime and emits synthetic text events', async () => {
-    const runtime = new FakeRuntime('hello');
-    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'say hi');
+  it('auto-enters and exits runtime', async () => {
+    const runtime = new FakeRuntime();
+    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'hello');
     const events = await collectEvents(streamer);
 
+    expect(runtime.lastInput).toBe('hello');
     expect(runtime.enterCalls).toBe(1);
     expect(runtime.exitCalls).toBe(1);
-    expect(runtime.usageEntryCount()).toBeGreaterThan(0);
-    expect(events.map((item) => item.event.eventKind)).toEqual([
-      'part_start',
-      'part_delta',
-      'part_end',
-    ]);
-    expect(streamer.run?.allMessages()).toEqual([
-      { role: 'user', content: 'say hi' },
-      { role: 'assistant', content: 'hello' },
-    ]);
+    expect(events).toEqual([{ type: 'agent_end', messages: [] }]);
   });
 
-  it('does not exit an already-entered runtime', async () => {
-    const runtime = new FakeRuntime('');
+  it('reuses an entered runtime', async () => {
+    const runtime = new FakeRuntime();
     await runtime.enter();
 
-    const streamer = streamAgent(runtime as unknown as AgentRuntime, {
-      prompt: 'hello',
-    });
+    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'hello');
     const events = await collectEvents(streamer);
 
+    expect(runtime.lastInput).toBe('hello');
     expect(runtime.enterCalls).toBe(1);
     expect(runtime.exitCalls).toBe(0);
-    expect(events.map((item) => item.event.eventKind)).toEqual([
-      'part_start',
-      'part_end',
-    ]);
-  });
-
-  it('emits lifecycle events on success', async () => {
-    const runtime = new FakeRuntime('done');
-    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'input');
-
-    await collectEvents(streamer);
-
-    expect(runtime.lastEvents()).toMatchObject([
-      { promptPreview: 'input' },
-      { success: true },
-    ]);
-  });
-
-  it('includes total tokens when available on success', async () => {
-    const runtime = new FakeRuntime('done');
-    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'input');
-
-    await collectEvents(streamer);
-
-    expect(runtime.lastEvents()).toMatchObject([
-      { promptPreview: 'input' },
-      { success: true, totalTokens: 42 },
-    ]);
-  });
-
-  it('propagates run errors and still exits auto-entered runtime', async () => {
-    const runtime = new FakeRuntime('unused', new Error('model failed'));
-    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'input');
-
-    await expect(streamer.next()).rejects.toThrow('model failed');
-    expect(runtime.exitCalls).toBe(1);
-    expect(runtime.lastEvents()).toMatchObject([
-      { promptPreview: 'input' },
-      { success: false, error: 'model failed' },
-    ]);
-  });
-
-  it('retries with recoverable messages when resume_on_error is enabled', async () => {
-    const runtime = new FakeRuntime('recovered', [new Error('first fail')]);
-    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'input', {
-      resumeOnError: true,
-      resumePrompt: 'resume please',
-    });
-
-    const events = await collectEvents(streamer);
-
-    expect(runtime.runCalls).toBe(2);
-    expect(events.map((item) => item.event.eventKind)).toEqual([
-      'part_start',
-      'part_delta',
-      'part_end',
-    ]);
-    expect(streamer.run?.allMessages()).toEqual([
-      { role: 'user', content: 'input' },
-      { role: 'user', content: 'resume please' },
-      { role: 'assistant', content: 'recovered' },
-    ]);
-    expect(runtime.lastPrompts()).toEqual(['input', 'resume please']);
-  });
-
-  it('drains steering and follow-up queues between turns', async () => {
-    const runtime = new FakeRuntime('done');
-    await runtime.enter();
-    runtime.steer('steer one');
-    runtime.followUp('follow up one');
-    const streamer = streamAgent(runtime as unknown as AgentRuntime, 'input');
-
-    await collectEvents(streamer);
-
-    expect(runtime.runCalls).toBe(3);
-    expect(runtime.lastPrompts()).toEqual([
-      'input',
-      'steer one',
-      'follow up one',
-    ]);
+    expect(events).toEqual([{ type: 'agent_end', messages: [] }]);
   });
 });
 
-function textEvent(text: string): StreamEvent {
-  return {
-    agentId: 'main',
-    agentName: 'main',
-    event: {
-      eventKind: 'part_end',
-      index: 0,
-      part: { type: 'text', text },
-    },
-  };
-}
-
-async function collectEvents(streamer: AgentStreamer): Promise<StreamEvent[]> {
-  const events: StreamEvent[] = [];
+async function collectEvents(
+  streamer: AsyncIterable<AgentStreamEvent>,
+): Promise<AgentStreamEvent[]> {
+  const events: AgentStreamEvent[] = [];
   for await (const event of streamer) {
     events.push(event);
   }
@@ -381,125 +243,29 @@ async function collectEvents(streamer: AgentStreamer): Promise<StreamEvent[]> {
 }
 
 class FakeRuntime {
-  readonly env = new LocalEnvironment();
-  ctx: AgentContext | null = null;
-  runtime: AgentRuntime | null = null;
+  lastInput: AgentRuntimeRunInput | null = null;
   enterCalls = 0;
   exitCalls = 0;
-  runCalls = 0;
-  private readonly contexts: AgentContext[] = [];
-  private readonly errors: Array<Error | null>;
-  readonly steeringQueue = new (class {
-    private readonly items: string[] = [];
-    enqueue(message: string): void {
-      this.items.push(message);
-    }
-    drain(): string[] {
-      const items = [...this.items];
-      this.items.length = 0;
-      return items;
-    }
-    clear(): void {
-      this.items.length = 0;
-    }
-  })();
-  readonly followUpQueue = new (class {
-    private readonly items: string[] = [];
-    enqueue(message: string): void {
-      this.items.push(message);
-    }
-    drain(): string[] {
-      const items = [...this.items];
-      this.items.length = 0;
-      return items;
-    }
-    clear(): void {
-      this.items.length = 0;
-    }
-  })();
-
-  constructor(
-    private readonly text: string,
-    error: Error | Array<Error | null> | null = null,
-  ) {
-    this.errors = Array.isArray(error)
-      ? [...error]
-      : error === null
-        ? []
-        : [error];
-  }
-
-  private readonly prompts: Array<string | null> = [];
 
   get entered(): boolean {
-    return this.ctx !== null;
+    return this.enterCalls > this.exitCalls;
   }
 
   async enter(): Promise<this> {
     this.enterCalls += 1;
-    await this.env.enter();
-    this.ctx = new AgentContext({ env: this.env });
-    this.runtime = this as unknown as AgentRuntime;
-    this.contexts.push(this.ctx);
     return this;
-  }
-
-  steer(message: string): void {
-    this.steeringQueue.enqueue(message);
-  }
-
-  followUp(message: string): void {
-    this.followUpQueue.enqueue(message);
   }
 
   async exit(): Promise<void> {
     this.exitCalls += 1;
-    await this.env.exit();
-    this.ctx = null;
-    this.runtime = null;
   }
 
-  async run(_input: AgentRuntimeRunInput): Promise<{ text: string }> {
-    this.runCalls += 1;
-    if (this.ctx === null) {
-      throw new Error('runtime is not entered');
-    }
-    this.prompts.push(
-      typeof _input === 'string'
-        ? _input
-        : 'prompt' in _input && typeof _input.prompt === 'string'
-          ? _input.prompt
-          : null,
-    );
-    this.ctx = this.ctx.prepareNewRun();
-    this.contexts.push(this.ctx);
-    const nextError = this.errors.shift() ?? null;
-    if (nextError !== null) {
-      throw nextError;
-    }
-    return {
-      text: this.text,
-      usage: {
-        requests: 1,
-        inputTokens: 5,
-        outputTokens: 7,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        toolCalls: 0,
-        totalTokens: 42,
-      },
-    };
-  }
-
-  lastEvents(): unknown[] {
-    return this.contexts.flatMap((ctx) => ctx.events);
-  }
-
-  lastPrompts(): Array<string | null> {
-    return [...this.prompts];
-  }
-
-  usageEntryCount(): number {
-    return this.contexts.at(-1)?.usageSnapshot.entries.length ?? 0;
+  stream(input: AgentRuntimeRunInput): AgentStreamer {
+    this.lastInput = input;
+    const streamer = new AgentStreamer();
+    streamer.enqueue({ type: 'agent_end', messages: [] });
+    streamer.setResult({ output: 'done', allMessages: () => [] });
+    streamer.finish();
+    return streamer;
   }
 }
