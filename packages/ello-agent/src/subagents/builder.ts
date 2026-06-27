@@ -22,7 +22,7 @@ export interface SubagentRunner {
   readonly toolset: Toolset;
   run(
     prompt: string,
-    options: { deps: AgentContext; messageHistory?: ModelMessage[] | null },
+    options: { deps: AgentContext; messages?: ModelMessage[] | null },
   ): Promise<SubagentRunResult>;
 }
 
@@ -88,10 +88,10 @@ class StaticSubagentRunner implements SubagentRunner {
 
   async run(
     prompt: string,
-    options: { deps: AgentContext; messageHistory?: ModelMessage[] | null },
+    options: { deps: AgentContext; messages?: ModelMessage[] | null },
   ): Promise<SubagentRunResult> {
     const messages: ModelMessage[] = [
-      ...(options.messageHistory ?? []),
+      ...(options.messages ?? []),
       { role: 'user', content: prompt },
       { role: 'assistant', content: this.config.systemPrompt },
     ];

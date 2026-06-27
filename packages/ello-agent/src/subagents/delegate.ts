@@ -150,7 +150,7 @@ export async function executeSubagent(
   deps.emitEvent(startEvent);
 
   const subCtx = deps.prepareNewRun();
-  const messageHistory = deps.subagentHistory.get(effectiveAgentId) as
+  const messages = deps.subagentHistory.get(effectiveAgentId) as
     | import('ai').ModelMessage[]
     | undefined;
   let success = true;
@@ -160,9 +160,7 @@ export async function executeSubagent(
   try {
     const result = await entry.agent.run(
       prompt,
-      messageHistory === undefined
-        ? { deps: subCtx }
-        : { deps: subCtx, messageHistory },
+      messages === undefined ? { deps: subCtx } : { deps: subCtx, messages },
     );
     output = result.output;
     deps.subagentHistory.set(effectiveAgentId, result.allMessages());

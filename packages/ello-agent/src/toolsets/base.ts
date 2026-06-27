@@ -45,7 +45,7 @@ export class Instruction {
  *
  * 子类定义静态 toolName/description, 实现 call() 方法, 可选覆写
  * isAvailable() 和 getInstruction()。TS 版使用 Zod inputSchema 显式描述
- * 参数, 替代 Python/PydanticAI 的函数签名反射。
+ * 参数。
  */
 export abstract class BaseTool {
   /** 工具名称。 */
@@ -161,7 +161,7 @@ export type ToolFunction = (
 /**
  * 函数式工具定义 helper。
  *
- * 将异步函数转换为 BaseTool 子类, 与 Toolset 兼容。TS 无法可靠区分
+ * 将异步函数转换为 BaseTool 子类。TS 无法可靠区分
  * async 函数和返回 Promise 的函数, 因此在 call() 时校验返回值是否为 Promise。
  */
 export function tool(

@@ -1,11 +1,7 @@
 export {
-  type PartDeltaEvent,
-  type PartEndEvent,
-  type PartStartEvent,
-  type RecoverableStreamEvent,
-  type StreamEvent,
-  type StreamTextDelta,
-  type StreamTextPart,
+  type AgentStreamEvent,
+  type TextDelta,
+  type ToolCallDelta,
 } from './events.js';
 export {
   PartialTextAccumulator,

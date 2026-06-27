@@ -44,11 +44,9 @@ export interface RunStateOptions {
   runId?: string | null;
 }
 
-/** fromRunResult 兼容的最小 run result 形态。 */
 export interface RunResultLike {
   output?: unknown;
   allMessages?: () => ModelMessage[];
-  all_messages?: () => ModelMessage[];
   messages?: ModelMessage[];
 }
 
@@ -76,16 +74,13 @@ const DeferredToolRequestsSchema = z.object({
 const RunStateEnvelopeSchema = z.object({
   messages: z.array(z.unknown()),
   pendingRequests: DeferredToolRequestsSchema.nullable().optional(),
-  pending_requests: DeferredToolRequestsSchema.nullable().optional(),
   runId: z.string().nullable().optional(),
-  run_id: z.string().nullable().optional(),
 });
 
 /**
  * 可序列化的 agent 运行状态。
  *
- * 包含消息历史和待审批/待执行的工具请求, 支持 JSON 序列化和反序列化,
- * 用于跨进程 pause/resume。
+ * 包含消息历史和待审批/待执行的工具请求。
  */
 export class RunState {
   readonly messages: ModelMessage[];
@@ -176,9 +171,8 @@ export class RunState {
     const envelope = RunStateEnvelopeSchema.parse(JSON.parse(raw));
     return new RunState({
       messages: envelope.messages as ModelMessage[],
-      pendingRequests:
-        envelope.pendingRequests ?? envelope.pending_requests ?? null,
-      runId: envelope.runId ?? envelope.run_id ?? null,
+      pendingRequests: envelope.pendingRequests ?? null,
+      runId: envelope.runId ?? null,
     });
   }
 
@@ -226,9 +220,6 @@ function normalizeDeferredToolRequests(
 function extractMessages(result: RunResultLike): ModelMessage[] {
   if (typeof result.allMessages === 'function') {
     return [...result.allMessages()];
-  }
-  if (typeof result.all_messages === 'function') {
-    return [...result.all_messages()];
   }
   return [...(result.messages ?? [])];
 }

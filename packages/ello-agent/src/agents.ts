@@ -4,43 +4,48 @@ import {
   type ModelMessage,
   type Prompt,
   type StepResult,
-  tool as aiTool,
+  streamText,
+  type TextStreamPart,
   type ToolSet,
 } from 'ai';
 
-import { createCompactFilter, type SummaryAgent } from './compression/index.js';
 import { ModelConfig, ToolConfig } from './config.js';
 import { AgentContext } from './context.js';
 import { LocalEnvironment, type Environment } from './environment/index.js';
-import {
-  coldStartTrim,
-  createEnvironmentInstructionsFilter,
-  injectRuntimeInstructions,
-} from './filters/index.js';
 import { buildMcpServers, MCPConfigSchema, type MCPConfig } from './mcp.js';
+import type { ProviderHooks } from './model/types.js';
 import { type ModelWrapper, resolveModel } from './models.js';
 import { resolveModelSettings, type ModelSettings } from './presets.js';
 import { MessageQueue } from './queue.js';
 import {
-  createCompactionEntry,
-  createMessageEntry,
-  createModelChangeEntry,
-  type SessionEntry,
-  type SessionStorage,
-} from './session/index.js';
-import type {
-  DeferredToolApprovalRequest,
-  DeferredToolApprovalResult,
-  DeferredToolRequests,
-  DeferredToolResults,
-} from './state.js';
+  assertRunInput,
+  applyHistoryFilters,
+  resolveInitialMessages,
+  splitRuntimeInput,
+} from './runtime/messages.js';
+import { renderSystemPrompt } from './runtime/prompt-template.js';
+import {
+  loadSessionHistory,
+  persistCompactionIfNeeded,
+  persistModelChange,
+  persistSessionRun,
+} from './runtime/session-persistence.js';
+import { createAiTool } from './runtime/tool-adapter.js';
+import {
+  emitStreamPart,
+  maybeApplyCompactFilter,
+  wrapStreamResult,
+} from './runtime/turn.js';
+import { recordUsageFromResult } from './runtime/usage.js';
+import type { SessionStorage } from './session/index.js';
+import type { DeferredToolRequests } from './state.js';
+import { AgentStreamer } from './streaming/index.js';
 import {
   Toolset,
   type BaseToolConstructor,
   type ToolArgs,
   type ToolsetTool,
 } from './toolsets/index.js';
-import { coerceRunUsage, type RunUsage } from './usage.js';
 import { applyModelWrapper } from './wrappers.js';
 
 const DEFAULT_SYSTEM_PROMPT = `# System
@@ -111,6 +116,7 @@ export interface CreateAgentOptions {
   compact?: boolean;
   modelSettings?: string | ModelSettings | null;
   summaryModel?: LanguageModel | null;
+  providerHooks?: ProviderHooks | null;
 }
 
 /** AgentRuntime 的构造参数。 */
@@ -129,6 +135,7 @@ export interface AgentRuntimeOptions {
   coreToolset?: Toolset | null;
   toolsets?: RuntimeToolset[];
   summaryModel?: LanguageModel | null;
+  providerHooks?: ProviderHooks | null;
 }
 
 /** AgentRuntime.run() 的 AI SDK 对齐输入。 */
@@ -139,18 +146,12 @@ export type AgentRuntimeGenerateInput = Omit<
   Parameters<typeof generateText>[0],
   'model' | 'tools'
 > &
-  Prompt & {
-    /** Python 兼容: 历史消息, 会被转换为 AI SDK messages。 */
-    messageHistory?: ModelMessage[] | null;
-    /** Python 兼容: resume 时传入的 deferred tool 结果。 */
-    deferredToolResults?: DeferredToolResults | null;
-  };
+  Prompt;
 
-/** AgentRuntime.run() 返回值, 在 AI SDK 结果上补充 Python 兼容字段。 */
+/** AgentRuntime.run() 返回值。 */
 export type AgentRuntimeRunResult = Awaited<ReturnType<typeof generateText>> & {
-  /** Python AgentRunResult 兼容输出; 普通调用为 text, 审批暂停时为 DeferredToolRequests。 */
   output: string | DeferredToolRequests;
-  /** Python AgentRunResult.all_messages() 对齐方法。 */
+  /** 返回本轮调用的完整消息。 */
   allMessages(): ModelMessage[];
 };
 
@@ -175,6 +176,7 @@ export class AgentRuntime {
   readonly coreToolset: Toolset | null;
   readonly toolsets: RuntimeToolset[];
   readonly summaryModel: LanguageModel | null;
+  readonly providerHooks: ProviderHooks | null;
   readonly steeringQueue = new MessageQueue();
   readonly followUpQueue = new MessageQueue();
   ctx: AgentContext | null = null;
@@ -196,6 +198,7 @@ export class AgentRuntime {
     this.coreToolset = options.coreToolset ?? null;
     this.toolsets = options.toolsets ?? [];
     this.summaryModel = options.summaryModel ?? null;
+    this.providerHooks = options.providerHooks ?? null;
   }
 
   /** 是否存在需要审批的工具。 */
@@ -230,7 +233,12 @@ export class AgentRuntime {
     for (const toolset of this.toolsets) {
       const tools = await toolset.getTools(runCtx);
       for (const [name, toolDef] of Object.entries(tools)) {
-        result[name] = this.createAiTool(toolset, name, toolDef);
+        result[name] = createAiTool({
+          toolset,
+          name,
+          toolDef,
+          getContext: () => this.ctx,
+        });
       }
     }
     return result;
@@ -298,14 +306,35 @@ export class AgentRuntime {
    *   Vercel AI SDK generateText 的结果。
    */
   async run(input: AgentRuntimeRunInput): Promise<AgentRuntimeRunResult> {
+    const stream = this.stream(input);
+    for await (const _event of stream) {
+      // consume stream to completion
+    }
+    return stream.result();
+  }
+
+  /** 执行一轮真实流式调用。 */
+  stream(input: AgentRuntimeRunInput): AgentStreamer<AgentRuntimeRunResult> {
+    const streamer = new AgentStreamer<AgentRuntimeRunResult>();
+    streamer.addTask(this.runStream(input, streamer));
+    return streamer;
+  }
+
+  private async runStream(
+    input: AgentRuntimeRunInput,
+    streamer: AgentStreamer<AgentRuntimeRunResult>,
+  ): Promise<void> {
     if (!this.entered || this.ctx === null) {
       throw new Error(
-        "AgentRuntime must be entered via 'await runtime.enter()' before calling run().",
+        "AgentRuntime must be entered via 'await runtime.enter()' before calling stream().",
       );
     }
     assertRunInput(input);
 
     this.ctx = this.ctx.prepareNewRun();
+    const runId = this.ctx.runId;
+    streamer.enqueue({ type: 'agent_start', runId });
+    streamer.enqueue({ type: 'turn_start', runId, turnIndex: 0 });
     const approvalToolNames = new Set<string>();
     const toolSets = await this.collectToolSets(approvalToolNames);
     const base = {
@@ -314,66 +343,123 @@ export class AgentRuntime {
       ...(this.modelSettings !== null ? this.modelSettings : {}),
       ...(this.systemPrompt !== null ? { system: this.systemPrompt } : {}),
     };
-    await this.persistModelChange();
+    await persistModelChange(this.session, this.modelName);
     const steps: Array<StepResult<ToolSet, Record<string, unknown>>> = [];
     const onStepEnd = (step: StepResult<ToolSet, Record<string, unknown>>) => {
       steps.push(step);
     };
 
+    let originalMessages: ModelMessage[];
+    let messages: ModelMessage[];
+    let sdkOptions: Record<string, unknown>;
     if (typeof input === 'string') {
-      const sessionHistory = await this.loadSessionHistory();
-      const initialMessages = await applyHistoryFilters(
-        resolveInitialMessages(input, null, null, null, sessionHistory),
+      const sessionHistory = await loadSessionHistory(this.session);
+      originalMessages = await applyHistoryFilters(
+        resolveInitialMessages(input, null, null, sessionHistory),
         this.ctx,
         this.env,
       );
-      const result = await generateText({
-        ...base,
-        messages: initialMessages,
-        onStepEnd,
-      });
-      this.recordUsageFromResult(result, 'main', this.modelName);
-      await this.persistSessionRun(input, result);
-      return this.wrapRunResult(result, input, steps, approvalToolNames);
+      messages = originalMessages;
+      sdkOptions = {};
+    } else {
+      const runtimeInput = splitRuntimeInput(input);
+      const sessionHistory = await loadSessionHistory(this.session);
+      const initialMessages = await applyHistoryFilters(
+        resolveInitialMessages(
+          runtimeInput.promptText,
+          runtimeInput.promptMessages,
+          runtimeInput.messages,
+          sessionHistory,
+        ),
+        this.ctx,
+        this.env,
+      );
+      const compactedMessages = await maybeApplyCompactFilter(
+        initialMessages,
+        this.ctx,
+        this.compact,
+        this.summaryModel ?? this.model,
+      );
+      await persistCompactionIfNeeded(
+        this.session,
+        initialMessages,
+        compactedMessages,
+      );
+      originalMessages = initialMessages;
+      messages = compactedMessages;
+      sdkOptions = runtimeInput.sdkOptions as Record<string, unknown>;
     }
 
-    const runtimeInput = splitRuntimeInput(input);
-    const sessionHistory = await this.loadSessionHistory();
-    const initialMessages = await applyHistoryFilters(
-      resolveInitialMessages(
-        runtimeInput.promptText,
-        runtimeInput.promptMessages,
-        runtimeInput.messages,
-        input.messageHistory ?? null,
-        sessionHistory,
-      ),
-      this.ctx,
-      this.env,
-    );
-    const compactedMessages = await maybeApplyCompactFilter(
-      initialMessages,
-      this.ctx,
-      this.compact,
-      this.summaryModel ?? this.model,
-    );
-    await this.persistCompactionIfNeeded(initialMessages, compactedMessages);
-    const resolvedDeferredResults = await this.resolveDeferredToolResults(
-      compactedMessages,
-      input.deferredToolResults,
-    );
-    const messages = buildMessagesWithResume(
-      compactedMessages,
-      resolvedDeferredResults,
-    );
-    const result = await generateText({
+    const assistantMessage: ModelMessage = { role: 'assistant', content: '' };
+    let text = '';
+    streamer.run = {
+      result: null,
+      allMessages: () => [...originalMessages],
+    };
+    streamer.enqueue({ type: 'message_start', message: assistantMessage });
+
+    const request = {
+      modelName: this.modelName,
+      baseUrl: this.baseUrl,
+      payload: { messages },
+    };
+    const hookRequest =
+      (await this.providerHooks?.beforeRequest?.(request)) ?? request;
+    const payload =
+      (await this.providerHooks?.beforePayload?.(hookRequest.payload)) ??
+      hookRequest.payload;
+    const hookMessages =
+      typeof payload === 'object' &&
+      payload !== null &&
+      'messages' in payload &&
+      Array.isArray((payload as { messages?: unknown }).messages)
+        ? (payload as { messages: ModelMessage[] }).messages
+        : messages;
+
+    const result = streamText({
       ...base,
-      ...runtimeInput.sdkOptions,
-      messages,
+      ...sdkOptions,
+      allowSystemInMessages: true,
+      messages: hookMessages,
       onStepEnd,
     });
-    this.recordUsageFromResult(result, 'main', this.modelName);
-    await this.persistSessionRun(input, result);
-    return this.wrapRunResult(result, input, steps, approvalToolNames);
+
+    for await (const part of result.stream as AsyncIterable<
+      TextStreamPart<ToolSet>
+    >) {
+      emitStreamPart(part, streamer, assistantMessage, (delta) => {
+        text += delta;
+        assistantMessage.content = text;
+      });
+    }
+
+    const finalResult = await wrapStreamResult(
+      result,
+      input,
+      steps,
+      approvalToolNames,
+    );
+    await this.providerHooks?.afterResponse?.({
+      modelName: this.modelName,
+      body: finalResult.responseMessages,
+    });
+    recordUsageFromResult(this.ctx, finalResult, 'main', this.modelName);
+    await persistSessionRun(this.session, input, finalResult);
+    const allMessages = finalResult.allMessages();
+    streamer.run = {
+      result: { output: finalResult.output },
+      allMessages: () => allMessages,
+    };
+    const finalMessage = allMessages.at(-1) ?? assistantMessage;
+    streamer.enqueue({ type: 'message_end', message: finalMessage });
+    streamer.enqueue({
+      type: 'turn_end',
+      message: finalMessage,
+      toolResults: allMessages.filter((message) => message.role === 'tool'),
+    });
+    streamer.enqueue({ type: 'agent_end', messages: allMessages });
+    streamer.setResult(finalResult);
+    streamer.finish();
   }
 
   private async collectToolSets(approvalToolNames: Set<string>): Promise<{
@@ -391,7 +477,12 @@ export class AgentRuntime {
         if (toolDef.requiresApproval) {
           approvalToolNames.add(name);
         }
-        result[name] = this.createAiTool(toolset, name, toolDef);
+        result[name] = createAiTool({
+          toolset,
+          name,
+          toolDef,
+          getContext: () => this.ctx,
+        });
       }
     }
     return { tools: result };
@@ -399,231 +490,6 @@ export class AgentRuntime {
 
   get modelSettingsValue(): ModelSettings | null {
     return this.modelSettings;
-  }
-
-  private createAiTool(
-    toolset: RuntimeToolset,
-    name: string,
-    toolDef: ToolsetTool,
-  ): ToolSet[string] {
-    return aiTool({
-      description: toolDef.description,
-      inputSchema: toolDef.inputSchema,
-      execute: async (input) => {
-        if (toolDef.requiresApproval) {
-          return {
-            status: 'deferred',
-            reason: 'Tool execution requires approval.',
-          };
-        }
-        if (this.ctx === null) {
-          throw new Error('AgentRuntime context is not available.');
-        }
-        return toolset.callTool(
-          name,
-          input as Record<string, unknown>,
-          { deps: this.ctx },
-          toolDef,
-        );
-      },
-    });
-  }
-
-  private wrapRunResult(
-    result: Awaited<ReturnType<typeof generateText>>,
-    input: AgentRuntimeRunInput,
-    steps: Array<StepResult<ToolSet, Record<string, unknown>>>,
-    approvalToolNames: ReadonlySet<string>,
-  ): AgentRuntimeRunResult {
-    const pending = collectDeferredRequests(steps, approvalToolNames);
-    const output = pending !== null ? pending : result.text;
-    return Object.assign(result, {
-      output,
-      allMessages: () => buildAllMessages(input, result),
-    });
-  }
-
-  private async resolveDeferredToolResults(
-    messageHistory: ModelMessage[],
-    deferredToolResults: DeferredToolResults | null | undefined,
-  ): Promise<ResolvedDeferredToolResult[]> {
-    if (deferredToolResults === null || deferredToolResults === undefined) {
-      return [];
-    }
-    if (this.ctx === null) {
-      throw new Error('AgentRuntime context is not available.');
-    }
-
-    const toolCalls = collectToolCallsFromMessages(messageHistory);
-    const runCtx = { deps: this.ctx };
-    const resolved: ResolvedDeferredToolResult[] = [];
-
-    for (const [toolCallId, approval] of Object.entries(
-      deferredToolResults.approvals,
-    )) {
-      const toolCall = toolCalls.get(toolCallId);
-      if (toolCall === undefined) {
-        resolved.push({
-          toolCallId,
-          toolName: 'approval',
-          output: `Error: deferred approval '${toolCallId}' has no matching tool call.`,
-        });
-        continue;
-      }
-
-      if (!isApprovalGranted(approval)) {
-        resolved.push({
-          toolCallId,
-          toolName: toolCall.toolName,
-          output: normalizeApprovalResult(approval),
-        });
-        continue;
-      }
-
-      const toolEntry = await this.findToolForCall(toolCall.toolName, runCtx);
-      if (toolEntry === null) {
-        resolved.push({
-          toolCallId,
-          toolName: toolCall.toolName,
-          output: `Error: tool '${toolCall.toolName}' not found for deferred approval.`,
-        });
-        continue;
-      }
-
-      const output = await toolEntry.toolset.callTool(
-        toolCall.toolName,
-        toolCall.input,
-        runCtx,
-        toolEntry.tool,
-      );
-      resolved.push({
-        toolCallId,
-        toolName: toolCall.toolName,
-        output,
-      });
-    }
-
-    for (const [toolCallId, output] of Object.entries(
-      deferredToolResults.calls,
-    )) {
-      const toolCall = toolCalls.get(toolCallId);
-      resolved.push({
-        toolCallId,
-        toolName: toolCall?.toolName ?? 'deferred_call',
-        output,
-      });
-    }
-
-    return resolved;
-  }
-
-  private async findToolForCall(
-    name: string,
-    runCtx: { deps: AgentContext },
-  ): Promise<{ toolset: RuntimeToolset; tool: ToolsetTool } | null> {
-    for (const toolset of this.toolsets) {
-      const tools = await toolset.getTools(runCtx);
-      const toolDef = tools[name];
-      if (toolDef !== undefined) {
-        return { toolset, tool: toolDef };
-      }
-    }
-    return null;
-  }
-
-  private async loadSessionHistory(): Promise<ModelMessage[] | null> {
-    if (this.session === null) {
-      return null;
-    }
-
-    const leafId = await this.session.getLeafId();
-    const entries = await this.session.getPathToRoot(leafId);
-    return entries
-      .filter(
-        (entry): entry is Extract<SessionEntry, { type: 'message' }> =>
-          entry.type === 'message',
-      )
-      .map((entry) => entry.message as ModelMessage);
-  }
-
-  private async persistSessionRun(
-    input: AgentRuntimeRunInput,
-    result: Awaited<ReturnType<typeof generateText>>,
-  ): Promise<void> {
-    if (this.session === null) {
-      return;
-    }
-
-    for (const message of normalizeRunMessages(input).concat(
-      result.responseMessages,
-    )) {
-      await this.session.appendEntry(
-        createMessageEntry({
-          message: message as Record<string, unknown>,
-        }),
-      );
-    }
-  }
-
-  private async persistModelChange(): Promise<void> {
-    if (this.session === null || this.ctx === null) {
-      return;
-    }
-
-    await this.session.appendEntry(
-      createModelChangeEntry({
-        modelName: this.modelName,
-      }),
-    );
-  }
-
-  private async persistCompactionIfNeeded(
-    before: ModelMessage[],
-    after: ModelMessage[],
-  ): Promise<void> {
-    if (this.session === null || this.ctx === null) {
-      return;
-    }
-    if (after.length >= before.length) {
-      return;
-    }
-
-    await this.session.appendEntry(
-      createCompactionEntry({
-        summary: 'Context was compacted',
-        firstKeptEntryId: '',
-        tokensBefore: before.length,
-        details: {
-          originalMessageCount: before.length,
-          compactedMessageCount: after.length,
-        },
-      }),
-    );
-  }
-
-  private recordUsageFromResult(
-    result: Awaited<ReturnType<typeof generateText>>,
-    agentId: string,
-    modelId: string,
-    source = 'model_request',
-  ): void {
-    if (this.ctx === null) {
-      return;
-    }
-
-    const usage = (result as { usage?: unknown }).usage;
-    if (usage === undefined || usage === null) {
-      return;
-    }
-
-    const normalized = coerceRunUsage(usage as never);
-    this.ctx.recordUsage({
-      agentId,
-      agentName: agentId,
-      modelId,
-      usage: usageToRunUsage(normalized),
-      source,
-    });
   }
 
   private async withEnterLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -639,327 +505,6 @@ export class AgentRuntime {
       release();
     }
   }
-}
-
-function splitRuntimeInput(input: AgentRuntimeGenerateInput) {
-  const inputWithRuntimeFields = input as AgentRuntimeGenerateInput & {
-    model?: unknown;
-    tools?: unknown;
-    prompt?: unknown;
-    messages?: unknown;
-    messageHistory?: unknown;
-    deferredToolResults?: unknown;
-  };
-  const {
-    model: _model,
-    tools: _tools,
-    prompt,
-    messages,
-    messageHistory: _messageHistory,
-    deferredToolResults: _deferredToolResults,
-    ...options
-  } = inputWithRuntimeFields;
-  return {
-    promptText: typeof prompt === 'string' ? prompt : null,
-    promptMessages: Array.isArray(prompt) ? (prompt as ModelMessage[]) : null,
-    messages: Array.isArray(messages) ? (messages as ModelMessage[]) : null,
-    sdkOptions: options as Omit<
-      AgentRuntimeGenerateInput,
-      'prompt' | 'messages' | 'messageHistory' | 'deferredToolResults'
-    >,
-  };
-}
-
-function assertRunInput(input: unknown): asserts input is AgentRuntimeRunInput {
-  if (
-    typeof input === 'string' ||
-    (typeof input === 'object' && input !== null && !Array.isArray(input))
-  ) {
-    return;
-  }
-  throw new TypeError(
-    'AgentRuntime.run() input must be a prompt string or an AI SDK generateText options object.',
-  );
-}
-
-interface ResolvedDeferredToolResult {
-  toolCallId: string;
-  toolName: string;
-  output: unknown;
-}
-
-interface DeferredToolCallSnapshot {
-  toolCallId: string;
-  toolName: string;
-  input: ToolArgs;
-}
-
-function resolveInitialMessages(
-  runtimeInput: string | null,
-  promptMessages: ModelMessage[] | null,
-  messages: ModelMessage[] | null,
-  messageHistory: ModelMessage[] | null | undefined,
-  sessionHistory: ModelMessage[] | null,
-): ModelMessage[] {
-  const baseMessages = [
-    ...(messageHistory ?? messages ?? promptMessages ?? sessionHistory ?? []),
-  ];
-  if (runtimeInput !== null && messages === null && promptMessages === null) {
-    return [...baseMessages, { role: 'user', content: runtimeInput }];
-  }
-  return baseMessages;
-}
-
-function normalizeRunMessages(input: AgentRuntimeRunInput): ModelMessage[] {
-  if (typeof input === 'string') {
-    return [{ role: 'user', content: input }];
-  }
-  if (input.messages !== undefined) {
-    return [...input.messages];
-  }
-  if (Array.isArray(input.prompt)) {
-    return [...input.prompt];
-  }
-  if (typeof input.prompt === 'string') {
-    return [{ role: 'user', content: input.prompt }];
-  }
-  return [];
-}
-
-function usageToRunUsage(usage: {
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  toolCalls: number;
-}): RunUsage {
-  return {
-    requests: usage.requests,
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    cacheReadTokens: usage.cacheReadTokens,
-    cacheWriteTokens: usage.cacheWriteTokens,
-    toolCalls: usage.toolCalls,
-  };
-}
-
-async function applyHistoryFilters(
-  messageHistory: ModelMessage[],
-  ctx: AgentContext,
-  env: Environment,
-): Promise<ModelMessage[]> {
-  let history = coldStartTrim({ deps: ctx }, messageHistory);
-  history = await createEnvironmentInstructionsFilter(env)(
-    { deps: ctx },
-    history,
-  );
-  history = await injectRuntimeInstructions({ deps: ctx }, history);
-  return history;
-}
-
-async function maybeApplyCompactFilter(
-  messageHistory: ModelMessage[],
-  ctx: AgentContext,
-  compact: boolean,
-  summaryModel: LanguageModel,
-): Promise<ModelMessage[]> {
-  if (!compact) {
-    return messageHistory;
-  }
-
-  const summaryAgent: SummaryAgent = {
-    run: async (input) => {
-      const summaryResult = await generateText({
-        model: summaryModel,
-        messages: [...input.messages, { role: 'user', content: input.prompt }],
-      });
-      return summaryResult.text;
-    },
-  };
-  const filter = createCompactFilter();
-  return filter({ deps: ctx, agent: summaryAgent }, messageHistory);
-}
-
-function buildMessagesWithResume(
-  messages: ModelMessage[],
-  resolvedDeferredResults: ResolvedDeferredToolResult[],
-): ModelMessage[] {
-  const baseMessages = [...messages];
-  const deferredMessages = buildDeferredResultMessages(resolvedDeferredResults);
-  return [...baseMessages, ...deferredMessages];
-}
-
-function buildDeferredResultMessages(
-  results: ResolvedDeferredToolResult[],
-): ModelMessage[] {
-  if (results.length === 0) {
-    return [];
-  }
-
-  return [
-    {
-      role: 'tool',
-      content: results.map((result) => ({
-        type: 'tool-result' as const,
-        toolCallId: result.toolCallId,
-        toolName: result.toolName,
-        output: result.output,
-      })),
-    },
-  ] as ModelMessage[];
-}
-
-function normalizeApprovalResult(
-  approval: DeferredToolApprovalResult,
-): unknown {
-  if (typeof approval === 'boolean') {
-    return approval ? 'approved' : 'denied';
-  }
-  return approval.approved
-    ? 'approved'
-    : `denied${approval.reason ? `: ${approval.reason}` : ''}`;
-}
-
-function isApprovalGranted(approval: DeferredToolApprovalResult): boolean {
-  return typeof approval === 'boolean' ? approval : approval.approved;
-}
-
-function collectDeferredRequests(
-  steps: Array<StepResult<ToolSet, Record<string, unknown>>>,
-  approvalToolNames: ReadonlySet<string>,
-): DeferredToolRequests | null {
-  const approvals = new Map<string, DeferredToolApprovalRequest>();
-  for (const step of steps) {
-    for (const toolCall of step.toolCalls) {
-      if (approvalToolNames.has(toolCall.toolName)) {
-        approvals.set(toolCall.toolCallId, {
-          toolCallId: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-          input: toolCall.input,
-        });
-      }
-    }
-  }
-
-  if (approvals.size === 0) {
-    return null;
-  }
-
-  return {
-    approvals: [...approvals.values()],
-    calls: [],
-  };
-}
-
-function buildAllMessages(
-  input: AgentRuntimeRunInput,
-  result: Awaited<ReturnType<typeof generateText>>,
-): ModelMessage[] {
-  const initialMessages = normalizeInitialMessages(input);
-  return [...initialMessages, ...result.responseMessages];
-}
-
-function normalizeInitialMessages(input: AgentRuntimeRunInput): ModelMessage[] {
-  if (typeof input === 'string') {
-    return [{ role: 'user', content: input }];
-  }
-  const history = input.messageHistory ?? [];
-  if (input.messages !== undefined) {
-    return [...history, ...input.messages];
-  }
-  if (Array.isArray(input.prompt)) {
-    return [...history, ...input.prompt];
-  }
-  if (typeof input.prompt === 'string') {
-    return [...history, { role: 'user', content: input.prompt }];
-  }
-  return [...history];
-}
-
-function collectToolCallsFromMessages(
-  messages: ModelMessage[],
-): Map<string, DeferredToolCallSnapshot> {
-  const result = new Map<string, DeferredToolCallSnapshot>();
-  for (const message of messages) {
-    if (message.role !== 'assistant' || !Array.isArray(message.content)) {
-      continue;
-    }
-    for (const part of message.content) {
-      if (isToolCallPart(part)) {
-        result.set(part.toolCallId, {
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          input: normalizeToolInput(part.input),
-        });
-      }
-    }
-  }
-  return result;
-}
-
-function isToolCallPart(part: unknown): part is {
-  type: 'tool-call';
-  toolCallId: string;
-  toolName: string;
-  input?: unknown;
-} {
-  if (typeof part !== 'object' || part === null) {
-    return false;
-  }
-  const candidate = part as {
-    type?: unknown;
-    toolCallId?: unknown;
-    toolName?: unknown;
-  };
-  return (
-    candidate.type === 'tool-call' &&
-    typeof candidate.toolCallId === 'string' &&
-    typeof candidate.toolName === 'string'
-  );
-}
-
-function normalizeToolInput(input: unknown): ToolArgs {
-  if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
-    return input as ToolArgs;
-  }
-  return {};
-}
-
-function renderSystemPrompt(options: {
-  template: string | null;
-  templateVars: Record<string, unknown> | null;
-}): string {
-  const template = options.template ?? DEFAULT_SYSTEM_PROMPT;
-  if (template.trim().length === 0) {
-    return '';
-  }
-  return renderTemplate(template, options.templateVars ?? {});
-}
-
-function renderTemplate(
-  template: string,
-  vars: Record<string, unknown>,
-): string {
-  return template
-    .replace(
-      /\{%\s*if\s+instructions\s*%\}([\s\S]*?)\{%\s*endif\s*%\}/g,
-      (_match, block: string) =>
-        hasNonEmptyValue(vars.instructions)
-          ? block.replace(
-              /\{\{\s*instructions\s*\}\}/g,
-              String(vars.instructions),
-            )
-          : '',
-    )
-    .replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => {
-      const value = vars[key];
-      return value === undefined || value === null ? '' : String(value);
-    });
-}
-
-function hasNonEmptyValue(value: unknown): boolean {
-  return typeof value === 'string' && value.trim().length > 0;
 }
 
 /**
@@ -1057,6 +602,7 @@ function buildAgentRuntime(
     systemPrompt: renderSystemPrompt({
       template: options.systemPrompt ?? null,
       templateVars: options.systemPromptTemplateVars ?? null,
+      defaultTemplate: DEFAULT_SYSTEM_PROMPT,
     }),
     model: effectiveModel,
     env: options.env ?? new LocalEnvironment(),
@@ -1069,5 +615,6 @@ function buildAgentRuntime(
     coreToolset,
     toolsets: allToolsets,
     summaryModel: options.summaryModel ?? null,
+    providerHooks: options.providerHooks ?? null,
   });
 }

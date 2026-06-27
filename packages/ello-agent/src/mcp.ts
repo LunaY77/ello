@@ -50,8 +50,7 @@ export type MCPConfig = z.infer<typeof MCPConfigSchema>;
 /**
  * MCP toolset 占位实现。
  *
- * 保存服务器配置和 prefix 信息。真正的 MCP client 连接可在后续接入,
- * 但配置构建和 createAgent wiring 已经与 Python 版保持同样边界。
+ * 保存服务器配置和 prefix 信息。真正的 MCP client 连接可在后续接入。
  */
 export class MCPToolset {
   readonly id: string;

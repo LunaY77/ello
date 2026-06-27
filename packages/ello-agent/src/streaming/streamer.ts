@@ -2,7 +2,7 @@ import type { ModelMessage } from 'ai';
 
 import { RunState } from '../state.js';
 
-import type { StreamEvent } from './events.js';
+import type { AgentStreamEvent } from './events.js';
 import {
   PartialTextAccumulator,
   closeUnreturnedToolCalls,
@@ -27,19 +27,33 @@ export interface StreamRunLike {
   result?: { output?: unknown } | null;
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  promise.catch(() => undefined);
+  return { promise, resolve, reject };
+}
+
 /**
  * Queue-based async iterator, 支持中断和错误传播。
  */
-export class AgentStreamer implements AsyncIterable<StreamEvent> {
+export class AgentStreamer<
+  TResult = unknown,
+> implements AsyncIterable<AgentStreamEvent> {
   run: StreamRunLike | null;
   exception: unknown = null;
-  private readonly queue: StreamEvent[] = [];
+  private readonly queue: AgentStreamEvent[] = [];
   private readonly waiters: Array<{
-    resolve: (value: IteratorResult<StreamEvent>) => void;
+    resolve: (value: IteratorResult<AgentStreamEvent>) => void;
     reject: (reason?: unknown) => void;
   }> = [];
   private readonly tasks = new Set<Promise<unknown>>();
   private readonly accumulator = new PartialTextAccumulator();
+  private readonly deferredResult = createDeferred<TResult>();
   private done = false;
   private interrupted = false;
 
@@ -47,14 +61,14 @@ export class AgentStreamer implements AsyncIterable<StreamEvent> {
     this.run = options.run ?? null;
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
+  [Symbol.asyncIterator](): AsyncIterator<AgentStreamEvent> {
     return this;
   }
 
-  async next(): Promise<IteratorResult<StreamEvent>> {
+  async next(): Promise<IteratorResult<AgentStreamEvent>> {
     const queued = this.queue.shift();
     if (queued !== undefined) {
-      this.accumulator.observe(queued.event);
+      this.accumulator.observe(queued);
       return { done: false, value: queued };
     }
 
@@ -70,10 +84,10 @@ export class AgentStreamer implements AsyncIterable<StreamEvent> {
   }
 
   /** 将事件推入队列。 */
-  enqueue(event: StreamEvent): void {
+  enqueue(event: AgentStreamEvent): void {
     const waiter = this.waiters.shift();
     if (waiter !== undefined) {
-      this.accumulator.observe(event.event);
+      this.accumulator.observe(event);
       waiter.resolve({ done: false, value: event });
       return;
     }
@@ -104,9 +118,20 @@ export class AgentStreamer implements AsyncIterable<StreamEvent> {
   fail(error: unknown): void {
     this.exception = error;
     this.done = true;
+    this.deferredResult.reject(error);
     while (this.waiters.length > 0) {
       this.waiters.shift()?.reject(error);
     }
+  }
+
+  /** 设置最终 result。 */
+  setResult(result: TResult): void {
+    this.deferredResult.resolve(result);
+  }
+
+  /** 等待最终 result。 */
+  result(): Promise<TResult> {
+    return this.deferredResult.promise;
   }
 
   /** 立即中断流。 */
@@ -120,11 +145,6 @@ export class AgentStreamer implements AsyncIterable<StreamEvent> {
     if (this.exception !== null) {
       throw this.exception;
     }
-  }
-
-  /** Python 兼容命名。 */
-  raiseIfException(): void {
-    this.throwIfException();
   }
 
   /** 构建包含 partial response 的可恢复消息历史。 */

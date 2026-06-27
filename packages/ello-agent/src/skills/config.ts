@@ -67,8 +67,6 @@ export async function loadSkillFromFile(
 
 /**
  * 从目录加载所有 .md 技能文件。
- *
- * 无效文件会被跳过, 与 Python 版保持一致。
  */
 export async function loadSkillsFromDir(
   directory: string,

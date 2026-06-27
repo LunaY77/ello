@@ -1,55 +1,40 @@
 import type { ModelMessage } from 'ai';
 
-import type {
-  RecoverableStreamEvent,
-  StreamTextDelta,
-  StreamTextPart,
-} from './events.js';
+import type { AgentStreamEvent } from './events.js';
 
 /** 从流事件中积累 partial response parts。 */
 export class PartialTextAccumulator {
-  private readonly parts = new Map<number, StreamTextPart>();
+  private partial: ModelMessage | null = null;
 
   /** 观察一个流事件, 积累 part 数据。 */
   observe(event: unknown): void {
-    const normalized = normalizeRecoverableStreamEvent(event);
-    if (normalized === null) {
+    if (!isAgentStreamEvent(event)) {
       return;
     }
 
-    if (normalized.eventKind === 'part_start') {
-      this.parts.set(normalized.index, normalized.part);
+    if (event.type === 'message_start') {
+      this.partial = event.message;
       return;
     }
 
-    if (normalized.eventKind === 'part_delta') {
-      const existing = this.parts.get(normalized.index);
-      if (existing !== undefined && normalized.delta.deltaKind === 'text') {
-        this.parts.set(normalized.index, {
-          type: 'text',
-          text: existing.text + normalized.delta.contentDelta,
-        });
-      }
+    if (event.type === 'message_delta') {
+      this.partial = event.partial;
       return;
     }
 
-    this.parts.set(normalized.index, normalized.part);
+    if (event.type === 'message_end') {
+      this.partial = event.message;
+    }
   }
 
   /** 从已观察的 parts 构建 partial assistant message。 */
   buildResponse(): ModelMessage | null {
-    if (this.parts.size === 0) {
-      return null;
-    }
-    const content = [...this.parts.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([, part]) => ({ type: 'text' as const, text: part.text }));
-    return { role: 'assistant', content };
+    return this.partial;
   }
 
   /** 重置积累器。 */
   reset(): void {
-    this.parts.clear();
+    this.partial = null;
   }
 }
 
@@ -105,86 +90,9 @@ export function closeUnreturnedToolCalls(
   ];
 }
 
-function normalizeRecoverableStreamEvent(
-  event: unknown,
-): RecoverableStreamEvent | null {
+function isAgentStreamEvent(event: unknown): event is AgentStreamEvent {
   if (typeof event !== 'object' || event === null) {
-    return null;
+    return false;
   }
-  const source = event as {
-    eventKind?: unknown;
-    event_kind?: unknown;
-    index?: unknown;
-    part?: unknown;
-    delta?: unknown;
-  };
-  const kind = source.eventKind ?? source.event_kind;
-  const index = typeof source.index === 'number' ? source.index : null;
-
-  if (
-    (kind === 'part_start' || kind === 'part_end') &&
-    index !== null &&
-    source.part !== undefined
-  ) {
-    return {
-      eventKind: kind,
-      index,
-      part: normalizeTextPart(source.part),
-    };
-  }
-
-  if (kind === 'part_delta' && index !== null && source.delta !== undefined) {
-    const delta = normalizeTextDelta(source.delta);
-    if (delta === null) {
-      return null;
-    }
-    return {
-      eventKind: 'part_delta',
-      index,
-      delta,
-    };
-  }
-
-  return null;
-}
-
-function normalizeTextPart(part: unknown): StreamTextPart {
-  if (typeof part !== 'object' || part === null) {
-    return { type: 'text', text: '' };
-  }
-  const source = part as { type?: unknown; text?: unknown; content?: unknown };
-  return {
-    type: 'text',
-    text:
-      typeof source.text === 'string'
-        ? source.text
-        : typeof source.content === 'string'
-          ? source.content
-          : '',
-  };
-}
-
-function normalizeTextDelta(delta: unknown): StreamTextDelta | null {
-  if (typeof delta !== 'object' || delta === null) {
-    return null;
-  }
-  const source = delta as {
-    deltaKind?: unknown;
-    delta_kind?: unknown;
-    contentDelta?: unknown;
-    content_delta?: unknown;
-  };
-  const kind = source.deltaKind ?? source.delta_kind;
-  if (kind !== 'text') {
-    return null;
-  }
-  return {
-    deltaKind: 'text',
-    contentDelta:
-      typeof source.contentDelta === 'string'
-        ? source.contentDelta
-        : typeof source.content_delta === 'string'
-          ? source.content_delta
-          : '',
-  };
+  return typeof (event as { type?: unknown }).type === 'string';
 }

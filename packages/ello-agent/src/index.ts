@@ -110,6 +110,11 @@ export {
   type ModelWrapper,
 } from './models.js';
 export {
+  type ProviderHooks,
+  type ProviderRequest,
+  type ProviderResponse,
+} from './model/types.js';
+export {
   GlobalHooks,
   ToolHooks,
   type GlobalPostHookFunc,
@@ -162,16 +167,12 @@ export {
   PartialTextAccumulator,
   closeUnreturnedToolCalls,
   streamAgent,
+  type AgentStreamEvent,
   type AgentStreamerOptions,
-  type PartDeltaEvent,
-  type PartEndEvent,
-  type PartStartEvent,
-  type RecoverableStreamEvent,
   type StreamAgentOptions,
-  type StreamEvent,
   type StreamRunLike,
-  type StreamTextDelta,
-  type StreamTextPart,
+  type TextDelta,
+  type ToolCallDelta,
 } from './streaming/index.js';
 export {
   ActivateSkillArgsSchema,
@@ -259,8 +260,6 @@ export {
   createEmptyUsage,
   type RunUsage,
   type RunUsageLike,
-  type PythonRunUsageLike,
-  type PythonUsageSnapshotEntryLike,
   type UsageAgentTotal,
   type UsageSnapshotEntry,
   type UsageSnapshotEntryLike,

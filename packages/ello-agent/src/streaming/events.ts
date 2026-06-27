@@ -1,48 +1,49 @@
-/** 统一流事件。 */
-export interface StreamEvent<TEvent = unknown> {
-  /** 产生事件的 agent 标识。 */
-  agentId: string;
-  /** agent 名称。 */
-  agentName: string;
-  /** 底层模型或运行时事件。 */
-  event: TEvent;
-}
+import type { ModelMessage } from 'ai';
 
-/** 文本 part 开始事件。 */
-export interface PartStartEvent {
-  eventKind: 'part_start';
-  index: number;
-  part: StreamTextPart;
-}
-
-/** 文本 part 增量事件。 */
-export interface PartDeltaEvent {
-  eventKind: 'part_delta';
-  index: number;
-  delta: StreamTextDelta;
-}
-
-/** 文本 part 结束事件。 */
-export interface PartEndEvent {
-  eventKind: 'part_end';
-  index: number;
-  part: StreamTextPart;
-}
-
-/** TS 版 streaming 使用的文本 part。 */
-export interface StreamTextPart {
+/** 文本增量。 */
+export interface TextDelta {
   type: 'text';
   text: string;
 }
 
-/** TS 版 streaming 使用的文本 delta。 */
-export interface StreamTextDelta {
-  deltaKind: 'text';
-  contentDelta: string;
+/** 工具调用参数增量。 */
+export interface ToolCallDelta {
+  type: 'tool_call';
+  toolCallId: string;
+  toolName: string;
+  argsDelta: string;
 }
 
-/** streaming recovery 可识别的事件。 */
-export type RecoverableStreamEvent =
-  | PartStartEvent
-  | PartDeltaEvent
-  | PartEndEvent;
+/** TS-first agent 事件协议。 */
+export type AgentStreamEvent =
+  | { type: 'agent_start'; runId: string }
+  | { type: 'turn_start'; runId: string; turnIndex: number }
+  | { type: 'message_start'; message: ModelMessage }
+  | {
+      type: 'message_delta';
+      delta: TextDelta | ToolCallDelta;
+      partial: ModelMessage;
+    }
+  | { type: 'message_end'; message: ModelMessage }
+  | {
+      type: 'tool_execution_start';
+      toolCallId: string;
+      toolName: string;
+      args: unknown;
+    }
+  | {
+      type: 'tool_execution_update';
+      toolCallId: string;
+      toolName: string;
+      partialResult: unknown;
+    }
+  | {
+      type: 'tool_execution_end';
+      toolCallId: string;
+      toolName: string;
+      result: unknown;
+      isError: boolean;
+    }
+  | { type: 'turn_end'; message: ModelMessage; toolResults: ModelMessage[] }
+  | { type: 'agent_end'; messages: ModelMessage[] }
+  | { type: 'error'; error: Error; partialMessages: ModelMessage[] };
