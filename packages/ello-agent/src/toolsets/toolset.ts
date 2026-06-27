@@ -17,6 +17,8 @@ export interface ToolsetTool {
   description: string;
   inputSchema: ZodTypeAny;
   requiresApproval: boolean;
+  /** Optional argument-sensitive approval predicate for policy wrappers. */
+  requiresApprovalFor?: (args: ToolArgs) => boolean;
   maxRetries: number;
 }
 

@@ -2,8 +2,13 @@ export {
   AgentRuntime,
   createAgent,
   createAgentAsync,
+  type AgentRuntimeGenerateInput,
+  type AgentRuntimeRunInput,
+  type AgentRuntimeRunResult,
   type CreateAgentOptions,
+  type RuntimeToolset,
 } from './agents.js';
+export type { ModelMessage } from 'ai';
 export {
   ModelCapability,
   ModelCapabilitySchema,
@@ -161,6 +166,24 @@ export {
   type RunResultLike,
   type RunStateOptions,
 } from './state.js';
+export {
+  agentEnd,
+  agentError,
+  agentStart,
+  messageDelta,
+  messageEnd,
+  messageStart,
+  toolExecutionEnd,
+  toolExecutionStart,
+  turnEnd,
+  turnStart,
+} from './runtime/events.js';
+export {
+  buildApprovalToolCallMessage,
+  buildApprovalToolResultMessage,
+  normalizeApprovalDecision,
+  resolveApprovalResult,
+} from './runtime/approval.js';
 export {
   AgentInterrupted,
   AgentStreamer,

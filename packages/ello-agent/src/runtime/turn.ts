@@ -19,7 +19,13 @@ import type {
   DeferredToolRequests,
 } from '../state.js';
 import { AgentStreamer } from '../streaming/index.js';
+import type { ToolArgs } from '../toolsets/index.js';
 
+import {
+  messageDelta,
+  toolExecutionEnd,
+  toolExecutionStart,
+} from './events.js';
 import { normalizeInitialMessages } from './messages.js';
 
 export function emitStreamPart(
@@ -30,41 +36,36 @@ export function emitStreamPart(
 ): void {
   if (part.type === 'text-delta') {
     appendText(part.text);
-    streamer.enqueue({
-      type: 'message_delta',
-      delta: { type: 'text', text: part.text },
-      partial: { ...partial },
-    });
+    streamer.enqueue(messageDelta({ type: 'text', text: part.text }, { ...partial }));
     return;
   }
 
   if (part.type === 'tool-input-delta') {
-    streamer.enqueue({
-      type: 'message_delta',
-      delta: {
+    streamer.enqueue(
+      messageDelta(
+        {
         type: 'tool_call',
         toolCallId: part.id,
         toolName: '',
         argsDelta: part.delta,
       },
-      partial: { ...partial },
-    });
+        { ...partial },
+      ),
+    );
     return;
   }
 
   if (part.type === 'tool-call') {
-    streamer.enqueue({
-      type: 'tool_execution_start',
+    streamer.enqueue(toolExecutionStart({
       toolCallId: part.toolCallId,
       toolName: part.toolName,
       args: part.input,
-    });
+    }));
     return;
   }
 
   if (part.type === 'tool-result' || part.type === 'tool-error') {
-    streamer.enqueue({
-      type: 'tool_execution_end',
+    streamer.enqueue(toolExecutionEnd({
       toolCallId: part.toolCallId,
       toolName: part.toolName,
       result:
@@ -72,7 +73,7 @@ export function emitStreamPart(
           ? (part as { output?: unknown }).output
           : (part as { error?: unknown }).error,
       isError: part.type === 'tool-error',
-    });
+    }));
   }
 }
 
@@ -81,12 +82,17 @@ export async function wrapStreamResult(
   input: AgentRuntimeRunInput,
   steps: Array<StepResult<ToolSet, Record<string, unknown>>>,
   approvalToolNames: ReadonlySet<string>,
+  approvalPredicates: ReadonlyMap<string, (args: ToolArgs) => boolean> = new Map(),
 ): Promise<AgentRuntimeRunResult> {
   const text = await result.text;
   const usage = await result.usage;
   const responseMessages = (await result.responseMessages) as ModelMessage[];
   const resolvedSteps = steps.length > 0 ? steps : await result.steps;
-  const pending = collectDeferredRequests(resolvedSteps, approvalToolNames);
+  const pending = collectDeferredRequests(
+    resolvedSteps,
+    approvalToolNames,
+    approvalPredicates,
+  );
   const output = pending !== null ? pending : text;
   return {
     ...(result as object),
@@ -104,11 +110,19 @@ export async function wrapStreamResult(
 export function collectDeferredRequests(
   steps: Array<StepResult<ToolSet, Record<string, unknown>>>,
   approvalToolNames: ReadonlySet<string>,
+  approvalPredicates: ReadonlyMap<string, (args: ToolArgs) => boolean> = new Map(),
 ): DeferredToolRequests | null {
   const approvals = new Map<string, DeferredToolApprovalRequest>();
   for (const step of steps) {
     for (const toolCall of step.toolCalls) {
-      if (approvalToolNames.has(toolCall.toolName)) {
+      const requiresApproval =
+        approvalToolNames.has(toolCall.toolName) ||
+        Boolean(
+          approvalPredicates
+            .get(toolCall.toolName)
+            ?.((toolCall.input ?? {}) as ToolArgs),
+        );
+      if (requiresApproval) {
         approvals.set(toolCall.toolCallId, {
           toolCallId: toolCall.toolCallId,
           toolName: toolCall.toolName,

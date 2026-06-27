@@ -14,6 +14,8 @@ import {
   type ToolArgs,
   type ToolRunContext,
 } from '../index.js';
+import { collectRuntimeTools } from '../runtime/tool-execution.js';
+import { collectDeferredRequests } from '../runtime/turn.js';
 
 class EchoTool extends BaseTool {
   static override toolName = 'echo';
@@ -276,5 +278,61 @@ describe('Toolset', () => {
     expect(ts.hasApprovalTools).toBe(true);
     expect(runtime.coreToolset).not.toBeNull();
     expect(runtime.hasApprovalTools).toBe(true);
+  });
+
+  it('collectRuntimeTools bridges tools and records approval names', async () => {
+    const approvalToolNames = new Set<string>();
+    const approvalPredicates = new Map<string, (args: ToolArgs) => boolean>();
+    const ts = new Toolset({ tools: [EchoTool, ApprovalTool] });
+    const tools = await collectRuntimeTools({
+      ctx: makeCtx().deps,
+      toolsets: [ts],
+      approvalToolNames,
+      approvalPredicates,
+    });
+
+    expect(tools).toHaveProperty('echo');
+    expect(tools).toHaveProperty('dangerous_action');
+    expect(approvalToolNames).toEqual(new Set(['dangerous_action']));
+    expect(approvalPredicates.size).toBe(0);
+  });
+
+  it('collectDeferredRequests supports argument-sensitive approval predicates', () => {
+    const pending = collectDeferredRequests(
+      [
+        {
+          toolCalls: [
+            {
+              toolCallId: 'call-safe',
+              toolName: 'read_file',
+              input: { path: 'src/index.ts' },
+            },
+            {
+              toolCallId: 'call-risky',
+              toolName: 'read_file',
+              input: { path: '/tmp/secret.txt' },
+            },
+          ],
+        },
+      ],
+      new Set(),
+      new Map([
+        [
+          'read_file',
+          (args) => typeof args.path === 'string' && args.path.startsWith('/tmp/'),
+        ],
+      ]),
+    );
+
+    expect(pending).toEqual({
+      approvals: [
+        {
+          toolCallId: 'call-risky',
+          toolName: 'read_file',
+          input: { path: '/tmp/secret.txt' },
+        },
+      ],
+      calls: [],
+    });
   });
 });

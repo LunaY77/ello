@@ -3,9 +3,6 @@ import {
   type LanguageModel,
   type ModelMessage,
   type Prompt,
-  type StepResult,
-  streamText,
-  type TextStreamPart,
   type ToolSet,
 } from 'ai';
 
@@ -17,26 +14,9 @@ import type { ProviderHooks } from './model/types.js';
 import { type ModelWrapper, resolveModel } from './models.js';
 import { resolveModelSettings, type ModelSettings } from './presets.js';
 import { MessageQueue } from './queue.js';
-import {
-  assertRunInput,
-  applyHistoryFilters,
-  resolveInitialMessages,
-  splitRuntimeInput,
-} from './runtime/messages.js';
+import { runAgentLoop } from './runtime/agent-loop.js';
 import { renderSystemPrompt } from './runtime/prompt-template.js';
-import {
-  loadSessionHistory,
-  persistCompactionIfNeeded,
-  persistModelChange,
-  persistSessionRun,
-} from './runtime/session-persistence.js';
-import { createAiTool } from './runtime/tool-adapter.js';
-import {
-  emitStreamPart,
-  maybeApplyCompactFilter,
-  wrapStreamResult,
-} from './runtime/turn.js';
-import { recordUsageFromResult } from './runtime/usage.js';
+import { collectRuntimeTools } from './runtime/tool-execution.js';
 import type { SessionStorage } from './session/index.js';
 import type { DeferredToolRequests } from './state.js';
 import { AgentStreamer } from './streaming/index.js';
@@ -224,24 +204,7 @@ export class AgentRuntime {
    * AI SDK 的 `tool({ inputSchema, execute })`。
    */
   async toAiToolSet(): Promise<ToolSet> {
-    if (this.ctx === null) {
-      return {};
-    }
-
-    const result: ToolSet = {};
-    const runCtx = { deps: this.ctx };
-    for (const toolset of this.toolsets) {
-      const tools = await toolset.getTools(runCtx);
-      for (const [name, toolDef] of Object.entries(tools)) {
-        result[name] = createAiTool({
-          toolset,
-          name,
-          toolDef,
-          getContext: () => this.ctx,
-        });
-      }
-    }
-    return result;
+    return collectRuntimeTools({ ctx: this.ctx, toolsets: this.toolsets });
   }
 
   /**
@@ -316,176 +279,8 @@ export class AgentRuntime {
   /** 执行一轮真实流式调用。 */
   stream(input: AgentRuntimeRunInput): AgentStreamer<AgentRuntimeRunResult> {
     const streamer = new AgentStreamer<AgentRuntimeRunResult>();
-    streamer.addTask(this.runStream(input, streamer));
+    streamer.addTask(runAgentLoop(this, input, streamer));
     return streamer;
-  }
-
-  private async runStream(
-    input: AgentRuntimeRunInput,
-    streamer: AgentStreamer<AgentRuntimeRunResult>,
-  ): Promise<void> {
-    if (!this.entered || this.ctx === null) {
-      throw new Error(
-        "AgentRuntime must be entered via 'await runtime.enter()' before calling stream().",
-      );
-    }
-    assertRunInput(input);
-
-    this.ctx = this.ctx.prepareNewRun();
-    const runId = this.ctx.runId;
-    streamer.enqueue({ type: 'agent_start', runId });
-    streamer.enqueue({ type: 'turn_start', runId, turnIndex: 0 });
-    const approvalToolNames = new Set<string>();
-    const toolSets = await this.collectToolSets(approvalToolNames);
-    const base = {
-      model: this.model,
-      tools: toolSets.tools,
-      ...(this.modelSettings !== null ? this.modelSettings : {}),
-      ...(this.systemPrompt !== null ? { system: this.systemPrompt } : {}),
-    };
-    await persistModelChange(this.session, this.modelName);
-    const steps: Array<StepResult<ToolSet, Record<string, unknown>>> = [];
-    const onStepEnd = (step: StepResult<ToolSet, Record<string, unknown>>) => {
-      steps.push(step);
-    };
-
-    let originalMessages: ModelMessage[];
-    let messages: ModelMessage[];
-    let sdkOptions: Record<string, unknown>;
-    if (typeof input === 'string') {
-      const sessionHistory = await loadSessionHistory(this.session);
-      originalMessages = await applyHistoryFilters(
-        resolveInitialMessages(input, null, null, sessionHistory),
-        this.ctx,
-        this.env,
-      );
-      messages = originalMessages;
-      sdkOptions = {};
-    } else {
-      const runtimeInput = splitRuntimeInput(input);
-      const sessionHistory = await loadSessionHistory(this.session);
-      const initialMessages = await applyHistoryFilters(
-        resolveInitialMessages(
-          runtimeInput.promptText,
-          runtimeInput.promptMessages,
-          runtimeInput.messages,
-          sessionHistory,
-        ),
-        this.ctx,
-        this.env,
-      );
-      const compactedMessages = await maybeApplyCompactFilter(
-        initialMessages,
-        this.ctx,
-        this.compact,
-        this.summaryModel ?? this.model,
-      );
-      await persistCompactionIfNeeded(
-        this.session,
-        initialMessages,
-        compactedMessages,
-      );
-      originalMessages = initialMessages;
-      messages = compactedMessages;
-      sdkOptions = runtimeInput.sdkOptions as Record<string, unknown>;
-    }
-
-    const assistantMessage: ModelMessage = { role: 'assistant', content: '' };
-    let text = '';
-    streamer.run = {
-      result: null,
-      allMessages: () => [...originalMessages],
-    };
-    streamer.enqueue({ type: 'message_start', message: assistantMessage });
-
-    const request = {
-      modelName: this.modelName,
-      baseUrl: this.baseUrl,
-      payload: { messages },
-    };
-    const hookRequest =
-      (await this.providerHooks?.beforeRequest?.(request)) ?? request;
-    const payload =
-      (await this.providerHooks?.beforePayload?.(hookRequest.payload)) ??
-      hookRequest.payload;
-    const hookMessages =
-      typeof payload === 'object' &&
-      payload !== null &&
-      'messages' in payload &&
-      Array.isArray((payload as { messages?: unknown }).messages)
-        ? (payload as { messages: ModelMessage[] }).messages
-        : messages;
-
-    const result = streamText({
-      ...base,
-      ...sdkOptions,
-      allowSystemInMessages: true,
-      messages: hookMessages,
-      onStepEnd,
-    });
-
-    for await (const part of result.stream as AsyncIterable<
-      TextStreamPart<ToolSet>
-    >) {
-      emitStreamPart(part, streamer, assistantMessage, (delta) => {
-        text += delta;
-        assistantMessage.content = text;
-      });
-    }
-
-    const finalResult = await wrapStreamResult(
-      result,
-      input,
-      steps,
-      approvalToolNames,
-    );
-    await this.providerHooks?.afterResponse?.({
-      modelName: this.modelName,
-      body: finalResult.responseMessages,
-    });
-    recordUsageFromResult(this.ctx, finalResult, 'main', this.modelName);
-    await persistSessionRun(this.session, input, finalResult);
-    const allMessages = finalResult.allMessages();
-    streamer.run = {
-      result: { output: finalResult.output },
-      allMessages: () => allMessages,
-    };
-    const finalMessage = allMessages.at(-1) ?? assistantMessage;
-    streamer.enqueue({ type: 'message_end', message: finalMessage });
-    streamer.enqueue({
-      type: 'turn_end',
-      message: finalMessage,
-      toolResults: allMessages.filter((message) => message.role === 'tool'),
-    });
-    streamer.enqueue({ type: 'agent_end', messages: allMessages });
-    streamer.setResult(finalResult);
-    streamer.finish();
-  }
-
-  private async collectToolSets(approvalToolNames: Set<string>): Promise<{
-    tools: ToolSet;
-  }> {
-    if (this.ctx === null) {
-      return { tools: {} };
-    }
-
-    const result: ToolSet = {};
-    const runCtx = { deps: this.ctx };
-    for (const toolset of this.toolsets) {
-      const tools = await toolset.getTools(runCtx);
-      for (const [name, toolDef] of Object.entries(tools)) {
-        if (toolDef.requiresApproval) {
-          approvalToolNames.add(name);
-        }
-        result[name] = createAiTool({
-          toolset,
-          name,
-          toolDef,
-          getContext: () => this.ctx,
-        });
-      }
-    }
-    return { tools: result };
   }
 
   get modelSettingsValue(): ModelSettings | null {

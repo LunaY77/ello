@@ -46,4 +46,5 @@ export type AgentStreamEvent =
     }
   | { type: 'turn_end'; message: ModelMessage; toolResults: ModelMessage[] }
   | { type: 'agent_end'; messages: ModelMessage[] }
+  | { type: 'agent_error'; error: Error; partialMessages: ModelMessage[] }
   | { type: 'error'; error: Error; partialMessages: ModelMessage[] };

@@ -14,7 +14,10 @@ export function createAiTool(options: {
     description: options.toolDef.description,
     inputSchema: options.toolDef.inputSchema,
     execute: async (input) => {
-      if (options.toolDef.requiresApproval) {
+      if (
+        options.toolDef.requiresApproval ||
+        options.toolDef.requiresApprovalFor?.(input as ToolArgs)
+      ) {
         return {
           status: 'deferred',
           reason: 'Tool execution requires approval.',
