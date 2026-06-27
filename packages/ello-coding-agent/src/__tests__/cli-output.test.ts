@@ -32,9 +32,9 @@ describe('formatCodingAgentEventOutput', () => {
         {
           type: 'core_event',
           event: {
-            type: 'message_delta',
-            delta: { type: 'text', text: 'hello' },
-            partial: { role: 'assistant', content: 'hello' },
+            type: 'message.delta',
+            messageId: 'm1',
+            text: 'hello',
           },
         } as const,
         false,

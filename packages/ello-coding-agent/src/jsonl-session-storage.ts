@@ -2,9 +2,11 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  type AgentMessage,
+  type AgentRunResult,
+  type AgentSessionExtension,
   generateEntryId,
   type SessionEntry,
-  type SessionStorage,
 } from '@ello/agent';
 
 interface JsonlSessionRecord {
@@ -28,7 +30,8 @@ export interface JsonlSessionSummary {
 /**
  * 用于会话历史、元数据、任务和记忆的追加式 JSONL 存储。
  */
-export class JsonlSessionStorage implements SessionStorage {
+export class JsonlSessionStorage implements AgentSessionExtension {
+  readonly name = 'jsonl-session';
   private readonly metadata: Record<string, unknown>;
   private readonly entries: SessionEntry[] = [];
   private readonly byId = new Map<string, SessionEntry>();
@@ -123,6 +126,24 @@ export class JsonlSessionStorage implements SessionStorage {
 
   async getEntries(): Promise<SessionEntry[]> {
     return [...this.entries];
+  }
+
+  loadMessages(): AgentMessage[] {
+    return this.entries
+      .map((entry) => entry.message)
+      .filter((message): message is AgentMessage => message !== undefined);
+  }
+
+  async saveResult(result: AgentRunResult): Promise<void> {
+    for (const message of result.messages) {
+      await this.appendEntry({
+        id: generateEntryId(),
+        parentId: this.leafId,
+        timestamp: new Date().toISOString(),
+        kind: 'message',
+        message,
+      });
+    }
   }
 
   /**

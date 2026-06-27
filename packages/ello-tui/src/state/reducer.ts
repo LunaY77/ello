@@ -201,9 +201,8 @@ function reduceEvent(state: TuiState, event: CodingAgentEvent): TuiState {
 }
 
 function eventToText(event: CodingAgentEvent): string | null {
-  if (event.type === 'core_event' && event.event.type === 'message_delta') {
-    const delta = event.event.delta;
-    return delta.type === 'text' && delta.text ? delta.text : null;
+  if (event.type === 'core_event' && event.event.type === 'message.delta') {
+    return event.event.text || null;
   }
   if (event.type === 'diagnostic') {
     return event.message;

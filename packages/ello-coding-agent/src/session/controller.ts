@@ -9,7 +9,7 @@ import type { CodingAgentEvent } from './types.js';
 /**
  * 供 TUI 和 CLI 命令使用的 controller 门面。
  *
- * controller 将面向 UI 的编排与实时会话 runtime 分离，
+ * controller 将面向 UI 的编排与实时会话 agent 分离，
  * 让 app 层无需了解会话持久化或工具执行内部细节。
  */
 export class CodingAgentController {
@@ -37,7 +37,7 @@ export class CodingAgentController {
   }
 
   /**
-   * Resolve a deferred tool approval request.
+   * 记录工具审批动作。
    */
   approveToolCall(id: string, decision: 'approve' | 'reject'): Promise<void> {
     return this.currentSession.approveToolCall(id, decision);
@@ -107,7 +107,7 @@ export class CodingAgentController {
   }
 
   /**
-   * 重新打开一个已持久化会话，并将其设为活跃 runtime。
+   * 重新打开一个已持久化会话，并将其设为活跃 agent。
    */
   async resumeSession(sessionId: string): Promise<CodingAgentSession> {
     this.currentSession = await recreateSession(this.currentSession, { sessionId });
@@ -143,7 +143,7 @@ async function recreateSession(
   overrides: Partial<CodingAgentConfig>,
 ): Promise<CodingAgentSession> {
   const nextConfig = { ...previous.config, ...overrides };
-  const previousLeafId = await previous.runtime.session?.getLeafId?.();
+  const previousLeafId = await previous.storage.getLeafId();
   await previous.close();
   const { createCodingAgentSession } = await import('./factory.js');
   const next = await createCodingAgentSession(nextConfig);

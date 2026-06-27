@@ -3,29 +3,19 @@ import { randomUUID } from 'node:crypto';
 
 import {
   createAgent,
-  DeleteFileTool,
-  EditFileTool,
-  GlobTool,
-  GrepTool,
-  ListDirTool,
-  LocalEnvironment,
-  buildMcpServers,
-  loadMcpConfigFile,
-  MkdirTool,
-  MoveCopyTool,
-  ReadFileTool,
-  ShellExecTool,
-  Toolset,
-  ToolSearchToolset,
-  WebFetchTool,
-  WebSearchTool,
-  WriteFileTool,
+  createLocalEnvironment,
 } from '@ello/agent';
+import {
+  createFilesystemTools,
+  createShellTools,
+  createToolSearchTools,
+  createWebTools,
+} from '@ello/agent/presets';
 
 import type { CodingAgentConfig } from '../config.js';
 import { JsonlSessionStorage } from '../jsonl-session-storage.js';
 import { loadCodingMemory, renderMemoryForPrompt } from '../memory.js';
-import { PermissionToolset } from '../permissions.js';
+import { applyPermissionPolicy } from '../permissions.js';
 import { buildCodingSystemPrompt } from '../system-prompt.js';
 import { TaskManager, TaskRecordSchema } from '../task-manager.js';
 
@@ -44,48 +34,35 @@ export async function createCodingAgentSession(
   });
   const memory = await loadCodingMemory(config.cwd);
   const instructions = renderMemoryForPrompt(memory, config.cwd);
-  const defaultToolset = new Toolset({
-    tools: [
-      ReadFileTool,
-      ListDirTool,
-      GrepTool,
-      GlobTool,
-      EditFileTool,
-      WriteFileTool,
-      MkdirTool,
-      DeleteFileTool,
-      MoveCopyTool,
-      ShellExecTool,
-      WebFetchTool,
-      WebSearchTool,
-    ],
-  });
   const permissionContext = {
     approvalMode: config.approvalMode,
     rules: config.permissionRules,
     cwd: config.cwd,
     allowedPaths: config.allowedPaths,
   };
-  const mcpToolsets = config.mcpConfigPath
-    ? buildMcpServers(await loadMcpConfigFile(config.mcpConfigPath))
-    : [];
-  const runtime = createAgent({
-    modelName: config.model,
-    baseUrl: config.baseUrl,
-    env: new LocalEnvironment({
-      defaultPath: config.cwd,
+  const baseTools = [
+    ...createFilesystemTools(),
+    ...createShellTools(),
+    ...createWebTools(),
+  ];
+  const tools = applyPermissionPolicy(
+    [...baseTools, ...createToolSearchTools(baseTools)],
+    permissionContext,
+  );
+  const agent = createAgent({
+    model: config.model,
+    instructions: buildCodingSystemPrompt(instructions),
+    environment: createLocalEnvironment({
+      cwd: config.cwd,
       allowedPaths: config.allowedPaths,
     }),
-    session: storage,
-    systemPrompt: buildCodingSystemPrompt(instructions),
-    systemPromptTemplateVars: { instructions },
-    toolsets: [
-      new PermissionToolset(defaultToolset, permissionContext),
-      new PermissionToolset(new ToolSearchToolset(defaultToolset), permissionContext),
-      ...mcpToolsets.map((toolset) => new PermissionToolset(toolset, permissionContext)),
-    ],
+    tools,
+    extensions: [storage],
+    metadata: {
+      baseUrl: config.baseUrl,
+      mcpConfigPath: config.mcpConfigPath,
+    },
   });
-  await runtime.enter();
 
   const taskSnapshot = storage.getLatestTaskSnapshot();
   const initialTasks = Array.isArray(taskSnapshot)
@@ -94,7 +71,7 @@ export async function createCodingAgentSession(
   const session = new CodingAgentSession(
     config,
     sessionId,
-    runtime,
+    agent,
     storage,
     memory,
     new TaskManager(initialTasks),
@@ -118,7 +95,7 @@ export async function createCodingAgentSession(
     model: config.model,
     approvalMode: config.approvalMode,
     mcpConfigPath: config.mcpConfigPath,
-    mcpServers: mcpToolsets.map((toolset) => toolset.id),
+    mcpServers: [],
     memoryFiles: memory.files.map((file) => file.path),
     updatedAt: new Date().toISOString(),
   });

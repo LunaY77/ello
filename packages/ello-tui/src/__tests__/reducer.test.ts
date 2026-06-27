@@ -32,9 +32,9 @@ describe('tuiReducer', () => {
       event: {
         type: 'core_event',
         event: {
-          type: 'message_delta',
-          delta: { type: 'text', text: 'hel' },
-          partial: { role: 'assistant', content: 'hel' },
+          type: 'message.delta',
+          messageId: 'm1',
+          text: 'hel',
         },
       },
     });
@@ -43,9 +43,9 @@ describe('tuiReducer', () => {
       event: {
         type: 'core_event',
         event: {
-          type: 'message_delta',
-          delta: { type: 'text', text: 'lo' },
-          partial: { role: 'assistant', content: 'hello' },
+          type: 'message.delta',
+          messageId: 'm1',
+          text: 'lo',
         },
       },
     });

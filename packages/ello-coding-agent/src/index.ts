@@ -28,7 +28,7 @@ export {
   type MemoryManifest,
 } from './memory.js';
 export {
-  PermissionToolset,
+  applyPermissionPolicy,
   evaluateToolPermission,
   formatPermissionRules,
   parsePermissionRules,

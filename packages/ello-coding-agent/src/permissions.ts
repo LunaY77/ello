@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import type { AgentContext, RuntimeToolset, ToolArgs, ToolsetTool } from '@ello/agent';
+import type { AgentTool } from '@ello/agent';
 import { z } from 'zod';
 
 
@@ -38,52 +38,31 @@ export interface PermissionContext {
   allowedPaths: string[];
 }
 
-/**
- * 包装 toolset，让权限检查可以拦截工具执行并触发审批。
- *
- * 该包装器只会在调用时阻断显式 `deny` 决策。`ask` 决策通过
- * `requiresApproval` 暴露给核心 runtime，使其可以暂停、持久化延迟审批状态，
- * 并在同一个工具调用上恢复执行。
- */
-export class PermissionToolset implements RuntimeToolset {
-  constructor(
-    private readonly inner: RuntimeToolset,
-    private readonly context: PermissionContext,
-  ) {}
-
-  get hasApprovalTools(): boolean {
-    return true;
-  }
-
-  async getTools(ctx: { deps: AgentContext }): Promise<Record<string, ToolsetTool>> {
-    const tools = await this.inner.getTools(ctx);
-    const result: Record<string, ToolsetTool> = {};
-    for (const [name, toolDef] of Object.entries(tools)) {
-      result[name] = {
-        ...toolDef,
-        requiresApproval:
-          toolDef.requiresApproval ||
-          evaluateToolPermission(this.context, name, {}).action === 'ask',
-        requiresApprovalFor: (args) =>
-          Boolean(toolDef.requiresApprovalFor?.(args)) ||
-          evaluateToolPermission(this.context, name, args).action === 'ask',
-      };
-    }
-    return result;
-  }
-
-  async callTool(
-    name: string,
-    toolArgs: ToolArgs,
-    ctx: { deps: AgentContext },
-    tool?: ToolsetTool,
-  ): Promise<unknown> {
-    const decision = evaluateToolPermission(this.context, name, toolArgs);
-    if (decision.action === 'deny') {
-      return `denied: ${decision.reason}`;
-    }
-    return this.inner.callTool(name, toolArgs, ctx, tool);
-  }
+/** 使用产品侧权限策略包装函数式工具。 */
+export function applyPermissionPolicy(
+  tools: readonly AgentTool<any, unknown>[],
+  context: PermissionContext,
+): AgentTool<any, unknown>[] {
+  return tools.map((baseTool) => ({
+    ...baseTool,
+    approval: (input, ctx) => {
+      const decision = evaluateToolPermission(context, baseTool.name, input);
+      if (decision.action === 'deny') {
+        return 'denied';
+      }
+      if (decision.action === 'ask') {
+        return 'required';
+      }
+      return baseTool.approval?.(input, ctx) ?? 'auto';
+    },
+    execute: async (input, ctx) => {
+      const decision = evaluateToolPermission(context, baseTool.name, input);
+      if (decision.action === 'deny') {
+        return `denied: ${decision.reason}`;
+      }
+      return baseTool.execute(input, ctx);
+    },
+  }));
 }
 
 /**

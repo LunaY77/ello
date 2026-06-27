@@ -10,11 +10,8 @@ export function formatCodingAgentEventOutput(
   if (json) {
     return `${JSON.stringify(event)}\n`;
   }
-  if (event.type === 'core_event' && event.event.type === 'message_delta') {
-    const delta = event.event.delta;
-    if (delta.type === 'text') {
-      return delta.text;
-    }
+  if (event.type === 'core_event' && event.event.type === 'message.delta') {
+    return event.event.text;
   }
   if (event.type === 'run_finished') {
     return event.success ? '\n' : `\n${event.error ?? ''}\n`;

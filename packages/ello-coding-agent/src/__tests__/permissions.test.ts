@@ -1,14 +1,9 @@
-import {
-  LocalEnvironment,
-  ReadFileTool,
-  Toolset,
-  type AgentContext,
-} from '@ello/agent';
+import { createFilesystemTools } from '@ello/agent/presets';
 import { describe, expect, it } from 'vitest';
 
 
 import {
-  PermissionToolset,
+  applyPermissionPolicy,
   evaluateToolPermission,
   formatPermissionRules,
 } from '../permissions.js';
@@ -91,47 +86,25 @@ describe('permissions', () => {
     ).toContain('shell_exec');
   });
 
-  it('keeps allowed path decisions in the permission toolset wrapper', async () => {
-    const env = new LocalEnvironment({
-      defaultPath: '/repo',
+  it('keeps allowed path decisions in the permission tool wrapper', async () => {
+    const tools = applyPermissionPolicy(createFilesystemTools(), {
+      approvalMode: 'on-request',
+      cwd: '/repo',
       allowedPaths: ['/repo/src'],
+      rules: [],
     });
-    await env.enter();
-    try {
-      const toolset = new PermissionToolset(
-        new Toolset({ tools: [ReadFileTool] }),
-        {
-          approvalMode: 'on-request',
-          cwd: '/repo',
-          allowedPaths: ['/repo/src'],
-          rules: [],
-        },
-      );
-      const ctx = {
-        deps: {
-          env,
-          toolConfig: {
-            viewMaxTextFileSize: 1024 * 1024,
-          },
-        } as AgentContext,
-      };
-
-      const tools = await toolset.getTools(ctx);
-      expect(tools.read_file?.requiresApproval).toBe(false);
-      expect(
-        evaluateToolPermission(
-          {
-            approvalMode: 'on-request',
-            cwd: '/repo',
-            allowedPaths: ['/repo/src'],
-            rules: [],
-          },
-          'read_file',
-          { path: '/tmp/secrets.txt' },
-        ).action,
-      ).toBe('ask');
-    } finally {
-      await env.exit();
-    }
+    const readFile = tools.find((tool) => tool.name === 'read_file');
+    await expect(Promise.resolve(
+      readFile?.approval?.(
+        { path: 'src/index.ts' },
+        { runId: 'run', environment: {}, metadata: {} },
+      ),
+    )).resolves.toBe('auto');
+    await expect(Promise.resolve(
+      readFile?.approval?.(
+        { path: '/tmp/secrets.txt' },
+        { runId: 'run', environment: {}, metadata: {} },
+      ),
+    )).resolves.toBe('required');
   });
 });

@@ -1,5 +1,4 @@
-import type { AgentStreamEvent } from '@ello/agent';
-import type { RunUsage } from '@ello/agent';
+import type { AgentStreamEvent, AgentUsage } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config.js';
 import type { JsonlSessionSummary } from '../jsonl-session-storage.js';
@@ -9,7 +8,7 @@ import type { TaskRecord } from '../task-manager.js';
  * CodingAgentSession 发出的产品侧事件流。
  *
  * 会话层刻意保持这个接口小而面向 UI，让 CLI/TUI 无需导入核心
- * AgentRuntime 内部实现即可渲染。
+ * Agent 稳定接口即可渲染。
  */
 export type CodingAgentEvent =
   | { type: 'session_started'; sessionId: string; config: CodingAgentConfig }
@@ -17,9 +16,9 @@ export type CodingAgentEvent =
   | {
       type: 'usage_snapshot';
       runId: string;
-      totalUsage: RunUsage;
-      modelUsage: Record<string, RunUsage>;
-      agentUsage: Record<string, { agentName: string; modelId: string; usage: RunUsage; source: string }>;
+      totalUsage: AgentUsage;
+      modelUsage: Record<string, AgentUsage>;
+      agentUsage: Record<string, { agentName: string; modelId: string; usage: AgentUsage; source: string }>;
     }
   | { type: 'run_started'; runId: string; input: string }
   | { type: 'run_finished'; runId: string; success: boolean; error?: string }
