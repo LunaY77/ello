@@ -1,3 +1,10 @@
+/**
+ * Agent 工厂入口。
+ *
+ * 暴露 `createAgent`：把 {@link CreateAgentOptions} 装配成内部 `ElloAgent` 实例，
+ * 并以稳定的 {@link Agent} 接口（run/stream/resume/close）对外返回，从而把内核
+ * 内部实现与调用方隔离开。
+ */
 import { ElloAgent } from '../core/agent.js';
 
 import type { Agent, CreateAgentOptions } from './types.js';

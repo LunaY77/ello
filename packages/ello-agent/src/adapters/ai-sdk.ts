@@ -1,3 +1,12 @@
+/**
+ * Vercel AI SDK 模型适配器。
+ *
+ * 把框架的标准 {@link AgentModelRequest} 翻译成 AI SDK 的 `generateText` /
+ * `streamText` 调用，并把其响应（文本、消息、tool call、用量、结束原因）反向
+ * 归一化回框架的标准响应形态。这是框架默认依赖具体 provider 的唯一位置——核心
+ * 循环只面向 {@link ModelAdapter} 接口编程，替换此适配器即可接入测试桩或私有模型服务。
+ */
+
 import { anthropic } from '@ai-sdk/anthropic';
 import { openai } from '@ai-sdk/openai';
 import {
@@ -121,6 +130,12 @@ function normalizeResponseMessages(
   return fallbackText ? [{ role: 'assistant', content: fallbackText }] : [];
 }
 
+/**
+ * 把 AI SDK 形态各异的 tool call 归一化为框架标准 `{ id, name, input }`。
+ *
+ * 兼容不同字段命名（`toolCallId`/`id`、`toolName`/`name`、`input`/`args`），
+ * 缺失 id 时回退为按序号生成的占位标识，缺失名时回退 `'unknown'`。
+ */
 function normalizeToolCalls(value: readonly unknown[]) {
   return value.map((item, index) => {
     const record = item as Record<string, unknown>;
@@ -159,6 +174,7 @@ export function resolveLanguageModel(model: AgentModel): LanguageModel {
   return openai(model as Parameters<typeof openai>[0]);
 }
 
+/** 把 provider 返回的结束原因收敛到框架已知枚举，未识别值归为 `'unknown'`。 */
 function normalizeFinishReason(value: unknown): AgentFinishReason {
   if (
     value === 'stop' ||

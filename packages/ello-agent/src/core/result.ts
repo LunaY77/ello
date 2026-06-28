@@ -9,6 +9,23 @@ import type {
 
 import type { LoopStopReason, RunSession } from './run-session.js';
 
+/**
+ * 运行结果与诊断信息的装配。
+ *
+ * 回合循环结束后，把散落在 {@link RunSession} 中的状态收拢成对外的
+ * {@link AgentRunResult} 与 {@link AgentRunDiagnostics}：
+ * - 诊断：逐回合诊断、队列排空记录、待办计数、最后一轮模型输入、压缩报告等；
+ * - 结果：最终文本/消息/usage、由内部停止原因映射出的 `finishReason`、
+ *   工具调用列表与待办快照；
+ * - finishReason 映射：把内核内部的 {@link LoopStopReason} 翻译成对外语义。
+ */
+
+/**
+ * 装配整段运行的诊断信息。
+ *
+ * 汇总逐回合诊断、队列排空记录与待办计数；仅在存在时附带最后一轮的模型
+ * 输入诊断、恢复来源标记与压缩报告，避免输出冗余字段。
+ */
 export function createRunDiagnostics(options: {
   readonly run: RunSession;
   readonly turns: readonly AgentTurnDiagnostics[];
@@ -29,12 +46,20 @@ export function createRunDiagnostics(options: {
   };
 }
 
+/**
+ * 装配对外的运行结果 {@link AgentRunResult}。
+ *
+ * 文本取自最终响应（缺省为空串）；usage 在累计值之上把本次运行实际发生的
+ * 工具调用数补加进 `toolCalls`；`finishReason` 由内部停止原因映射而来；
+ * 同时附带消息快照、工具调用列表、待办快照与诊断/元数据。
+ */
 export function createRunResult(options: {
   readonly run: RunSession;
   readonly diagnostics: AgentRunDiagnostics;
 }): AgentRunResult {
   const response = options.run.finalResponse;
   const finishReason = finishReasonForStop(options.run.stopReason, options.run);
+  // 把本次运行记录的工具调用条数并入累计 usage。
   const usage = {
     ...options.run.usage,
     toolCalls: options.run.usage.toolCalls + options.run.toolCalls.length,
@@ -57,6 +82,11 @@ export function createRunResult(options: {
   };
 }
 
+/**
+ * 装配单个回合的诊断信息。
+ *
+ * 缺省模型输入诊断时填充一份空诊断占位，保证字段稳定存在。
+ */
 export function createTurnDiagnostics(options: {
   readonly turn: number;
   readonly modelInput?: ModelInputDiagnostics;
@@ -73,6 +103,13 @@ export function createTurnDiagnostics(options: {
   };
 }
 
+/**
+ * 把内核内部停止原因映射成对外的 `finishReason`。
+ *
+ * 自然结束→`stop`，到达回合上限→`length`，等待审批→`approval-required`，
+ * 被中断→`interrupted`，无进展→`no-progress`；其余情况退回最终响应自带的
+ * finishReason，仍无则记为 `error`。
+ */
 export function finishReasonForStop(
   stopReason: LoopStopReason,
   run?: RunSession,
@@ -95,6 +132,7 @@ export function finishReasonForStop(
   return run?.finalResponse?.finishReason ?? 'error';
 }
 
+/** 空的模型输入诊断占位（全零/全空）。 */
 function emptyModelInputDiagnostics(): ModelInputDiagnostics {
   return {
     systemSections: 0,

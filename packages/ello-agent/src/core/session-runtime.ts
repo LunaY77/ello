@@ -1,3 +1,10 @@
+/**
+ * 会话持久化与压缩的运行时胶水层。
+ *
+ * 把回合循环与可选的「会话存储」「会话压缩器」解耦：仅当配置里同时提供了
+ * `session` 存储与 `sessionId` 时才真正读写历史，否则全部静默退化为无操作。
+ * 因此一次性（无持久化）运行与带持久化的长会话共用同一套循环代码。
+ */
 import type {
   AgentMessage,
   AgentRunContext,
@@ -6,6 +13,11 @@ import type {
   SessionCompactionReport,
 } from '../public/types.js';
 
+/**
+ * 运行开始时载入既有会话历史。
+ *
+ * 未配置会话存储或缺少 `sessionId` 时返回空数组，使运行从零开始。
+ */
 export async function loadSessionMessages(options: {
   readonly config: CreateAgentOptions;
   readonly sessionId?: string;
@@ -17,6 +29,12 @@ export async function loadSessionMessages(options: {
   return messages;
 }
 
+/**
+ * 运行结束时把本次新增的消息追加到会话存储。
+ *
+ * `sessionId` 取自结果元数据；只追加 `messagesToAppend`（即本次运行相对
+ * 载入历史新产生的部分），避免重复写入已持久化的历史。
+ */
 export async function saveSessionResult(options: {
   readonly config: CreateAgentOptions;
   readonly result: AgentRunResult;
@@ -35,6 +53,12 @@ export async function saveSessionResult(options: {
   }
 }
 
+/**
+ * 运行收尾时尝试压缩会话历史。
+ *
+ * 仅当 `sessionId`、会话存储与压缩器三者齐备时才调用压缩器的 `maybeCompact`，
+ * 是否真正压缩由压缩器自行判定。返回压缩报告数组（未压缩时为空），用于运行诊断。
+ */
 export async function compactSession(options: {
   readonly config: CreateAgentOptions;
   readonly sessionId?: string;

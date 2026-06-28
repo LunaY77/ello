@@ -1,3 +1,12 @@
+/**
+ * core 工具调度器模块。
+ *
+ * 模型适配器只负责把模型输出归一化成标准 tool call；本模块在此之上承担工具的
+ * 审批判定、执行、错误归一化以及 tool-result 消息构造，是「模型决定调用什么」
+ * 与「框架如何真正执行」之间的唯一汇聚点。审批被拦截在执行之前，确保需要批准
+ * 的工具不会先于人工决定就被执行。
+ */
+
 import { normalizeAgentError } from '../public/errors.js';
 import type {
   AgentEnvironment,
@@ -7,15 +16,23 @@ import type {
   AnyAgentTool,
 } from '../public/types.js';
 
+/** 构造 {@link ToolScheduler} 的入参。 */
 export interface ToolSchedulerOptions {
+  /** 当前 run 的标识，注入到每次工具执行的上下文中。 */
   readonly runId: string;
+  /** 本 run 可用的全部工具，按名建索引后供调度查找。 */
   readonly tools: readonly AnyAgentTool[];
+  /** 工具运行所处的环境（文件系统、shell、资源等）。 */
   readonly environment: AgentEnvironment;
+  /** 透传给工具上下文的元数据。 */
   readonly metadata: Record<string, unknown>;
 }
 
+/** 调度过程中的事件回调集合，由调用方提供以转发为运行事件。 */
 export interface ToolSchedulerEventSink {
+  /** 某个工具开始执行时触发。 */
   onToolStarted(toolCallId: string, name: string, input: unknown): Promise<void>;
+  /** 某个工具需要人工审批、被挂起时触发。 */
   onApprovalRequired(item: {
     readonly kind: 'approval';
     readonly toolCallId: string;
@@ -23,13 +40,19 @@ export interface ToolSchedulerEventSink {
     readonly input?: unknown;
     readonly reason?: string;
   }): Promise<void>;
+  /** 某个工具执行成功时触发，携带其输出。 */
   onToolCompleted(toolCallId: string, output: unknown): Promise<void>;
+  /** 某个工具执行失败时触发，携带错误。 */
   onToolFailed(toolCallId: string, error: Error): Promise<void>;
 }
 
+/** 一批 tool call 调度后的结果。 */
 export interface ToolScheduleResult {
+  /** 已执行（成功/失败/拒绝）工具对应的 tool-result 消息。 */
   readonly messages: AgentMessage[];
+  /** 已执行工具的 tool call 记录（含输出或归一化错误）。 */
   readonly toolCalls: AgentToolCall[];
+  /** 因需要审批而挂起、尚未执行的工具项。 */
   readonly pending: Array<{
     readonly kind: 'approval';
     readonly toolCallId: string;
@@ -46,13 +69,20 @@ export interface ToolScheduleResult {
  * 归一化和 tool-result message 构造。
  */
 export class ToolScheduler {
+  /** 工具名到工具实现的索引，便于按名查找。 */
   private readonly byName: Map<string, AnyAgentTool>;
 
   constructor(private readonly options: ToolSchedulerOptions) {
     this.byName = new Map(options.tools.map((tool) => [tool.name, tool]));
   }
 
-  /** 执行一批模型返回的 tool call。 */
+  /**
+   * 顺序执行一批模型返回的 tool call。
+   *
+   * 对每个 call 依次做：未知工具 → 失败；审批策略判定为拒绝 → 拒绝；判定为需审批
+   * → 挂起进 `pending` 且不执行；否则执行并收集结果。成功、失败、拒绝都会生成相应
+   * 的 tool-result 消息，使下一回合模型能看到每次调用的结果。
+   */
   async schedule(
     calls: readonly AgentToolCall[],
     sink: ToolSchedulerEventSink,
@@ -62,6 +92,7 @@ export class ToolScheduler {
     const pending: ToolScheduleResult['pending'] = [];
     for (const call of calls) {
       const tool = this.byName.get(call.name);
+      // 模型可能臆造出不存在的工具名：记为失败并回灌错误结果，而非直接抛出中断整批。
       if (tool === undefined) {
         const error = new Error(`Unknown tool: ${call.name}`);
         await sink.onToolStarted(call.id, call.name, call.input);
@@ -71,6 +102,7 @@ export class ToolScheduler {
         continue;
       }
       const ctx = this.createContext();
+      // 执行前先跑工具自带的审批策略（若有），据其结果决定拒绝 / 挂起 / 放行。
       const decision = await tool.approval?.(call.input, ctx);
       if (decision === 'denied') {
         const error = new Error(`Tool '${call.name}' was denied by approval policy.`);
@@ -80,6 +112,7 @@ export class ToolScheduler {
         messages.push(createToolResultMessage(call, { denied: true, reason: error.message }, 'denied'));
         continue;
       }
+      // 需要人工审批：仅入队挂起并通知，不执行，等待产品层批准后再重放。
       if (decision === 'required') {
         const item = {
           kind: 'approval' as const,
@@ -92,6 +125,7 @@ export class ToolScheduler {
         await sink.onApprovalRequired(item);
         continue;
       }
+      // 放行：正常执行工具，捕获异常并归一化，单个工具失败不影响整批其余调用。
       await sink.onToolStarted(call.id, call.name, call.input);
       try {
         const output = await tool.execute(call.input, ctx);
@@ -146,6 +180,7 @@ export class ToolScheduler {
   }
 }
 
+/** 构造一条 `role:'tool'` 的 tool-result 消息，按状态包装其输出负载。 */
 function createToolResultMessage(
   call: AgentToolCall,
   output: unknown,
@@ -164,6 +199,12 @@ function createToolResultMessage(
   } as unknown as AgentMessage;
 }
 
+/**
+ * 把工具输出归一化为 AI SDK 识别的 tool-output 负载形态。
+ *
+ * 拒绝 → `execution-denied`；错误 → `error-text`；字符串原样作 `text`；
+ * 其余对象走 `json`（经一轮 JSON 序列化清洗，去除不可序列化字段）。
+ */
 function createAiSdkToolOutput(
   output: unknown,
   status: 'success' | 'error' | 'denied',
@@ -186,6 +227,7 @@ function createAiSdkToolOutput(
   return { type: 'json', value: toJsonValue(output) };
 }
 
+/** 从对象或字符串里尽力提取一段可读的原因文本（优先 `reason`，回退 `error`）。 */
 function readReason(value: unknown): string | undefined {
   if (typeof value === 'object' && value !== null) {
     const reason = (value as Record<string, unknown>).reason ?? (value as Record<string, unknown>).error;
@@ -194,6 +236,7 @@ function readReason(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+/** 经一轮 JSON 序列化清洗任意值，`undefined` 归一化为 `null`。 */
 function toJsonValue(value: unknown): unknown {
   if (value === undefined) {
     return null;

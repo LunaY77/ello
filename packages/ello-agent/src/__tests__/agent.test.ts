@@ -236,7 +236,7 @@ describe('createAgent', () => {
     ).toBe(0);
   });
 
-  it('builds model input with session, memory, observers, and transforms', async () => {
+  it('builds model input with session, observers, and transforms', async () => {
     const seenMessages: AgentModelRequest[] = [];
     let sessionLoads = 0;
     const session = {
@@ -264,14 +264,6 @@ describe('createAgent', () => {
       },
       instructions: 'Be precise.',
       session,
-      memory: {
-        retrieve: () => [
-          {
-            text: 'remembered fact',
-          },
-        ],
-        observe: (event) => observed.push(event.type),
-      },
       modelInput: {
         systemSections: [() => 'Working directory: /tmp/project'],
         messageTransforms: [trimMessages({ maxMessages: 3 })],
@@ -280,6 +272,7 @@ describe('createAgent', () => {
       observers: [
         {
           onTurnStarted: () => observed.push('turn-started'),
+          onRunCompleted: () => observed.push('run.completed'),
         },
       ],
     });
@@ -290,7 +283,6 @@ describe('createAgent', () => {
     expect(seenMessages[0]?.system).toContain(
       'Working directory: /tmp/project',
     );
-    expect(seenMessages[0]?.system).toContain('remembered fact');
     expect(seenMessages[0]?.providerOptions).toEqual({
       test: { enabled: true },
     });
@@ -763,71 +755,6 @@ describe('createAgent', () => {
     });
     expect(result.finishReason).toBe('stop');
     await agent.close();
-  });
-
-  it('honors memory retrieve policies', async () => {
-    let oncePerRun = 0;
-    let oncePerTurn = 0;
-    const adapter: ModelAdapter = {
-      async generate(request) {
-        const first = !request.messages.some(
-          (message) => message.role === 'assistant',
-        );
-        return {
-          text: first ? '' : 'done',
-          messages: [
-            ...request.messages,
-            { role: 'assistant', content: first ? 'tool result' : 'done' },
-          ],
-          newMessages: [
-            { role: 'assistant', content: first ? 'tool result' : 'done' },
-          ],
-          usage: {
-            requests: 1,
-            inputTokens: 0,
-            outputTokens: 0,
-            cacheReadTokens: 0,
-            cacheWriteTokens: 0,
-            toolCalls: 0,
-          },
-          finishReason: first ? 'tool-calls' : 'stop',
-          provider: null,
-        };
-      },
-      async *stream(request) {
-        yield { type: 'final', response: await this.generate(request) };
-      },
-    };
-    const runAgent = createAgent({
-      model: 'test:model',
-      modelAdapter: adapter,
-      memory: {
-        retrievePolicy: 'once-per-run',
-        retrieve: () => {
-          oncePerRun += 1;
-          return [];
-        },
-      },
-    });
-    const turnAgent = createAgent({
-      model: 'test:model',
-      modelAdapter: adapter,
-      memory: {
-        retrievePolicy: 'once-per-turn',
-        retrieve: () => {
-          oncePerTurn += 1;
-          return [];
-        },
-      },
-    });
-
-    await runAgent.run('hi');
-    await turnAgent.run('hi');
-
-    expect(oncePerRun).toBe(1);
-    expect(oncePerTurn).toBe(2);
-    await runAgent.close();
-    await turnAgent.close();
   });
 
   it('stream abort resolves final as interrupted instead of failing', async () => {

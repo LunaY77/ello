@@ -1,15 +1,27 @@
+/**
+ * 工具定义辅助。
+ *
+ * 提供 `defineTool` 工厂，把 Zod 输入 schema、执行函数与可选审批策略包装成内核
+ * 可消费的 {@link AgentTool}，并让 `TInput` 从 schema 自动推导，省去手写类型。
+ */
 import type { z } from 'zod';
 
 import type { AgentTool, AgentToolContext, MaybePromise } from './types.js';
 
+/** {@link defineTool} 的入参。 */
 export interface DefineToolOptions<TInput, TOutput> {
+  /** 工具名（模型调用时使用）。 */
   readonly name: string;
+  /** 工具描述（供模型选择工具）。 */
   readonly description: string;
+  /** 输入 Zod schema，用于校验并推导 `TInput`。 */
   readonly input: z.ZodType<TInput>;
+  /** 实际执行函数。 */
   readonly execute: (
     input: TInput,
     ctx: AgentToolContext,
   ) => MaybePromise<TOutput>;
+  /** 可选审批策略。 */
   readonly approval?: AgentTool<TInput, TOutput>['approval'];
 }
 
