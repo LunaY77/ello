@@ -2,18 +2,37 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile, appendFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { AgentMessage } from '@ello/agent';
-
-import type { CodingAgentEvent, CompactSummary, SessionInfo } from '../product/events.js';
+import type { AgentMessage, AgentStreamEvent } from '@ello/agent';
 
 /** JSONL session 文件版本。 */
 export const SESSION_FILE_VERSION = 1;
+
+/** 一个会话文件的元信息。 */
+export interface SessionInfo {
+  readonly sessionId: string;
+  readonly cwd: string;
+  readonly path: string;
+  readonly createdAt: string;
+  readonly activeEntryId?: string;
+}
+
+/**
+ * 一次压缩边界的描述。
+ *
+ * `summary` 为压缩摘要正文，`boundaryEntryId` 指向压缩发生时的 active leaf，
+ * 便于回放时定位“摘要之前的历史”。
+ */
+export interface CompactSummary {
+  readonly id: string;
+  readonly boundaryEntryId?: string;
+  readonly summary: string;
+}
 
 /** append-only session tree 的记录形状。 */
 export type SessionRecord =
   | { readonly kind: 'header'; readonly sessionId: string; readonly cwd: string; readonly createdAt: string; readonly version: number }
   | { readonly kind: 'entry'; readonly id: string; readonly parentId: string | null; readonly type: 'message'; readonly message: AgentMessage; readonly createdAt: string }
-  | { readonly kind: 'entry'; readonly id: string; readonly parentId: string | null; readonly type: 'event'; readonly event: CodingAgentEvent; readonly createdAt: string }
+  | { readonly kind: 'entry'; readonly id: string; readonly parentId: string | null; readonly type: 'event'; readonly event: AgentStreamEvent; readonly createdAt: string }
   | { readonly kind: 'leaf'; readonly entryId: string | null; readonly createdAt: string }
   | { readonly kind: 'branch'; readonly from: string | null; readonly to: string; readonly reason: string; readonly createdAt: string }
   | { readonly kind: 'compaction'; readonly id: string; readonly boundaryEntryId?: string; readonly summary: string; readonly createdAt: string };
@@ -130,8 +149,8 @@ export class JsonlSessionRepository {
     return leaf;
   }
 
-  /** 追加产品事件。 */
-  async appendEvent(sessionId: string, parentId: string | null, event: CodingAgentEvent): Promise<string> {
+  /** 追加内核事件（回放用，可选）。 */
+  async appendEvent(sessionId: string, parentId: string | null, event: AgentStreamEvent): Promise<string> {
     const id = randomUUID();
     await this.appendRecords(sessionId, [
       { kind: 'entry', id, parentId, type: 'event', event, createdAt: new Date().toISOString() },
