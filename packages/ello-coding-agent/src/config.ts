@@ -4,9 +4,9 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
-import { PermissionRuleSchema } from './permissions.js';
+import { PermissionModeSchema, PermissionRuleSchema } from './permissions.js';
 
-export const ApprovalModeSchema = z.enum(['never', 'on-request', 'always']);
+export const ApprovalModeSchema = PermissionModeSchema;
 export type ApprovalMode = z.infer<typeof ApprovalModeSchema>;
 
 /**
@@ -29,7 +29,7 @@ export const CodingAgentConfigSchema = z.object({
   allowedPaths: z.array(z.string()).default([]),
   sessionDir: z.string().default(path.join(homedir(), '.ello', 'sessions')),
   sessionId: z.string().nullable().default(null),
-  approvalMode: ApprovalModeSchema.default('on-request'),
+  approvalMode: ApprovalModeSchema.default('default'),
   permissionRules: z.array(PermissionRuleSchema).default([]),
   mcpConfigPath: z.string().nullable().default(null),
   systemPromptProfile: z.string().default('coding'),
@@ -54,6 +54,7 @@ export async function loadCodingAgentConfig(
   const cwd = path.resolve(overrides.cwd ?? process.cwd());
   const user = await readJsonConfig(path.join(homedir(), '.ello', 'config.json'));
   const project = await readJsonConfig(path.join(cwd, '.ello', 'config.json'));
+  const local = await readJsonConfig(path.join(cwd, '.ello', 'local.json'));
   const env = readEnvConfig();
   const sessionDirValue = firstString(
     overrides.sessionDir,
@@ -61,19 +62,24 @@ export async function loadCodingAgentConfig(
     project.sessionDir,
     user.sessionDir,
   );
-  return CodingAgentConfigSchema.parse({
+  const merged = {
     ...user,
     ...project,
+    ...local,
     ...env,
     ...overrides,
     cwd,
     allowedPaths: resolveAllowedPaths(
       cwd,
-      overrides.allowedPaths ?? env.allowedPaths ?? project.allowedPaths ?? user.allowedPaths,
+      overrides.allowedPaths ?? env.allowedPaths ?? local.allowedPaths ?? project.allowedPaths ?? user.allowedPaths,
     ),
     sessionDir: path.resolve(
       sessionDirValue ?? path.join(homedir(), '.ello', 'sessions'),
     ),
+  };
+  return CodingAgentConfigSchema.parse({
+    ...merged,
+    approvalMode: normalizeApprovalMode(merged.approvalMode ?? 'default'),
   });
 }
 
@@ -128,7 +134,7 @@ function readEnvConfig(): Record<string, unknown> {
       ? { allowedPaths: process.env.ELLO_ALLOWED_PATHS.split(path.delimiter) }
       : {}),
     ...(process.env.ELLO_APPROVAL_MODE
-      ? { approvalMode: process.env.ELLO_APPROVAL_MODE }
+      ? { approvalMode: normalizeApprovalMode(process.env.ELLO_APPROVAL_MODE) }
       : {}),
   };
 }
@@ -158,4 +164,11 @@ function firstString(...values: unknown[]): string | null {
     }
   }
   return null;
+}
+
+export function normalizeApprovalMode(value: unknown): ApprovalMode {
+  if (value === 'never') return 'dont-ask';
+  if (value === 'on-request') return 'default';
+  if (value === 'always') return 'bypass';
+  return ApprovalModeSchema.parse(value);
 }

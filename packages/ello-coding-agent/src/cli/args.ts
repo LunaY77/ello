@@ -1,86 +1,99 @@
-import type { ApprovalMode } from '../config.js';
+import { normalizeApprovalMode, type ApprovalMode } from '../config.js';
 
-import type { CliOptions } from './types.js';
+import type { CliCommand, CliOptions } from './types.js';
 
-/**
- * 将 argv 解析为产品层 CLI 选项。
- */
+/** 将 argv 解析为产品层 CLI 选项。 */
 export function parseArgs(args: string[]): CliOptions {
-  const options: CliOptions = {
-    command: 'tui',
-    subcommand: null,
-    prompt: '',
-    modelCandidates: [],
-    allowedPaths: [],
-  };
+  let command: CliCommand = 'tui';
+  let subcommand: string | null = null;
   const rest: string[] = [];
+  const modelCandidates: string[] = [];
+  const allowedPaths: string[] = [];
+  let model: string | undefined;
+  let baseUrl: string | undefined;
+  let cwd: string | undefined;
+  let sessionId: string | undefined;
+  let mcpConfigPath: string | undefined;
+  let approvalMode: ApprovalMode | undefined;
+  let json: boolean | undefined;
+  let noTui: boolean | undefined;
+
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? '';
-    if (
-      arg === 'run' ||
-      arg === 'resume' ||
-      arg === 'sessions' ||
-      arg === 'config' ||
-      arg === 'tools' ||
-      arg === 'memory' ||
-      arg === 'permissions' ||
-      arg === 'tasks'
-    ) {
-      options.command = arg;
-      if ((arg === 'config' || arg === 'tools') && args[index + 1]?.startsWith('-') === false) {
-        options.subcommand = args[(index += 1)] ?? null;
+    if (isCommand(arg)) {
+      command = arg;
+      if (arg === 'config' && args[index + 1] !== undefined && !args[index + 1]!.startsWith('-')) {
+        subcommand = args[(index += 1)] ?? null;
       }
       continue;
     }
     if (arg === '--help' || arg === '-h') {
-      options.command = 'help';
+      command = 'help';
       continue;
     }
     if (arg === '--model') {
-      options.model = readOptionValue(args, (index += 1), arg);
+      model = readOptionValue(args, (index += 1), arg);
       continue;
     }
     if (arg === '--model-candidate') {
-      options.modelCandidates.push(readOptionValue(args, (index += 1), arg));
+      modelCandidates.push(readOptionValue(args, (index += 1), arg));
       continue;
     }
     if (arg === '--base-url') {
-      options.baseUrl = readOptionValue(args, (index += 1), arg);
+      baseUrl = readOptionValue(args, (index += 1), arg);
       continue;
     }
     if (arg === '--cwd') {
-      options.cwd = readOptionValue(args, (index += 1), arg);
+      cwd = readOptionValue(args, (index += 1), arg);
       continue;
     }
     if (arg === '--session') {
-      options.sessionId = readOptionValue(args, (index += 1), arg);
+      sessionId = readOptionValue(args, (index += 1), arg);
       continue;
     }
     if (arg === '--allowed-path') {
-      options.allowedPaths.push(readOptionValue(args, (index += 1), arg));
+      allowedPaths.push(readOptionValue(args, (index += 1), arg));
       continue;
     }
     if (arg === '--mcp') {
-      options.mcpConfigPath = readOptionValue(args, (index += 1), arg);
+      mcpConfigPath = readOptionValue(args, (index += 1), arg);
       continue;
     }
     if (arg === '--approval-mode') {
-      options.approvalMode = readApprovalMode(readOptionValue(args, (index += 1), arg));
+      approvalMode = normalizeApprovalMode(readOptionValue(args, (index += 1), arg));
       continue;
     }
     if (arg === '--json') {
-      options.json = true;
+      json = true;
       continue;
     }
     if (arg === '--no-tui') {
-      options.noTui = true;
-      options.command = options.command === 'tui' ? 'run' : options.command;
+      noTui = true;
+      if (command === 'tui') command = 'run';
       continue;
     }
     rest.push(arg);
   }
-  options.prompt = rest.join(' ');
-  return options;
+
+  return {
+    command,
+    subcommand,
+    prompt: rest.join(' '),
+    ...(model !== undefined ? { model } : {}),
+    modelCandidates,
+    ...(baseUrl !== undefined ? { baseUrl } : {}),
+    ...(cwd !== undefined ? { cwd } : {}),
+    ...(sessionId !== undefined ? { sessionId } : {}),
+    allowedPaths,
+    ...(mcpConfigPath !== undefined ? { mcpConfigPath } : {}),
+    ...(approvalMode !== undefined ? { approvalMode } : {}),
+    ...(json !== undefined ? { json } : {}),
+    ...(noTui !== undefined ? { noTui } : {}),
+  };
+}
+
+function isCommand(value: string): value is CliCommand {
+  return value === 'run' || value === 'rpc' || value === 'resume' || value === 'sessions' || value === 'config' || value === 'tools' || value === 'memory' || value === 'permissions';
 }
 
 function readOptionValue(args: string[], index: number, flag: string): string {
@@ -89,11 +102,4 @@ function readOptionValue(args: string[], index: number, flag: string): string {
     throw new Error(`Missing value for ${flag}`);
   }
   return value;
-}
-
-function readApprovalMode(value: string): ApprovalMode {
-  if (value === 'never' || value === 'on-request' || value === 'always') {
-    return value;
-  }
-  throw new Error(`Invalid approval mode: ${value}`);
 }

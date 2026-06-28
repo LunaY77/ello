@@ -237,12 +237,22 @@ describe('createAgent', () => {
       modelAdapter: {
         async generate(request) {
           toolsSeen.push(request);
-          const execute = request.tools.danger?.execute;
-          if (execute === undefined) {
-            throw new Error('missing tool');
-          }
-          await execute({ value: 'x' }, { toolCallId: 'call_1', messages: [] });
-          return new EchoAdapter().generate(request);
+          return {
+            text: '',
+            messages: [...request.messages],
+            newMessages: [],
+            toolCalls: [{ id: 'call_1', name: 'danger', input: { value: 'x' } }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: 'tool-calls',
+            provider: null,
+          };
         },
         async *stream(request) {
           yield { type: 'final', response: await this.generate(request) };
@@ -502,12 +512,22 @@ describe('createAgent', () => {
       ],
       modelAdapter: {
         async generate(request) {
-          const execute = request.tools.danger?.execute;
-          if (execute === undefined) {
-            throw new Error('missing tool');
-          }
-          await execute({ value: 'x' }, { toolCallId: 'call_1', messages: [] });
-          return new EchoAdapter().generate(request);
+          return {
+            text: '',
+            messages: [...request.messages],
+            newMessages: [],
+            toolCalls: [{ id: 'call_1', name: 'danger', input: { value: 'x' } }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: 'tool-calls',
+            provider: null,
+          };
         },
         async *stream(request) {
           yield { type: 'final', response: await this.generate(request) };
@@ -518,6 +538,15 @@ describe('createAgent', () => {
     const resumedRequests: AgentModelRequest[] = [];
     const resumedAgent = createAgent({
       model: 'test:model',
+      tools: [
+        defineTool({
+          name: 'danger',
+          description: 'Dangerous tool',
+          input: z.object({ value: z.string() }),
+          approval: () => 'required',
+          execute: () => 'approved-output',
+        }),
+      ],
       modelAdapter: {
         async generate(request) {
           resumedRequests.push(request);
@@ -552,6 +581,8 @@ describe('createAgent', () => {
 
     expect(result.output).toBe('approved');
     expect(resumedRequests[0]?.messages[0]).toMatchObject({ role: 'tool' });
+    expect(JSON.stringify(resumedRequests[0]?.messages[0])).toContain('"type":"text"');
+    expect(JSON.stringify(resumedRequests[0]?.messages[0])).toContain('approved-output');
     expect(result.diagnostics?.resumeSource).toBe('options.resume');
     await firstAgent.close();
     await resumedAgent.close();

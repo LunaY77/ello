@@ -12,23 +12,24 @@ import {
 } from './config.js';
 import { loadCodingMemory, summarizeMemory } from './memory.js';
 import { formatPermissionRules } from './permissions.js';
-import {
-  createCodingAgentSession,
-  listCodingAgentSessions,
-} from './session.js';
+import { CodingAgentRuntime } from './product/runtime.js';
+import { runRpcServer } from './rpc/server.js';
+import { JsonlSessionRepository } from './session/repository.js';
 import { handleSlashCommand } from './slash-commands.js';
+import type { CommandResult } from './slash-commands.js';
+import { describeCodingTools } from './tools/index.js';
+import { renderCodingAgentTui } from './tui/index.js';
 
 export interface CliIo {
-  stdout: Pick<NodeJS.WriteStream, 'write'>;
-  stderr: Pick<NodeJS.WriteStream, 'write'>;
+  readonly stdout: Pick<NodeJS.WriteStream, 'write'>;
+  readonly stderr: Pick<NodeJS.WriteStream, 'write'>;
+  readonly stdin?: NodeJS.ReadableStream;
 }
 
-/**
- * 运行 coding-agent CLI，并允许为测试和嵌入场景注入 IO。
- */
+/** 运行 coding-agent CLI，并允许测试注入 IO。 */
 export async function runCli(
   args: string[],
-  io: CliIo = { stdout: process.stdout, stderr: process.stderr },
+  io: CliIo = { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin },
 ): Promise<void> {
   const options = parseArgs(args);
   if (options.command === 'help') {
@@ -36,35 +37,24 @@ export async function runCli(
     return;
   }
   const config = await loadCodingAgentConfig({
-    ...(options.model ? { model: options.model } : {}),
+    ...(options.model !== undefined ? { model: options.model } : {}),
     ...(options.modelCandidates.length > 0 ? { modelCandidates: options.modelCandidates } : {}),
-    ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
-    ...(options.cwd ? { cwd: options.cwd } : {}),
-    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    ...(options.baseUrl !== undefined ? { baseUrl: options.baseUrl } : {}),
+    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+    ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
     ...(options.allowedPaths.length > 0 ? { allowedPaths: options.allowedPaths } : {}),
-    ...(options.mcpConfigPath ? { mcpConfigPath: options.mcpConfigPath } : {}),
-    ...(options.approvalMode ? { approvalMode: options.approvalMode } : {}),
+    ...(options.mcpConfigPath !== undefined ? { mcpConfigPath: options.mcpConfigPath } : {}),
+    ...(options.approvalMode !== undefined ? { approvalMode: options.approvalMode } : {}),
     ...(options.json !== undefined ? { json: options.json } : {}),
     ...(options.noTui !== undefined ? { tui: !options.noTui } : {}),
   });
 
   if (options.command === 'config') {
-    if (options.subcommand === 'path') {
-      io.stdout.write(`${getProjectConfigPath(config.cwd)}\n`);
-    } else if (options.subcommand === 'get') {
-      io.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
-    } else if (options.subcommand === 'set') {
-      const [key, rawValue] = splitConfigSetPrompt(options.prompt);
-      const updated = await setProjectConfigValue(config.cwd, key, parseConfigValue(rawValue));
-      io.stdout.write(`${JSON.stringify(updated, null, 2)}\n`);
-    } else {
-      io.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
-    }
+    await handleConfigCommand(options.subcommand, options.prompt, config.cwd, io);
     return;
   }
   if (options.command === 'tools') {
-    const tools = handleSlashCommand('/tools', config);
-    io.stdout.write(`${tools.handled ? tools.output : ''}\n`);
+    io.stdout.write(`${describeCodingTools()}\n`);
     return;
   }
   if (options.command === 'memory') {
@@ -73,83 +63,99 @@ export async function runCli(
     return;
   }
   if (options.command === 'permissions') {
-    const output = {
-      mode: config.approvalMode,
-      allowedPaths: config.allowedPaths,
-      rules: config.permissionRules,
-    };
-    io.stdout.write(
-      `${config.json
-          ? JSON.stringify(output, null, 2)
-          : [
-              `mode\t${config.approvalMode}`,
-              `allowedPaths\t${config.allowedPaths.join(', ')}`,
-              formatPermissionRules(config.permissionRules),
-            ].join('\n')}\n`,
-    );
-    return;
-  }
-  if (options.command === 'tasks') {
-    const session = await createCodingAgentSession(config);
-    try {
-      const tasks = session.listTasks();
-      io.stdout.write(`${config.json ? JSON.stringify(tasks, null, 2) : tasks.length === 0 ? 'No tasks.' : tasks.map((task) => `${task.id}\t${task.status}\t${task.activeForm}`).join('\n')}\n`);
-    } finally {
-      await session.close();
-    }
+    io.stdout.write(`${config.json ? JSON.stringify({ mode: config.approvalMode, allowedPaths: config.allowedPaths, rules: config.permissionRules }, null, 2) : [`mode\t${config.approvalMode}`, `allowedPaths\t${config.allowedPaths.join(', ')}`, formatPermissionRules(config.permissionRules)].join('\n')}\n`);
     return;
   }
   if (options.command === 'sessions') {
-    const sessions = await listCodingAgentSessions(config);
-    if (config.json) {
-      io.stdout.write(`${JSON.stringify(sessions, null, 2)}\n`);
-    } else {
-      io.stdout.write(
-        `${sessions.length === 0
-            ? `No sessions in ${config.sessionDir}`
-            : sessions
-                .map(
-                  (session) =>
-                    `${session.sessionId}\t${session.entryCount} entries\t${session.updatedAt ?? 'unknown'}`,
-                )
-                .join('\n')}\n`,
-      );
-    }
+    const sessions = await new JsonlSessionRepository({ sessionDir: config.sessionDir, cwd: config.cwd }).list();
+    io.stdout.write(`${config.json ? JSON.stringify(sessions, null, 2) : sessions.length === 0 ? `No sessions in ${config.sessionDir}` : sessions.map((session) => `${session.sessionId}\t${session.entryCount} entries\t${session.updatedAt ?? 'unknown'}`).join('\n')}\n`);
     return;
   }
-  if (options.command === 'resume') {
-    const sessionId = options.sessionId ?? options.prompt.trim();
-    if (!sessionId) {
-      throw new Error('Missing session id. Use `ello resume <sessionId>`.');
-    }
-    const { renderCodingAgentTui } = await import('@ello/tui');
-    await renderCodingAgentTui({ config: { ...config, sessionId } });
+  if (options.command === 'rpc') {
+    await runRpcServer(config, { stdin: io.stdin ?? process.stdin, stdout: io.stdout });
     return;
   }
-  if (options.command === 'tui' && !options.noTui) {
-    const { renderCodingAgentTui } = await import('@ello/tui');
-    await renderCodingAgentTui({ config });
+  if ((options.command === 'tui' || options.command === 'resume') && !options.noTui) {
+    await renderCodingAgentTui({ config: { ...config, ...(options.command === 'resume' && options.prompt.trim() ? { sessionId: options.prompt.trim() } : {}) } });
     return;
   }
 
-  const prompt = options.prompt || (options.command === 'run' ? '' : options.prompt);
-  if (!prompt.trim()) {
+  const prompt = options.prompt.trim();
+  if (!prompt) {
     throw new Error('Missing prompt. Use `ello run <prompt>` or start `ello` for TUI.');
   }
   const slash = handleSlashCommand(prompt, config);
   if (slash.handled) {
-    io.stdout.write(`${slash.output}\n`);
+    if (slash.command !== undefined) {
+      const handled = await executeCommandResult(slash.command, config);
+      io.stdout.write(`${handled ?? slash.output}\n`);
+    } else {
+      io.stdout.write(`${slash.output}\n`);
+    }
     return;
   }
 
-  const session = await createCodingAgentSession(config);
+  const runtime = await CodingAgentRuntime.create({ config });
+  const unsubscribe = runtime.events.subscribe((event) => {
+    io.stdout.write(formatCodingAgentEventOutput(event, config.json));
+  });
   try {
-    await session.submit(prompt, (event) => {
-      io.stdout.write(formatCodingAgentEventOutput(event, config.json));
-    });
+    await runtime.submit(prompt);
   } finally {
-    await session.close();
+    unsubscribe();
+    await runtime.close();
   }
+}
+
+async function executeCommandResult(command: CommandResult, config: Awaited<ReturnType<typeof loadCodingAgentConfig>>): Promise<string | null> {
+  if (command.type === 'runtime-action') {
+    const runtime = await CodingAgentRuntime.create({ config });
+    try {
+      if (command.action === 'compact') {
+        await runtime.compact();
+        return 'Compacted current session.';
+      }
+      if (command.action === 'new-session') {
+        const info = await runtime.newSession();
+        return `New session: ${info.sessionId}`;
+      }
+      if (command.action === 'fork') {
+        await runtime.fork(command.args?.[0] ?? '', { reason: command.args?.slice(1).join(' ') || 'slash-command' });
+        return 'Forked current session.';
+      }
+      if (command.action === 'export') {
+        return await runtime.exportSession(command.args?.[0] === 'html' ? 'html' : 'jsonl');
+      }
+      if (command.action === 'quit') {
+        return 'Quit requested.';
+      }
+    } finally {
+      await runtime.close();
+    }
+  }
+  if (command.type === 'set-model') {
+    const runtime = await CodingAgentRuntime.create({ config });
+    try {
+      await runtime.switchModel(command.model);
+      return `Switched model: ${command.model}`;
+    } finally {
+      await runtime.close();
+    }
+  }
+  return null;
+}
+
+async function handleConfigCommand(subcommand: string | null, prompt: string, cwd: string, io: CliIo): Promise<void> {
+  if (subcommand === 'path') {
+    io.stdout.write(`${getProjectConfigPath(cwd)}\n`);
+    return;
+  }
+  if (subcommand === 'set') {
+    const [key, rawValue] = splitConfigSetPrompt(prompt);
+    io.stdout.write(`${JSON.stringify(await setProjectConfigValue(cwd, key, parseConfigValue(rawValue)), null, 2)}\n`);
+    return;
+  }
+  io.stdout.write(`${JSON.stringify(await loadCodingAgentConfig({ cwd }), null, 2)}\n`);
 }
 
 if (isCliEntrypoint()) {
@@ -169,8 +175,5 @@ process.stdout.on('error', (error: NodeJS.ErrnoException) => {
 
 function isCliEntrypoint(): boolean {
   const entrypoint = process.argv[1];
-  if (entrypoint === undefined) {
-    return false;
-  }
-  return realpathSync(entrypoint) === realpathSync(fileURLToPath(import.meta.url));
+  return entrypoint !== undefined && realpathSync(entrypoint) === realpathSync(fileURLToPath(import.meta.url));
 }

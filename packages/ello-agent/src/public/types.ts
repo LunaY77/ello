@@ -130,6 +130,18 @@ export interface Agent {
   stream(input: AgentInput, options?: AgentRunOptions): AgentStream;
 
   /**
+   * 恢复一个因审批或中断而暂停的 run。
+   *
+   * Args:
+   *   deferred: 上一次 run 返回的 pending 项以及审批结果。
+   *   options: 本次恢复调用的模型设置、metadata 和取消信号。
+   *
+   * Returns:
+   *   与 stream() 相同的 AgentStream，便于产品层继续消费事件。
+   */
+  resume(deferred: DeferredRunResults, options?: AgentRunOptions): AgentStream;
+
+  /**
    * 释放 agent 持有的环境与扩展资源。
    *
    * Returns:
@@ -510,6 +522,12 @@ export interface SessionStore {
     messages: AgentMessage[],
     metadata?: Record<string, unknown>,
   ): Promise<void>;
+  appendEvent?(sessionId: string, event: AgentStreamEvent): Promise<void>;
+  compact?(
+    sessionId: string,
+    result: SessionCompactionReport,
+    metadata?: Record<string, unknown>,
+  ): Promise<void>;
   replace?(
     sessionId: string,
     messages: AgentMessage[],
@@ -545,6 +563,26 @@ export interface MemoryCompactResult {
 }
 
 export interface AgentObserver<TContext = unknown> {
+  onRunStarted?(
+    event: { readonly runId: string },
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  onTurnStarted?(
+    event: { readonly runId: string; readonly turnIndex: number },
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  onToolScheduled?(
+    event: AgentToolCall,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  onToolApprovalRequired?(
+    event: DeferredApprovalItem,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  onToolCompleted?(
+    event: AgentToolCall,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
   onContextLoaded?(
     event: ContextLoadedEvent,
     ctx: AgentRunContext<TContext>,
@@ -555,6 +593,14 @@ export interface AgentObserver<TContext = unknown> {
   ): MaybePromise<void>;
   onModelCallPlanned?(
     plan: ModelCallPlan,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  onRunCompleted?(
+    result: AgentRunResult,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  onRunFailed?(
+    event: { readonly error: AgentError },
     ctx: AgentRunContext<TContext>,
   ): MaybePromise<void>;
 }

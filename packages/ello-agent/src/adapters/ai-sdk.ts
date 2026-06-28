@@ -47,11 +47,13 @@ export class AiSdkModelAdapter implements ModelAdapter {
       ...(request.signal !== undefined ? { abortSignal: request.signal } : {}),
       ...(request.modelSettings as object),
     });
-    const newMessages: ModelMessage[] = [{ role: 'assistant', content: result.text }];
+    const newMessages = normalizeResponseMessages(result.responseMessages, result.text);
     return {
       text: result.text,
       messages: [...request.messages, ...newMessages],
       newMessages,
+      toolCalls: normalizeToolCalls(result.toolCalls),
+      toolResults: result.toolResults,
       usage: coerceUsage(result.usage),
       finishReason: normalizeFinishReason(result.finishReason),
       provider: result,
@@ -85,19 +87,49 @@ export class AiSdkModelAdapter implements ModelAdapter {
       yield { type: 'text-delta', text: delta };
     }
     const text = await result.text;
-    const newMessages: ModelMessage[] = [{ role: 'assistant', content: text }];
+    const responseMessages = await result.responseMessages;
+    const newMessages = normalizeResponseMessages(responseMessages, text);
     yield {
       type: 'final',
       response: {
         text,
         messages: [...request.messages, ...newMessages],
         newMessages,
+        toolCalls: normalizeToolCalls(await result.toolCalls),
+        toolResults: await result.toolResults,
         usage: coerceUsage(await result.usage),
         finishReason: normalizeFinishReason(await result.finishReason),
         provider: await result.response,
       },
     };
   }
+}
+
+/**
+ * 将 AI SDK 累计 response messages 标准化为 core 可保存的消息。
+ *
+ * 工具路径必须保留 assistant tool-call 和 tool-result 消息；否则下一轮模型
+ * 看不到工具结果，会重复调用同一个工具直到 maxTurns。
+ */
+function normalizeResponseMessages(
+  messages: readonly unknown[],
+  fallbackText: string,
+): ModelMessage[] {
+  if (messages.length > 0) {
+    return messages as ModelMessage[];
+  }
+  return fallbackText ? [{ role: 'assistant', content: fallbackText }] : [];
+}
+
+function normalizeToolCalls(value: readonly unknown[]) {
+  return value.map((item, index) => {
+    const record = item as Record<string, unknown>;
+    return {
+      id: String(record.toolCallId ?? record.id ?? `tool_${index}`),
+      name: String(record.toolName ?? record.name ?? 'unknown'),
+      input: record.input ?? record.args ?? {},
+    };
+  });
 }
 
 /**
@@ -115,8 +147,11 @@ export function resolveLanguageModel(model: AgentModel): LanguageModel {
   }
   const [provider, ...rest] = model.split(':');
   const modelName = rest.join(':') || provider || model;
-  if (provider === 'openai' || provider === 'openai-chat') {
-    return openai(modelName as Parameters<typeof openai>[0]);
+  if (provider === 'openai-chat') {
+    return openai.chat(modelName as Parameters<typeof openai.chat>[0]);
+  }
+  if (provider === 'openai-responses' || provider === 'openai') {
+    return openai.responses(modelName as Parameters<typeof openai.responses>[0]);
   }
   if (provider === 'anthropic') {
     return anthropic(modelName as Parameters<typeof anthropic>[0]);

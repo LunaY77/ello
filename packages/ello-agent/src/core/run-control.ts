@@ -177,6 +177,9 @@ export class AgentRunControl {
         const decision = resume.approvals?.[item.toolCallId];
         const approved =
           typeof decision === 'boolean' ? decision : (decision?.approved ?? false);
+        const output = approved
+          ? (resume.toolResults?.[item.toolCallId] ?? { approved: true })
+          : createDeniedOutput(typeof decision === 'object' ? decision.reason : undefined);
         messages.push({
           role: 'tool',
           content: [
@@ -184,9 +187,7 @@ export class AgentRunControl {
               type: 'tool-result',
               toolCallId: item.toolCallId,
               toolName: item.toolName,
-              output: approved
-                ? { approved: true, reason: typeof decision === 'object' ? decision.reason : undefined }
-                : { approved: false, reason: typeof decision === 'object' ? decision.reason : undefined },
+              output: approved ? createToolOutput(output) : output,
             },
           ],
         } as unknown as AgentMessage);
@@ -200,7 +201,7 @@ export class AgentRunControl {
               type: 'tool-result',
               toolCallId: item.toolCallId,
               toolName: item.toolName,
-              output: resume.toolResults?.[item.toolCallId] ?? null,
+              output: createToolOutput(resume.toolResults?.[item.toolCallId] ?? null),
             },
           ],
         } as unknown as AgentMessage);
@@ -210,4 +211,24 @@ export class AgentRunControl {
     }
     return messages;
   }
+}
+
+function createToolOutput(output: unknown): unknown {
+  if (typeof output === 'string') {
+    return { type: 'text', value: output };
+  }
+  return { type: 'json', value: toJsonValue(output) };
+}
+
+function createDeniedOutput(reason: string | undefined): unknown {
+  return reason === undefined
+    ? { type: 'execution-denied' }
+    : { type: 'execution-denied', reason };
+}
+
+function toJsonValue(value: unknown): unknown {
+  if (value === undefined) {
+    return null;
+  }
+  return JSON.parse(JSON.stringify(value)) as unknown;
 }

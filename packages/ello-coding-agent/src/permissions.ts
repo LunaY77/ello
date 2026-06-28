@@ -1,235 +1,224 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 
-import type { AgentTool } from '@ello/agent';
 import { z } from 'zod';
 
+/** 产品层权限动作。 */
+export type PermissionAction = 'allow' | 'ask' | 'deny';
 
-import type { ApprovalMode } from './config.js';
+/** coding-agent 权限模式。 */
+export type PermissionMode = 'default' | 'plan' | 'accept-edits' | 'dont-ask' | 'bypass';
 
-export const PermissionActionSchema = z.enum(['allow', 'deny', 'ask']);
-export type PermissionAction = z.infer<typeof PermissionActionSchema>;
+export const PermissionModeSchema = z.enum(['default', 'plan', 'accept-edits', 'dont-ask', 'bypass']);
 
+/** 可持久化权限规则。 */
 export const PermissionRuleSchema = z.object({
-  tool: z.string().default('*'),
-  action: PermissionActionSchema,
-  path: z.string().optional(),
-  command: z.string().optional(),
+  action: z.enum(['allow', 'ask', 'deny']),
+  tool: z.string().optional(),
+  pathGlob: z.string().optional(),
+  commandPattern: z.string().optional(),
+  domain: z.string().optional(),
+  scope: z.enum(['session', 'project', 'user', 'default']).default('session'),
   reason: z.string().optional(),
 });
+
 export type PermissionRule = z.infer<typeof PermissionRuleSchema>;
 
-export interface PermissionDecision {
-  /** 由显式规则、审批模式或默认风险策略选出的最终动作。 */
-  action: PermissionAction;
-  /** 持久化到会话日志并展示在审批 UI 中的可读原因。 */
-  reason: string;
-  /** 当决策来自配置时，记录本次调用命中的显式规则。 */
-  rule?: PermissionRule;
-}
-
+/** 权限判定上下文。 */
 export interface PermissionContext {
-  /** 未被显式规则覆盖时使用的全局审批姿态。 */
-  approvalMode: ApprovalMode;
-  /** 用户或项目配置的 allow、deny、ask 规则；规则会优先求值。 */
-  rules: PermissionRule[];
-  /** 用于解析相对规则路径和工具路径的工作目录。 */
-  cwd: string;
-  /** 无需额外边界审批即可使用的文件系统根路径。 */
-  allowedPaths: string[];
+  readonly toolName: string;
+  readonly input?: unknown;
+  readonly cwd: string;
+  readonly allowedPaths: readonly string[];
+  readonly mode: PermissionMode;
+  readonly rules?: readonly PermissionRule[];
+  readonly repeatedDenials?: ReadonlyMap<string, number>;
 }
 
-/** 使用产品侧权限策略包装函数式工具。 */
-export function applyPermissionPolicy(
-  tools: readonly AgentTool<any, unknown>[],
-  context: PermissionContext,
-): AgentTool<any, unknown>[] {
-  return tools.map((baseTool) => ({
-    ...baseTool,
-    approval: (input, ctx) => {
-      const decision = evaluateToolPermission(context, baseTool.name, input);
-      if (decision.action === 'deny') {
-        return 'denied';
-      }
-      if (decision.action === 'ask') {
-        return 'required';
-      }
-      return baseTool.approval?.(input, ctx) ?? 'auto';
-    },
-    execute: async (input, ctx) => {
-      const decision = evaluateToolPermission(context, baseTool.name, input);
-      if (decision.action === 'deny') {
-        return `denied: ${decision.reason}`;
-      }
-      return baseTool.execute(input, ctx);
-    },
-  }));
+/** 权限判定结果。 */
+export interface PermissionDecision {
+  readonly action: PermissionAction;
+  readonly reason: string;
+  readonly matchedRule?: PermissionRule;
 }
 
 /**
- * 为一次工具调用评估当前权限策略。
+ * 权限策略引擎。
  *
- * 决策顺序有意贴近 Codex/Claude Code 风格：显式规则最优先，
- * `approvalMode` 可全局强制 allow/ask，on-request 模式会对 shell、网络、
- * 文件变更或超出允许根路径的文件系统访问请求审批。
+ * 规则来源由调用方合并后传入，本函数只做确定性判定：显式规则优先，
+ * 然后按 permission mode 和工具风险分类给出 allow/ask/deny。
  */
-export function evaluateToolPermission(
-  context: PermissionContext,
-  toolName: string,
-  input: unknown,
-): PermissionDecision {
-  for (const rule of context.rules) {
-    if (!ruleMatches(rule, context.cwd, toolName, input)) {
-      continue;
+export function evaluateToolPermission(ctx: PermissionContext): PermissionDecision {
+  const explicit = ctx.rules?.find((rule) => matchRule(rule, ctx));
+  if (explicit !== undefined) {
+    return { action: explicit.action, reason: explicit.reason ?? `matched ${explicit.scope} rule`, matchedRule: explicit };
+  }
+  if (ctx.repeatedDenials?.get(denialKey(ctx)) !== undefined && (ctx.repeatedDenials.get(denialKey(ctx)) ?? 0) >= 2) {
+    return { action: 'deny', reason: 'same operation was denied repeatedly' };
+  }
+  if (ctx.mode === 'bypass' || ctx.mode === 'dont-ask') {
+    return { action: 'allow', reason: `${ctx.mode} mode` };
+  }
+  if (ctx.mode === 'plan') {
+    return isReadOnlyTool(ctx.toolName) ? { action: 'allow', reason: 'read-only tool in plan mode' } : { action: 'deny', reason: 'plan mode blocks write, shell and network tools' };
+  }
+  if (ctx.mode === 'accept-edits') {
+    if ((ctx.toolName === 'write' || ctx.toolName === 'edit') && targetInsideAllowedPath(ctx)) {
+      return { action: 'allow', reason: 'accept-edits mode allows workspace edits' };
     }
-    return {
-      action: rule.action,
-      reason: rule.reason ?? `Matched permission rule for ${rule.tool}.`,
-      rule,
-    };
+    if (isReadOnlyTool(ctx.toolName)) {
+      return { action: 'allow', reason: 'read-only tool' };
+    }
+    return { action: 'ask', reason: 'accept-edits mode still asks for shell and network tools' };
   }
-
-  if (context.approvalMode === 'never') {
-    return { action: 'allow', reason: 'approvalMode=never' };
+  if (isReadOnlyTool(ctx.toolName)) {
+    return { action: 'allow', reason: 'read-only tool' };
   }
-  if (context.approvalMode === 'always') {
-    return { action: 'ask', reason: 'approvalMode=always' };
-  }
-
-  const pathDecision = evaluateAllowedPaths(context, input);
-  if (pathDecision !== null) {
-    return pathDecision;
-  }
-
-  if (toolName === 'shell_exec') {
-    return { action: 'ask', reason: 'Shell commands require approval.' };
-  }
-  if (toolName === 'delete_file') {
-    return { action: 'ask', reason: 'Deleting files requires approval.' };
-  }
-  if (toolName === 'write_file' || toolName === 'edit_file' || toolName === 'move_copy') {
-    return { action: 'ask', reason: 'File mutations require approval.' };
-  }
-  if (toolName.startsWith('web_')) {
-    return { action: 'ask', reason: 'Network access requires approval.' };
-  }
-  return { action: 'allow', reason: 'Read-only local tool.' };
+  return { action: 'ask', reason: 'default mode asks for mutating or external tools' };
 }
 
-/**
- * 从配置或环境输入中解析序列化后的权限规则。
- */
+/** 将产品权限动作映射到 @ello/agent 工具 approval 返回值。 */
+export function applyPermissionPolicy(ctx: PermissionContext): 'auto' | 'required' | 'denied' {
+  const decision = evaluateToolPermission(ctx);
+  if (decision.action === 'allow') {
+    return 'auto';
+  }
+  if (decision.action === 'deny') {
+    return 'denied';
+  }
+  return 'required';
+}
+
+/** 解析 JSON 或对象数组形式的权限规则。 */
 export function parsePermissionRules(value: unknown): PermissionRule[] {
-  if (!Array.isArray(value)) {
-    return [];
+  if (typeof value === 'string' && value.trim()) {
+    return z.array(PermissionRuleSchema).parse(JSON.parse(value));
   }
-  return value.map((item) => PermissionRuleSchema.parse(item));
+  if (Array.isArray(value)) {
+    return z.array(PermissionRuleSchema).parse(value);
+  }
+  return [];
 }
 
-/**
- * 将权限规则格式化为紧凑的 CLI 表格。
- */
-export function formatPermissionRules(rules: PermissionRule[]): string {
+/** 输出人类可读规则表。 */
+export function formatPermissionRules(rules: readonly PermissionRule[]): string {
   if (rules.length === 0) {
-    return 'No explicit permission rules configured.';
+    return 'rules\t<none>';
   }
   return rules
     .map((rule) => {
-      const filters = [
-        rule.path ? `path=${rule.path}` : null,
-        rule.command ? `command=${rule.command}` : null,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      return `${rule.action}\t${rule.tool}${filters ? `\t${filters}` : ''}`;
+      const parts = [`${rule.action}`];
+      if (rule.tool !== undefined) parts.push(`tool=${rule.tool}`);
+      if (rule.pathGlob !== undefined) parts.push(`path=${rule.pathGlob}`);
+      if (rule.commandPattern !== undefined) parts.push(`command=${rule.commandPattern}`);
+      if (rule.domain !== undefined) parts.push(`domain=${rule.domain}`);
+      parts.push(`scope=${rule.scope}`);
+      return parts.join('\t');
     })
     .join('\n');
 }
 
-function ruleMatches(
-  rule: PermissionRule,
-  cwd: string,
-  toolName: string,
-  input: unknown,
-): boolean {
-  if (rule.tool !== '*' && rule.tool !== toolName) {
+/** 记录 repeated denial 的稳定 key。 */
+export function denialKey(ctx: Pick<PermissionContext, 'toolName' | 'input'>): string {
+  return `${ctx.toolName}:${JSON.stringify(ctx.input ?? null)}`;
+}
+
+/** 权限规则持久化存储。 */
+export class PermissionStore {
+  private readonly sessionRules: PermissionRule[] = [];
+
+  constructor(private readonly cwd: string) {}
+
+  /** 当前 session 内动态规则。 */
+  rules(): readonly PermissionRule[] {
+    return [...this.sessionRules];
+  }
+
+  /** 添加规则并按 scope 持久化。 */
+  async addRule(rule: PermissionRule): Promise<void> {
+    if (rule.scope === 'session') {
+      this.sessionRules.push(rule);
+      return;
+    }
+    const filePath =
+      rule.scope === 'user'
+        ? path.join(homedir(), '.ello', 'config.json')
+        : rule.scope === 'project'
+          ? path.join(this.cwd, '.ello', 'config.json')
+          : path.join(this.cwd, '.ello', 'local.json');
+    const current = await readConfig(filePath);
+    const currentRules = parsePermissionRules(current.permissionRules);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(
+      filePath,
+      `${JSON.stringify({ ...current, permissionRules: [...currentRules, rule] }, null, 2)}\n`,
+      'utf8',
+    );
+  }
+}
+
+function matchRule(rule: PermissionRule, ctx: PermissionContext): boolean {
+  if (rule.tool !== undefined && rule.tool !== ctx.toolName) {
     return false;
   }
-  if (rule.path !== undefined) {
-    const targets = extractPaths(input);
-    if (targets.length === 0) {
-      return false;
-    }
-    const resolvedRulePath = path.resolve(cwd, rule.path);
-    if (!targets.some((target) => isPathInside(path.resolve(cwd, target), resolvedRulePath))) {
+  if (rule.commandPattern !== undefined) {
+    const command = readInputString(ctx.input, 'command');
+    if (command === undefined || !new RegExp(rule.commandPattern).test(command)) {
       return false;
     }
   }
-  if (rule.command !== undefined) {
-    const command = extractCommand(input);
-    if (command === null || !command.includes(rule.command)) {
+  if (rule.pathGlob !== undefined) {
+    const targetPath = readInputString(ctx.input, 'path');
+    if (targetPath === undefined || !globLikeMatch(rule.pathGlob, targetPath)) {
+      return false;
+    }
+  }
+  if (rule.domain !== undefined) {
+    const url = readInputString(ctx.input, 'url') ?? readInputString(ctx.input, 'query');
+    if (url === undefined || !url.includes(rule.domain)) {
       return false;
     }
   }
   return true;
 }
 
-function evaluateAllowedPaths(
-  context: PermissionContext,
-  input: unknown,
-): PermissionDecision | null {
-  const targets = extractPaths(input);
-  if (targets.length === 0 || context.allowedPaths.length === 0) {
-    return null;
-  }
-
-  const outsidePath = targets
-    .map((target) => ({
-      original: target,
-      resolved: path.resolve(context.cwd, target),
-    }))
-    .find((target) =>
-      !context.allowedPaths.some((allowedPath) =>
-        isPathInside(target.resolved, path.resolve(context.cwd, allowedPath)),
-      ),
-    );
-
-  if (outsidePath === undefined) {
-    return null;
-  }
-
-  return {
-    action: 'ask',
-    reason: `Path is outside allowedPaths: ${outsidePath.original}`,
-  };
+function isReadOnlyTool(toolName: string): boolean {
+  return toolName === 'read' || toolName === 'ls' || toolName === 'grep' || toolName === 'glob' || toolName === 'todo' || toolName === 'tool_search';
 }
 
-function extractPaths(input: unknown): string[] {
+function targetInsideAllowedPath(ctx: PermissionContext): boolean {
+  const target = readInputString(ctx.input, 'path');
+  if (target === undefined) {
+    return false;
+  }
+  const resolved = path.isAbsolute(target) ? path.resolve(target) : path.resolve(ctx.cwd, target);
+  return ctx.allowedPaths.some((root) => {
+    const relative = path.relative(root, resolved);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  });
+}
+
+function readInputString(input: unknown, key: string): string | undefined {
   if (typeof input !== 'object' || input === null) {
-    return [];
+    return undefined;
   }
-  const record = input as Record<string, unknown>;
-  return [
-    'path',
-    'filePath',
-    'targetPath',
-    'source',
-    'destination',
-    'from',
-    'to',
-  ]
-    .map((key) => record[key])
-    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value : undefined;
 }
 
-function extractCommand(input: unknown): string | null {
-  if (typeof input !== 'object' || input === null) {
-    return null;
-  }
-  const record = input as Record<string, unknown>;
-  return typeof record.command === 'string' ? record.command : null;
+function globLikeMatch(pattern: string, value: string): boolean {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`).test(value);
 }
 
-function isPathInside(target: string, root: string): boolean {
-  const relative = path.relative(root, target);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+async function readConfig(filePath: string): Promise<Record<string, unknown>> {
+  try {
+    return JSON.parse(await readFile(filePath, 'utf8')) as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return {};
+    }
+    throw new Error(`Failed to read permission config ${filePath}`, { cause: error });
+  }
 }

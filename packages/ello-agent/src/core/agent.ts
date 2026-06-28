@@ -23,6 +23,7 @@ import type {
   AgentTurnDiagnostics,
   ContextDiagnostics,
   CreateAgentOptions,
+  DeferredRunResults,
   ModelAdapter,
   ModelCallPlan,
   QueueDrainDiagnostic,
@@ -36,7 +37,8 @@ import {
 } from './planner.js';
 import { AgentRunControl } from './run-control.js';
 import { AgentEventStream } from './stream.js';
-import { AgentApprovalRequiredError, buildToolSet } from './tool-runner.js';
+import { buildToolSet } from './tool-runner.js';
+import { ToolScheduler } from './tool-scheduler.js';
 import { addUsage, createEmptyUsage } from './usage.js';
 
 type LoopStopReason =
@@ -77,6 +79,7 @@ export class ElloAgent implements Agent {
   private readonly environment: AgentEnvironment;
   private readonly extensions: readonly AgentExtension[];
   private readonly modelAdapter: ModelAdapter;
+  private readonly observerToolCalls = new Map<string, AgentToolCall>();
   private setupDone = false;
 
   constructor(private readonly config: CreateAgentOptions) {
@@ -122,6 +125,20 @@ export class ElloAgent implements Agent {
     const stream = new AgentEventStream(abortController);
     void this.execute(input, options, abortController.signal, stream);
     return stream;
+  }
+
+  /**
+   * 恢复一个暂停 run。
+   *
+   * 当前 public 控制面保持窄接口：产品层提供 deferred payload，core
+   * 仍复用同一条 stream 执行路径。这样 approval resume 可以进入 Agent
+   * 生命周期，而不再停留在 UI 假动作。
+   */
+  resume(
+    deferred: NonNullable<AgentRunOptions['resume']>,
+    options: AgentRunOptions = {},
+  ): AgentStream {
+    return this.stream({ messages: [] }, { ...options, resume: deferred });
   }
 
   /**
@@ -202,58 +219,13 @@ export class ElloAgent implements Agent {
 
       const toolCalls: AgentToolCall[] = [];
       const tools = buildToolSet({
+        tools: this.config.tools ?? [],
+      });
+      const toolScheduler = new ToolScheduler({
         runId,
         tools: this.config.tools ?? [],
         environment: this.environment,
         metadata,
-        toolCalls,
-        emitToolStarted: (toolCallId, name, toolInput) => {
-          void this.emit(
-            { type: 'tool.started', toolCallId, name, input: toolInput },
-            stream,
-            ctx,
-          );
-        },
-        emitApprovalRequired: (toolCallId, name, toolInput) => {
-          runControl.pushDeferred({
-            kind: 'approval',
-            toolCallId,
-            toolName: name,
-            input: toolInput,
-          });
-          void this.emit(
-            {
-              type: 'approval.required',
-              runId,
-              item: {
-                kind: 'approval',
-                toolCallId,
-                toolName: name,
-                input: toolInput,
-              },
-            },
-            stream,
-            ctx,
-          );
-        },
-        emitToolCompleted: (toolCallId, output) => {
-          void this.emit(
-            { type: 'tool.completed', toolCallId, output },
-            stream,
-            ctx,
-          );
-        },
-        emitToolFailed: (toolCallId, error) => {
-          void this.emit(
-            {
-              type: 'tool.failed',
-              toolCallId,
-              error: normalizeAgentError(error),
-            },
-            stream,
-            ctx,
-          );
-        },
       });
       const contextSources = [
         createStateContextSource(),
@@ -305,6 +277,12 @@ export class ElloAgent implements Agent {
       let usage = createEmptyUsage();
       let finalResponse: AgentModelResponse | undefined;
       let stopReason: LoopStopReason = 'no-progress';
+      const executedResume = await this.prepareResume(
+        options.resume,
+        toolScheduler,
+        stream,
+        ctx,
+      );
 
       for (let turnIndex = 0; ; turnIndex += 1) {
         const turn = await this.executeTurn({
@@ -313,11 +291,12 @@ export class ElloAgent implements Agent {
           runControl,
           planner,
           tools,
+          toolScheduler,
           options,
           signal,
           stream,
           ctx,
-          resume: turnIndex === 0 ? options.resume : undefined,
+          resume: turnIndex === 0 ? executedResume : undefined,
         });
         turns.push(turn.diagnostics);
         toolCalls.push(...turn.toolCalls);
@@ -385,7 +364,8 @@ export class ElloAgent implements Agent {
       for (const extension of this.extensions) {
         await extension.afterRun?.(result, ctx);
       }
-      await this.saveSessionResult(result);
+      const messagesToAppend = result.messages.slice(sessionMessages.length);
+      await this.saveSessionResult(result, messagesToAppend);
       await this.config.memory?.observe?.(
         { type: 'run.completed', result, diagnostics },
         ctx,
@@ -429,6 +409,7 @@ export class ElloAgent implements Agent {
       plan(ctx: AgentRunContext): PromiseLike<ModelCallPlan> | ModelCallPlan;
     };
     readonly tools: AgentModelRequest['tools'];
+    readonly toolScheduler: ToolScheduler;
     readonly options: AgentRunOptions;
     readonly signal: AbortSignal;
     readonly stream: AgentEventStream;
@@ -513,48 +494,6 @@ export class ElloAgent implements Agent {
         finalResponse = await this.modelAdapter.generate(modelRequest);
       }
     } catch (error) {
-      if (error instanceof AgentApprovalRequiredError) {
-        const wasAlreadyPending = hasDeferredApproval(
-          args.runControl,
-          error.toolCallId,
-        );
-        if (!wasAlreadyPending) {
-          args.runControl.pushDeferred({
-            kind: 'approval',
-            toolCallId: error.toolCallId,
-            toolName: error.toolName,
-            input: error.input,
-          });
-        }
-        if (!wasAlreadyPending) {
-          await this.emit(
-            {
-              type: 'approval.required',
-              runId: args.runId,
-              item: {
-                kind: 'approval',
-                toolCallId: error.toolCallId,
-                toolName: error.toolName,
-                input: error.input,
-              },
-            },
-            args.stream,
-            args.ctx,
-          );
-        }
-        await this.emit(
-          { type: 'turn.completed', turnIndex: args.turnIndex },
-          args.stream,
-          args.ctx,
-        );
-        return this.emptyTurn(
-          args.turnIndex,
-          args.ctx,
-          'waiting-approval',
-          plan.diagnostics,
-          drained.diagnostics,
-        );
-      }
       if (args.signal.aborted || isAbortError(error)) {
         args.runControl.pushDeferred({
           kind: 'interrupted',
@@ -580,12 +519,64 @@ export class ElloAgent implements Agent {
     const newMessages =
       finalResponse.newMessages ??
       diffNewMessages(beforeCallMessages, finalResponse.messages);
-    args.ctx.state.messages.push(...newMessages);
+    const toolCallsFromModel = finalResponse.toolCalls ?? [];
+    const scheduled =
+      toolCallsFromModel.length === 0
+        ? { messages: [] as AgentMessage[], toolCalls: [] as AgentToolCall[], pending: [] }
+        : await args.toolScheduler.schedule(toolCallsFromModel, {
+            onToolStarted: (toolCallId, name, input) =>
+              this.emit(
+                { type: 'tool.started', toolCallId, name, input },
+                args.stream,
+                args.ctx,
+              ),
+            onApprovalRequired: async (item) => {
+              const wasAlreadyPending = hasDeferredApproval(
+                args.runControl,
+                item.toolCallId,
+              );
+              if (!wasAlreadyPending) {
+                args.runControl.pushDeferred(item);
+                await this.emit(
+                  { type: 'approval.required', runId: args.runId, item },
+                  args.stream,
+                  args.ctx,
+                );
+              }
+            },
+            onToolCompleted: (toolCallId, output) =>
+              this.emit(
+                { type: 'tool.completed', toolCallId, output },
+                args.stream,
+                args.ctx,
+              ),
+            onToolFailed: (toolCallId, error) =>
+              this.emit(
+                {
+                  type: 'tool.failed',
+                  toolCallId,
+                  error: normalizeAgentError(error),
+                },
+                args.stream,
+                args.ctx,
+              ),
+          });
+    const allNewMessages = [...newMessages, ...scheduled.messages];
+    args.ctx.state.messages.push(...allNewMessages);
     await this.emit(
       { type: 'turn.completed', turnIndex: args.turnIndex },
       args.stream,
       args.ctx,
     );
+    if (scheduled.pending.length > 0) {
+      return this.emptyTurn(
+        args.turnIndex,
+        args.ctx,
+        'waiting-approval',
+        plan.diagnostics,
+        drained.diagnostics,
+      );
+    }
 
     return {
       response: finalResponse,
@@ -594,10 +585,10 @@ export class ElloAgent implements Agent {
         context: plan.diagnostics,
         queueDrains: drained.diagnostics,
         finishReason: finalResponse.finishReason,
-        newMessageCount: newMessages.length,
+        newMessageCount: allNewMessages.length,
       },
-      newMessages,
-      toolCalls: [],
+      newMessages: allNewMessages,
+      toolCalls: scheduled.toolCalls,
     };
   }
 
@@ -611,6 +602,65 @@ export class ElloAgent implements Agent {
         (await extension.transformMessages?.(transformed, ctx)) ?? transformed;
     }
     return transformed;
+  }
+
+  private async prepareResume(
+    resume: AgentRunOptions['resume'],
+    toolScheduler: ToolScheduler,
+    stream: AgentEventStream,
+    ctx: AgentRunContext,
+  ): Promise<AgentRunOptions['resume']> {
+    if (resume === undefined || resume.deferred === undefined) {
+      return resume;
+    }
+    const toolResults: Record<string, unknown> = {
+      ...(resume.toolResults ?? {}),
+    };
+    for (const item of resume.deferred) {
+      if (item.kind !== 'approval') {
+        continue;
+      }
+      const decision = resume.approvals?.[item.toolCallId];
+      const approved =
+        typeof decision === 'boolean' ? decision : (decision?.approved ?? false);
+      if (!approved || toolResults[item.toolCallId] !== undefined) {
+        continue;
+      }
+      const result = await toolScheduler.executeApproved(
+        {
+          id: item.toolCallId,
+          name: item.toolName,
+          input: item.input,
+        },
+        {
+          onToolStarted: (toolCallId, name, input) =>
+            this.emit(
+              { type: 'tool.started', toolCallId, name, input },
+              stream,
+              ctx,
+            ),
+          onApprovalRequired: async () => {},
+          onToolCompleted: (toolCallId, output) =>
+            this.emit({ type: 'tool.completed', toolCallId, output }, stream, ctx),
+          onToolFailed: (toolCallId, error) =>
+            this.emit(
+              {
+                type: 'tool.failed',
+                toolCallId,
+                error: normalizeAgentError(error),
+              },
+              stream,
+              ctx,
+            ),
+        },
+      );
+      toolResults[item.toolCallId] =
+        result.error !== undefined ? { error: result.error.message } : result.output;
+    }
+    return {
+      ...resume,
+      toolResults,
+    } satisfies DeferredRunResults;
   }
 
   private emptyTurn(
@@ -718,8 +768,57 @@ export class ElloAgent implements Agent {
   ): Promise<void> {
     ctx.trace.events.push(event);
     stream.emit(event);
+    await this.emitObserverEvent(event, ctx);
+    if (ctx.sessionId !== undefined) {
+      await this.config.session?.appendEvent?.(ctx.sessionId, event);
+    }
     for (const extension of this.extensions) {
       await extension.onEvent?.(event, ctx);
+    }
+  }
+
+  private async emitObserverEvent(
+    event: AgentStreamEvent,
+    ctx: AgentRunContext,
+  ): Promise<void> {
+    for (const observer of this.config.observers ?? []) {
+      if (event.type === 'run.started') {
+        await observer.onRunStarted?.({ runId: event.runId }, ctx);
+      } else if (event.type === 'turn.started') {
+        await observer.onTurnStarted?.(
+          { runId: event.runId, turnIndex: event.turnIndex },
+          ctx,
+        );
+      } else if (event.type === 'tool.started') {
+        this.observerToolCalls.set(event.toolCallId, {
+          id: event.toolCallId,
+          name: event.name,
+          input: event.input,
+        });
+        await observer.onToolScheduled?.(
+          { id: event.toolCallId, name: event.name, input: event.input },
+          ctx,
+        );
+      } else if (event.type === 'approval.required') {
+        await observer.onToolApprovalRequired?.(event.item, ctx);
+      } else if (event.type === 'tool.completed') {
+        const started = this.observerToolCalls.get(event.toolCallId);
+        const completed = {
+          id: event.toolCallId,
+          name: started?.name ?? event.toolCallId,
+          input: started?.input ?? null,
+          output: event.output,
+        };
+        this.observerToolCalls.set(event.toolCallId, completed);
+        await observer.onToolCompleted?.(
+          completed,
+          ctx,
+        );
+      } else if (event.type === 'run.completed') {
+        await observer.onRunCompleted?.(event.result, ctx);
+      } else if (event.type === 'run.failed') {
+        await observer.onRunFailed?.({ error: event.error }, ctx);
+      }
     }
   }
 
@@ -743,7 +842,10 @@ export class ElloAgent implements Agent {
     return messages;
   }
 
-  private async saveSessionResult(result: AgentRunResult): Promise<void> {
+  private async saveSessionResult(
+    result: AgentRunResult,
+    messagesToAppend: AgentMessage[],
+  ): Promise<void> {
     const sessionId =
       typeof result.metadata.sessionId === 'string'
         ? result.metadata.sessionId
@@ -751,7 +853,7 @@ export class ElloAgent implements Agent {
     if (this.config.session !== undefined && sessionId !== undefined) {
       await this.config.session.append(
         sessionId,
-        result.messages,
+        messagesToAppend,
         result.metadata,
       );
     }
