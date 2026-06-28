@@ -19,9 +19,9 @@ export interface AgentRunControlSnapshot {
   readonly sessionDrained: boolean;
 }
 
-export class DefaultAgentMessageQueue<T = AgentMessage>
-  implements AgentMessageQueue<T>
-{
+export class DefaultAgentMessageQueue<
+  T = AgentMessage,
+> implements AgentMessageQueue<T> {
   private readonly items: T[] = [];
 
   constructor(readonly mode: AgentMessageQueueMode = 'all') {}
@@ -70,8 +70,12 @@ export interface DrainNextTurnResult {
 export class AgentRunControl {
   readonly inputQueue = new DefaultAgentMessageQueue<AgentMessage>('all');
   readonly sessionQueue = new DefaultAgentMessageQueue<AgentMessage>('all');
-  readonly followUpQueue = new DefaultAgentMessageQueue<AgentMessage>('one-at-a-time');
-  readonly steeringQueue = new DefaultAgentMessageQueue<AgentMessage>('one-at-a-time');
+  readonly followUpQueue = new DefaultAgentMessageQueue<AgentMessage>(
+    'one-at-a-time',
+  );
+  readonly steeringQueue = new DefaultAgentMessageQueue<AgentMessage>(
+    'one-at-a-time',
+  );
   readonly deferredQueue = new DefaultAgentMessageQueue<DeferredRunItem>('all');
   status: AgentRunControlStatus = 'running';
   interrupted = false;
@@ -176,10 +180,17 @@ export class AgentRunControl {
       if (item.kind === 'approval') {
         const decision = resume.approvals?.[item.toolCallId];
         const approved =
-          typeof decision === 'boolean' ? decision : (decision?.approved ?? false);
+          typeof decision === 'boolean'
+            ? decision
+            : (decision?.approved ?? false);
         const output = approved
           ? (resume.toolResults?.[item.toolCallId] ?? { approved: true })
-          : createDeniedOutput(typeof decision === 'object' ? decision.reason : undefined);
+          : createDeniedOutput(
+              typeof decision === 'object' ? decision.reason : undefined,
+            );
+        messages.push(
+          createToolCallMessage(item.toolCallId, item.toolName, item.input),
+        );
         messages.push({
           role: 'tool',
           content: [
@@ -194,6 +205,9 @@ export class AgentRunControl {
         continue;
       }
       if (item.kind === 'tool-call') {
+        messages.push(
+          createToolCallMessage(item.toolCallId, item.toolName, item.input),
+        );
         messages.push({
           role: 'tool',
           content: [
@@ -201,7 +215,9 @@ export class AgentRunControl {
               type: 'tool-result',
               toolCallId: item.toolCallId,
               toolName: item.toolName,
-              output: createToolOutput(resume.toolResults?.[item.toolCallId] ?? null),
+              output: createToolOutput(
+                resume.toolResults?.[item.toolCallId] ?? null,
+              ),
             },
           ],
         } as unknown as AgentMessage);
@@ -211,6 +227,24 @@ export class AgentRunControl {
     }
     return messages;
   }
+}
+
+function createToolCallMessage(
+  toolCallId: string,
+  toolName: string,
+  input: unknown,
+): AgentMessage {
+  return {
+    role: 'assistant',
+    content: [
+      {
+        type: 'tool-call',
+        toolCallId,
+        toolName,
+        input,
+      },
+    ],
+  } as unknown as AgentMessage;
 }
 
 function createToolOutput(output: unknown): unknown {

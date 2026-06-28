@@ -8,17 +8,18 @@ import {
   createAgent,
   createLocalEnvironment,
   createMemorySession,
-  DefaultAgentMessageQueue,
-  AgentRunControl,
   defineTool,
-  trimHistoryReducer,
-  tokenBudgetReducer,
   z,
   type AgentModelEvent,
   type AgentModelRequest,
   type AgentModelResponse,
   type ModelAdapter,
 } from '../index.js';
+import {
+  AgentRunControl,
+  DefaultAgentMessageQueue,
+  trimMessages,
+} from '../internal.js';
 import { createFilesystemTools } from '../presets/index.js';
 
 class EchoAdapter implements ModelAdapter {
@@ -89,7 +90,10 @@ describe('createAgent', () => {
       },
       async *stream(request) {
         seenToolNames.push(...Object.keys(request.tools));
-        yield { type: 'final', response: await new EchoAdapter().generate(request) };
+        yield {
+          type: 'final',
+          response: await new EchoAdapter().generate(request),
+        };
       },
     };
     const agent = createAgent({
@@ -107,7 +111,10 @@ describe('createAgent', () => {
   it('uses local environment and memory session extensions', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ello-agent-'));
     dirs.push(dir);
-    const environment = createLocalEnvironment({ cwd: dir, allowedPaths: [dir] });
+    const environment = createLocalEnvironment({
+      cwd: dir,
+      allowedPaths: [dir],
+    });
     await environment.files?.writeText('note.txt', 'content');
     const entries = await environment.files?.listDir('.');
     const session = createMemorySession();
@@ -144,22 +151,23 @@ describe('createAgent', () => {
     control.pushFollowUp({ role: 'user', content: 'follow' });
 
     const first = control.drainNextTurn();
-    expect(first.messages.map((message) => (message as { content: string }).content)).toEqual([
-      'session',
-      'input',
-      'steer',
-      'follow',
-    ]);
+    expect(
+      first.messages.map((message) => (message as { content: string }).content),
+    ).toEqual(['session', 'input', 'steer', 'follow']);
 
     control.pushInput({ role: 'user', content: 'second' });
     const second = control.drainNextTurn();
-    expect(second.messages.map((message) => (message as { content: string }).content)).toEqual([
-      'second',
-    ]);
-    expect(second.diagnostics.find((item) => item.queue === 'session')?.count).toBe(0);
+    expect(
+      second.messages.map(
+        (message) => (message as { content: string }).content,
+      ),
+    ).toEqual(['second']);
+    expect(
+      second.diagnostics.find((item) => item.queue === 'session')?.count,
+    ).toBe(0);
   });
 
-  it('plans with session, memory, observers, and reducers', async () => {
+  it('builds model input with session, memory, observers, and transforms', async () => {
     const seenMessages: AgentModelRequest[] = [];
     let sessionLoads = 0;
     const session = {
@@ -179,7 +187,10 @@ describe('createAgent', () => {
         },
         async *stream(request) {
           seenMessages.push(request);
-          yield { type: 'final', response: await new EchoAdapter().generate(request) };
+          yield {
+            type: 'final',
+            response: await new EchoAdapter().generate(request),
+          };
         },
       },
       instructions: 'Be precise.',
@@ -187,22 +198,19 @@ describe('createAgent', () => {
       memory: {
         retrieve: () => [
           {
-            kind: 'memory',
-            source: 'test.memory',
-            priority: 600,
-            scope: 'workspace',
-            retention: 'compressible',
-            persist: 'memory',
             text: 'remembered fact',
-            memoryType: 'semantic',
           },
         ],
         observe: (event) => observed.push(event.type),
       },
-      reducers: [trimHistoryReducer({ maxMessages: 3 }), tokenBudgetReducer({ maxInputTokens: 1000 })],
+      modelInput: {
+        systemSections: [() => 'Working directory: /tmp/project'],
+        messageTransforms: [trimMessages({ maxMessages: 3 })],
+        providerOptions: () => ({ test: { enabled: true } }),
+      },
       observers: [
         {
-          onModelCallPlanned: () => observed.push('planned'),
+          onTurnStarted: () => observed.push('turn-started'),
         },
       ],
     });
@@ -210,12 +218,20 @@ describe('createAgent', () => {
 
     expect(sessionLoads).toBe(1);
     expect(seenMessages[0]?.system).toContain('Be precise.');
-    expect(seenMessages[0]?.messages.map((message) => message.role)).toContain('user');
-    expect(result.diagnostics?.context?.reducerReports.map((report) => report.reducer)).toEqual([
-      'trim-history',
-      'token-budget',
-    ]);
-    expect(observed).toContain('planned');
+    expect(seenMessages[0]?.system).toContain(
+      'Working directory: /tmp/project',
+    );
+    expect(seenMessages[0]?.system).toContain('remembered fact');
+    expect(seenMessages[0]?.providerOptions).toEqual({
+      test: { enabled: true },
+    });
+    expect(seenMessages[0]?.messages.map((message) => message.role)).toContain(
+      'user',
+    );
+    expect(
+      result.diagnostics?.modelInput?.appliedMessageTransforms.length,
+    ).toBeGreaterThan(0);
+    expect(observed).toContain('turn-started');
     expect(observed).toContain('run.completed');
     await agent.close();
   });
@@ -241,7 +257,9 @@ describe('createAgent', () => {
             text: '',
             messages: [...request.messages],
             newMessages: [],
-            toolCalls: [{ id: 'call_1', name: 'danger', input: { value: 'x' } }],
+            toolCalls: [
+              { id: 'call_1', name: 'danger', input: { value: 'x' } },
+            ],
             usage: {
               requests: 1,
               inputTokens: 0,
@@ -272,14 +290,14 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('continues the loop after tool-calls and plans once per turn', async () => {
+  it('continues the loop after tool-calls and builds input once per turn', async () => {
     const requests: AgentModelRequest[] = [];
     const observed: string[] = [];
     const agent = createAgent({
       model: 'test:model',
       observers: [
         {
-          onModelCallPlanned: () => observed.push('planned'),
+          onTurnStarted: () => observed.push('turn-started'),
         },
       ],
       modelAdapter: {
@@ -292,7 +310,9 @@ describe('createAgent', () => {
                 ...request.messages,
                 { role: 'assistant', content: 'tool result ready' },
               ],
-              newMessages: [{ role: 'assistant', content: 'tool result ready' }],
+              newMessages: [
+                { role: 'assistant', content: 'tool result ready' },
+              ],
               usage: {
                 requests: 1,
                 inputTokens: 1,
@@ -307,7 +327,10 @@ describe('createAgent', () => {
           }
           return {
             text: 'done',
-            messages: [...request.messages, { role: 'assistant', content: 'done' }],
+            messages: [
+              ...request.messages,
+              { role: 'assistant', content: 'done' },
+            ],
             newMessages: [{ role: 'assistant', content: 'done' }],
             usage: {
               requests: 1,
@@ -332,7 +355,7 @@ describe('createAgent', () => {
     expect(result.output).toBe('done');
     expect(result.finishReason).toBe('stop');
     expect(requests).toHaveLength(2);
-    expect(observed).toEqual(['planned', 'planned']);
+    expect(observed).toEqual(['turn-started', 'turn-started']);
     expect(result.diagnostics?.turns).toHaveLength(2);
     await agent.close();
   });
@@ -398,7 +421,10 @@ describe('createAgent', () => {
           calls += 1;
           return {
             text: '',
-            messages: [...request.messages, { role: 'assistant', content: 'again' }],
+            messages: [
+              ...request.messages,
+              { role: 'assistant', content: 'again' },
+            ],
             newMessages: [{ role: 'assistant', content: 'again' }],
             usage: {
               requests: 1,
@@ -516,7 +542,9 @@ describe('createAgent', () => {
             text: '',
             messages: [...request.messages],
             newMessages: [],
-            toolCalls: [{ id: 'call_1', name: 'danger', input: { value: 'x' } }],
+            toolCalls: [
+              { id: 'call_1', name: 'danger', input: { value: 'x' } },
+            ],
             usage: {
               requests: 1,
               inputTokens: 0,
@@ -552,7 +580,10 @@ describe('createAgent', () => {
           resumedRequests.push(request);
           return {
             text: 'approved',
-            messages: [...request.messages, { role: 'assistant', content: 'approved' }],
+            messages: [
+              ...request.messages,
+              { role: 'assistant', content: 'approved' },
+            ],
             newMessages: [{ role: 'assistant', content: 'approved' }],
             usage: {
               requests: 1,
@@ -580,9 +611,15 @@ describe('createAgent', () => {
     });
 
     expect(result.output).toBe('approved');
-    expect(resumedRequests[0]?.messages[0]).toMatchObject({ role: 'tool' });
-    expect(JSON.stringify(resumedRequests[0]?.messages[0])).toContain('"type":"text"');
-    expect(JSON.stringify(resumedRequests[0]?.messages[0])).toContain('approved-output');
+    expect(resumedRequests[0]?.messages.map((message) => message.role)).toEqual(
+      ['assistant', 'tool'],
+    );
+    expect(JSON.stringify(resumedRequests[0]?.messages[1])).toContain(
+      '"type":"text"',
+    );
+    expect(JSON.stringify(resumedRequests[0]?.messages[1])).toContain(
+      'approved-output',
+    );
     expect(result.diagnostics?.resumeSource).toBe('options.resume');
     await firstAgent.close();
     await resumedAgent.close();
@@ -633,8 +670,12 @@ describe('createAgent', () => {
 
     expect(result.diagnostics?.turns).toHaveLength(2);
     expect(events.filter((event) => event === 'turn.started')).toHaveLength(2);
-    expect(events.filter((event) => event === 'queue.drained').length).toBeGreaterThan(4);
-    expect(events.filter((event) => event === 'turn.completed')).toHaveLength(2);
+    expect(
+      events.filter((event) => event === 'queue.drained').length,
+    ).toBeGreaterThan(4);
+    expect(events.filter((event) => event === 'turn.completed')).toHaveLength(
+      2,
+    );
     expect(events).toContain('run.completed');
     await agent.close();
   });

@@ -7,8 +7,7 @@ import { defineTool } from '../public/tool.js';
 import type {
   AgentSkill,
   AnyAgentTool,
-  ContextBundle,
-  ContextSource,
+  SystemSection,
 } from '../public/types.js';
 
 export interface ActiveSkillsContextOptions {
@@ -18,29 +17,22 @@ export interface ActiveSkillsContextOptions {
 
 export function activeSkillsContext(
   options: ActiveSkillsContextOptions,
-): ContextSource {
+): SystemSection {
   const active = new Set<string>();
-  return {
-    name: 'agent.skills',
-    load() {
-      const selected =
-        options.activation === 'always-on'
-          ? options.skills
-          : options.skills.filter((skill) => active.has(skill.name));
-      return selected.map((skill) => {
-        const bundle: ContextBundle = {
-          kind: 'system',
-          source: `skill.${skill.name}`,
-          priority: 700,
-          scope: 'session',
-          retention: 'compressible',
-          persist: 'session',
-          text: `<skill name="${skill.name}">\n${skill.instructions}\n</skill>`,
-          ...(skill.metadata !== undefined ? { metadata: skill.metadata } : {}),
-        };
-        return bundle;
-      });
-    },
+  return () => {
+    const selected =
+      options.activation === 'always-on'
+        ? options.skills
+        : options.skills.filter((skill) => active.has(skill.name));
+    if (selected.length === 0) {
+      return null;
+    }
+    return selected
+      .map(
+        (skill) =>
+          `<skill name="${skill.name}">\n${skill.instructions}\n</skill>`,
+      )
+      .join('\n\n');
   };
 }
 

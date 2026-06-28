@@ -1,4 +1,4 @@
-import { trimHistoryReducer } from '../core/reducers.js';
+import { trimMessages } from '../core/input-transforms.js';
 import type { AgentExtension, AgentMessage } from '../public/types.js';
 
 export interface CreateCompressionExtensionOptions {
@@ -21,15 +21,11 @@ export function createCompressionExtension(
   options: CreateCompressionExtensionOptions = {},
 ): AgentExtension {
   const maxMessages = options.maxMessages ?? 40;
-  const reducer = trimHistoryReducer({ maxMessages });
+  const trim = trimMessages({ maxMessages });
   return {
     name: 'compression',
-    reducer,
-    transformMessages(messages: AgentMessage[]) {
-      if (messages.length <= maxMessages) {
-        return messages;
-      }
-      return messages.slice(-maxMessages);
+    async transformMessages(messages: AgentMessage[], ctx) {
+      return [...(await trim(messages, ctx))];
     },
   };
 }

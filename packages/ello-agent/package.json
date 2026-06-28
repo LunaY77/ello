@@ -17,6 +17,10 @@
     "./presets": {
       "types": "./dist/presets/index.d.ts",
       "import": "./dist/presets/index.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "import": "./dist/internal.js"
     }
   },
   "files": [

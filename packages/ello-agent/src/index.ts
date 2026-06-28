@@ -1,30 +1,10 @@
 export { createAgent } from './public/create-agent.js';
 export { defineTool } from './public/tool.js';
 export {
-  DefaultAgentMessageQueue,
-  AgentRunControl,
-} from './core/run-control.js';
-export {
-  DefaultModelCallPlanner,
-  compileModelCallPlan,
-  createEnvironmentContextSource,
-  createStateContextSource,
-} from './core/planner.js';
-export {
-  createSummarySessionCompactor,
-  summarizeHistoryReducer,
-  tokenBudgetReducer,
-  trimHistoryReducer,
-} from './core/reducers.js';
-export {
   activeSkillsContext,
   createSkillTools,
   loadSkillsFromDir,
 } from './core/skills.js';
-export {
-  createDelegateTool,
-  defineSubagent,
-} from './core/subagent.js';
 export {
   createApprovalExtension,
   createCompressionExtension,
@@ -43,9 +23,9 @@ export type {
   AgentApprovalDecision,
   AgentApprovalPolicy,
   AgentApprovalRequest,
-  AnyAgentTool,
   AgentContext,
   AgentMemory,
+  AgentMemoryItem,
   AgentEnvironment,
   AgentError,
   AgentExtension,
@@ -68,15 +48,8 @@ export type {
   AgentToolContext,
   AgentToolSet,
   AgentUsage,
+  AnyAgentTool,
   AssistantMessage,
-  ContextBundle,
-  ContextBudget,
-  ContextDiagnostics,
-  ContextReducer,
-  ContextReductionInput,
-  ContextReductionOutput,
-  ContextReductionReport,
-  ContextSource,
   CreateAgentOptions,
   DeferredApprovalItem,
   DeferredRunItem,
@@ -87,19 +60,19 @@ export type {
   MemoryCompactResult,
   MemoryRetrievePolicy,
   MemoryObserveEvent,
-  ModelCallPlan,
-  ModelCallPlanner,
-  AgentModelEvent,
-  AgentModelRequest,
-  AgentModelResponse,
-  AgentSessionExtension,
+  ModelAdapter,
+  ModelInput,
+  ModelInputDiagnostics,
+  PrepareModelInput,
+  ProviderOptionsResolver,
   QueueDrainDiagnostic,
   SessionCompactionReport,
   SessionCompactor,
   SessionStore,
   SubagentDefinition,
   SubagentRunSummary,
-  ModelAdapter,
+  SystemSection,
+  MessageTransform,
   UserMessage,
 } from './public/types.js';
 export type { AgentStreamEvent } from './public/events.js';
