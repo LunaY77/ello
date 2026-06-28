@@ -12,7 +12,9 @@ import type { ApprovalFor } from './tools/shared.js';
  * 天然保证「探索/审查代理不会误写文件」。`inheritTools: false` 表示不继承父工具，
  * 完全使用这里给定的受限工具集。运行机制走内核的 `createDelegateTool`。
  */
-export function codingSubagents(config: CodingAgentConfig): SubagentDefinition[] {
+export function codingSubagents(
+  config: CodingAgentConfig,
+): SubagentDefinition[] {
   const tools = readOnlyTools(config);
   return [
     {
@@ -75,7 +77,8 @@ export function codingSubagents(config: CodingAgentConfig): SubagentDefinition[]
 function readOnlyTools(config: CodingAgentConfig): AnyAgentTool[] {
   const autoApproval: ApprovalFor = () => () => 'auto';
   const readOnlyNames = new Set(['read', 'ls', 'grep', 'glob']);
-  return [...createFsTools(config, autoApproval), ...createSearchTools(config, autoApproval)].filter(
-    (tool) => readOnlyNames.has(tool.name),
-  );
+  return [
+    ...createFsTools(config, autoApproval),
+    ...createSearchTools(config, autoApproval),
+  ].filter((tool) => readOnlyNames.has(tool.name));
 }

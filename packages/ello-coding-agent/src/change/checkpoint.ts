@@ -89,7 +89,9 @@ export class CheckpointStore {
   async list(): Promise<Checkpoint[]> {
     let files: string[];
     try {
-      files = (await readdir(this.dir)).filter((file) => file.endsWith('.json'));
+      files = (await readdir(this.dir)).filter((file) =>
+        file.endsWith('.json'),
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return [];

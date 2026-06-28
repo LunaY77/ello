@@ -165,13 +165,19 @@ function approvalSection(config: CodingAgentConfig): string {
   const note =
     guidance[config.approvalMode] ??
     'File edits and command execution require explicit user approval each time.';
-  return ['# Approval mode', `Current approval mode: \`${config.approvalMode}\`.`, note].join('\n');
+  return [
+    '# Approval mode',
+    `Current approval mode: \`${config.approvalMode}\`.`,
+    note,
+  ].join('\n');
 }
 
 /** 运行环境：把当前会话的可变约束以结构化形式注入。 */
 function environmentSection(config: CodingAgentConfig): string {
   const allowed =
-    config.allowedPaths.length > 0 ? config.allowedPaths.join(', ') : config.cwd;
+    config.allowedPaths.length > 0
+      ? config.allowedPaths.join(', ')
+      : config.cwd;
   return [
     '# Environment',
     `- Working directory: ${config.cwd}`,

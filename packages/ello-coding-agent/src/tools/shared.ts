@@ -11,7 +11,7 @@ import type {
 export const MAX_TOOL_OUTPUT = 12_000;
 
 /**
- * 审批工厂类型：按工具名生成 `approval` 回调（来自 06 的 {@link makeApprovalPolicy}）。
+ * 审批工厂类型：按工具名生成 `approval` 回调（{@link makeApprovalPolicy}）。
  *
  * 内核会在工具被调度前调用返回的回调，`'required'` 时暂停并发 `approval.required`。
  *
@@ -54,7 +54,7 @@ export function requireShell(ctx: AgentToolContext): AgentShell {
 }
 
 /**
- * 生成写入/编辑的预览 diff，供 04 的 presenter 渲染和 09 的检查点提取。
+ * 生成写入/编辑的预览 diff，供 presenter 渲染和检查点提取。
  *
  * 这是“展示用”的轻量 diff（各取前 40 行），不是可应用的 patch。
  */
@@ -70,9 +70,11 @@ export function createPreviewDiff(
       ? ['--- /dev/null', `+++ ${targetPath}`]
       : [`--- ${targetPath}`, `+++ ${targetPath}`];
   return truncate(
-    [...header, ...oldLines.map((line) => `- ${line}`), ...nextLines.map((line) => `+ ${line}`)].join(
-      '\n',
-    ),
+    [
+      ...header,
+      ...oldLines.map((line) => `- ${line}`),
+      ...nextLines.map((line) => `+ ${line}`),
+    ].join('\n'),
   );
 }
 
@@ -92,7 +94,10 @@ export function resolveWorkspacePath(
     : path.resolve(cwd, targetPath);
   const allowed = allowedPaths.some((root) => {
     const relative = path.relative(root, resolved);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    return (
+      relative === '' ||
+      (!relative.startsWith('..') && !path.isAbsolute(relative))
+    );
   });
   if (!allowed) {
     throw new Error(`Path not allowed: ${resolved}`);

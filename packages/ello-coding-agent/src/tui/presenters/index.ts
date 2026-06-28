@@ -6,7 +6,7 @@ import { createElement, type ReactNode } from 'react';
  *
  * `@ello/agent` 的 `AgentTool` 不含任何 React（内核与 UI 解耦），所以工具的渲染
  * 不能塞进工具本身。这里把渲染放到 **TUI 层的一个按工具名查找的注册表**里：
- * 加一个工具，只需在 `05` 写执行、在这里加一个 presenter，互不影响。
+ * 加一个工具，只需在写执行、在这里加一个 presenter，互不影响。
  */
 export interface ToolPresenter<I = unknown, O = unknown> {
   /** `tool.started` 时画请求卡片（命令、路径、diff 头等）。 */
@@ -39,17 +39,23 @@ const defaultPresenter: ToolPresenter = {
 /** read 工具：展示路径与读到的行数。 */
 const readPresenter: ToolPresenter = {
   summarize: (input) => str(input, 'path'),
-  renderCall: (input) => createElement(Text, { dimColor: true }, str(input, 'path')),
+  renderCall: (input) =>
+    createElement(Text, { dimColor: true }, str(input, 'path')),
   renderResult: (_input, output) => {
     const total = (output as { totalLines?: number })?.totalLines;
-    return createElement(Text, { dimColor: true }, total ? `${total} lines` : 'read');
+    return createElement(
+      Text,
+      { dimColor: true },
+      total ? `${total} lines` : 'read',
+    );
   },
 };
 
 /** 写类工具（write/edit）：展示路径 + diff。 */
 const diffPresenter: ToolPresenter = {
   summarize: (input) => str(input, 'path'),
-  renderCall: (input) => createElement(Text, { dimColor: true }, str(input, 'path')),
+  renderCall: (input) =>
+    createElement(Text, { dimColor: true }, str(input, 'path')),
   renderResult: (_input, output) =>
     createElement(Text, undefined, str(output, 'diff') || str(output, 'path')),
 };
@@ -57,9 +63,14 @@ const diffPresenter: ToolPresenter = {
 /** bash 工具：展示命令与退出码/输出摘要。 */
 const bashPresenter: ToolPresenter = {
   summarize: (input) => clip(str(input, 'command'), 60),
-  renderCall: (input) => createElement(Text, { dimColor: true }, str(input, 'command')),
+  renderCall: (input) =>
+    createElement(Text, { dimColor: true }, str(input, 'command')),
   renderResult: (_input, output) => {
-    const record = output as { exitCode?: number; stdout?: string; stderr?: string };
+    const record = output as {
+      exitCode?: number;
+      stdout?: string;
+      stderr?: string;
+    };
     const head = record?.stdout || record?.stderr || '';
     return createElement(Text, { dimColor: true }, clip(head, 200));
   },
@@ -68,8 +79,10 @@ const bashPresenter: ToolPresenter = {
 /** grep 工具：展示 pattern 与命中摘要。 */
 const grepPresenter: ToolPresenter = {
   summarize: (input) => clip(str(input, 'pattern'), 60),
-  renderCall: (input) => createElement(Text, { dimColor: true }, str(input, 'pattern')),
-  renderResult: (_input, output) => createElement(Text, { dimColor: true }, clip(stringify(output), 200)),
+  renderCall: (input) =>
+    createElement(Text, { dimColor: true }, str(input, 'pattern')),
+  renderResult: (_input, output) =>
+    createElement(Text, { dimColor: true }, clip(stringify(output), 200)),
 };
 
 /** todo 工具：展示任务条数。 */
@@ -78,7 +91,11 @@ const todoPresenter: ToolPresenter = {
   renderCall: () => null,
   renderResult: (_input, output) => {
     const items = (output as { items?: unknown[] })?.items;
-    return createElement(Text, { dimColor: true }, `${items?.length ?? 0} items`);
+    return createElement(
+      Text,
+      { dimColor: true },
+      `${items?.length ?? 0} items`,
+    );
   },
 };
 

@@ -46,9 +46,19 @@ export type AgentStreamEvent =
   /** 运行被中断，携带中断时的消息现场。 */
   | { type: 'run.interrupted'; runId: string; messages: AgentMessage[] }
   /** 子代理开始，携带父运行 ID。 */
-  | { type: 'subagent.started'; runId: string; name: string; parentRunId: string }
+  | {
+      type: 'subagent.started';
+      runId: string;
+      name: string;
+      parentRunId: string;
+    }
   /** 子代理完成，携带其运行结果。 */
-  | { type: 'subagent.completed'; runId: string; name: string; result: AgentRunResult }
+  | {
+      type: 'subagent.completed';
+      runId: string;
+      name: string;
+      result: AgentRunResult;
+    }
   /** 子代理失败，携带错误。 */
   | { type: 'subagent.failed'; runId: string; name: string; error: AgentError }
   /** 运行成功完成，携带最终结果。 */

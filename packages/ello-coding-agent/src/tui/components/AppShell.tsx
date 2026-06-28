@@ -5,7 +5,6 @@ import { Spinner, StatusMessage } from '@inkjs/ui';
 import { Box, Static, Text } from 'ink';
 import type { ReactNode } from 'react';
 
-
 import type { TranscriptItem, ToolCallView } from '../state/view-reducer.js';
 
 import { Footer } from './Footer.js';
@@ -38,7 +37,11 @@ export function AppShell(props: AppShellProps) {
     <Box flexDirection="column" width="100%" paddingX={1}>
       <Box justifyContent="space-between" paddingX={1}>
         <Text color="cyan">ello</Text>
-        {props.running ? <Spinner label="running" /> : <Text dimColor>ready</Text>}
+        {props.running ? (
+          <Spinner label="running" />
+        ) : (
+          <Text dimColor>ready</Text>
+        )}
         <Text color="gray">{formatCwd(props.cwd)}</Text>
       </Box>
 
@@ -94,7 +97,8 @@ function TranscriptLine({ item }: { readonly item: TranscriptItem }) {
 /** 把 cwd 压成 `parent/base` 形式，home 替换成 ~。 */
 function formatCwd(cwd: string): string {
   const home = process.env.HOME;
-  const display = home !== undefined && cwd.startsWith(home) ? cwd.replace(home, '~') : cwd;
+  const display =
+    home !== undefined && cwd.startsWith(home) ? cwd.replace(home, '~') : cwd;
   const base = path.basename(display);
   const parent = path.basename(path.dirname(display));
   return parent && parent !== '.' ? `${parent}/${base}` : display;

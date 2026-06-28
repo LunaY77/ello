@@ -20,7 +20,11 @@ export function webFetchTool(approval: ApprovalFor): AnyAgentTool {
     approval: approval('web_fetch'),
     execute: async ({ url }) => {
       const response = await fetch(url);
-      return { url, status: response.status, text: truncate(await response.text()) };
+      return {
+        url,
+        status: response.status,
+        text: truncate(await response.text()),
+      };
     },
   });
 }

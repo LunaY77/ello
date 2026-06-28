@@ -14,7 +14,9 @@ export { buildProgram, runCli, type CliIo } from './cli/main.js';
  */
 if (isCliEntrypoint()) {
   runCli(process.argv.slice(2)).catch((error: unknown) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `${error instanceof Error ? error.message : String(error)}\n`,
+    );
     process.exitCode = 1;
   });
 }

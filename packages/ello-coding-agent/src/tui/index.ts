@@ -26,7 +26,10 @@ export async function launchTui(options: LaunchTuiOptions): Promise<void> {
   const instance = render(
     createElement(ThemeProvider, {
       theme: elloTheme,
-      children: createElement(CodingAgentApp, { session, config: options.config }),
+      children: createElement(CodingAgentApp, {
+        session,
+        config: options.config,
+      }),
     }),
     { maxFps: 30 },
   );

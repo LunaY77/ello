@@ -87,7 +87,9 @@ function globalInstructionsSection(): SystemSection {
   const file = path.join(homedir(), '.ello', 'ELLO.md');
   return async () => {
     const text = await readFileOrNull(file);
-    return text && text.trim() ? `# Global instructions (~/.ello/ELLO.md)\n${text.trim()}` : null;
+    return text && text.trim()
+      ? `# Global instructions (~/.ello/ELLO.md)\n${text.trim()}`
+      : null;
   };
 }
 
@@ -187,7 +189,10 @@ async function buildRepoOverview(cwd: string): Promise<string | null> {
   }
 
   const readme = (await readFileOrNull(path.join(cwd, 'README.md'))) ?? '';
-  const firstParagraph = readme.trim().split(/\n\s*\n/u)[0]?.trim();
+  const firstParagraph = readme
+    .trim()
+    .split(/\n\s*\n/u)[0]
+    ?.trim();
   if (firstParagraph) {
     lines.push(`readme: ${firstParagraph.slice(0, 400)}`);
   }
@@ -199,11 +204,15 @@ async function buildRepoOverview(cwd: string): Promise<string | null> {
 async function loadGitContext(cwd: string): Promise<string> {
   try {
     const [branch, status, log] = await Promise.all([
-      execFileAsync('git', ['branch', '--show-current'], { cwd, timeout: 3000 }),
+      execFileAsync('git', ['branch', '--show-current'], {
+        cwd,
+        timeout: 3000,
+      }),
       execFileAsync('git', ['status', '--short'], { cwd, timeout: 3000 }),
-      execFileAsync('git', ['log', '-1', '--pretty=%h %s'], { cwd, timeout: 3000 }).catch(
-        () => ({ stdout: '' }),
-      ),
+      execFileAsync('git', ['log', '-1', '--pretty=%h %s'], {
+        cwd,
+        timeout: 3000,
+      }).catch(() => ({ stdout: '' })),
     ]);
     return [
       `branch: ${branch.stdout.trim() || 'detached'}`,

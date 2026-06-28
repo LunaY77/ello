@@ -21,7 +21,10 @@ export function useRuntimeEvents(session: CodingSession): {
 } {
   const [state, dispatch] = useReducer(reduce, initialViewState);
 
-  useEffect(() => session.subscribe((event) => dispatch(event as ViewInput)), [session]);
+  useEffect(
+    () => session.subscribe((event) => dispatch(event as ViewInput)),
+    [session],
+  );
 
   return {
     state,

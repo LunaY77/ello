@@ -164,8 +164,9 @@ export class DefaultAgentResourceRegistry implements AgentResourceRegistry {
   async getContextInstructions(): Promise<string | null> {
     const sections: string[] = [];
     for (const key of this.resources.keys()) {
-      const instructions =
-        await this.resources.get(key)?.getContextInstructions?.();
+      const instructions = await this.resources
+        .get(key)
+        ?.getContextInstructions?.();
       if (instructions) {
         sections.push(`<resource name="${key}">\n${instructions}\n</resource>`);
       }
@@ -305,11 +306,7 @@ class LocalShell implements AgentShell {
         killed?: boolean;
       };
       return {
-        exitCode: err.killed
-          ? -1
-          : typeof err.code === 'number'
-            ? err.code
-            : 1,
+        exitCode: err.killed ? -1 : typeof err.code === 'number' ? err.code : 1,
         stdout: err.stdout ?? '',
         stderr: err.killed ? 'timeout' : (err.stderr ?? err.message),
       };

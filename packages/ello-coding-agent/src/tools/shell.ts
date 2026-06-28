@@ -18,7 +18,8 @@ export function createShellTools(
   return [
     defineTool({
       name: 'bash',
-      description: 'Run a shell command in the workspace with timeout and captured stdout/stderr.',
+      description:
+        'Run a shell command in the workspace with timeout and captured stdout/stderr.',
       input: z.object({
         command: z.string(),
         timeoutMs: z.number().int().min(1000).max(120_000).default(30_000),

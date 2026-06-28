@@ -46,7 +46,9 @@ function summarizeInput(input: unknown): string {
   if (typeof input === 'object') {
     const record = input as Record<string, unknown>;
     // 优先展示最有信息量的字段：path / command / pattern。
-    const key = ['path', 'command', 'pattern', 'query'].find((k) => typeof record[k] === 'string');
+    const key = ['path', 'command', 'pattern', 'query'].find(
+      (k) => typeof record[k] === 'string',
+    );
     if (key !== undefined) {
       return clip(String(record[key]), 80);
     }
@@ -62,14 +64,18 @@ function summarizeOutput(output: unknown): string {
   if (typeof output === 'object') {
     const record = output as Record<string, unknown>;
     if (typeof record.path === 'string') {
-      const bytes = typeof record.bytes === 'number' ? ` (${record.bytes}b)` : '';
+      const bytes =
+        typeof record.bytes === 'number' ? ` (${record.bytes}b)` : '';
       return `→ ${record.path}${bytes}`;
     }
     if (typeof record.totalLines === 'number') {
       return `→ ${record.totalLines} lines`;
     }
   }
-  return clip(typeof output === 'string' ? output : JSON.stringify(output), 120);
+  return clip(
+    typeof output === 'string' ? output : JSON.stringify(output),
+    120,
+  );
 }
 
 /** 截断到 max 字符，超出加省略号。 */
@@ -79,7 +85,8 @@ function clip(text: string, max: number): string {
 }
 
 // 极简 ANSI 着色：无 TTY 时退化为原文（由调用方决定是否启用）。
-const useColor = process.stdout.isTTY === true && process.env.NO_COLOR === undefined;
+const useColor =
+  process.stdout.isTTY === true && process.env.NO_COLOR === undefined;
 function dim(text: string): string {
   return useColor ? `\u001b[2m${text}\u001b[0m` : text;
 }

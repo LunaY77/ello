@@ -38,7 +38,11 @@ export interface OverlayHostProps {
  * 审批用 `Alert` + `Select`：选择结果直接翻译成 `ApprovalDecision` 交给
  * `session.approve`（在 App 里），TUI 本身不判权限。
  */
-export function OverlayHost({ overlay, onApprove, onSelectModel }: OverlayHostProps) {
+export function OverlayHost({
+  overlay,
+  onApprove,
+  onSelectModel,
+}: OverlayHostProps) {
   if (overlay.type === 'none') {
     return null;
   }
@@ -47,10 +51,14 @@ export function OverlayHost({ overlay, onApprove, onSelectModel }: OverlayHostPr
       {overlay.type === 'approval' ? (
         <Alert variant="warning" title={`Approve ${overlay.request.toolName}?`}>
           <Box flexDirection="column">
-            <Text dimColor wrap="wrap">{preview(overlay.request.input)}</Text>
+            <Text dimColor wrap="wrap">
+              {preview(overlay.request.input)}
+            </Text>
             <Select
               options={APPROVAL_OPTIONS}
-              onChange={(value) => onApprove(overlay.request.requestId, toDecision(value))}
+              onChange={(value) =>
+                onApprove(overlay.request.requestId, toDecision(value))
+              }
             />
           </Box>
         </Alert>
@@ -59,7 +67,10 @@ export function OverlayHost({ overlay, onApprove, onSelectModel }: OverlayHostPr
         <Box flexDirection="column" borderStyle="round" paddingX={1}>
           <Text color="cyan">Select model</Text>
           <Select
-            options={overlay.models.map((model) => ({ label: model, value: model }))}
+            options={overlay.models.map((model) => ({
+              label: model,
+              value: model,
+            }))}
             onChange={onSelectModel}
           />
         </Box>
@@ -67,7 +78,8 @@ export function OverlayHost({ overlay, onApprove, onSelectModel }: OverlayHostPr
       {overlay.type === 'help' ? (
         <Box borderStyle="round" paddingX={1}>
           <Text>
-            /help /model /new /tools /permissions /memory /quit · Esc closes · Ctrl+C exits
+            /help /model /new /tools /permissions /memory /quit · Esc closes ·
+            Ctrl+C exits
           </Text>
         </Box>
       ) : null}

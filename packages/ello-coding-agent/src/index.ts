@@ -71,7 +71,10 @@ export {
 
 // —— 上下文与系统提示 ——
 export { buildCodingSystemPrompt } from './system-prompt.js';
-export { buildSystemSections, loadProjectInstructions } from './context/sections.js';
+export {
+  buildSystemSections,
+  loadProjectInstructions,
+} from './context/sections.js';
 export { createCodingMemory } from './context/memory.js';
 export { createSessionCompactor } from './context/compactor.js';
 export {
@@ -94,7 +97,10 @@ export { loadCodingSkills } from './skills.js';
 export { codingSubagents } from './subagents.js';
 
 // —— 可观测 ——
-export { createCodingObserver, summarizeUsage } from './observability/observer.js';
+export {
+  createCodingObserver,
+  summarizeUsage,
+} from './observability/observer.js';
 
 // —— slash 命令 ——
 export {

@@ -3,7 +3,12 @@ import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config.js';
 
-import { createPreviewDiff, requireFs, truncate, type ApprovalFor } from './shared.js';
+import {
+  createPreviewDiff,
+  requireFs,
+  truncate,
+  type ApprovalFor,
+} from './shared.js';
 
 /**
  * 文件系统工具：read / ls / write / edit。
@@ -35,7 +40,10 @@ export function createFsTools(
           totalLines: lines.length,
           content: truncate(
             slice
-              .map((line, index) => `${String(offset + index).padStart(5, ' ')}  ${line}`)
+              .map(
+                (line, index) =>
+                  `${String(offset + index).padStart(5, ' ')}  ${line}`,
+              )
               .join('\n'),
           ),
         };
@@ -55,7 +63,11 @@ export function createFsTools(
       name: 'write',
       description:
         'Create or overwrite a file. Requires approval outside bypass or accept-edits mode.',
-      input: z.object({ path: z.string(), content: z.string(), reason: z.string().optional() }),
+      input: z.object({
+        path: z.string(),
+        content: z.string(),
+        reason: z.string().optional(),
+      }),
       approval: approval('write'),
       execute: async ({ path: targetPath, content, reason }, ctx) => {
         const fs = requireFs(ctx);
@@ -74,7 +86,8 @@ export function createFsTools(
     }),
     defineTool({
       name: 'edit',
-      description: 'Replace a unique text fragment in a file. Fails when the old text is not unique.',
+      description:
+        'Replace a unique text fragment in a file. Fails when the old text is not unique.',
       input: z.object({
         path: z.string(),
         oldText: z.string(),
@@ -92,7 +105,10 @@ export function createFsTools(
         if (current.indexOf(oldText, first + oldText.length) !== -1) {
           throw new Error(`Text is not unique in ${targetPath}`);
         }
-        const next = current.slice(0, first) + newText + current.slice(first + oldText.length);
+        const next =
+          current.slice(0, first) +
+          newText +
+          current.slice(first + oldText.length);
         await fs.writeText(targetPath, next);
         return {
           path: targetPath,

@@ -32,7 +32,10 @@ export function sessionsDir(config: CodingAgentConfig): string {
 }
 
 /** 单个会话 JSONL 文件路径：`<sessionDir>/<sessionId>.jsonl`。 */
-export function sessionFile(config: CodingAgentConfig, sessionId: string): string {
+export function sessionFile(
+  config: CodingAgentConfig,
+  sessionId: string,
+): string {
   return path.join(sessionsDir(config), `${sessionId}.jsonl`);
 }
 

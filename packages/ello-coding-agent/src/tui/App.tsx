@@ -34,7 +34,10 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
 
   useInput((_input, key) => {
     if (key.escape) {
-      if (effectiveOverlay.type !== 'none' && effectiveOverlay.type !== 'approval') {
+      if (
+        effectiveOverlay.type !== 'none' &&
+        effectiveOverlay.type !== 'approval'
+      ) {
         setOverlay({ type: 'none' });
       } else if (state.status === 'running') {
         session.abort();
@@ -47,7 +50,10 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
     switch (command.type) {
       case 'open-overlay':
         if (command.overlay === 'model-selector') {
-          setOverlay({ type: 'model-selector', models: config.modelCandidates });
+          setOverlay({
+            type: 'model-selector',
+            models: config.modelCandidates,
+          });
         } else if (command.overlay === 'help') {
           setOverlay({ type: 'help' });
         }
@@ -95,7 +101,10 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
     void session.approve(requestId, decision);
   };
 
-  const runningTools = useMemo(() => [...state.runningTools.values()], [state.runningTools]);
+  const runningTools = useMemo(
+    () => [...state.runningTools.values()],
+    [state.runningTools],
+  );
 
   return (
     <AppShell

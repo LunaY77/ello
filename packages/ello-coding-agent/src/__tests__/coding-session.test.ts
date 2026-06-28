@@ -18,7 +18,9 @@ import type { CodingSessionEvent } from '../runtime/intents.js';
 const dirs: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
 });
 
 async function tempDir(): Promise<string> {
@@ -43,7 +45,10 @@ class TextAdapter implements ModelAdapter {
   async generate(request: AgentModelRequest): Promise<AgentModelResponse> {
     return {
       text: this.text,
-      messages: [...request.messages, { role: 'assistant', content: this.text }],
+      messages: [
+        ...request.messages,
+        { role: 'assistant', content: this.text },
+      ],
       newMessages: [{ role: 'assistant', content: this.text }],
       usage,
       finishReason: 'stop',
@@ -66,7 +71,10 @@ describe('createCodingSession', () => {
       model: 'fake:test',
       approvalMode: 'default',
     });
-    const session = await createCodingSession({ config, modelAdapter: new TextAdapter('OK') });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: new TextAdapter('OK'),
+    });
     const types: string[] = [];
     session.subscribe((event: CodingSessionEvent) => types.push(event.type));
 
@@ -100,7 +108,13 @@ describe('createCodingSession', () => {
             text: '',
             messages: [...request.messages],
             newMessages: [],
-            toolCalls: [{ id: 'call_1', name: 'write', input: { path: target, content: 'hi' } }],
+            toolCalls: [
+              {
+                id: 'call_1',
+                name: 'write',
+                input: { path: target, content: 'hi' },
+              },
+            ],
             usage,
             finishReason: 'tool-calls',
             provider: null,
@@ -108,7 +122,10 @@ describe('createCodingSession', () => {
         }
         return {
           text: 'wrote it',
-          messages: [...request.messages, { role: 'assistant', content: 'wrote it' }],
+          messages: [
+            ...request.messages,
+            { role: 'assistant', content: 'wrote it' },
+          ],
           newMessages: [{ role: 'assistant', content: 'wrote it' }],
           usage,
           finishReason: 'stop',
@@ -120,7 +137,10 @@ describe('createCodingSession', () => {
       },
     };
 
-    const session = await createCodingSession({ config, modelAdapter: adapter });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
     const pending: { requestId: string; toolName: string }[] = [];
     session.subscribe((event) => {
       if (event.type === 'approval.pending') {

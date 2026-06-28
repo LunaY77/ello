@@ -17,7 +17,7 @@ export type RuleScope = 'session' | 'project';
  * - `session` 作用域：仅存进程内存，随会话消失；
  * - `project` 作用域：写 `<repo>/.ello/permissions.json`，跨会话生效。
  *
- * `rules()` 合并内存与磁盘规则，交给 06 的 {@link makeApprovalPolicy} 实时匹配。
+ * `rules()` 合并内存与磁盘规则，交给 {@link makeApprovalPolicy} 实时匹配。
  * 规则结构沿用 `permissions.ts` 的 {@link PermissionRule}。
  */
 export class RulesStore {
@@ -40,12 +40,18 @@ export class RulesStore {
   }
 
   /** 把一个审批待决项转成 allow 规则并按作用域持久化。 */
-  async addAllowRule(item: DeferredApprovalItem, scope: RuleScope): Promise<void> {
+  async addAllowRule(
+    item: DeferredApprovalItem,
+    scope: RuleScope,
+  ): Promise<void> {
     await this.addRule(toRule(item, 'allow', scope));
   }
 
   /** 把一个审批待决项转成 deny 规则并按作用域持久化。 */
-  async addDenyRule(item: DeferredApprovalItem, scope: RuleScope): Promise<void> {
+  async addDenyRule(
+    item: DeferredApprovalItem,
+    scope: RuleScope,
+  ): Promise<void> {
     await this.addRule(toRule(item, 'deny', scope));
   }
 
@@ -85,7 +91,9 @@ function toRule(
   action: 'allow' | 'deny',
   scope: RuleScope,
 ): PermissionRule {
-  const input = (item.input ?? undefined) as Record<string, unknown> | undefined;
+  const input = (item.input ?? undefined) as
+    | Record<string, unknown>
+    | undefined;
   return {
     action,
     tool: item.toolName,

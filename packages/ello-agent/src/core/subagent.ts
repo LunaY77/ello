@@ -90,11 +90,16 @@ export function createDelegateTool(
           ? { modelAdapter: options.modelAdapter }
           : {}),
         ...(options.session !== undefined ? { session: options.session } : {}),
-        ...(options.observers !== undefined ? { observers: options.observers } : {}),
+        ...(options.observers !== undefined
+          ? { observers: options.observers }
+          : {}),
       });
       try {
         return await agent.run(input, {
-          metadata: { parentRunId: ctx.runId, delegatedBy: 'delegate_to_subagent' },
+          metadata: {
+            parentRunId: ctx.runId,
+            delegatedBy: 'delegate_to_subagent',
+          },
         });
       } finally {
         // 无论成功与否都关闭子代理，避免泄漏其持有的资源。

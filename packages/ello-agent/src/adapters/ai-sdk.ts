@@ -48,15 +48,22 @@ export class AiSdkModelAdapter implements ModelAdapter {
       ...(request.system !== undefined ? { system: request.system } : {}),
       messages: request.messages as ModelMessage[],
       tools: request.tools,
-      ...(request.activeTools !== undefined ? { activeTools: request.activeTools } : {}),
-      ...(request.toolChoice !== undefined ? { toolChoice: request.toolChoice } : {}),
+      ...(request.activeTools !== undefined
+        ? { activeTools: request.activeTools }
+        : {}),
+      ...(request.toolChoice !== undefined
+        ? { toolChoice: request.toolChoice }
+        : {}),
       ...(request.providerOptions !== undefined
         ? { providerOptions: request.providerOptions as never }
         : {}),
       ...(request.signal !== undefined ? { abortSignal: request.signal } : {}),
       ...(request.modelSettings as object),
     });
-    const newMessages = normalizeResponseMessages(result.responseMessages, result.text);
+    const newMessages = normalizeResponseMessages(
+      result.responseMessages,
+      result.text,
+    );
     return {
       text: result.text,
       messages: [...request.messages, ...newMessages],
@@ -84,8 +91,12 @@ export class AiSdkModelAdapter implements ModelAdapter {
       ...(request.system !== undefined ? { system: request.system } : {}),
       messages: request.messages as ModelMessage[],
       tools: request.tools,
-      ...(request.activeTools !== undefined ? { activeTools: request.activeTools } : {}),
-      ...(request.toolChoice !== undefined ? { toolChoice: request.toolChoice } : {}),
+      ...(request.activeTools !== undefined
+        ? { activeTools: request.activeTools }
+        : {}),
+      ...(request.toolChoice !== undefined
+        ? { toolChoice: request.toolChoice }
+        : {}),
       ...(request.providerOptions !== undefined
         ? { providerOptions: request.providerOptions as never }
         : {}),
@@ -166,7 +177,9 @@ export function resolveLanguageModel(model: AgentModel): LanguageModel {
     return openai.chat(modelName as Parameters<typeof openai.chat>[0]);
   }
   if (provider === 'openai-responses' || provider === 'openai') {
-    return openai.responses(modelName as Parameters<typeof openai.responses>[0]);
+    return openai.responses(
+      modelName as Parameters<typeof openai.responses>[0],
+    );
   }
   if (provider === 'anthropic') {
     return anthropic(modelName as Parameters<typeof anthropic>[0]);

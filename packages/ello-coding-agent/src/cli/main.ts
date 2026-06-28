@@ -104,14 +104,18 @@ export function buildProgram(io: CliIo = defaultIo): Command {
     .command('resume')
     .description('resume an existing session (TUI by default)')
     .argument('[session]', 'session id or jsonl path')
-    .action(async (session: string | undefined, _opts: unknown, cmd: Command) => {
-      const config = await resolveConfig(cmd.optsWithGlobals());
-      if (config.tui) {
-        await launchTui({ config: { ...config, sessionId: session ?? null } });
-      } else {
-        await resumeNonInteractive(config, session, io);
-      }
-    });
+    .action(
+      async (session: string | undefined, _opts: unknown, cmd: Command) => {
+        const config = await resolveConfig(cmd.optsWithGlobals());
+        if (config.tui) {
+          await launchTui({
+            config: { ...config, sessionId: session ?? null },
+          });
+        } else {
+          await resumeNonInteractive(config, session, io);
+        }
+      },
+    );
 
   registerInfoCommands(program, io);
   return program;
@@ -122,7 +126,10 @@ export function buildProgram(io: CliIo = defaultIo): Command {
  *
  * `from: 'user'` 表示传入的是去掉 node/script 前缀的纯参数数组。
  */
-export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<void> {
+export async function runCli(
+  argv: string[],
+  io: CliIo = defaultIo,
+): Promise<void> {
   await buildProgram(io).parseAsync(argv, { from: 'user' });
 }
 
@@ -132,7 +139,11 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<voi
  * 审批在非交互模式下完全由策略决定（bypass/accept-edits/dont-ask）；若策略判
  * required 而无 UI，内核侧会按拒绝处理并把原因喂回模型。CLI 不实现任何业务逻辑。
  */
-async function runOnce(config: CodingAgentConfig, prompt: string, io: CliIo): Promise<void> {
+async function runOnce(
+  config: CodingAgentConfig,
+  prompt: string,
+  io: CliIo,
+): Promise<void> {
   const session = await createCodingSession({ config });
   const unsubscribe = session.subscribe((event) => {
     io.stdout.write(renderEvent(event, config.json));
@@ -178,7 +189,10 @@ function registerInfoCommands(program: Command, io: CliIo): void {
     .description('list sessions')
     .action(async (_opts: unknown, cmd: Command) => {
       const config = await resolveConfig(cmd.optsWithGlobals());
-      const store = new JsonlSessionStore({ sessionDir: config.sessionDir, cwd: config.cwd });
+      const store = new JsonlSessionStore({
+        sessionDir: config.sessionDir,
+        cwd: config.cwd,
+      });
       const sessions = await store.list();
       io.stdout.write(
         `${
@@ -188,7 +202,8 @@ function registerInfoCommands(program: Command, io: CliIo): void {
               ? `No sessions in ${config.sessionDir}`
               : sessions
                   .map(
-                    (s) => `${s.sessionId}\t${s.entryCount} entries\t${s.updatedAt ?? 'unknown'}`,
+                    (s) =>
+                      `${s.sessionId}\t${s.entryCount} entries\t${s.updatedAt ?? 'unknown'}`,
                   )
                   .join('\n')
         }\n`,
@@ -239,7 +254,9 @@ function registerInfoCommands(program: Command, io: CliIo): void {
       );
     });
 
-  const configCmd = program.command('config').description('read/write project config');
+  const configCmd = program
+    .command('config')
+    .description('read/write project config');
   configCmd
     .command('path')
     .description('print project config path')
@@ -259,10 +276,16 @@ function registerInfoCommands(program: Command, io: CliIo): void {
     .argument('<key>', 'config key')
     .argument('<value>', 'config value')
     .description('set a project config key')
-    .action(async (key: string, value: string, _opts: unknown, cmd: Command) => {
-      const config = await resolveConfig(cmd.optsWithGlobals());
-      const [parsedKey, rawValue] = splitConfigSetPrompt(`${key} ${value}`);
-      const next = await setProjectConfigValue(config.cwd, parsedKey, parseConfigValue(rawValue));
-      io.stdout.write(`${JSON.stringify(next, null, 2)}\n`);
-    });
+    .action(
+      async (key: string, value: string, _opts: unknown, cmd: Command) => {
+        const config = await resolveConfig(cmd.optsWithGlobals());
+        const [parsedKey, rawValue] = splitConfigSetPrompt(`${key} ${value}`);
+        const next = await setProjectConfigValue(
+          config.cwd,
+          parsedKey,
+          parseConfigValue(rawValue),
+        );
+        io.stdout.write(`${JSON.stringify(next, null, 2)}\n`);
+      },
+    );
 }

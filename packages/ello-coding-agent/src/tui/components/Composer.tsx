@@ -24,8 +24,12 @@ export function Composer(props: ComposerProps) {
         <Text color="cyan">{'>'}</Text>
         <TextInput
           isDisabled={props.isActive === false}
-          placeholder={props.running ? 'steer while running…' : '/command  @file  !shell'}
-          {...(props.suggestions !== undefined ? { suggestions: [...props.suggestions] } : {})}
+          placeholder={
+            props.running ? 'steer while running…' : '/command  @file  !shell'
+          }
+          {...(props.suggestions !== undefined
+            ? { suggestions: [...props.suggestions] }
+            : {})}
           onSubmit={props.onSubmit}
         />
       </Box>

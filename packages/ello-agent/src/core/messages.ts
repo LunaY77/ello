@@ -61,7 +61,10 @@ export function diffNewMessages(
 }
 
 /** 判断两条消息是否等价（角色相同且稳定化内容一致）。 */
-function messagesEqual(left: AgentMessage, right: AgentMessage | undefined): boolean {
+function messagesEqual(
+  left: AgentMessage,
+  right: AgentMessage | undefined,
+): boolean {
   if (right === undefined || left.role !== right.role) {
     return false;
   }

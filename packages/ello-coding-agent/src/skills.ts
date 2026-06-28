@@ -10,9 +10,11 @@ import { globalSkillsDir, projectSkillsDir } from './session/paths.js';
  * （内含 SKILL.md）”的布局，加载机制完全复用内核 {@link loadSkillsFromDir}，
  * 本函数只做目录装配与同名覆盖。
  *
- * 覆盖规则：先全局后项目，**项目同名技能覆盖全局**（与 07/08 的覆盖规则一致）。
+ * 覆盖规则：先全局后项目，**项目同名技能覆盖全局**。
  */
-export async function loadCodingSkills(config: CodingAgentConfig): Promise<AgentSkill[]> {
+export async function loadCodingSkills(
+  config: CodingAgentConfig,
+): Promise<AgentSkill[]> {
   const global = await safeLoad(globalSkillsDir());
   const project = await safeLoad(projectSkillsDir(config.cwd));
   return dedupeByName([...global, ...project]);

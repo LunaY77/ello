@@ -148,12 +148,8 @@ env.resources?.register('cache', {
 const agent = createAgent({
   model: 'test:model',
   modelInput: {
-    systemSections: [
-      async () => '额外系统提示。',
-    ],
-    messageTransforms: [
-      async (messages) => messages.slice(-20),
-    ],
+    systemSections: [async () => '额外系统提示。'],
+    messageTransforms: [async (messages) => messages.slice(-20)],
     providerOptions: async () => ({
       temperature: 0.2,
     }),
@@ -250,4 +246,3 @@ const agent = createAgent({
 - `src/environment` - 本地 environment 实现
 - `src/public` - 对外类型与接口
 - `src/docs` - 这份文档
-

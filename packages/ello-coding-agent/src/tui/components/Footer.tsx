@@ -2,7 +2,6 @@ import type { AgentUsage } from '@ello/agent';
 import { Badge } from '@inkjs/ui';
 import { Box, Text } from 'ink';
 
-
 export interface FooterProps {
   readonly model: string;
   readonly approvalMode: string;
@@ -17,12 +16,17 @@ export interface FooterProps {
  * 用 `Badge` 标审批模式，文本展示 model / token 用量 / 上下文占用。
  */
 export function Footer(props: FooterProps) {
-  const tokens = props.usage !== undefined ? props.usage.inputTokens + props.usage.outputTokens : 0;
+  const tokens =
+    props.usage !== undefined
+      ? props.usage.inputTokens + props.usage.outputTokens
+      : 0;
   return (
     <Box justifyContent="space-between" paddingX={1} marginTop={1}>
       <Box gap={1}>
         <Text color="gray">{props.model}</Text>
-        <Badge color={approvalColor(props.approvalMode)}>{props.approvalMode}</Badge>
+        <Badge color={approvalColor(props.approvalMode)}>
+          {props.approvalMode}
+        </Badge>
       </Box>
       <Box gap={1}>
         <Text dimColor>{`${formatTokens(tokens)} tok`}</Text>

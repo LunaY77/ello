@@ -36,7 +36,11 @@ import { codingSubagents } from '../subagents.js';
 import { buildCodingSystemPrompt } from '../system-prompt.js';
 import { createCodingTools } from '../tools/index.js';
 
-import type { ApprovalDecision, CodingEventListener, CodingSessionEvent } from './intents.js';
+import type {
+  ApprovalDecision,
+  CodingEventListener,
+  CodingSessionEvent,
+} from './intents.js';
 
 /** 模型上下文窗口默认值，用于压缩触发判定。 */
 const DEFAULT_CONTEXT_WINDOW = 160_000;
@@ -63,7 +67,10 @@ export interface CodingSession {
   readonly checkpoints: CheckpointStore;
 
   subscribe(listener: CodingEventListener): () => void;
-  submit(prompt: string, meta?: Record<string, unknown>): Promise<AgentRunResult>;
+  submit(
+    prompt: string,
+    meta?: Record<string, unknown>,
+  ): Promise<AgentRunResult>;
   steer(prompt: string): void;
   approve(requestId: string, decision: ApprovalDecision): Promise<void>;
   abort(reason?: string): void;
@@ -93,7 +100,10 @@ export async function createCodingSession(
   const { config } = options;
   const sessionId = config.sessionId ?? randomUUID();
 
-  const sessionStore = new JsonlSessionStore({ sessionDir: config.sessionDir, cwd: config.cwd });
+  const sessionStore = new JsonlSessionStore({
+    sessionDir: config.sessionDir,
+    cwd: config.cwd,
+  });
   const rulesStore = new RulesStore(config.cwd);
   await rulesStore.load();
 
@@ -110,7 +120,9 @@ export async function createCodingSession(
     rulesStore,
     compactor,
     skills,
-    ...(options.modelAdapter !== undefined ? { modelAdapter: options.modelAdapter } : {}),
+    ...(options.modelAdapter !== undefined
+      ? { modelAdapter: options.modelAdapter }
+      : {}),
   });
   session.emit({ type: 'session.opened', sessionId, cwd: config.cwd });
   return session;
@@ -147,10 +159,14 @@ class CodingSessionImpl implements CodingSession {
   }
 
   /** 提交一次用户输入，消费整条 stream 直到 run 结束或被审批卡住。 */
-  async submit(prompt: string, meta?: Record<string, unknown>): Promise<AgentRunResult> {
+  async submit(
+    prompt: string,
+    meta?: Record<string, unknown>,
+  ): Promise<AgentRunResult> {
     // v1：把排队的 steer 输入并入本次提交（公共 API 暂无 run 内注入入口）。
     const drained = this.steerQueue.splice(0);
-    const input = drained.length > 0 ? [...drained, prompt].join('\n\n') : prompt;
+    const input =
+      drained.length > 0 ? [...drained, prompt].join('\n\n') : prompt;
 
     this.emit({ type: 'status', state: 'running' });
     this.currentStream = this.agent.stream(input, {
@@ -189,7 +205,10 @@ class CodingSessionImpl implements CodingSession {
 
     const approved = decision.action !== 'deny';
     if (decision.action === 'always_allow') {
-      await this.deps.rulesStore.addAllowRule(item, decision.scope ?? 'session');
+      await this.deps.rulesStore.addAllowRule(
+        item,
+        decision.scope ?? 'session',
+      );
     } else if (decision.action === 'deny') {
       await this.deps.rulesStore.addDenyRule(item, decision.scope ?? 'session');
     }
@@ -201,7 +220,9 @@ class CodingSessionImpl implements CodingSession {
         approvals: {
           [item.toolCallId]: {
             approved,
-            ...(decision.reason !== undefined ? { reason: decision.reason } : {}),
+            ...(decision.reason !== undefined
+              ? { reason: decision.reason }
+              : {}),
           },
         },
       },
@@ -315,22 +336,34 @@ class CodingSessionImpl implements CodingSession {
     const memory = createCodingMemory(config);
     const observer = createCodingObserver(config);
 
-    const tools = createCodingTools({ config, rules: () => this.deps.rulesStore.rules() });
-    const skillTools = createSkillTools({ skills: this.deps.skills, active: this.activeSkills });
+    const tools = createCodingTools({
+      config,
+      rules: () => this.deps.rulesStore.rules(),
+    });
+    const skillTools = createSkillTools({
+      skills: this.deps.skills,
+      active: this.activeSkills,
+    });
     const delegateTool = createDelegateTool({
       subagents: codingSubagents(config),
       model: config.model,
       parentTools: tools,
       session: this.deps.sessionStore,
-      ...(this.deps.modelAdapter !== undefined ? { modelAdapter: this.deps.modelAdapter } : {}),
+      ...(this.deps.modelAdapter !== undefined
+        ? { modelAdapter: this.deps.modelAdapter }
+        : {}),
     });
 
     const sections = [
       ...buildSystemSections(config, {
         activeSkills: () => [...this.activeSkills],
-        sessionSummary: () => this.deps.sessionStore.latestCompactionSummary(this.sessionId),
+        sessionSummary: () =>
+          this.deps.sessionStore.latestCompactionSummary(this.sessionId),
       }),
-      activeSkillsContext({ skills: this.deps.skills, activation: 'activated' }),
+      activeSkillsContext({
+        skills: this.deps.skills,
+        activation: 'activated',
+      }),
       memory.section,
     ];
 
@@ -347,9 +380,14 @@ class CodingSessionImpl implements CodingSession {
       compactor: this.deps.compactor,
       observers: [observer, memory.observer],
       sessionWindow: { maxMessages: 200 },
-      modelInputBudget: { maxInputTokens: 160_000, reservedOutputTokens: 8_000 },
+      modelInputBudget: {
+        maxInputTokens: 160_000,
+        reservedOutputTokens: 8_000,
+      },
       modelInput: { systemSections: sections },
-      ...(this.deps.modelAdapter !== undefined ? { modelAdapter: this.deps.modelAdapter } : {}),
+      ...(this.deps.modelAdapter !== undefined
+        ? { modelAdapter: this.deps.modelAdapter }
+        : {}),
       metadata: { sessionId: this.sessionId, cwd: config.cwd },
     });
   }
@@ -361,7 +399,10 @@ class CodingSessionImpl implements CodingSession {
  * 临时起一个无工具的小 Agent 跑一次补全，用与主会话相同的 model / adapter，
  * 避免压缩器直接依赖 provider 细节（保持与内核解耦）。
  */
-function makeSummarizer(config: CodingAgentConfig, modelAdapter?: ModelAdapter) {
+function makeSummarizer(
+  config: CodingAgentConfig,
+  modelAdapter?: ModelAdapter,
+) {
   return async (
     messages: readonly AgentMessage[],
     opts: { previousSummary?: string; maxTokens?: number },
@@ -373,7 +414,8 @@ function makeSummarizer(config: CodingAgentConfig, modelAdapter?: ModelAdapter) 
     const conversation = messages
       .map((message) => {
         const content = (message as { content?: unknown }).content;
-        const text = typeof content === 'string' ? content : JSON.stringify(content);
+        const text =
+          typeof content === 'string' ? content : JSON.stringify(content);
         return `### ${message.role}\n${text}`;
       })
       .join('\n\n');

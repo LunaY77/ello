@@ -22,7 +22,12 @@ import { logsDir } from '../session/paths.js';
 export function createCodingObserver(config: CodingAgentConfig): AgentObserver {
   const file = path.join(logsDir(), 'coding-agent.ndjson');
   const log = (event: string, data: Record<string, unknown>): void => {
-    void writeLine(file, { ts: new Date().toISOString(), event, model: config.model, ...data });
+    void writeLine(file, {
+      ts: new Date().toISOString(),
+      event,
+      model: config.model,
+      ...data,
+    });
   };
 
   return {
@@ -30,7 +35,10 @@ export function createCodingObserver(config: CodingAgentConfig): AgentObserver {
       log('run.started', { runId: event.runId, sessionId: ctx.sessionId });
     },
     onToolApprovalRequired: (item) => {
-      log('tool.approval_required', { tool: item.toolName, toolCallId: item.toolCallId });
+      log('tool.approval_required', {
+        tool: item.toolName,
+        toolCallId: item.toolCallId,
+      });
     },
     onToolCompleted: (call) => {
       log('tool.completed', { tool: call.name, ok: call.error === undefined });
@@ -60,7 +68,10 @@ export function summarizeUsage(usage: AgentUsage): Record<string, number> {
 }
 
 /** 追加一行 NDJSON；失败静默（可观测性不得影响执行）。 */
-async function writeLine(file: string, payload: Record<string, unknown>): Promise<void> {
+async function writeLine(
+  file: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
   try {
     await mkdir(path.dirname(file), { recursive: true });
     await appendFile(file, `${JSON.stringify(payload)}\n`, 'utf8');

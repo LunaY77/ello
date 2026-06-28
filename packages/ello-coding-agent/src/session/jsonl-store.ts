@@ -43,7 +43,11 @@ export class JsonlSessionStore implements SessionStore {
   /** 把本轮新增消息追加到 active leaf 之下。 */
   async append(sessionId: string, messages: AgentMessage[]): Promise<void> {
     const parent = await this.leafOf(sessionId);
-    const nextLeaf = await this.repository.appendMessages(sessionId, parent, messages);
+    const nextLeaf = await this.repository.appendMessages(
+      sessionId,
+      parent,
+      messages,
+    );
     this.leaves.set(sessionId, nextLeaf);
   }
 
@@ -95,7 +99,11 @@ export class JsonlSessionStore implements SessionStore {
           : 'Session history replaced by compactor.',
     });
     // 从“无父”重新挂载压缩后的消息，形成一条新的 active 分支。
-    const nextLeaf = await this.repository.appendMessages(sessionId, null, messages);
+    const nextLeaf = await this.repository.appendMessages(
+      sessionId,
+      null,
+      messages,
+    );
     this.leaves.set(sessionId, nextLeaf);
   }
 

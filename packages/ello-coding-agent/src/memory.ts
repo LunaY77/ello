@@ -21,9 +21,15 @@ export async function loadCodingMemory(cwd: string): Promise<MemoryManifest> {
   const candidates = [
     { scope: 'project' as const, path: path.join(cwd, 'AGENTS.md') },
     { scope: 'project' as const, path: path.join(cwd, 'CLAUDE.md') },
-    { scope: 'project' as const, path: path.join(cwd, '.ello', 'instructions.md') },
+    {
+      scope: 'project' as const,
+      path: path.join(cwd, '.ello', 'instructions.md'),
+    },
     { scope: 'project' as const, path: path.join(cwd, '.ello', 'memory.md') },
-    { scope: 'user' as const, path: path.join(homedir(), '.ello', 'memory.md') },
+    {
+      scope: 'user' as const,
+      path: path.join(homedir(), '.ello', 'memory.md'),
+    },
   ];
   const userMemoryDir = path.join(homedir(), '.ello', 'memory');
   for (const file of await listMarkdownFiles(userMemoryDir)) {
@@ -55,7 +61,10 @@ export async function loadCodingMemory(cwd: string): Promise<MemoryManifest> {
 /**
  * 将已加载的记忆文件渲染为可注入 prompt 的 Markdown 块。
  */
-export function renderMemoryForPrompt(manifest: MemoryManifest, cwd: string): string {
+export function renderMemoryForPrompt(
+  manifest: MemoryManifest,
+  cwd: string,
+): string {
   return manifest.files
     .map((file) => {
       const displayPath = path.relative(cwd, file.path) || file.path;
@@ -72,7 +81,9 @@ export function summarizeMemory(manifest: MemoryManifest, cwd: string): string {
     return 'No memory files loaded.';
   }
   return manifest.files
-    .map((file) => `${file.scope}\t${path.relative(cwd, file.path) || file.path}`)
+    .map(
+      (file) => `${file.scope}\t${path.relative(cwd, file.path) || file.path}`,
+    )
     .join('\n');
 }
 

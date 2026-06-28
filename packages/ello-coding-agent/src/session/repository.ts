@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, stat, writeFile, appendFile } from 'node:fs/promises';
+import {
+  mkdir,
+  readdir,
+  readFile,
+  stat,
+  writeFile,
+  appendFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 
 import type { AgentMessage, AgentStreamEvent } from '@ello/agent';
@@ -30,12 +37,48 @@ export interface CompactSummary {
 
 /** append-only session tree 的记录形状。 */
 export type SessionRecord =
-  | { readonly kind: 'header'; readonly sessionId: string; readonly cwd: string; readonly createdAt: string; readonly version: number }
-  | { readonly kind: 'entry'; readonly id: string; readonly parentId: string | null; readonly type: 'message'; readonly message: AgentMessage; readonly createdAt: string }
-  | { readonly kind: 'entry'; readonly id: string; readonly parentId: string | null; readonly type: 'event'; readonly event: AgentStreamEvent; readonly createdAt: string }
-  | { readonly kind: 'leaf'; readonly entryId: string | null; readonly createdAt: string }
-  | { readonly kind: 'branch'; readonly from: string | null; readonly to: string; readonly reason: string; readonly createdAt: string }
-  | { readonly kind: 'compaction'; readonly id: string; readonly boundaryEntryId?: string; readonly summary: string; readonly createdAt: string };
+  | {
+      readonly kind: 'header';
+      readonly sessionId: string;
+      readonly cwd: string;
+      readonly createdAt: string;
+      readonly version: number;
+    }
+  | {
+      readonly kind: 'entry';
+      readonly id: string;
+      readonly parentId: string | null;
+      readonly type: 'message';
+      readonly message: AgentMessage;
+      readonly createdAt: string;
+    }
+  | {
+      readonly kind: 'entry';
+      readonly id: string;
+      readonly parentId: string | null;
+      readonly type: 'event';
+      readonly event: AgentStreamEvent;
+      readonly createdAt: string;
+    }
+  | {
+      readonly kind: 'leaf';
+      readonly entryId: string | null;
+      readonly createdAt: string;
+    }
+  | {
+      readonly kind: 'branch';
+      readonly from: string | null;
+      readonly to: string;
+      readonly reason: string;
+      readonly createdAt: string;
+    }
+  | {
+      readonly kind: 'compaction';
+      readonly id: string;
+      readonly boundaryEntryId?: string;
+      readonly summary: string;
+      readonly createdAt: string;
+    };
 
 /** session list 的摘要。 */
 export interface JsonlSessionSummary {
@@ -70,8 +113,18 @@ export interface SessionTreeView {
   readonly sessionId: string;
   readonly activeEntryId: string | null;
   readonly nodes: SessionTreeNode[];
-  readonly branches: Array<{ readonly from: string | null; readonly to: string; readonly reason: string; readonly createdAt: string }>;
-  readonly compactions: Array<{ readonly id: string; readonly boundaryEntryId?: string; readonly summary: string; readonly createdAt: string }>;
+  readonly branches: Array<{
+    readonly from: string | null;
+    readonly to: string;
+    readonly reason: string;
+    readonly createdAt: string;
+  }>;
+  readonly compactions: Array<{
+    readonly id: string;
+    readonly boundaryEntryId?: string;
+    readonly summary: string;
+    readonly createdAt: string;
+  }>;
 }
 
 /**
@@ -112,13 +165,20 @@ export class JsonlSessionRepository {
   /** 读取 active branch 的消息和元数据。 */
   async load(sessionId: string): Promise<ActiveSessionPath> {
     const records = await this.readRecords(sessionId);
-    const header = records.find((record): record is Extract<SessionRecord, { kind: 'header' }> => record.kind === 'header');
+    const header = records.find(
+      (record): record is Extract<SessionRecord, { kind: 'header' }> =>
+        record.kind === 'header',
+    );
     if (header === undefined) {
       throw new Error(`Invalid session ${sessionId}: missing header`);
     }
     const leaf = findLeaf(records);
     const activeRecords = buildActivePath(records, leaf);
-    const messages = activeRecords.flatMap((record) => record.kind === 'entry' && record.type === 'message' ? [record.message] : []);
+    const messages = activeRecords.flatMap((record) =>
+      record.kind === 'entry' && record.type === 'message'
+        ? [record.message]
+        : [],
+    );
     return {
       info: {
         sessionId: header.sessionId,
@@ -134,26 +194,52 @@ export class JsonlSessionRepository {
   }
 
   /** 追加消息增量。 */
-  async appendMessages(sessionId: string, parentId: string | null, messages: readonly AgentMessage[]): Promise<string | null> {
+  async appendMessages(
+    sessionId: string,
+    parentId: string | null,
+    messages: readonly AgentMessage[],
+  ): Promise<string | null> {
     let leaf = parentId;
     const records: SessionRecord[] = [];
     for (const message of messages) {
       const id = randomUUID();
-      records.push({ kind: 'entry', id, parentId: leaf, type: 'message', message, createdAt: new Date().toISOString() });
+      records.push({
+        kind: 'entry',
+        id,
+        parentId: leaf,
+        type: 'message',
+        message,
+        createdAt: new Date().toISOString(),
+      });
       leaf = id;
     }
     if (records.length > 0) {
-      records.push({ kind: 'leaf', entryId: leaf, createdAt: new Date().toISOString() });
+      records.push({
+        kind: 'leaf',
+        entryId: leaf,
+        createdAt: new Date().toISOString(),
+      });
       await this.appendRecords(sessionId, records);
     }
     return leaf;
   }
 
   /** 追加内核事件（回放用，可选）。 */
-  async appendEvent(sessionId: string, parentId: string | null, event: AgentStreamEvent): Promise<string> {
+  async appendEvent(
+    sessionId: string,
+    parentId: string | null,
+    event: AgentStreamEvent,
+  ): Promise<string> {
     const id = randomUUID();
     await this.appendRecords(sessionId, [
-      { kind: 'entry', id, parentId, type: 'event', event, createdAt: new Date().toISOString() },
+      {
+        kind: 'entry',
+        id,
+        parentId,
+        type: 'event',
+        event,
+        createdAt: new Date().toISOString(),
+      },
       { kind: 'leaf', entryId: id, createdAt: new Date().toISOString() },
     ]);
     return id;
@@ -161,7 +247,9 @@ export class JsonlSessionRepository {
 
   /** 在同一 session 中切换 active leaf。 */
   async checkout(sessionId: string, entryId: string | null): Promise<void> {
-    await this.appendRecords(sessionId, [{ kind: 'leaf', entryId, createdAt: new Date().toISOString() }]);
+    await this.appendRecords(sessionId, [
+      { kind: 'leaf', entryId, createdAt: new Date().toISOString() },
+    ]);
   }
 
   /** 从当前 active path fork 到一个新 session 文件。 */
@@ -170,12 +258,31 @@ export class JsonlSessionRepository {
     const nextId = randomUUID();
     const createdAt = new Date().toISOString();
     const records: SessionRecord[] = [
-      { kind: 'header', sessionId: nextId, cwd: source.info.cwd, createdAt, version: SESSION_FILE_VERSION },
-      ...source.records.filter((record): record is Extract<SessionRecord, { kind: 'entry' }> => record.kind === 'entry'),
+      {
+        kind: 'header',
+        sessionId: nextId,
+        cwd: source.info.cwd,
+        createdAt,
+        version: SESSION_FILE_VERSION,
+      },
+      ...source.records.filter(
+        (record): record is Extract<SessionRecord, { kind: 'entry' }> =>
+          record.kind === 'entry',
+      ),
       { kind: 'leaf', entryId: source.leafEntryId, createdAt },
-      { kind: 'branch', from: source.leafEntryId, to: nextId, reason, createdAt },
+      {
+        kind: 'branch',
+        from: source.leafEntryId,
+        to: nextId,
+        reason,
+        createdAt,
+      },
     ];
-    await writeFile(this.filePath(nextId), records.map((record) => JSON.stringify(record)).join('\n') + '\n', 'utf8');
+    await writeFile(
+      this.filePath(nextId),
+      records.map((record) => JSON.stringify(record)).join('\n') + '\n',
+      'utf8',
+    );
     return (await this.load(nextId)).info;
   }
 
@@ -183,12 +290,19 @@ export class JsonlSessionRepository {
   async tree(sessionId: string): Promise<SessionTreeView> {
     const records = await this.readRecords(sessionId);
     const activeEntryId = findLeaf(records);
-    const activePath = new Set(buildActivePath(records, activeEntryId).filter((record) => record.kind === 'entry').map((record) => record.id));
+    const activePath = new Set(
+      buildActivePath(records, activeEntryId)
+        .filter((record) => record.kind === 'entry')
+        .map((record) => record.id),
+    );
     return {
       sessionId,
       activeEntryId,
       nodes: records
-        .filter((record): record is Extract<SessionRecord, { kind: 'entry' }> => record.kind === 'entry')
+        .filter(
+          (record): record is Extract<SessionRecord, { kind: 'entry' }> =>
+            record.kind === 'entry',
+        )
         .map((record) => ({
           id: record.id,
           parentId: record.parentId,
@@ -198,13 +312,26 @@ export class JsonlSessionRepository {
           active: activePath.has(record.id),
         })),
       branches: records
-        .filter((record): record is Extract<SessionRecord, { kind: 'branch' }> => record.kind === 'branch')
-        .map(({ from, to, reason, createdAt }) => ({ from, to, reason, createdAt })),
+        .filter(
+          (record): record is Extract<SessionRecord, { kind: 'branch' }> =>
+            record.kind === 'branch',
+        )
+        .map(({ from, to, reason, createdAt }) => ({
+          from,
+          to,
+          reason,
+          createdAt,
+        })),
       compactions: records
-        .filter((record): record is Extract<SessionRecord, { kind: 'compaction' }> => record.kind === 'compaction')
+        .filter(
+          (record): record is Extract<SessionRecord, { kind: 'compaction' }> =>
+            record.kind === 'compaction',
+        )
         .map((record) => ({
           id: record.id,
-          ...(record.boundaryEntryId !== undefined ? { boundaryEntryId: record.boundaryEntryId } : {}),
+          ...(record.boundaryEntryId !== undefined
+            ? { boundaryEntryId: record.boundaryEntryId }
+            : {}),
           summary: record.summary,
           createdAt: record.createdAt,
         })),
@@ -217,7 +344,9 @@ export class JsonlSessionRepository {
       {
         kind: 'compaction',
         id: summary.id,
-        ...(summary.boundaryEntryId !== undefined ? { boundaryEntryId: summary.boundaryEntryId } : {}),
+        ...(summary.boundaryEntryId !== undefined
+          ? { boundaryEntryId: summary.boundaryEntryId }
+          : {}),
         summary: summary.summary,
         createdAt: new Date().toISOString(),
       },
@@ -229,27 +358,38 @@ export class JsonlSessionRepository {
     const records = await this.readRecords(sessionId);
     const latest = [...records]
       .reverse()
-      .find((record): record is Extract<SessionRecord, { kind: 'compaction' }> => record.kind === 'compaction');
+      .find(
+        (record): record is Extract<SessionRecord, { kind: 'compaction' }> =>
+          record.kind === 'compaction',
+      );
     return latest?.summary ?? null;
   }
 
   /** 列出 session 文件摘要。 */
   async list(): Promise<JsonlSessionSummary[]> {
     await mkdir(this.options.sessionDir, { recursive: true });
-    const files = (await readdir(this.options.sessionDir)).filter((file) => file.endsWith('.jsonl')).sort();
+    const files = (await readdir(this.options.sessionDir))
+      .filter((file) => file.endsWith('.jsonl'))
+      .sort();
     const summaries: JsonlSessionSummary[] = [];
     for (const file of files) {
       const fullPath = path.join(this.options.sessionDir, file);
       try {
         const records = await this.readRecords(path.basename(file, '.jsonl'));
-        const header = records.find((record): record is Extract<SessionRecord, { kind: 'header' }> => record.kind === 'header');
+        const header = records.find(
+          (record): record is Extract<SessionRecord, { kind: 'header' }> =>
+            record.kind === 'header',
+        );
         const fileStat = await stat(fullPath);
         summaries.push({
           sessionId: header?.sessionId ?? path.basename(file, '.jsonl'),
           path: fullPath,
           cwd: header?.cwd ?? this.options.cwd,
-          entryCount: records.filter((record) => record.kind === 'entry').length,
-          ...(header?.createdAt !== undefined ? { createdAt: header.createdAt } : {}),
+          entryCount: records.filter((record) => record.kind === 'entry')
+            .length,
+          ...(header?.createdAt !== undefined
+            ? { createdAt: header.createdAt }
+            : {}),
           updatedAt: fileStat.mtime.toISOString(),
         });
       } catch (error) {
@@ -286,11 +426,18 @@ export class JsonlSessionRepository {
     return path.join(this.options.sessionDir, `${sessionId}.jsonl`);
   }
 
-  private async appendRecords(sessionId: string, records: readonly SessionRecord[]): Promise<void> {
+  private async appendRecords(
+    sessionId: string,
+    records: readonly SessionRecord[],
+  ): Promise<void> {
     if (records.length === 0) {
       return;
     }
-    await appendFile(this.filePath(sessionId), records.map((record) => JSON.stringify(record)).join('\n') + '\n', 'utf8');
+    await appendFile(
+      this.filePath(sessionId),
+      records.map((record) => JSON.stringify(record)).join('\n') + '\n',
+      'utf8',
+    );
   }
 
   private async readRecords(sessionId: string): Promise<SessionRecord[]> {
@@ -302,7 +449,10 @@ export class JsonlSessionRepository {
         try {
           return JSON.parse(line) as SessionRecord;
         } catch (error) {
-          throw new Error(`Invalid JSON in ${this.filePath(sessionId)} at line ${index + 1}: ${String(error)}`, { cause: error });
+          throw new Error(
+            `Invalid JSON in ${this.filePath(sessionId)} at line ${index + 1}: ${String(error)}`,
+            { cause: error },
+          );
         }
       });
   }
@@ -311,7 +461,8 @@ export class JsonlSessionRepository {
 function labelEntry(record: Extract<SessionRecord, { kind: 'entry' }>): string {
   if (record.type === 'message') {
     const content = (record.message as { content?: unknown }).content;
-    const text = typeof content === 'string' ? content : JSON.stringify(content);
+    const text =
+      typeof content === 'string' ? content : JSON.stringify(content);
     return `${record.message.role} ${text.slice(0, 80)}`;
   }
   return record.event.type;
@@ -326,11 +477,19 @@ function escapeHtml(value: string): string {
 }
 
 function findLeaf(records: readonly SessionRecord[]): string | null {
-  const leaf = [...records].reverse().find((record): record is Extract<SessionRecord, { kind: 'leaf' }> => record.kind === 'leaf');
+  const leaf = [...records]
+    .reverse()
+    .find(
+      (record): record is Extract<SessionRecord, { kind: 'leaf' }> =>
+        record.kind === 'leaf',
+    );
   return leaf?.entryId ?? null;
 }
 
-function buildActivePath(records: readonly SessionRecord[], leaf: string | null): SessionRecord[] {
+function buildActivePath(
+  records: readonly SessionRecord[],
+  leaf: string | null,
+): SessionRecord[] {
   if (leaf === null) {
     return records.filter((record) => record.kind === 'header');
   }

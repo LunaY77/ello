@@ -95,7 +95,8 @@ export interface SessionCompactorDeps {
 /** 估算单条消息的 token 数（`ceil(chars/4)` 启发式，遍历 part）。 */
 export function estimateTokens(message: AgentMessage): number {
   const { content } = message as { content: unknown };
-  const chars = typeof content === 'string' ? content.length : measureParts(content);
+  const chars =
+    typeof content === 'string' ? content.length : measureParts(content);
   return Math.ceil(chars / 4);
 }
 
@@ -116,7 +117,9 @@ export function shouldCompact(
   contextWindow: number,
   settings: CompactionSettings,
 ): boolean {
-  return settings.enabled && contextTokens > contextWindow - settings.reserveTokens;
+  return (
+    settings.enabled && contextTokens > contextWindow - settings.reserveTokens
+  );
 }
 
 /**
@@ -176,7 +179,9 @@ export function extractFileOps(messages: readonly AgentMessage[]): {
       if (!isToolCallPart(part)) {
         continue;
       }
-      const input = (part.input ?? part.args) as Record<string, unknown> | undefined;
+      const input = (part.input ?? part.args) as
+        | Record<string, unknown>
+        | undefined;
       const file = typeof input?.path === 'string' ? input.path : undefined;
       if (file === undefined) {
         continue;
@@ -188,7 +193,10 @@ export function extractFileOps(messages: readonly AgentMessage[]): {
       }
     }
   }
-  return { readFiles: [...readFiles].sort(), modifiedFiles: [...modifiedFiles].sort() };
+  return {
+    readFiles: [...readFiles].sort(),
+    modifiedFiles: [...modifiedFiles].sort(),
+  };
 }
 
 /** 把文件清单以 `<read-files>` / `<modified-files>` 标签追加到摘要尾部。 */
@@ -201,7 +209,9 @@ export function appendFileManifest(
     parts.push(`<read-files>\n${files.readFiles.join('\n')}\n</read-files>`);
   }
   if (files.modifiedFiles.length > 0) {
-    parts.push(`<modified-files>\n${files.modifiedFiles.join('\n')}\n</modified-files>`);
+    parts.push(
+      `<modified-files>\n${files.modifiedFiles.join('\n')}\n</modified-files>`,
+    );
   }
   return parts.join('\n\n');
 }
@@ -215,13 +225,16 @@ export function summaryMessage(summary: string): AgentMessage {
 }
 
 /** 序列化历史喂给摘要模型：tool-result 截断到 TOOL_RESULT_MAX_CHARS。 */
-export function serializeForSummary(messages: readonly AgentMessage[]): AgentMessage[] {
+export function serializeForSummary(
+  messages: readonly AgentMessage[],
+): AgentMessage[] {
   return messages.map((message) => {
     if (message.role !== 'tool') {
       return message;
     }
     const content = (message as { content?: unknown }).content;
-    const text = typeof content === 'string' ? content : JSON.stringify(content);
+    const text =
+      typeof content === 'string' ? content : JSON.stringify(content);
     return {
       ...message,
       content: text.slice(0, TOOL_RESULT_MAX_CHARS),
@@ -239,8 +252,13 @@ export function serializeForSummary(messages: readonly AgentMessage[]): AgentMes
  * 4. 调 `summarize` 生成结构化摘要，追加文件清单；
  * 5. `store.replace` 用 `[摘要消息, ...保留消息]` 改写历史。
  */
-export function createSessionCompactor(deps: SessionCompactorDeps): SessionCompactor {
-  const settings: CompactionSettings = { ...DEFAULT_COMPACTION_SETTINGS, ...deps.settings };
+export function createSessionCompactor(
+  deps: SessionCompactorDeps,
+): SessionCompactor {
+  const settings: CompactionSettings = {
+    ...DEFAULT_COMPACTION_SETTINGS,
+    ...deps.settings,
+  };
 
   return {
     name: 'ello-session-compactor',
@@ -293,7 +311,9 @@ export function createSessionCompactor(deps: SessionCompactorDeps): SessionCompa
 /** 累加 part 数组的字符数（用于 token 估算）。 */
 function measureParts(content: unknown): number {
   if (!Array.isArray(content)) {
-    return content === undefined || content === null ? 0 : JSON.stringify(content).length;
+    return content === undefined || content === null
+      ? 0
+      : JSON.stringify(content).length;
   }
   let chars = 0;
   for (const part of content) {

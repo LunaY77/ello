@@ -22,7 +22,13 @@ function statusColor(status: ToolCallView['status']): string {
  * 只做三件事：查 presenter、用 `Badge` 标状态、把渲染委托给 presenter。
  * 它不认识任何具体工具——加工具不需要改这里。
  */
-export function ToolCard({ call, compact = false }: { readonly call: ToolCallView; readonly compact?: boolean }) {
+export function ToolCard({
+  call,
+  compact = false,
+}: {
+  readonly call: ToolCallView;
+  readonly compact?: boolean;
+}) {
   const presenter = presenterFor(call.name);
   return (
     <Box flexDirection="column">

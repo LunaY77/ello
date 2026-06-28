@@ -1,6 +1,9 @@
 import type { AgentError, AgentUsage } from '@ello/agent';
 
-import type { CodingSessionEvent, CodingSessionState } from '../../runtime/intents.js';
+import type {
+  CodingSessionEvent,
+  CodingSessionState,
+} from '../../runtime/intents.js';
 
 /** 单个工具调用在视图里的折叠态。 */
 export interface ToolCallView {
@@ -78,7 +81,10 @@ export function reduce(state: ViewState, event: ViewInput): ViewState {
       return { ...state, liveAssistantText: '' };
 
     case 'message.delta':
-      return { ...state, liveAssistantText: state.liveAssistantText + event.text };
+      return {
+        ...state,
+        liveAssistantText: state.liveAssistantText + event.text,
+      };
 
     case 'tool.started':
       return upsertTool(state, event.toolCallId, {
@@ -89,10 +95,16 @@ export function reduce(state: ViewState, event: ViewInput): ViewState {
       });
 
     case 'tool.completed':
-      return sealTool(state, event.toolCallId, { status: 'ok', output: event.output });
+      return sealTool(state, event.toolCallId, {
+        status: 'ok',
+        output: event.output,
+      });
 
     case 'tool.failed':
-      return sealTool(state, event.toolCallId, { status: 'fail', error: event.error });
+      return sealTool(state, event.toolCallId, {
+        status: 'fail',
+        error: event.error,
+      });
 
     case 'approval.pending':
       return {
@@ -154,7 +166,11 @@ function flushAssistant(state: ViewState): ViewState {
 }
 
 /** 新增/更新一个运行中工具。 */
-function upsertTool(state: ViewState, id: string, tool: ToolCallView): ViewState {
+function upsertTool(
+  state: ViewState,
+  id: string,
+  tool: ToolCallView,
+): ViewState {
   const next = new Map(state.runningTools);
   next.set(id, tool);
   return { ...state, runningTools: next };

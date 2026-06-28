@@ -8,9 +8,20 @@ import { z } from 'zod';
 export type PermissionAction = 'allow' | 'ask' | 'deny';
 
 /** coding-agent 权限模式。 */
-export type PermissionMode = 'default' | 'plan' | 'accept-edits' | 'dont-ask' | 'bypass';
+export type PermissionMode =
+  | 'default'
+  | 'plan'
+  | 'accept-edits'
+  | 'dont-ask'
+  | 'bypass';
 
-export const PermissionModeSchema = z.enum(['default', 'plan', 'accept-edits', 'dont-ask', 'bypass']);
+export const PermissionModeSchema = z.enum([
+  'default',
+  'plan',
+  'accept-edits',
+  'dont-ask',
+  'bypass',
+]);
 
 /** 可持久化权限规则。 */
 export const PermissionRuleSchema = z.object({
@@ -49,37 +60,65 @@ export interface PermissionDecision {
  * 规则来源由调用方合并后传入，本函数只做确定性判定：显式规则优先，
  * 然后按 permission mode 和工具风险分类给出 allow/ask/deny。
  */
-export function evaluateToolPermission(ctx: PermissionContext): PermissionDecision {
+export function evaluateToolPermission(
+  ctx: PermissionContext,
+): PermissionDecision {
   const explicit = ctx.rules?.find((rule) => matchRule(rule, ctx));
   if (explicit !== undefined) {
-    return { action: explicit.action, reason: explicit.reason ?? `matched ${explicit.scope} rule`, matchedRule: explicit };
+    return {
+      action: explicit.action,
+      reason: explicit.reason ?? `matched ${explicit.scope} rule`,
+      matchedRule: explicit,
+    };
   }
-  if (ctx.repeatedDenials?.get(denialKey(ctx)) !== undefined && (ctx.repeatedDenials.get(denialKey(ctx)) ?? 0) >= 2) {
+  if (
+    ctx.repeatedDenials?.get(denialKey(ctx)) !== undefined &&
+    (ctx.repeatedDenials.get(denialKey(ctx)) ?? 0) >= 2
+  ) {
     return { action: 'deny', reason: 'same operation was denied repeatedly' };
   }
   if (ctx.mode === 'bypass' || ctx.mode === 'dont-ask') {
     return { action: 'allow', reason: `${ctx.mode} mode` };
   }
   if (ctx.mode === 'plan') {
-    return isReadOnlyTool(ctx.toolName) ? { action: 'allow', reason: 'read-only tool in plan mode' } : { action: 'deny', reason: 'plan mode blocks write, shell and network tools' };
+    return isReadOnlyTool(ctx.toolName)
+      ? { action: 'allow', reason: 'read-only tool in plan mode' }
+      : {
+          action: 'deny',
+          reason: 'plan mode blocks write, shell and network tools',
+        };
   }
   if (ctx.mode === 'accept-edits') {
-    if ((ctx.toolName === 'write' || ctx.toolName === 'edit') && targetInsideAllowedPath(ctx)) {
-      return { action: 'allow', reason: 'accept-edits mode allows workspace edits' };
+    if (
+      (ctx.toolName === 'write' || ctx.toolName === 'edit') &&
+      targetInsideAllowedPath(ctx)
+    ) {
+      return {
+        action: 'allow',
+        reason: 'accept-edits mode allows workspace edits',
+      };
     }
     if (isReadOnlyTool(ctx.toolName)) {
       return { action: 'allow', reason: 'read-only tool' };
     }
-    return { action: 'ask', reason: 'accept-edits mode still asks for shell and network tools' };
+    return {
+      action: 'ask',
+      reason: 'accept-edits mode still asks for shell and network tools',
+    };
   }
   if (isReadOnlyTool(ctx.toolName)) {
     return { action: 'allow', reason: 'read-only tool' };
   }
-  return { action: 'ask', reason: 'default mode asks for mutating or external tools' };
+  return {
+    action: 'ask',
+    reason: 'default mode asks for mutating or external tools',
+  };
 }
 
 /** 将产品权限动作映射到 @ello/agent 工具 approval 返回值。 */
-export function applyPermissionPolicy(ctx: PermissionContext): 'auto' | 'required' | 'denied' {
+export function applyPermissionPolicy(
+  ctx: PermissionContext,
+): 'auto' | 'required' | 'denied' {
   const decision = evaluateToolPermission(ctx);
   if (decision.action === 'allow') {
     return 'auto';
@@ -102,7 +141,9 @@ export function parsePermissionRules(value: unknown): PermissionRule[] {
 }
 
 /** 输出人类可读规则表。 */
-export function formatPermissionRules(rules: readonly PermissionRule[]): string {
+export function formatPermissionRules(
+  rules: readonly PermissionRule[],
+): string {
   if (rules.length === 0) {
     return 'rules\t<none>';
   }
@@ -111,7 +152,8 @@ export function formatPermissionRules(rules: readonly PermissionRule[]): string 
       const parts = [`${rule.action}`];
       if (rule.tool !== undefined) parts.push(`tool=${rule.tool}`);
       if (rule.pathGlob !== undefined) parts.push(`path=${rule.pathGlob}`);
-      if (rule.commandPattern !== undefined) parts.push(`command=${rule.commandPattern}`);
+      if (rule.commandPattern !== undefined)
+        parts.push(`command=${rule.commandPattern}`);
       if (rule.domain !== undefined) parts.push(`domain=${rule.domain}`);
       parts.push(`scope=${rule.scope}`);
       return parts.join('\t');
@@ -120,7 +162,9 @@ export function formatPermissionRules(rules: readonly PermissionRule[]): string 
 }
 
 /** 记录 repeated denial 的稳定 key。 */
-export function denialKey(ctx: Pick<PermissionContext, 'toolName' | 'input'>): string {
+export function denialKey(
+  ctx: Pick<PermissionContext, 'toolName' | 'input'>,
+): string {
   return `${ctx.toolName}:${JSON.stringify(ctx.input ?? null)}`;
 }
 
@@ -164,7 +208,10 @@ function matchRule(rule: PermissionRule, ctx: PermissionContext): boolean {
   }
   if (rule.commandPattern !== undefined) {
     const command = readInputString(ctx.input, 'command');
-    if (command === undefined || !new RegExp(rule.commandPattern).test(command)) {
+    if (
+      command === undefined ||
+      !new RegExp(rule.commandPattern).test(command)
+    ) {
       return false;
     }
   }
@@ -175,7 +222,8 @@ function matchRule(rule: PermissionRule, ctx: PermissionContext): boolean {
     }
   }
   if (rule.domain !== undefined) {
-    const url = readInputString(ctx.input, 'url') ?? readInputString(ctx.input, 'query');
+    const url =
+      readInputString(ctx.input, 'url') ?? readInputString(ctx.input, 'query');
     if (url === undefined || !url.includes(rule.domain)) {
       return false;
     }
@@ -184,7 +232,14 @@ function matchRule(rule: PermissionRule, ctx: PermissionContext): boolean {
 }
 
 function isReadOnlyTool(toolName: string): boolean {
-  return toolName === 'read' || toolName === 'ls' || toolName === 'grep' || toolName === 'glob' || toolName === 'todo' || toolName === 'tool_search';
+  return (
+    toolName === 'read' ||
+    toolName === 'ls' ||
+    toolName === 'grep' ||
+    toolName === 'glob' ||
+    toolName === 'todo' ||
+    toolName === 'tool_search'
+  );
 }
 
 function targetInsideAllowedPath(ctx: PermissionContext): boolean {
@@ -192,10 +247,15 @@ function targetInsideAllowedPath(ctx: PermissionContext): boolean {
   if (target === undefined) {
     return false;
   }
-  const resolved = path.isAbsolute(target) ? path.resolve(target) : path.resolve(ctx.cwd, target);
+  const resolved = path.isAbsolute(target)
+    ? path.resolve(target)
+    : path.resolve(ctx.cwd, target);
   return ctx.allowedPaths.some((root) => {
     const relative = path.relative(root, resolved);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    return (
+      relative === '' ||
+      (!relative.startsWith('..') && !path.isAbsolute(relative))
+    );
   });
 }
 
@@ -208,17 +268,24 @@ function readInputString(input: unknown, key: string): string | undefined {
 }
 
 function globLikeMatch(pattern: string, value: string): boolean {
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*');
   return new RegExp(`^${escaped}$`).test(value);
 }
 
 async function readConfig(filePath: string): Promise<Record<string, unknown>> {
   try {
-    return JSON.parse(await readFile(filePath, 'utf8')) as Record<string, unknown>;
+    return JSON.parse(await readFile(filePath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return {};
     }
-    throw new Error(`Failed to read permission config ${filePath}`, { cause: error });
+    throw new Error(`Failed to read permission config ${filePath}`, {
+      cause: error,
+    });
   }
 }

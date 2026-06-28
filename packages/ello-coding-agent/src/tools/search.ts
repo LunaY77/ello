@@ -25,7 +25,8 @@ export function createSearchTools(
   return [
     defineTool({
       name: 'grep',
-      description: 'Search files with ripgrep when available and a Node fallback otherwise.',
+      description:
+        'Search files with ripgrep when available and a Node fallback otherwise.',
       input: z.object({
         pattern: z.string(),
         path: z.string().default('.'),
@@ -34,7 +35,11 @@ export function createSearchTools(
       }),
       approval: approval('grep'),
       execute: async ({ pattern, path: targetPath, glob, limit }) => {
-        const cwd = resolveWorkspacePath(config.cwd, config.allowedPaths, targetPath);
+        const cwd = resolveWorkspacePath(
+          config.cwd,
+          config.allowedPaths,
+          targetPath,
+        );
         try {
           const args = [
             '--line-number',
@@ -55,7 +60,11 @@ export function createSearchTools(
           });
           return { matches: truncate(result.stdout) };
         } catch (error) {
-          const err = error as { stdout?: string; stderr?: string; code?: number };
+          const err = error as {
+            stdout?: string;
+            stderr?: string;
+            code?: number;
+          };
           if (err.stdout) {
             return { matches: truncate(err.stdout) };
           }
@@ -77,7 +86,11 @@ export function createSearchTools(
       }),
       approval: approval('glob'),
       execute: async ({ pattern, path: targetPath, limit }) => {
-        const cwd = resolveWorkspacePath(config.cwd, config.allowedPaths, targetPath);
+        const cwd = resolveWorkspacePath(
+          config.cwd,
+          config.allowedPaths,
+          targetPath,
+        );
         const files = await walk(cwd, limit * 5);
         const matcher = globToRegExp(pattern);
         const matches = files
@@ -97,7 +110,11 @@ async function walk(root: string, limit: number): Promise<string[]> {
       return;
     }
     for (const entry of await readdir(dir, { withFileTypes: true })) {
-      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') {
+      if (
+        entry.name === 'node_modules' ||
+        entry.name === '.git' ||
+        entry.name === 'dist'
+      ) {
         continue;
       }
       const fullPath = path.join(dir, entry.name);

@@ -31,7 +31,11 @@ export interface ToolSchedulerOptions {
 /** 调度过程中的事件回调集合，由调用方提供以转发为运行事件。 */
 export interface ToolSchedulerEventSink {
   /** 某个工具开始执行时触发。 */
-  onToolStarted(toolCallId: string, name: string, input: unknown): Promise<void>;
+  onToolStarted(
+    toolCallId: string,
+    name: string,
+    input: unknown,
+  ): Promise<void>;
   /** 某个工具需要人工审批、被挂起时触发。 */
   onApprovalRequired(item: {
     readonly kind: 'approval';
@@ -98,18 +102,28 @@ export class ToolScheduler {
         await sink.onToolStarted(call.id, call.name, call.input);
         await sink.onToolFailed(call.id, error);
         toolCalls.push({ ...call, error: normalizeAgentError(error) });
-        messages.push(createToolResultMessage(call, { error: error.message }, 'error'));
+        messages.push(
+          createToolResultMessage(call, { error: error.message }, 'error'),
+        );
         continue;
       }
       const ctx = this.createContext();
       // 执行前先跑工具自带的审批策略（若有），据其结果决定拒绝 / 挂起 / 放行。
       const decision = await tool.approval?.(call.input, ctx);
       if (decision === 'denied') {
-        const error = new Error(`Tool '${call.name}' was denied by approval policy.`);
+        const error = new Error(
+          `Tool '${call.name}' was denied by approval policy.`,
+        );
         await sink.onToolStarted(call.id, call.name, call.input);
         await sink.onToolFailed(call.id, error);
         toolCalls.push({ ...call, error: normalizeAgentError(error) });
-        messages.push(createToolResultMessage(call, { denied: true, reason: error.message }, 'denied'));
+        messages.push(
+          createToolResultMessage(
+            call,
+            { denied: true, reason: error.message },
+            'denied',
+          ),
+        );
         continue;
       }
       // 需要人工审批：仅入队挂起并通知，不执行，等待产品层批准后再重放。
@@ -133,10 +147,13 @@ export class ToolScheduler {
         toolCalls.push({ ...call, output });
         messages.push(createToolResultMessage(call, output));
       } catch (error) {
-        const normalized = error instanceof Error ? error : new Error(String(error));
+        const normalized =
+          error instanceof Error ? error : new Error(String(error));
         await sink.onToolFailed(call.id, normalized);
         toolCalls.push({ ...call, error: normalizeAgentError(normalized) });
-        messages.push(createToolResultMessage(call, { error: normalized.message }, 'error'));
+        messages.push(
+          createToolResultMessage(call, { error: normalized.message }, 'error'),
+        );
       }
     }
     return { messages, toolCalls, pending };
@@ -164,7 +181,8 @@ export class ToolScheduler {
       await sink.onToolCompleted(call.id, output);
       return { ...call, output };
     } catch (error) {
-      const normalized = error instanceof Error ? error : new Error(String(error));
+      const normalized =
+        error instanceof Error ? error : new Error(String(error));
       await sink.onToolFailed(call.id, normalized);
       return { ...call, error: normalizeAgentError(normalized) };
     }
@@ -230,7 +248,9 @@ function createAiSdkToolOutput(
 /** 从对象或字符串里尽力提取一段可读的原因文本（优先 `reason`，回退 `error`）。 */
 function readReason(value: unknown): string | undefined {
   if (typeof value === 'object' && value !== null) {
-    const reason = (value as Record<string, unknown>).reason ?? (value as Record<string, unknown>).error;
+    const reason =
+      (value as Record<string, unknown>).reason ??
+      (value as Record<string, unknown>).error;
     return typeof reason === 'string' ? reason : undefined;
   }
   return typeof value === 'string' ? value : undefined;

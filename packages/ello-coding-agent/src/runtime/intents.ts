@@ -27,7 +27,11 @@ export type CodingSessionState = 'idle' | 'running' | 'awaiting_approval';
  */
 export type CodingSessionEvent =
   | AgentStreamEvent
-  | { readonly type: 'session.opened'; readonly sessionId: string; readonly cwd: string }
+  | {
+      readonly type: 'session.opened';
+      readonly sessionId: string;
+      readonly cwd: string;
+    }
   | { readonly type: 'session.switched'; readonly sessionId: string }
   | { readonly type: 'status'; readonly state: CodingSessionState }
   | {

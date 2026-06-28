@@ -17,13 +17,15 @@ export type ApprovalMode = z.infer<typeof ApprovalModeSchema>;
  */
 export const CodingAgentConfigSchema = z.object({
   model: z.string().default('openai-chat:gpt-4o-mini'),
-  modelCandidates: z.array(z.string()).default([
-    'openai-chat:gpt-4o-mini',
-    'openai-chat:gpt-4.1',
-    'openai-chat:gpt-4o',
-    'openai-responses:gpt-4.1',
-    'anthropic:claude-3-5-sonnet-latest',
-  ]),
+  modelCandidates: z
+    .array(z.string())
+    .default([
+      'openai-chat:gpt-4o-mini',
+      'openai-chat:gpt-4.1',
+      'openai-chat:gpt-4o',
+      'openai-responses:gpt-4.1',
+      'anthropic:claude-3-5-sonnet-latest',
+    ]),
   baseUrl: z.string().nullable().default(null),
   cwd: z.string().default(process.cwd()),
   allowedPaths: z.array(z.string()).default([]),
@@ -52,7 +54,9 @@ export async function loadCodingAgentConfig(
   overrides: CodingAgentConfigOverrides = {},
 ): Promise<CodingAgentConfig> {
   const cwd = path.resolve(overrides.cwd ?? process.cwd());
-  const user = await readJsonConfig(path.join(homedir(), '.ello', 'config.json'));
+  const user = await readJsonConfig(
+    path.join(homedir(), '.ello', 'config.json'),
+  );
   const project = await readJsonConfig(path.join(cwd, '.ello', 'config.json'));
   const local = await readJsonConfig(path.join(cwd, '.ello', 'local.json'));
   const env = readEnvConfig();
@@ -71,7 +75,11 @@ export async function loadCodingAgentConfig(
     cwd,
     allowedPaths: resolveAllowedPaths(
       cwd,
-      overrides.allowedPaths ?? env.allowedPaths ?? local.allowedPaths ?? project.allowedPaths ?? user.allowedPaths,
+      overrides.allowedPaths ??
+        env.allowedPaths ??
+        local.allowedPaths ??
+        project.allowedPaths ??
+        user.allowedPaths,
     ),
     sessionDir: path.resolve(
       sessionDirValue ?? path.join(homedir(), '.ello', 'sessions'),
@@ -106,9 +114,14 @@ export async function setProjectConfigValue(
   return loadCodingAgentConfig({ cwd });
 }
 
-async function readJsonConfig(filePath: string): Promise<Record<string, unknown>> {
+async function readJsonConfig(
+  filePath: string,
+): Promise<Record<string, unknown>> {
   try {
-    return JSON.parse(await readFile(filePath, 'utf8')) as Record<string, unknown>;
+    return JSON.parse(await readFile(filePath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
@@ -126,7 +139,9 @@ function readEnvConfig(): Record<string, unknown> {
     ...(process.env.ELLO_MODEL_CANDIDATES
       ? { modelCandidates: process.env.ELLO_MODEL_CANDIDATES.split(',') }
       : {}),
-    ...(process.env.ELLO_BASE_URL ? { baseUrl: process.env.ELLO_BASE_URL } : {}),
+    ...(process.env.ELLO_BASE_URL
+      ? { baseUrl: process.env.ELLO_BASE_URL }
+      : {}),
     ...(process.env.ELLO_SESSION_DIR
       ? { sessionDir: process.env.ELLO_SESSION_DIR }
       : {}),

@@ -39,7 +39,10 @@ export function coerceUsage(usage: unknown): AgentUsage {
   return {
     requests: numberValue(value.requests, 1),
     // 优先取标准字段，否则回落到 AI SDK 的别名。
-    inputTokens: numberValue(value.inputTokens, numberValue(value.promptTokens, 0)),
+    inputTokens: numberValue(
+      value.inputTokens,
+      numberValue(value.promptTokens, 0),
+    ),
     outputTokens: numberValue(
       value.outputTokens,
       numberValue(value.completionTokens, 0),
