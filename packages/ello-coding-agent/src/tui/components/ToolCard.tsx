@@ -1,39 +1,45 @@
+import { Badge, Spinner } from '@inkjs/ui';
 import { Box, Text } from 'ink';
 
-import type { ToolCallView } from '../../product/events.js';
+import { presenterFor } from '../presenters/index.js';
+import type { ToolCallView } from '../state/view-reducer.js';
 
-/** 结构化工具卡片。 */
-export function ToolCard({ tool, compact = false }: { readonly tool: ToolCallView; readonly compact?: boolean }) {
-  const color = tool.status === 'success' ? 'green' : tool.status === 'error' || tool.status === 'denied' ? 'red' : 'yellow';
-  const label = `${tool.name}  ${tool.status}${tool.durationMs !== undefined ? `  ${tool.durationMs}ms` : ''}`;
-  if (compact) {
-    return <Text color={color}>{`tool ${tool.name}  ${tool.status}  ${tool.summary}`}</Text>;
+/** 工具状态 → Badge 颜色。 */
+function statusColor(status: ToolCallView['status']): string {
+  switch (status) {
+    case 'running':
+      return 'yellow';
+    case 'ok':
+      return 'green';
+    case 'fail':
+      return 'red';
   }
+}
+
+/**
+ * 工具卡片。
+ *
+ * 只做三件事：查 presenter、用 `Badge` 标状态、把渲染委托给 presenter。
+ * 它不认识任何具体工具——加工具不需要改这里。
+ */
+export function ToolCard({ call, compact = false }: { readonly call: ToolCallView; readonly compact?: boolean }) {
+  const presenter = presenterFor(call.name);
   return (
-    <Box flexDirection="column" borderStyle="single" paddingX={1} marginTop={1}>
-      <Box justifyContent="space-between">
-        <Text color={color}>{label}</Text>
-        {tool.render?.target ? <Text dimColor>{tool.render.target}</Text> : <Text dimColor>{tool.render?.kind ?? 'generic'}</Text>}
+    <Box flexDirection="column">
+      <Box gap={1}>
+        <Badge color={statusColor(call.status)}>{call.name}</Badge>
+        <Text dimColor>{presenter.summarize(call.input)}</Text>
       </Box>
-      <Text wrap="truncate-middle">{tool.summary}</Text>
-      {tool.argsPreview ? <Text dimColor wrap="wrap">{`args   ${tool.argsPreview}`}</Text> : null}
-      {tool.render?.kind === 'diff' && tool.render.diff ? (
-        <Text wrap="wrap">{`diff\n${tool.render.diff}`}</Text>
+      {call.status === 'running' ? (
+        <Spinner label="running" />
+      ) : compact ? null : call.output !== undefined ? (
+        presenter.renderResult(call.input, call.output)
+      ) : (
+        presenter.renderCall(call.input)
+      )}
+      {call.status === 'fail' && call.error !== undefined ? (
+        <Text color="red">{call.error.message}</Text>
       ) : null}
-      {tool.render?.kind === 'bash' ? (
-        <>
-          <Text>{`exit   ${tool.render.exitCode ?? '-'}`}</Text>
-          {tool.render.stdout ? <Text wrap="wrap">{`stdout\n${tool.render.stdout}`}</Text> : null}
-          {tool.render.stderr
-            ? tool.render.exitCode === 0
-              ? <Text wrap="wrap">{`stderr\n${tool.render.stderr}`}</Text>
-              : <Text color="red" wrap="wrap">{`stderr\n${tool.render.stderr}`}</Text>
-            : null}
-        </>
-      ) : null}
-      {tool.render?.kind !== 'diff' && tool.render?.kind !== 'bash' && tool.outputPreview ? <Text wrap="wrap">{tool.outputPreview}</Text> : null}
-      {tool.render?.truncated ? <Text color="yellow">output truncated</Text> : null}
-      {tool.error ? <Text color="red" wrap="wrap">{tool.error}</Text> : null}
     </Box>
   );
 }

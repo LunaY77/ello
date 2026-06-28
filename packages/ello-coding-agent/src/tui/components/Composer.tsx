@@ -1,49 +1,39 @@
-import { Box, Text, useInput } from 'ink';
+import { TextInput } from '@inkjs/ui';
+import { Box, Text } from 'ink';
 
 export interface ComposerProps {
-  readonly value: string;
+  /** 是否运行中：决定回车语义是 steer 还是 submit。 */
   readonly running: boolean;
+  /** overlay 抢焦点时置 false，输入被忽略。 */
   readonly isActive?: boolean;
-  onChange(value: string): void;
+  /** `/`、`@` 补全建议。 */
+  readonly suggestions?: readonly string[];
   onSubmit(value: string): void;
-  onFollowUp?(value: string): void;
 }
 
-/** 多行 composer 的轻量控制器。 */
+/**
+ * 输入区。
+ *
+ * 用 `@inkjs/ui` 的 {@link TextInput} 替换旧的手搓 `useInput` 字符拼接：
+ * 回车提交，运行中提交即 steer、空闲提交即新一轮 submit（由 App 区分）。
+ */
 export function Composer(props: ComposerProps) {
-  useInput((input, key) => {
-    if (key.shift && key.return) {
-      props.onChange(`${props.value}\n`);
-      return;
-    }
-    if (key.meta && key.return) {
-      props.onFollowUp?.(props.value);
-      return;
-    }
-    if (key.return) {
-      props.onSubmit(props.value);
-      return;
-    }
-    if (key.backspace || key.delete) {
-      props.onChange(props.value.slice(0, -1));
-      return;
-    }
-    if (key.ctrl && input === 'c') {
-      props.onChange('');
-      return;
-    }
-    if (input) {
-      props.onChange(`${props.value}${input}`);
-    }
-  }, { isActive: props.isActive ?? true });
   return (
-    <Box flexDirection="column" borderStyle={props.isActive === false ? 'single' : 'double'} paddingX={1}>
-      <Box justifyContent="space-between">
-        <Text color="cyan">Composer</Text>
-        <Text dimColor>{props.running ? 'steer mode' : 'submit mode'}</Text>
+    <Box flexDirection="column" paddingX={1}>
+      <Box gap={1}>
+        <Text color="cyan">{'>'}</Text>
+        <TextInput
+          isDisabled={props.isActive === false}
+          placeholder={props.running ? 'steer while running…' : '/command  @file  !shell'}
+          {...(props.suggestions !== undefined ? { suggestions: [...props.suggestions] } : {})}
+          onSubmit={props.onSubmit}
+        />
       </Box>
-      <Text wrap="wrap">{props.value ? `> ${props.value}` : '> '}</Text>
-      <Text dimColor>{props.running ? 'Enter steer while running  Alt+Enter follow-up  Esc abort' : 'Enter submit  /command  @file  !shell'}</Text>
+      <Text dimColor>
+        {props.running
+          ? 'Enter steers the running turn · Esc aborts'
+          : 'Enter submits · /command · @file · !shell'}
+      </Text>
     </Box>
   );
 }

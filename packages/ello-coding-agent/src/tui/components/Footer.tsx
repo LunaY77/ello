@@ -1,13 +1,54 @@
+import type { AgentUsage } from '@ello/agent';
+import { Badge } from '@inkjs/ui';
 import { Box, Text } from 'ink';
 
-import type { FooterView } from '../state/selectors.js';
 
-/** 低频动态状态栏。 */
-export function Footer({ view }: { readonly view: FooterView }) {
+export interface FooterProps {
+  readonly model: string;
+  readonly approvalMode: string;
+  readonly usage?: AgentUsage;
+  /** 上下文窗口占用比例（0~1），用于粗略展示预算。 */
+  readonly contextRatio?: number;
+}
+
+/**
+ * 底部状态栏。
+ *
+ * 用 `Badge` 标审批模式，文本展示 model / token 用量 / 上下文占用。
+ */
+export function Footer(props: FooterProps) {
+  const tokens = props.usage !== undefined ? props.usage.inputTokens + props.usage.outputTokens : 0;
   return (
-    <Box justifyContent="space-between" borderStyle="single" paddingX={1} marginTop={1}>
-      <Text color="gray">{view.cwd}</Text>
-      <Text>{`${view.model}  ${view.mode}`}</Text>
+    <Box justifyContent="space-between" paddingX={1} marginTop={1}>
+      <Box gap={1}>
+        <Text color="gray">{props.model}</Text>
+        <Badge color={approvalColor(props.approvalMode)}>{props.approvalMode}</Badge>
+      </Box>
+      <Box gap={1}>
+        <Text dimColor>{`${formatTokens(tokens)} tok`}</Text>
+        {props.contextRatio !== undefined ? (
+          <Text dimColor>{`ctx ${Math.round(props.contextRatio * 100)}%`}</Text>
+        ) : null}
+      </Box>
     </Box>
   );
+}
+
+/** 审批模式 → Badge 颜色：越宽松越偏红。 */
+function approvalColor(mode: string): string {
+  switch (mode) {
+    case 'bypass':
+      return 'red';
+    case 'accept-edits':
+      return 'yellow';
+    case 'dont-ask':
+      return 'magenta';
+    default:
+      return 'green';
+  }
+}
+
+/** token 数收敛成 12.3k 形式。 */
+function formatTokens(tokens: number): string {
+  return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
 }

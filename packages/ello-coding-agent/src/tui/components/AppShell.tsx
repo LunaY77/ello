@@ -1,80 +1,88 @@
 import path from 'node:path';
 
-import { Box, Text } from 'ink';
+import type { AgentUsage } from '@ello/agent';
+import { Spinner, StatusMessage } from '@inkjs/ui';
+import { Box, Static, Text } from 'ink';
+import type { ReactNode } from 'react';
 
-import type { TranscriptItem } from '../../product/event-store.js';
-import type { ToolCallView } from '../../product/events.js';
-import type { FooterView } from '../state/selectors.js';
 
-import { Composer } from './Composer.js';
+import type { TranscriptItem, ToolCallView } from '../state/view-reducer.js';
+
 import { Footer } from './Footer.js';
 import { ToolCard } from './ToolCard.js';
 
 export interface AppShellProps {
+  readonly cwd: string;
+  readonly model: string;
+  readonly approvalMode: string;
   readonly transcript: readonly TranscriptItem[];
-  readonly currentAssistantText: string;
+  readonly liveAssistantText: string;
   readonly runningTools: readonly ToolCallView[];
-  readonly footer: FooterView;
-  readonly composerValue: string;
-  readonly composerHints: readonly string[];
-  readonly queueHint: string;
   readonly running: boolean;
-  readonly composerActive?: boolean;
-  readonly overlay: React.ReactNode;
-  onComposerChange(value: string): void;
-  onSubmit(value: string): void;
-  onFollowUp?(value: string): void;
+  readonly usage?: AgentUsage;
+  /** 浮层（审批/help/模型选择）。 */
+  readonly overlay: ReactNode;
+  /** 输入区（Composer）。 */
+  readonly composer: ReactNode;
 }
 
-/** 纵向 coding-agent 工作台布局。 */
+/**
+ * 纵向工作台布局。
+ *
+ * 区域：Header / Transcript / Live run / Composer / Footer + Overlay。已结案的
+ * transcript 用 ink 的 `<Static>` 一次性输出（只渲染一次、不参与重画），live 区
+ * 才随事件重渲染——对应文档的“渲染预算”。
+ */
 export function AppShell(props: AppShellProps) {
-  const compactCwd = formatCwd(props.footer.cwd);
   return (
     <Box flexDirection="column" width="100%" paddingX={1}>
-      <Box justifyContent="space-between" borderStyle="single" paddingX={1}>
+      <Box justifyContent="space-between" paddingX={1}>
         <Text color="cyan">ello</Text>
-        <Text>{props.running ? 'run active' : 'ready'}</Text>
-        <Text color="gray">{compactCwd}</Text>
+        {props.running ? <Spinner label="running" /> : <Text dimColor>ready</Text>}
+        <Text color="gray">{formatCwd(props.cwd)}</Text>
       </Box>
-      <Box flexDirection="column" borderStyle="single" paddingX={1} marginTop={1}>
-        <Text color="gray">Transcript</Text>
-        {props.transcript.length === 0 ? <Text dimColor>No transcript yet</Text> : props.transcript.map((item) => <TranscriptLine key={item.id} item={item} />)}
-      </Box>
-      <Box flexDirection="column" borderStyle="single" paddingX={1} marginTop={1}>
-        <Box justifyContent="space-between">
-          <Text color="cyan">Live run</Text>
-          <Text color={props.running ? 'yellow' : 'green'}>{props.running ? 'streaming' : 'idle'}</Text>
+
+      <Static items={[...props.transcript]}>
+        {(item) => <TranscriptLine key={item.id} item={item} />}
+      </Static>
+
+      {props.liveAssistantText !== '' ? (
+        <Box marginTop={1}>
+          <Text wrap="wrap">{props.liveAssistantText}</Text>
         </Box>
-        {props.currentAssistantText ? <Text wrap="wrap">{props.currentAssistantText}</Text> : <Text dimColor>{props.running ? 'waiting for model...' : 'no active response'}</Text>}
-        {props.runningTools.map((tool) => <ToolCard key={tool.id} tool={tool} />)}
-      </Box>
-      <Box flexDirection="column" marginTop={1}>
-        <Box justifyContent="space-between">
-          <Text dimColor>{props.queueHint}</Text>
-          <Text dimColor>{props.footer.context}</Text>
-        </Box>
-        {props.composerHints.length > 0 ? <Text dimColor>{props.composerHints.join('  ')}</Text> : null}
-        <Composer
-          value={props.composerValue}
-          running={props.running}
-          isActive={props.composerActive ?? true}
-          onChange={props.onComposerChange}
-          onSubmit={props.onSubmit}
-          {...(props.onFollowUp !== undefined ? { onFollowUp: props.onFollowUp } : {})}
-        />
-      </Box>
-      <Footer view={props.footer} />
+      ) : null}
+
+      {props.runningTools.map((tool) => (
+        <ToolCard key={tool.id} call={tool} />
+      ))}
+
       {props.overlay}
+
+      <Box marginTop={1}>{props.composer}</Box>
+
+      <Footer
+        model={props.model}
+        approvalMode={props.approvalMode}
+        {...(props.usage !== undefined ? { usage: props.usage } : {})}
+      />
     </Box>
   );
 }
 
+/** 渲染一行 transcript：按 kind 分流。 */
 function TranscriptLine({ item }: { readonly item: TranscriptItem }) {
-  if (item.role === 'tool') {
-    return <ToolCard tool={item.tool} compact />;
+  if (item.kind === 'tool') {
+    return <ToolCard call={item.tool} compact />;
   }
-  const color = item.role === 'user' ? 'green' : item.role === 'diagnostic' ? 'yellow' : 'white';
-  const label = item.role === 'user' ? 'user' : item.role === 'assistant' ? 'assistant' : 'diagnostic';
+  if (item.kind === 'diagnostic') {
+    return (
+      <Box marginBottom={1}>
+        <StatusMessage variant="error">{item.text}</StatusMessage>
+      </Box>
+    );
+  }
+  const color = item.kind === 'user' ? 'green' : 'white';
+  const label = item.kind === 'user' ? 'user' : 'assistant';
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Text color={color}>{label}</Text>
@@ -83,6 +91,7 @@ function TranscriptLine({ item }: { readonly item: TranscriptItem }) {
   );
 }
 
+/** 把 cwd 压成 `parent/base` 形式，home 替换成 ~。 */
 function formatCwd(cwd: string): string {
   const home = process.env.HOME;
   const display = home !== undefined && cwd.startsWith(home) ? cwd.replace(home, '~') : cwd;
