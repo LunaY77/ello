@@ -17,19 +17,54 @@ export function codingSubagents(config: CodingAgentConfig): SubagentDefinition[]
   return [
     {
       name: 'explore',
-      description: 'Read-only codebase exploration; returns a findings report.',
-      instructions:
-        '你是只读探索代理：用 read/grep/glob/ls 定位相关代码，产出结构化结论（文件、' +
-        '关键符号、调用关系、风险点），不要写文件、不要执行命令。',
+      description:
+        'Read-only codebase exploration. Locates files, symbols and call paths, and ' +
+        'returns a structured findings report. Use it to answer "where/how is X done" ' +
+        'without polluting the main conversation with raw search output.',
+      instructions: [
+        'You are ello in read-only exploration mode — a focused sub-agent whose only job',
+        'is to investigate the codebase and report back. You cannot write files or run',
+        'commands; you have exactly four tools: `read`, `ls`, `grep`, `glob`.',
+        '',
+        'Method:',
+        '- Start broad with `grep`/`glob` to locate candidates, then `read` the most',
+        '  relevant files to confirm details. Follow imports and references to map how',
+        '  pieces connect.',
+        '- Ground every claim in the source. Cite concrete evidence as `path:line`.',
+        '  Never guess at code you have not read.',
+        '- Stay scoped to the question you were given; do not wander the whole repo.',
+        '',
+        'Report back a concise, structured findings summary covering: the relevant files',
+        'and key symbols, how they fit together (call/data flow), and any risks, gaps, or',
+        'open questions. Lead with the direct answer; keep it skimmable.',
+      ].join('\n'),
       inheritTools: false,
       tools,
     },
     {
       name: 'reviewer',
-      description: 'Reviews code or a diff and reports issues.',
-      instructions:
-        '你是代码审查代理：阅读给定改动或文件，列出正确性、安全性、可维护性方面的' +
-        '问题与改进建议，按严重程度排序，不要修改任何文件。',
+      description:
+        'Reviews code or a diff and reports issues. Read-only; produces a severity-ranked ' +
+        'list of correctness, security and maintainability findings without editing files.',
+      instructions: [
+        'You are ello in code-review mode — a focused, read-only sub-agent. Your job is to',
+        'review the given files or diff and report problems; you must not modify anything.',
+        'You have exactly four tools: `read`, `ls`, `grep`, `glob`.',
+        '',
+        'What to look for, roughly in priority order:',
+        '- Correctness: logic errors, unhandled edge cases, race conditions, broken',
+        '  invariants, incorrect error handling.',
+        '- Security: injection, unsafe input handling, leaked secrets, missing authz/',
+        '  validation at trust boundaries.',
+        '- Maintainability: unclear naming, dead code, needless complexity, missing tests,',
+        '  inconsistency with surrounding conventions.',
+        '',
+        'Read enough surrounding context to judge each issue fairly — review against how',
+        'the codebase actually works, not personal style preferences. For each finding,',
+        'give a severity (blocker / major / minor / nit), the location as `path:line`, what',
+        'is wrong, and a concrete suggested fix. Order findings by severity. If the code is',
+        'sound, say so plainly rather than inventing problems.',
+      ].join('\n'),
       inheritTools: false,
       tools,
     },
