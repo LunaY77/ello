@@ -4,7 +4,6 @@ import { AiSdkModelAdapter } from '../adapters/ai-sdk.js';
 import { normalizeAgentError } from '../public/errors.js';
 import type {
   AgentEnvironment,
-  AgentExtension,
   AgentInput,
   AgentMemoryItem,
   AgentMessage,
@@ -39,7 +38,6 @@ import {
   compactSession,
   loadSessionMessages,
   saveSessionResult,
-  sessionExtensions,
 } from './session-runtime.js';
 import { AgentEventStream } from './stream.js';
 import { buildToolSet } from './tool-runner.js';
@@ -67,9 +65,7 @@ export function createRunSession(options: {
   readonly input: AgentInput;
   readonly runOptions: AgentRunOptions;
   readonly environment: AgentEnvironment;
-  readonly extensions: readonly AgentExtension[];
   readonly modelAdapter: ModelAdapter;
-  readonly setup: () => Promise<void>;
 }): RunSession {
   const abortController = new AbortController();
   if (options.runOptions.signal !== undefined) {
@@ -118,9 +114,7 @@ export class RunSession {
       readonly input: AgentInput;
       readonly runOptions: AgentRunOptions;
       readonly environment: AgentEnvironment;
-      readonly extensions: readonly AgentExtension[];
       readonly modelAdapter: ModelAdapter;
-      readonly setup: () => Promise<void>;
       readonly abortController: AbortController;
     },
   ) {
@@ -128,7 +122,6 @@ export class RunSession {
     this.input = optionsBundle.input;
     this.options = optionsBundle.runOptions;
     this.environment = optionsBundle.environment;
-    this.extensions = optionsBundle.extensions;
     this.modelAdapter = optionsBundle.modelAdapter;
     this.abortController = optionsBundle.abortController;
     this.signal = this.abortController.signal;
@@ -174,12 +167,7 @@ export class RunSession {
       environment: this.environment,
       metadata: this.metadata,
     });
-    this.events = new AgentEventDispatcher(
-      this.config,
-      this.extensions,
-      this.stream,
-      this.ctx,
-    );
+    this.events = new AgentEventDispatcher(this.config, this.stream, this.ctx);
     this.maxTurns = Math.max(1, this.options.maxTurns ?? 8);
   }
 
@@ -187,19 +175,14 @@ export class RunSession {
   readonly input: AgentInput;
   readonly options: AgentRunOptions;
   readonly environment: AgentEnvironment;
-  readonly extensions: readonly AgentExtension[];
   readonly modelAdapter: ModelAdapter;
   readonly abortController: AbortController;
 
   async start(): Promise<void> {
-    await this.optionsBundle.setup();
+    await this.environment.setup?.(this.ctx);
     await this.events.emit({ type: 'run.started', runId: this.runId });
-    for (const extension of this.extensions) {
-      await extension.beforeRun?.(this.ctx);
-    }
     this.loadedSessionMessages = await loadSessionMessages({
       config: this.config,
-      extensions: sessionExtensions(this.extensions),
       ...(this.options.sessionId !== undefined
         ? { sessionId: this.options.sessionId }
         : {}),
@@ -352,15 +335,11 @@ export class RunSession {
       compactions,
     });
     const result = createRunResult({ run: this, diagnostics });
-    for (const extension of this.extensions) {
-      await extension.afterRun?.(result, this.ctx);
-    }
     const messagesToAppend = result.messages.slice(
       this.loadedSessionMessages.length,
     );
     await saveSessionResult({
       config: this.config,
-      extensions: sessionExtensions(this.extensions),
       result,
       messagesToAppend,
     });

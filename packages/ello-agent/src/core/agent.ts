@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import type {
   Agent,
   AgentInput,
@@ -15,13 +13,10 @@ import { runAgentLoop } from './loop.js';
 import { createRunSession, defaultModelAdapter } from './run-session.js';
 
 export class ElloAgent implements Agent {
-  private readonly extensions;
   private readonly environment;
   private readonly modelAdapter: ModelAdapter;
-  private setupDone = false;
 
   constructor(private readonly config: CreateAgentOptions) {
-    this.extensions = config.extensions ?? [];
     this.environment = config.environment ?? {};
     this.modelAdapter = config.modelAdapter ?? defaultModelAdapter();
   }
@@ -43,9 +38,7 @@ export class ElloAgent implements Agent {
       input,
       runOptions: options,
       environment: this.environment,
-      extensions: this.extensions,
       modelAdapter: this.modelAdapter,
-      setup: () => this.setup(),
     });
     void runAgentLoop(run);
     return run.stream;
@@ -59,16 +52,6 @@ export class ElloAgent implements Agent {
   }
 
   async close(): Promise<void> {
-    await closeAgentResources(this.environment, this.extensions);
-  }
-
-  private async setup(): Promise<void> {
-    if (this.setupDone) {
-      return;
-    }
-    this.setupDone = true;
-    for (const extension of this.extensions) {
-      await extension.setup?.({ agentId: randomUUID() });
-    }
+    await closeAgentResources(this.environment);
   }
 }

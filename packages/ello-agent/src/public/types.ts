@@ -436,35 +436,25 @@ export interface SubagentRunSummary {
   readonly finishReason: AgentFinishReason;
 }
 
-export interface AgentExtension {
-  readonly name: string;
-  setup?(ctx: AgentSetupContext): MaybePromise<void>;
-  beforeRun?(ctx: AgentRunContext): MaybePromise<void>;
-  transformMessages?(
-    messages: AgentMessage[],
-    ctx: AgentRunContext,
-  ): MaybePromise<AgentMessage[]>;
-  onEvent?(event: AgentStreamEvent, ctx: AgentRunContext): MaybePromise<void>;
-  afterRun?(result: AgentRunResult, ctx: AgentRunContext): MaybePromise<void>;
-  teardown?(): MaybePromise<void>;
-}
-
-export interface AgentSessionExtension extends AgentExtension {
-  loadMessages?(): MaybePromise<AgentMessage[]>;
-  saveResult?(result: AgentRunResult): MaybePromise<void>;
-}
-
 export interface AgentFileSystem {
   readText(path: string): Promise<string>;
   writeText(path: string, content: string): Promise<void>;
   listDir(path: string): Promise<string[]>;
+  getContextInstructions?(): MaybePromise<string | null>;
+  close?(): MaybePromise<void>;
 }
 
 export interface AgentShell {
   run(
     command: string,
-    options?: { cwd?: string; timeout?: number },
+    options?: {
+      cwd?: string;
+      timeout?: number;
+      env?: Record<string, string>;
+    },
   ): Promise<AgentShellResult>;
+  getContextInstructions?(): MaybePromise<string | null>;
+  close?(): MaybePromise<void>;
 }
 
 export interface AgentShellResult {
@@ -474,10 +464,37 @@ export interface AgentShellResult {
 }
 
 export interface AgentEnvironment {
+  readonly fileSystem?: AgentFileSystem;
   readonly files?: AgentFileSystem;
   readonly shell?: AgentShell;
-  getInstructions?(): MaybePromise<string>;
+  readonly resources?: AgentResourceRegistry;
+  setup?(ctx: AgentRunContext): MaybePromise<void>;
+  getContextInstructions?(ctx: AgentRunContext): MaybePromise<string | null>;
+  getInstructions?(): MaybePromise<string | null>;
+  onEvent?(event: AgentStreamEvent, ctx: AgentRunContext): MaybePromise<void>;
   close?(): MaybePromise<void>;
+}
+
+export interface AgentResource {
+  setup?(): MaybePromise<void>;
+  close?(): MaybePromise<void>;
+  getContextInstructions?(): MaybePromise<string | null>;
+}
+
+export type AgentResourceFactory = (
+  environment: AgentEnvironment,
+) => MaybePromise<AgentResource>;
+
+export interface AgentResourceRegistry {
+  bind?(environment: AgentEnvironment): void;
+  setupAll?(): MaybePromise<void>;
+  register(key: string, resource: AgentResource): void;
+  registerFactory(key: string, factory: AgentResourceFactory): void;
+  get(key: string): AgentResource | undefined;
+  getOrCreate(key: string): Promise<AgentResource>;
+  keys(): string[];
+  getContextInstructions?(): MaybePromise<string | null>;
+  closeAll?(): MaybePromise<void>;
 }
 
 export interface CreateAgentOptions<TContext = unknown> {
@@ -488,7 +505,6 @@ export interface CreateAgentOptions<TContext = unknown> {
   readonly modelAdapter?: ModelAdapter;
   readonly environment?: AgentEnvironment;
   readonly tools?: readonly AnyAgentTool[];
-  readonly extensions?: readonly AgentExtension[];
   readonly session?: SessionStore;
   readonly memory?: AgentMemory<TContext>;
   readonly observers?: readonly AgentObserver<TContext>[];

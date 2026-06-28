@@ -6,7 +6,6 @@ import type {
 } from '../public/types.js';
 
 import {
-  applyExtensionMessageTransforms,
   defaultMessageTransforms,
   estimateMessagesTokens,
   estimateTextTokens,
@@ -46,7 +45,9 @@ async function buildSystem(
   if (run.config.instructions) {
     sections.push(run.config.instructions);
   }
-  const environmentInstructions = await run.environment.getInstructions?.();
+  const environmentInstructions =
+    (await run.environment.getContextInstructions?.(run.ctx)) ??
+    (await run.environment.getInstructions?.());
   if (environmentInstructions) {
     sections.push(environmentInstructions);
   }
@@ -75,14 +76,6 @@ async function buildFinalMessages(run: RunSession): Promise<{
   for (const transform of defaultMessageTransforms(run)) {
     messages = await transform(messages, run.ctx);
     appliedTransforms.push(transform.name || 'default-message-transform');
-  }
-  messages = await applyExtensionMessageTransforms(messages, run);
-  if (
-    run.extensions.some(
-      (extension) => extension.transformMessages !== undefined,
-    )
-  ) {
-    appliedTransforms.push('extension.transformMessages');
   }
   for (const transform of run.config.modelInput?.messageTransforms ?? []) {
     messages = await transform(messages, run.ctx);

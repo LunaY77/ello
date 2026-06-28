@@ -38,18 +38,6 @@ export function defaultMessageTransforms(run: RunSession): MessageTransform[] {
   return transforms;
 }
 
-export async function applyExtensionMessageTransforms(
-  messages: readonly AgentMessage[],
-  run: RunSession,
-): Promise<readonly AgentMessage[]> {
-  let current = [...messages];
-  for (const extension of run.extensions) {
-    current =
-      (await extension.transformMessages?.(current, run.ctx)) ?? current;
-  }
-  return preserveToolCallPairs(current);
-}
-
 export function estimateMessagesTokens(
   messages: readonly AgentMessage[],
 ): number {

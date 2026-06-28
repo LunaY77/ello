@@ -2,31 +2,23 @@ import type {
   AgentMessage,
   AgentRunContext,
   AgentRunResult,
-  AgentSessionExtension,
   CreateAgentOptions,
   SessionCompactionReport,
 } from '../public/types.js';
 
-import { asSessionExtension } from './events.js';
-
 export async function loadSessionMessages(options: {
   readonly config: CreateAgentOptions;
-  readonly extensions: readonly AgentSessionExtension[];
   readonly sessionId?: string;
 }): Promise<AgentMessage[]> {
   const messages: AgentMessage[] = [];
   if (options.config.session !== undefined && options.sessionId !== undefined) {
     messages.push(...(await options.config.session.load(options.sessionId)));
   }
-  for (const extension of options.extensions) {
-    messages.push(...((await extension.loadMessages?.()) ?? []));
-  }
   return messages;
 }
 
 export async function saveSessionResult(options: {
   readonly config: CreateAgentOptions;
-  readonly extensions: readonly AgentSessionExtension[];
   readonly result: AgentRunResult;
   readonly messagesToAppend: AgentMessage[];
 }): Promise<void> {
@@ -40,9 +32,6 @@ export async function saveSessionResult(options: {
       options.messagesToAppend,
       options.result.metadata,
     );
-  }
-  for (const extension of options.extensions) {
-    await extension.saveResult?.(options.result);
   }
 }
 
@@ -64,10 +53,4 @@ export async function compactSession(options: {
     options.ctx,
   );
   return report === null ? [] : [report];
-}
-
-export function sessionExtensions(
-  extensions: readonly import('../public/types.js').AgentExtension[],
-): AgentSessionExtension[] {
-  return extensions.map(asSessionExtension);
 }

@@ -1,9 +1,7 @@
 import type { AgentStreamEvent } from '../public/events.js';
 import type {
-  AgentExtension,
   AgentObserver,
   AgentRunContext,
-  AgentSessionExtension,
   AgentToolCall,
   CreateAgentOptions,
 } from '../public/types.js';
@@ -15,7 +13,6 @@ export class AgentEventDispatcher {
 
   constructor(
     private readonly config: CreateAgentOptions,
-    private readonly extensions: readonly AgentExtension[],
     private readonly stream: AgentEventStream,
     private readonly ctx: AgentRunContext,
   ) {}
@@ -26,9 +23,6 @@ export class AgentEventDispatcher {
     await this.emitObserverEvent(event);
     if (this.ctx.sessionId !== undefined) {
       await this.config.session?.appendEvent?.(this.ctx.sessionId, event);
-    }
-    for (const extension of this.extensions) {
-      await extension.onEvent?.(event, this.ctx);
     }
   }
 
@@ -41,6 +35,7 @@ export class AgentEventDispatcher {
         this.observerToolCalls,
       );
     }
+    await this.ctx.environment.onEvent?.(event, this.ctx);
   }
 }
 
@@ -98,16 +93,15 @@ async function emitSingleObserverEvent(
 
 export async function closeAgentResources(
   environment: CreateAgentOptions['environment'],
-  extensions: readonly AgentExtension[],
 ): Promise<void> {
-  for (const extension of [...extensions].reverse()) {
-    await extension.teardown?.();
+  if (environment?.close !== undefined) {
+    await environment.close();
+    return;
   }
-  await environment?.close?.();
-}
-
-export function asSessionExtension(
-  extension: AgentExtension,
-): AgentSessionExtension {
-  return extension as AgentSessionExtension;
+  await environment?.resources?.closeAll?.();
+  await environment?.fileSystem?.close?.();
+  if (environment?.files !== environment?.fileSystem) {
+    await environment?.files?.close?.();
+  }
+  await environment?.shell?.close?.();
 }

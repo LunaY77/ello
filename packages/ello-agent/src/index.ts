@@ -6,16 +6,9 @@ export {
   loadSkillsFromDir,
 } from './core/skills.js';
 export {
-  createApprovalExtension,
-  createCompressionExtension,
-  createEnvironmentExtension,
-  createJsonlSession,
   createLocalEnvironment,
-  createMemorySession,
-  createMessageEntry,
-  createObservabilityExtension,
-  generateEntryId,
-} from './extensions/index.js';
+  createLocalShellEnvironment,
+} from './environment/index.js';
 export { z } from 'zod';
 
 export type {
@@ -28,8 +21,10 @@ export type {
   AgentMemoryItem,
   AgentEnvironment,
   AgentError,
-  AgentExtension,
   AgentFileSystem,
+  AgentResource,
+  AgentResourceFactory,
+  AgentResourceRegistry,
   AgentFinishReason,
   AgentInput,
   AgentMessage,
@@ -76,4 +71,7 @@ export type {
   UserMessage,
 } from './public/types.js';
 export type { AgentStreamEvent } from './public/events.js';
-export type { SessionEntry } from './extensions/index.js';
+export type {
+  CreateLocalEnvironmentOptions,
+  DefaultAgentResourceRegistry,
+} from './environment/index.js';

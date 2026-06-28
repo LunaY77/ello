@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   createAgent,
   createLocalEnvironment,
-  createMemorySession,
+  createLocalShellEnvironment,
   defineTool,
   z,
   type AgentModelEvent,
@@ -20,7 +20,6 @@ import {
   DefaultAgentMessageQueue,
   trimMessages,
 } from '../internal.js';
-import { createFilesystemTools } from '../presets/index.js';
 
 class EchoAdapter implements ModelAdapter {
   async generate(request: AgentModelRequest): Promise<AgentModelResponse> {
@@ -108,28 +107,98 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('uses local environment and memory session extensions', async () => {
+  it('uses local environment and session store', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ello-agent-'));
     dirs.push(dir);
     const environment = createLocalEnvironment({
       cwd: dir,
       allowedPaths: [dir],
     });
-    await environment.files?.writeText('note.txt', 'content');
-    const entries = await environment.files?.listDir('.');
-    const session = createMemorySession();
+    await environment.fileSystem?.writeText('note.txt', 'content');
+    const entries = await environment.fileSystem?.listDir('.');
+    const savedMessages: unknown[] = [];
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: new EchoAdapter(),
       environment,
-      extensions: [session],
-      tools: createFilesystemTools(),
+      session: {
+        async load() {
+          return [];
+        },
+        async append(_sessionId, messages) {
+          savedMessages.push(...messages);
+        },
+      },
+      tools: [
+        defineTool({
+          name: 'read_note',
+          description: 'Read note file',
+          input: z.object({ path: z.string() }),
+          execute: ({ path }, ctx) =>
+            ctx.environment.fileSystem?.readText(path) ?? '',
+        }),
+      ],
     });
-    await agent.run('remember');
+    await agent.run('remember', { sessionId: 'sess_1' });
 
     expect(entries).toContain('note.txt');
-    expect(session.messages.length).toBeGreaterThan(0);
+    expect(savedMessages.length).toBeGreaterThan(0);
     await agent.close();
+  });
+
+  it('runs environment lifecycle and resource instructions inside the agent loop', async () => {
+    const events: string[] = [];
+    const requests: AgentModelRequest[] = [];
+    const environment = createLocalShellEnvironment();
+    environment.resources?.register('test-resource', {
+      setup: () => events.push('resource.setup'),
+      getContextInstructions: () => 'Resource instruction.',
+      close: () => events.push('resource.close'),
+    });
+    const originalSetup = environment.setup?.bind(environment);
+    const originalClose = environment.close?.bind(environment);
+    environment.setup = async (ctx) => {
+      events.push(`setup:${ctx.runId.length > 0}`);
+      await originalSetup?.(ctx);
+    };
+    environment.onEvent = (event) => events.push(event.type);
+    environment.close = async () => {
+      events.push('close');
+      await originalClose?.();
+    };
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          requests.push(request);
+          return new EchoAdapter().generate(request);
+        },
+        async *stream(request) {
+          requests.push(request);
+          yield {
+            type: 'final',
+            response: await new EchoAdapter().generate(request),
+          };
+        },
+      },
+      environment,
+    });
+
+    await agent.run('hi');
+    const shellResult = await environment.shell?.run('echo shell-ok');
+    await agent.close();
+
+    expect(events[0]).toBe('setup:true');
+    expect(events).toContain('resource.setup');
+    expect(events).toContain('run.started');
+    expect(events).toContain('run.completed');
+    expect(events).toContain('close');
+    expect(events).toContain('resource.close');
+    expect(shellResult?.stdout.trim()).toBe('shell-ok');
+    expect(requests[0]?.system).toContain('<environment-context>');
+    expect(requests[0]?.system).toContain('<file-system>');
+    expect(requests[0]?.system).toContain('<shell>');
+    expect(requests[0]?.system).toContain('Resource instruction.');
   });
 
   it('drains message queues in stable modes and run-control order', () => {
