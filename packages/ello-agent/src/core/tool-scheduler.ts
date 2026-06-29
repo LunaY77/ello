@@ -16,6 +16,8 @@ import type {
   AnyAgentTool,
 } from '../public/types.js';
 
+import { createToolResultMessage } from './tool-messages.js';
+
 /** 构造 {@link ToolScheduler} 的入参。 */
 export interface ToolSchedulerOptions {
   /** 当前 run 的标识，注入到每次工具执行的上下文中。 */
@@ -102,9 +104,7 @@ export class ToolScheduler {
         await sink.onToolStarted(call.id, call.name, call.input);
         await sink.onToolFailed(call.id, error);
         toolCalls.push({ ...call, error: normalizeAgentError(error) });
-        messages.push(
-          createToolResultMessage(call, { error: error.message }, 'error'),
-        );
+        messages.push(createToolResultMessage(call, { error: error.message }, 'error'));
         continue;
       }
       const ctx = this.createContext();
@@ -196,70 +196,4 @@ export class ToolScheduler {
       metadata: this.options.metadata,
     };
   }
-}
-
-/** 构造一条 `role:'tool'` 的 tool-result 消息，按状态包装其输出负载。 */
-function createToolResultMessage(
-  call: AgentToolCall,
-  output: unknown,
-  status: 'success' | 'error' | 'denied' = 'success',
-): AgentMessage {
-  return {
-    role: 'tool',
-    content: [
-      {
-        type: 'tool-result',
-        toolCallId: call.id,
-        toolName: call.name,
-        output: createAiSdkToolOutput(output, status),
-      },
-    ],
-  } as unknown as AgentMessage;
-}
-
-/**
- * 把工具输出归一化为 AI SDK 识别的 tool-output 负载形态。
- *
- * 拒绝 → `execution-denied`；错误 → `error-text`；字符串原样作 `text`；
- * 其余对象走 `json`（经一轮 JSON 序列化清洗，去除不可序列化字段）。
- */
-function createAiSdkToolOutput(
-  output: unknown,
-  status: 'success' | 'error' | 'denied',
-): unknown {
-  if (status === 'denied') {
-    return {
-      type: 'execution-denied',
-      reason: readReason(output) ?? 'Tool execution denied.',
-    };
-  }
-  if (status === 'error') {
-    return {
-      type: 'error-text',
-      value: readReason(output) ?? String(output),
-    };
-  }
-  if (typeof output === 'string') {
-    return { type: 'text', value: output };
-  }
-  return { type: 'json', value: toJsonValue(output) };
-}
-
-/** 从对象或字符串里尽力提取一段可读的原因文本（优先 `reason`，回退 `error`）。 */
-function readReason(value: unknown): string | undefined {
-  if (typeof value === 'object' && value !== null) {
-    const reason =
-      (value as Record<string, unknown>).reason ??
-      (value as Record<string, unknown>).error;
-    return typeof reason === 'string' ? reason : undefined;
-  }
-  return typeof value === 'string' ? value : undefined;
-}
-
-/** 经一轮 JSON 序列化清洗任意值，`undefined` 归一化为 `null`。 */
-function toJsonValue(value: unknown): unknown {
-  if (value === undefined) {
-    return null;
-  }
-  return JSON.parse(JSON.stringify(value)) as unknown;
 }

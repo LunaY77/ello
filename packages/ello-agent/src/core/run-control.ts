@@ -16,6 +16,12 @@ import type {
   QueueDrainDiagnostic,
 } from '../public/types.js';
 
+import {
+  collectToolCallIds,
+  createToolCallMessage,
+  createToolResultMessage,
+} from './tool-messages.js';
+
 /** {@link AgentRunControl} 的可序列化快照，用于保存/恢复完整排队状态。 */
 export interface AgentRunControlSnapshot {
   /** 运行状态（运行中/待审批/已中断）。 */
@@ -172,19 +178,15 @@ export class AgentRunControl {
   /**
    * 抽取并合并出下一个回合的消息序列。
    *
-   * 按固定顺序拼装：先用 `resume` 恢复延迟项（审批/工具结果），再注入会话历史
-   * （仅首回合），随后依次抽取输入、引导、后续提问。每个来源都记录一条抽取诊断。
+   * 按固定顺序拼装：先注入会话历史（仅首回合），再用 `resume` 补齐审批
+   * tool-result，随后依次抽取输入、引导、后续提问。审批恢复必须在历史之后，
+   * 因为上一次挂起运行已经可能把 assistant tool-call 持久化进 session。
    */
   drainNextTurn(resume?: DeferredRunResults): DrainNextTurnResult {
     const diagnostics: QueueDrainDiagnostic[] = [];
     const messages: AgentMessage[] = [];
 
-    // 1) 延迟项恢复：把审批/工具调用结果重建成 assistant+tool 消息对。
-    const recovery = this.createRecoveryMessages(resume);
-    messages.push(...recovery);
-    diagnostics.push({ queue: 'deferred', count: recovery.length });
-
-    // 2) 会话历史：仅在首个回合注入一次，之后置位避免重复。
+    // 1) 会话历史：仅在首个回合注入一次，之后置位避免重复。
     if (!this.sessionDrained) {
       const drained = this.sessionQueue.drain();
       this.sessionDrained = true;
@@ -193,6 +195,15 @@ export class AgentRunControl {
     } else {
       diagnostics.push({ queue: 'session', count: 0 });
     }
+
+    // 2) 延迟项恢复：对历史中已有的 tool-call 只补 tool-result，避免重复
+    // assistant tool-call 造成 AI SDK 再次判定缺失 tool-result。
+    const recovery = this.createRecoveryMessages(
+      resume,
+      collectToolCallIds(messages),
+    );
+    messages.push(...recovery);
+    diagnostics.push({ queue: 'deferred', count: recovery.length });
 
     // 3) 依次抽取输入、引导、后续提问（后两者逐条推进）。
     for (const [queue, drained] of [
@@ -243,7 +254,10 @@ export class AgentRunControl {
    * - `tool-call`：同样补出 tool-call + tool 结果（取 `toolResults` 中的输出）。
    * - 其他（如中断快照）：直接展开其携带的原始消息。
    */
-  private createRecoveryMessages(resume?: DeferredRunResults): AgentMessage[] {
+  private createRecoveryMessages(
+    resume?: DeferredRunResults,
+    existingToolCallIds: ReadonlySet<string> = new Set(),
+  ): AgentMessage[] {
     if (resume === undefined) {
       return [];
     }
@@ -265,41 +279,43 @@ export class AgentRunControl {
           : createDeniedOutput(
               typeof decision === 'object' ? decision.reason : undefined,
             );
-        // 先补 tool-call 消息，再补对应 tool 结果，保持配对完整。
+        // 历史里没有对应 tool-call 时才补 assistant tool-call；恢复已持久化
+        // 的审批运行时，历史通常已经包含该调用，只需要追加 tool-result。
+        if (!existingToolCallIds.has(item.toolCallId)) {
+          messages.push(
+            createToolCallMessage({
+              id: item.toolCallId,
+              name: item.toolName,
+              input: item.input,
+            }),
+          );
+        }
         messages.push(
-          createToolCallMessage(item.toolCallId, item.toolName, item.input),
+          createToolResultMessage(
+            { id: item.toolCallId, name: item.toolName, input: item.input },
+            output,
+            approved ? 'success' : 'denied',
+          ),
         );
-        messages.push({
-          role: 'tool',
-          content: [
-            {
-              type: 'tool-result',
-              toolCallId: item.toolCallId,
-              toolName: item.toolName,
-              output: approved ? createToolOutput(output) : output,
-            },
-          ],
-        } as unknown as AgentMessage);
         continue;
       }
       if (item.kind === 'tool-call') {
-        // 已执行的延迟工具调用：重建调用与其结果消息对。
+        // 已执行的延迟工具调用：按需重建调用与其结果消息对。
+        if (!existingToolCallIds.has(item.toolCallId)) {
+          messages.push(
+            createToolCallMessage({
+              id: item.toolCallId,
+              name: item.toolName,
+              input: item.input,
+            }),
+          );
+        }
         messages.push(
-          createToolCallMessage(item.toolCallId, item.toolName, item.input),
+          createToolResultMessage(
+            { id: item.toolCallId, name: item.toolName, input: item.input },
+            resume.toolResults?.[item.toolCallId] ?? null,
+          ),
         );
-        messages.push({
-          role: 'tool',
-          content: [
-            {
-              type: 'tool-result',
-              toolCallId: item.toolCallId,
-              toolName: item.toolName,
-              output: createToolOutput(
-                resume.toolResults?.[item.toolCallId] ?? null,
-              ),
-            },
-          ],
-        } as unknown as AgentMessage);
         continue;
       }
       // 中断快照等：直接还原其保存的消息。
@@ -309,44 +325,9 @@ export class AgentRunControl {
   }
 }
 
-/** 构造一条携带单个 tool-call 的 assistant 消息。 */
-function createToolCallMessage(
-  toolCallId: string,
-  toolName: string,
-  input: unknown,
-): AgentMessage {
-  return {
-    role: 'assistant',
-    content: [
-      {
-        type: 'tool-call',
-        toolCallId,
-        toolName,
-        input,
-      },
-    ],
-  } as unknown as AgentMessage;
-}
-
-/** 把工具输出包装成统一的 tool-result 输出：字符串走 text，其余走 json。 */
-function createToolOutput(output: unknown): unknown {
-  if (typeof output === 'string') {
-    return { type: 'text', value: output };
-  }
-  return { type: 'json', value: toJsonValue(output) };
-}
-
 /** 构造「执行被拒」的工具输出，可附带拒绝原因。 */
 function createDeniedOutput(reason: string | undefined): unknown {
   return reason === undefined
     ? { type: 'execution-denied' }
     : { type: 'execution-denied', reason };
-}
-
-/** 将任意值深拷贝为可 JSON 序列化的形态，`undefined` 归一为 `null`。 */
-function toJsonValue(value: unknown): unknown {
-  if (value === undefined) {
-    return null;
-  }
-  return JSON.parse(JSON.stringify(value)) as unknown;
 }

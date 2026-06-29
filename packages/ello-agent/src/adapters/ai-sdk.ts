@@ -7,8 +7,8 @@
  * 循环只面向 {@link ModelAdapter} 接口编程，替换此适配器即可接入测试桩或私有模型服务。
  */
 
-import { anthropic } from '@ai-sdk/anthropic';
-import { openai } from '@ai-sdk/openai';
+import { anthropic, createAnthropic } from '@ai-sdk/anthropic';
+import { createOpenAI, openai } from '@ai-sdk/openai';
 import {
   generateText,
   streamText,
@@ -16,6 +16,7 @@ import {
   type ModelMessage,
 } from 'ai';
 
+import { createToolCallMessage } from '../core/tool-messages.js';
 import { coerceUsage } from '../core/usage.js';
 import type {
   AgentFinishReason,
@@ -26,6 +27,11 @@ import type {
   ModelAdapter,
 } from '../public/types.js';
 
+export interface AiSdkModelAdapterOptions {
+  readonly baseURL?: string;
+  readonly headers?: Record<string, string>;
+}
+
 /**
  * 默认 Vercel AI SDK adapter。
  *
@@ -33,6 +39,34 @@ import type {
  * 面向 ModelAdapter 编程，因此测试或私有模型服务可以替换这里。
  */
 export class AiSdkModelAdapter implements ModelAdapter {
+  private readonly openaiProvider: typeof openai;
+  private readonly anthropicProvider: typeof anthropic;
+
+  constructor(private readonly options: AiSdkModelAdapterOptions = {}) {
+    this.openaiProvider =
+      options.baseURL !== undefined || options.headers !== undefined
+        ? createOpenAI({
+            ...(options.baseURL !== undefined
+              ? { baseURL: options.baseURL }
+              : {}),
+            ...(options.headers !== undefined
+              ? { headers: options.headers }
+              : {}),
+          })
+        : openai;
+    this.anthropicProvider =
+      options.baseURL !== undefined || options.headers !== undefined
+        ? createAnthropic({
+            ...(options.baseURL !== undefined
+              ? { baseURL: options.baseURL }
+              : {}),
+            ...(options.headers !== undefined
+              ? { headers: options.headers }
+              : {}),
+          })
+        : anthropic;
+  }
+
   /**
    * 非流式模型调用。
    *
@@ -44,7 +78,7 @@ export class AiSdkModelAdapter implements ModelAdapter {
    */
   async generate(request: AgentModelRequest): Promise<AgentModelResponse> {
     const result = await generateText({
-      model: resolveLanguageModel(request.model),
+      model: this.resolveLanguageModel(request.model),
       ...(request.system !== undefined ? { system: request.system } : {}),
       messages: request.messages as ModelMessage[],
       tools: request.tools,
@@ -87,10 +121,11 @@ export class AiSdkModelAdapter implements ModelAdapter {
    */
   async *stream(request: AgentModelRequest): AsyncIterable<AgentModelEvent> {
     const result = streamText({
-      model: resolveLanguageModel(request.model),
+      model: this.resolveLanguageModel(request.model),
       ...(request.system !== undefined ? { system: request.system } : {}),
       messages: request.messages as ModelMessage[],
       tools: request.tools,
+      onError: () => undefined,
       ...(request.activeTools !== undefined
         ? { activeTools: request.activeTools }
         : {}),
@@ -103,25 +138,54 @@ export class AiSdkModelAdapter implements ModelAdapter {
       ...(request.signal !== undefined ? { abortSignal: request.signal } : {}),
       ...(request.modelSettings as object),
     });
-    for await (const delta of result.textStream) {
-      yield { type: 'text-delta', text: delta };
+    let text = '';
+    let usage = coerceUsage(undefined);
+    let finishReason: AgentFinishReason = 'unknown';
+    const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
+    for await (const part of result.fullStream) {
+      if (part.type === 'text-delta') {
+        text += part.text;
+        yield { type: 'text-delta', text: part.text };
+      } else if (part.type === 'tool-call') {
+        toolCalls.push({
+          id: part.toolCallId,
+          name: part.toolName,
+          input: part.input,
+        });
+      } else if (part.type === 'finish') {
+        usage = coerceUsage(part.totalUsage);
+        finishReason = normalizeFinishReason(part.finishReason);
+      } else if (part.type === 'error') {
+        throw part.error;
+      }
     }
-    const text = await result.text;
-    const responseMessages = await result.responseMessages;
-    const newMessages = normalizeResponseMessages(responseMessages, text);
+    const newMessages =
+      toolCalls.length > 0
+        ? [createToolCallMessageGroup(toolCalls) as ModelMessage]
+        : normalizeResponseMessages([], text);
     yield {
       type: 'final',
       response: {
         text,
         messages: [...request.messages, ...newMessages],
         newMessages,
-        toolCalls: normalizeToolCalls(await result.toolCalls),
-        toolResults: await result.toolResults,
-        usage: coerceUsage(await result.usage),
-        finishReason: normalizeFinishReason(await result.finishReason),
-        provider: await result.response,
+        toolCalls,
+        toolResults: [],
+        usage,
+        finishReason:
+          toolCalls.length > 0 && finishReason === 'stop'
+            ? 'tool-calls'
+            : finishReason,
+        provider: result,
       },
     };
+  }
+
+  private resolveLanguageModel(model: AgentModel): LanguageModel {
+    return resolveLanguageModel(model, {
+      openaiProvider: this.openaiProvider,
+      anthropicProvider: this.anthropicProvider,
+    });
   }
 }
 
@@ -167,24 +231,46 @@ function normalizeToolCalls(value: readonly unknown[]) {
  * Returns:
  *   Vercel AI SDK LanguageModel。
  */
-export function resolveLanguageModel(model: AgentModel): LanguageModel {
+export function resolveLanguageModel(
+  model: AgentModel,
+  providers: {
+    readonly openaiProvider?: typeof openai;
+    readonly anthropicProvider?: typeof anthropic;
+  } = {},
+): LanguageModel {
   if (typeof model !== 'string') {
     return model;
   }
+  const openaiProvider = providers.openaiProvider ?? openai;
+  const anthropicProvider = providers.anthropicProvider ?? anthropic;
   const [provider, ...rest] = model.split(':');
   const modelName = rest.join(':') || provider || model;
   if (provider === 'openai-chat') {
-    return openai.chat(modelName as Parameters<typeof openai.chat>[0]);
+    return openaiProvider.chat(
+      modelName as Parameters<typeof openai.chat>[0],
+    );
   }
   if (provider === 'openai-responses' || provider === 'openai') {
-    return openai.responses(
+    return openaiProvider.responses(
       modelName as Parameters<typeof openai.responses>[0],
     );
   }
   if (provider === 'anthropic') {
-    return anthropic(modelName as Parameters<typeof anthropic>[0]);
+    return anthropicProvider(modelName as Parameters<typeof anthropic>[0]);
   }
-  return openai(model as Parameters<typeof openai>[0]);
+  return openaiProvider(model as Parameters<typeof openai>[0]);
+}
+
+function createToolCallMessageGroup(
+  calls: readonly { readonly id: string; readonly name: string; readonly input: unknown }[],
+): ModelMessage {
+  const parts = calls.flatMap((call) => {
+    const message = createToolCallMessage(call) as {
+      readonly content?: unknown;
+    };
+    return Array.isArray(message.content) ? message.content : [];
+  });
+  return { role: 'assistant', content: parts } as ModelMessage;
 }
 
 /** 把 provider 返回的结束原因收敛到框架已知枚举，未识别值归为 `'unknown'`。 */

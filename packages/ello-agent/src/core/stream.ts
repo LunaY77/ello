@@ -1,5 +1,9 @@
 import type { AgentStreamEvent } from '../public/events.js';
-import type { AgentRunResult, AgentStream } from '../public/types.js';
+import type {
+  AgentMessage,
+  AgentRunResult,
+  AgentStream,
+} from '../public/types.js';
 
 /**
  * 单生产者—单消费者的事件流实现。
@@ -47,7 +51,10 @@ export class AgentEventStream implements AgentStream {
   /** 流是否已关闭（complete 或 fail 之后置真）。 */
   private closed = false;
 
-  constructor(private readonly abortController: AbortController) {
+  constructor(
+    private readonly abortController: AbortController,
+    private readonly onSteer: (message: AgentMessage) => void = () => {},
+  ) {
     this.final = this.result.promise;
   }
 
@@ -111,6 +118,14 @@ export class AgentEventStream implements AgentStream {
     while (this.waiters.length > 0) {
       this.waiters.shift()?.reject(error);
     }
+  }
+
+  /** 追加运行中引导消息，供下一回合抽取。 */
+  steer(message: AgentMessage): void {
+    if (this.closed) {
+      return;
+    }
+    this.onSteer(message);
   }
 
   /** 触发取消：转发到绑定的 `AbortController`。 */

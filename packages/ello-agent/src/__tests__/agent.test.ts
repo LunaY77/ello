@@ -236,6 +236,54 @@ describe('createAgent', () => {
     ).toBe(0);
   });
 
+  it('resumes approvals by appending a tool-result after persisted tool-call history', () => {
+    const control = new AgentRunControl('run_approval');
+    control.sessionQueue.push({
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call_write',
+          toolName: 'write',
+          input: { path: 'tmp', content: 'abc' },
+        },
+      ],
+    } as never);
+
+    const drained = control.drainNextTurn({
+      deferred: [
+        {
+          kind: 'approval',
+          toolCallId: 'call_write',
+          toolName: 'write',
+          input: { path: 'tmp', content: 'abc' },
+        },
+      ],
+      approvals: { call_write: { approved: true } },
+      toolResults: { call_write: { path: 'tmp', written: true } },
+    });
+
+    expect(drained.messages).toHaveLength(2);
+    expect(drained.messages[0]).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'tool-call', toolCallId: 'call_write' }],
+    });
+    expect(drained.messages[1]).toMatchObject({
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          toolCallId: 'call_write',
+          toolName: 'write',
+          output: {
+            type: 'json',
+            value: { path: 'tmp', written: true },
+          },
+        },
+      ],
+    });
+  });
+
   it('builds model input with session, observers, and transforms', async () => {
     const seenMessages: AgentModelRequest[] = [];
     let sessionLoads = 0;
@@ -351,6 +399,126 @@ describe('createAgent', () => {
     await agent.close();
   });
 
+  it('resumes approved tools against persisted session history without missing tool results', async () => {
+    const requests: AgentModelRequest[] = [];
+    const persistedToolCall = {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call_write',
+          toolName: 'write_file',
+          input: { path: 'tmp', content: 'abc' },
+        },
+      ],
+    } as AgentMessage;
+    const appendedMessages: AgentMessage[] = [];
+    const agent = createAgent({
+      model: 'test:model',
+      session: {
+        async load() {
+          return [persistedToolCall];
+        },
+        async append(_sessionId, messages) {
+          appendedMessages.push(...messages);
+        },
+      },
+      tools: [
+        defineTool({
+          name: 'write_file',
+          description: 'Write a file',
+          input: z.object({ path: z.string(), content: z.string() }),
+          approval: () => 'required',
+          execute: ({ path, content }) => ({ path, content }),
+        }),
+      ],
+      modelAdapter: {
+        async generate(request) {
+          requests.push(request);
+          return {
+            text: 'done',
+            messages: [
+              ...request.messages,
+              { role: 'assistant', content: 'done' },
+            ],
+            newMessages: [{ role: 'assistant', content: 'done' }],
+            usage: {
+              requests: 1,
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: 'stop',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const stream = agent.resume(
+      {
+        deferred: [
+          {
+            kind: 'approval',
+            toolCallId: 'call_write',
+            toolName: 'write_file',
+            input: { path: 'tmp', content: 'abc' },
+          },
+        ],
+        approvals: { call_write: { approved: true } },
+      },
+      { sessionId: 'sess_approval' },
+    );
+    for await (const _event of stream) {
+      // drive stream
+    }
+    const result = await stream.final;
+
+    expect(result.output).toBe('done');
+    expect(requests).toHaveLength(1);
+    const requestMessages = requests[0]?.messages ?? [];
+    const assistantToolCalls = requestMessages.filter(
+      (message) =>
+        message.role === 'assistant' &&
+        Array.isArray(message.content) &&
+        message.content.some(
+          (part) =>
+            typeof part === 'object' &&
+            part !== null &&
+            (part as { toolCallId?: string }).toolCallId === 'call_write',
+        ),
+    );
+    const toolResults = requestMessages.filter(
+      (message) =>
+        message.role === 'tool' &&
+        Array.isArray(message.content) &&
+        message.content.some(
+          (part) =>
+            typeof part === 'object' &&
+            part !== null &&
+            (part as { toolCallId?: string }).toolCallId === 'call_write',
+        ),
+    );
+    expect(assistantToolCalls).toHaveLength(1);
+    expect(toolResults).toHaveLength(1);
+    expect(appendedMessages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'tool',
+          content: expect.arrayContaining([
+            expect.objectContaining({ toolCallId: 'call_write' }),
+          ]),
+        }),
+      ]),
+    );
+    await agent.close();
+  });
+
   it('continues the loop after tool-calls and builds input once per turn', async () => {
     const requests: AgentModelRequest[] = [];
     const observed: string[] = [];
@@ -418,6 +586,58 @@ describe('createAgent', () => {
     expect(requests).toHaveLength(2);
     expect(observed).toEqual(['turn-started', 'turn-started']);
     expect(result.diagnostics?.turns).toHaveLength(2);
+    await agent.close();
+  });
+
+  it('injects stream steering into the next turn', async () => {
+    const requests: AgentModelRequest[] = [];
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          requests.push(request);
+          const first = requests.length === 1;
+          return {
+            text: first ? '' : 'done',
+            messages: [
+              ...request.messages,
+              { role: 'assistant', content: first ? 'thinking' : 'done' },
+            ],
+            newMessages: [
+              { role: 'assistant', content: first ? 'thinking' : 'done' },
+            ],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: first ? 'tool-calls' : 'stop',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const stream = agent.stream('start');
+    stream.steer({ role: 'user', content: 'please adjust' });
+    for await (const _event of stream) {
+      // drive stream
+    }
+    await stream.final;
+
+    expect(requests).toHaveLength(2);
+    expect(
+      requests[1]?.messages.some(
+        (message) =>
+          message.role === 'user' && message.content === 'please adjust',
+      ),
+    ).toBe(true);
     await agent.close();
   });
 
@@ -582,6 +802,109 @@ describe('createAgent', () => {
       content: 'from-new-messages',
     });
     expect(result.finishReason).toBe('stop');
+    await agent.close();
+  });
+
+  it('carries tool-call and tool-result messages into the next turn', async () => {
+    const seen: AgentModelRequest[] = [];
+    const agent = createAgent({
+      model: 'test:model',
+      tools: [
+        defineTool({
+          name: 'write',
+          description: 'Write a file',
+          input: z.object({ path: z.string(), content: z.string() }),
+          execute: ({ path: targetPath, content }) => ({
+            path: targetPath,
+            content,
+          }),
+        }),
+      ],
+      modelAdapter: {
+        async generate(request) {
+          seen.push(request);
+          if (seen.length === 1) {
+            return {
+              text: '',
+              messages: [
+                ...request.messages,
+                {
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'tool-call',
+                      toolCallId: 'call_1',
+                      toolName: 'write',
+                      input: { path: 'tmp', content: 'abc' },
+                    },
+                  ],
+                } as never,
+              ],
+              newMessages: [
+                {
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'tool-call',
+                      toolCallId: 'call_1',
+                      toolName: 'write',
+                      input: { path: 'tmp', content: 'abc' },
+                    },
+                  ],
+                } as never,
+              ],
+              toolCalls: [
+                {
+                  id: 'call_1',
+                  name: 'write',
+                  input: { path: 'tmp', content: 'abc' },
+                },
+              ],
+              usage: {
+                requests: 1,
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                toolCalls: 0,
+              },
+              finishReason: 'tool-calls',
+              provider: null,
+            };
+          }
+          return {
+            text: 'done',
+            messages: [
+              ...request.messages,
+              { role: 'assistant', content: 'done' },
+            ],
+            newMessages: [{ role: 'assistant', content: 'done' }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: 'stop',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('write tmp');
+    const secondTurn = JSON.stringify(seen[1]?.messages);
+
+    expect(result.output).toBe('done');
+    expect(seen).toHaveLength(2);
+    expect(secondTurn).toContain('"type":"tool-call"');
+    expect(secondTurn).toContain('"type":"tool-result"');
+    expect(secondTurn).toContain('call_1');
     await agent.close();
   });
 

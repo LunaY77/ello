@@ -7,6 +7,8 @@
  * 同时重导出 `zod` 的 `z`，方便调用方定义工具输入 schema 时无需另装依赖。
  */
 export { createAgent } from './public/create-agent.js';
+export { AiSdkModelAdapter } from './adapters/ai-sdk.js';
+export type { AiSdkModelAdapterOptions } from './adapters/ai-sdk.js';
 export { defineTool } from './public/tool.js';
 export {
   activeSkillsContext,

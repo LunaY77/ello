@@ -179,7 +179,10 @@ export class RunSession {
     this.modelAdapter = optionsBundle.modelAdapter;
     this.abortController = optionsBundle.abortController;
     this.signal = this.abortController.signal;
-    this.stream = new AgentEventStream(this.abortController);
+    this.runControl = new AgentRunControl(this.runId);
+    this.stream = new AgentEventStream(this.abortController, (message) => {
+      this.runControl.pushSteering(message);
+    });
     this.metadata = {
       ...(this.config.metadata ?? {}),
       ...(this.options.metadata ?? {}),
@@ -213,7 +216,6 @@ export class RunSession {
       state: this.state,
       trace: this.trace,
     };
-    this.runControl = new AgentRunControl(this.runId);
     this.tools = buildToolSet({ tools: this.config.tools ?? [] });
     this.toolScheduler = new ToolScheduler({
       runId: this.runId,

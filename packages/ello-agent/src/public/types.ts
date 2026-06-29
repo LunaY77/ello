@@ -96,6 +96,8 @@ export interface Agent {
 export interface AgentStream extends AsyncIterable<AgentStreamEvent> {
   /** 解析为最终运行结果；可在迭代结束后 await。 */
   readonly final: Promise<AgentRunResult>;
+  /** 向正在运行的下一回合追加用户引导消息。 */
+  steer(message: AgentMessage): void;
   /** 中断本次运行，可附带原因。 */
   abort(reason?: unknown): void;
 }
