@@ -1,5 +1,7 @@
-import { TextInput } from '@inkjs/ui';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
+import { useEffect, useState } from 'react';
+
+import { tokyoNight } from '../tokyo-night.js';
 
 export interface ComposerProps {
   /** 是否运行中：决定回车语义是 steer 还是 submit。 */
@@ -7,37 +9,228 @@ export interface ComposerProps {
   /** overlay 抢焦点时置 false，输入被忽略。 */
   readonly isActive?: boolean;
   /** `/`、`@` 补全建议。 */
-  readonly suggestions?: readonly string[];
+  readonly suggestions?: readonly ComposerSuggestion[];
+  /** 输入历史，空输入时可用上下键遍历。 */
+  readonly history?: readonly string[];
+  /** 输入内容变化，用于 App 计算补全和 Ctrl+C 语义。 */
+  onChange?(value: string): void;
   onSubmit(value: string): void;
+  onCancel(): void;
+  onEscape(): void;
 }
+
+export type ComposerSuggestion =
+  | string
+  | {
+      readonly value: string;
+      readonly label: string;
+      readonly description?: string;
+    };
 
 /**
  * 输入区。
  *
- * 用 `@inkjs/ui` 的 {@link TextInput} 替换旧的手搓 `useInput` 字符拼接：
- * 回车提交，运行中提交即 steer、空闲提交即新一轮 submit（由 App 区分）。
+ * 这里用 Ink 原生 `useInput`，避免 `@inkjs/ui` 组合组件在 Ink 6 下产生
+ * `<Box>` 嵌套进 `<Text>` 的运行时错误。提交后本地清空输入，App 负责把输入
+ * 解释成 submit / steer / slash command / shell escape。
  */
 export function Composer(props: ComposerProps) {
+  const [value, setValue] = useState('');
+  const [cursorIndex, setCursorIndex] = useState(0);
+  const [cursorVisible, setCursorVisible] = useState(true);
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCursorVisible((current) => !current);
+    }, 530);
+    return () => clearInterval(timer);
+  }, []);
+
+  const updateValue = (next: string, nextCursorIndex = next.length): void => {
+    setValue(next);
+    setCursorIndex(Math.max(0, Math.min(next.length, nextCursorIndex)));
+    props.onChange?.(next);
+  };
+
+  const acceptSuggestion = (): void => {
+    const suggestion = props.suggestions?.[effectiveSuggestionIndex()];
+    if (suggestion === undefined) {
+      return;
+    }
+    const next = typeof suggestion === 'string' ? suggestion : suggestion.value;
+    updateValue(next);
+  };
+
+  const moveSuggestion = (delta: number): boolean => {
+    const count = props.suggestions?.length ?? 0;
+    if (count === 0) {
+      return false;
+    }
+    setSuggestionIndex((current) => (current + delta + count) % count);
+    return true;
+  };
+
+  const effectiveSuggestionIndex = (): number => {
+    const count = props.suggestions?.length ?? 0;
+    return count === 0 ? 0 : Math.min(suggestionIndex, count - 1);
+  };
+
+  const moveHistory = (delta: number): void => {
+    const history = props.history ?? [];
+    if (history.length === 0) {
+      return;
+    }
+    const current = historyIndex ?? history.length;
+    const next = Math.max(0, Math.min(history.length, current + delta));
+    setHistoryIndex(next === history.length ? null : next);
+    updateValue(next === history.length ? '' : (history[next] ?? ''));
+  };
+
+  useInput(
+    (input, key) => {
+      if (key.return) {
+        const submitted = value;
+        props.onSubmit(submitted);
+        if (submitted.trim() !== '') {
+          setHistoryIndex(null);
+          updateValue('');
+        }
+        return;
+      }
+      if (key.leftArrow) {
+        setCursorIndex((current) => Math.max(0, current - 1));
+        return;
+      }
+      if (key.rightArrow) {
+        setCursorIndex((current) => Math.min(value.length, current + 1));
+        return;
+      }
+      if (key.upArrow) {
+        if (props.suggestions !== undefined && props.suggestions.length > 0) {
+          moveSuggestion(-1);
+        } else if (value === '') {
+          moveHistory(-1);
+        }
+        return;
+      }
+      if (key.downArrow) {
+        if (props.suggestions !== undefined && props.suggestions.length > 0) {
+          moveSuggestion(1);
+        } else if (value === '' || historyIndex !== null) {
+          moveHistory(1);
+        }
+        return;
+      }
+      if (key.tab) {
+        acceptSuggestion();
+        return;
+      }
+      if (key.ctrl && input === 'c') {
+        if (value.length > 0) {
+          setHistoryIndex(null);
+          updateValue('');
+        } else {
+          props.onCancel();
+        }
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setHistoryIndex(null);
+        if (key.backspace || input === 'backspace') {
+          if (cursorIndex > 0) {
+            updateValue(
+              value.slice(0, cursorIndex - 1) + value.slice(cursorIndex),
+              cursorIndex - 1,
+            );
+          }
+        } else if (cursorIndex < value.length) {
+          updateValue(
+            value.slice(0, cursorIndex) + value.slice(cursorIndex + 1),
+            cursorIndex,
+          );
+        }
+        return;
+      }
+      if (key.escape) {
+        props.onEscape();
+        return;
+      }
+      if (input.length > 0 && !key.ctrl && !key.meta) {
+        setHistoryIndex(null);
+        updateValue(
+          value.slice(0, cursorIndex) + input + value.slice(cursorIndex),
+          cursorIndex + input.length,
+        );
+      }
+    },
+    { isActive: props.isActive !== false },
+  );
+
+  const showCursor = props.isActive !== false && cursorVisible;
+  const activeSuggestionIndex = effectiveSuggestionIndex();
+  const beforeCursor = value.slice(0, cursorIndex);
+  const cursorChar = value[cursorIndex] ?? ' ';
+  const afterCursor =
+    cursorIndex < value.length ? value.slice(cursorIndex + 1) : '';
+
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box gap={1}>
-        <Text color="cyan">{'>'}</Text>
-        <TextInput
-          isDisabled={props.isActive === false}
-          placeholder={
-            props.running ? 'steer while running…' : '/command  @file  !shell'
-          }
-          {...(props.suggestions !== undefined
-            ? { suggestions: [...props.suggestions] }
-            : {})}
-          onSubmit={props.onSubmit}
-        />
+        <Text color={tokyoNight.cyan}>{'>'}</Text>
+        <Text
+          color={tokyoNight.foreground}
+          wrap="wrap"
+        >
+          {beforeCursor}
+          <Text
+            color={showCursor ? tokyoNight.cyan : tokyoNight.background}
+            inverse={showCursor}
+          >
+            {cursorChar}
+          </Text>
+          {afterCursor}
+        </Text>
       </Box>
-      <Text dimColor>
-        {props.running
-          ? 'Enter steers the running turn · Esc aborts'
-          : 'Enter submits · /command · @file · !shell'}
-      </Text>
+      {props.suggestions !== undefined && props.suggestions.length > 0 ? (
+        <Box marginLeft={2} flexDirection="column">
+          {props.suggestions.map((item, index) => (
+            <SuggestionLine
+              key={typeof item === 'string' ? item : item.value}
+              item={item}
+              active={index === activeSuggestionIndex}
+            />
+          ))}
+        </Box>
+      ) : null}
     </Box>
+  );
+}
+
+function SuggestionLine({
+  item,
+  active,
+}: {
+  readonly item: ComposerSuggestion;
+  readonly active: boolean;
+}) {
+  if (typeof item === 'string') {
+    return (
+      <Text color={active ? tokyoNight.cyan : tokyoNight.muted}>
+        {active ? `${item} <tab>` : item}
+      </Text>
+    );
+  }
+  return (
+    <Text>
+      <Text color={active ? tokyoNight.cyan : tokyoNight.blue}>
+        {item.label.padEnd(16)}
+      </Text>
+      {item.description !== undefined ? (
+        <Text color={tokyoNight.muted}>{item.description}</Text>
+      ) : null}
+      {active ? <Text color={tokyoNight.muted}>  &lt;tab&gt;</Text> : null}
+    </Text>
   );
 }

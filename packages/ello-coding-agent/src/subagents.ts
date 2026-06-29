@@ -18,7 +18,7 @@ export function codingSubagents(
   const tools = readOnlyTools(config);
   return [
     {
-      name: 'explore',
+      name: 'explorer',
       description:
         'Read-only codebase exploration. Locates files, symbols and call paths, and ' +
         'returns a structured findings report. Use it to answer "where/how is X done" ' +
@@ -40,6 +40,14 @@ export function codingSubagents(
         'and key symbols, how they fit together (call/data flow), and any risks, gaps, or',
         'open questions. Lead with the direct answer; keep it skimmable.',
       ].join('\n'),
+      inheritTools: false,
+      tools,
+    },
+    {
+      name: 'explore',
+      description: 'Alias for explorer.',
+      instructions:
+        'You are the explorer alias. Perform the same read-only codebase exploration task as explorer.',
       inheritTools: false,
       tools,
     },

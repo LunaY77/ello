@@ -99,9 +99,11 @@ describe('createCodingSession', () => {
 
     const target = path.join(cwd, 'note.txt');
     let turn = 0;
+    const seenRequests: AgentModelRequest[] = [];
     const adapter: ModelAdapter = {
       async generate(request) {
         turn += 1;
+        seenRequests.push(request);
         // 第一轮请求写文件（需审批）；恢复后第二轮收尾。
         if (turn === 1) {
           return {
@@ -157,5 +159,70 @@ describe('createCodingSession', () => {
 
     // 审批通过后工具真正执行：文件落盘。
     expect(await readFile(target, 'utf8')).toBe('hi');
+    expect(
+      seenRequests[1]?.messages.some(
+        (message) =>
+          message.role === 'tool' &&
+          Array.isArray((message as { content?: unknown }).content) &&
+          (message as { content: Array<{ toolCallId?: string }> }).content.some(
+            (part) => part.toolCallId === 'call_1',
+          ),
+      ),
+    ).toBe(true);
+  });
+
+  it('supports session tree checkout and fork from the coding runtime', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      model: 'fake:test',
+      approvalMode: 'default',
+    });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: new TextAdapter('OK'),
+    });
+
+    await session.submit('first');
+    const tree = await session.sessionTree();
+    expect(tree.nodes.length).toBeGreaterThan(0);
+    expect(tree.activeEntryId).not.toBeNull();
+
+    await session.checkout(null);
+    expect((await session.sessionTree()).activeEntryId).toBeNull();
+
+    const forked = await session.fork('test branch');
+    expect(forked).toHaveLength(36);
+    expect((await session.listSessions()).map((item) => item.sessionId)).toContain(
+      forked,
+    );
+
+    await session.close();
+  });
+
+  it('exposes session summaries with last message previews for resume browsing', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      model: 'fake:test',
+      approvalMode: 'default',
+    });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: new TextAdapter('OK'),
+    });
+
+    await session.submit('hello');
+    const sessions = await session.listSessions();
+    await session.close();
+
+    expect(sessions.at(0)?.lastUserText).toBeDefined();
+    expect(
+      sessions.at(0)?.lastAssistantText ?? sessions.at(0)?.lastToolText,
+    ).toBeDefined();
   });
 });

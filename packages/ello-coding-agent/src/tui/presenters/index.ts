@@ -1,6 +1,8 @@
 import { Text } from 'ink';
 import { createElement, type ReactNode } from 'react';
 
+import { tokyoNight } from '../tokyo-night.js';
+
 /**
  * 工具渲染注册表。
  *
@@ -33,19 +35,23 @@ const defaultPresenter: ToolPresenter = {
   summarize: (input) => clip(JSON.stringify(input ?? {}), 60),
   renderCall: () => null,
   renderResult: (_input, output) =>
-    createElement(Text, { dimColor: true }, clip(stringify(output), 200)),
+    createElement(
+      Text,
+      { color: tokyoNight.muted },
+      clip(stringify(output), 200),
+    ),
 };
 
 /** read 工具：展示路径与读到的行数。 */
 const readPresenter: ToolPresenter = {
   summarize: (input) => str(input, 'path'),
   renderCall: (input) =>
-    createElement(Text, { dimColor: true }, str(input, 'path')),
+    createElement(Text, { color: tokyoNight.muted }, str(input, 'path')),
   renderResult: (_input, output) => {
     const total = (output as { totalLines?: number })?.totalLines;
     return createElement(
       Text,
-      { dimColor: true },
+      { color: tokyoNight.muted },
       total ? `${total} lines` : 'read',
     );
   },
@@ -55,16 +61,16 @@ const readPresenter: ToolPresenter = {
 const diffPresenter: ToolPresenter = {
   summarize: (input) => str(input, 'path'),
   renderCall: (input) =>
-    createElement(Text, { dimColor: true }, str(input, 'path')),
+    createElement(Text, { color: tokyoNight.muted }, str(input, 'path')),
   renderResult: (_input, output) =>
-    createElement(Text, undefined, str(output, 'diff') || str(output, 'path')),
+    createElement(DiffPreview, { diff: str(output, 'diff') }),
 };
 
 /** bash 工具：展示命令与退出码/输出摘要。 */
 const bashPresenter: ToolPresenter = {
   summarize: (input) => clip(str(input, 'command'), 60),
   renderCall: (input) =>
-    createElement(Text, { dimColor: true }, str(input, 'command')),
+    createElement(Text, { color: tokyoNight.muted }, str(input, 'command')),
   renderResult: (_input, output) => {
     const record = output as {
       exitCode?: number;
@@ -72,7 +78,7 @@ const bashPresenter: ToolPresenter = {
       stderr?: string;
     };
     const head = record?.stdout || record?.stderr || '';
-    return createElement(Text, { dimColor: true }, clip(head, 200));
+    return createElement(Text, { color: tokyoNight.muted }, clip(head, 200));
   },
 };
 
@@ -80,9 +86,13 @@ const bashPresenter: ToolPresenter = {
 const grepPresenter: ToolPresenter = {
   summarize: (input) => clip(str(input, 'pattern'), 60),
   renderCall: (input) =>
-    createElement(Text, { dimColor: true }, str(input, 'pattern')),
+    createElement(Text, { color: tokyoNight.muted }, str(input, 'pattern')),
   renderResult: (_input, output) =>
-    createElement(Text, { dimColor: true }, clip(stringify(output), 200)),
+    createElement(
+      Text,
+      { color: tokyoNight.muted },
+      clip(stringify(output), 200),
+    ),
 };
 
 /** todo 工具：展示任务条数。 */
@@ -93,7 +103,7 @@ const todoPresenter: ToolPresenter = {
     const items = (output as { items?: unknown[] })?.items;
     return createElement(
       Text,
-      { dimColor: true },
+      { color: tokyoNight.muted },
       `${items?.length ?? 0} items`,
     );
   },
@@ -130,4 +140,23 @@ function stringify(value: unknown): string {
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/gu, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+function DiffPreview({ diff }: { readonly diff: string }) {
+  const lines = diff.split(/\r?\n/u).slice(0, 24);
+  return createElement(
+    Text,
+    { color: tokyoNight.foreground },
+    lines
+      .map((line) => {
+        if (line.startsWith('+ ')) {
+          return `+ ${line.slice(2)}`;
+        }
+        if (line.startsWith('- ')) {
+          return `- ${line.slice(2)}`;
+        }
+        return `  ${line}`;
+      })
+      .join('\n'),
+  );
 }

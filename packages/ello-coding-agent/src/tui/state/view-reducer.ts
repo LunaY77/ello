@@ -20,6 +20,7 @@ export type TranscriptItem =
   | { readonly kind: 'user'; readonly id: string; readonly text: string }
   | { readonly kind: 'assistant'; readonly id: string; readonly text: string }
   | { readonly kind: 'tool'; readonly id: string; readonly tool: ToolCallView }
+  | { readonly kind: 'system'; readonly id: string; readonly text: string }
   | { readonly kind: 'diagnostic'; readonly id: string; readonly text: string };
 
 /** 待审批项在视图里的形状。 */
@@ -46,6 +47,7 @@ export interface ViewState {
   readonly status: CodingSessionState;
   readonly pendingApproval?: ApprovalView;
   readonly usage?: AgentUsage;
+  readonly interruptNotice?: string;
 }
 
 /** 初始空状态。 */
@@ -77,8 +79,29 @@ export function reduce(state: ViewState, event: ViewInput): ViewState {
         text: event.text,
       });
 
-    case 'message.started':
-      return { ...state, liveAssistantText: '' };
+    case 'ui.message':
+      return appendTranscript(state, {
+        kind: 'system',
+        id: `system-${state.transcript.length}`,
+        text: event.text,
+      });
+
+    case 'ui.clear':
+      return initialViewState;
+
+    case 'ui.interrupted':
+      return {
+        ...state,
+        status: 'idle',
+        interruptNotice: `interrupted: ${event.reason}`,
+        liveAssistantText: '',
+        runningTools: new Map(),
+      };
+
+    case 'message.started': {
+      const { interruptNotice: _cleared, ...rest } = state;
+      return { ...rest, liveAssistantText: '' };
+    }
 
     case 'message.delta':
       return {

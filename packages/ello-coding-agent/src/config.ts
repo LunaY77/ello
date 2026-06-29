@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import { parseTomlConfig, stringifyTomlConfig } from './config-toml.js';
 import { PermissionModeSchema, PermissionRuleSchema } from './permissions.js';
 
 export const ApprovalModeSchema = PermissionModeSchema;
@@ -16,10 +17,11 @@ export type ApprovalMode = z.infer<typeof ApprovalModeSchema>;
  * 当前 package 负责 CLI/TUI 默认值、会话路径、审批姿态和项目级策略。
  */
 export const CodingAgentConfigSchema = z.object({
-  model: z.string().default('openai-chat:gpt-4o-mini'),
+  model: z.string().default('openai-chat:deepseek-v4-flash'),
   modelCandidates: z
     .array(z.string())
     .default([
+      'openai-chat:deepseek-v4-flash',
       'openai-chat:gpt-4o-mini',
       'openai-chat:gpt-4.1',
       'openai-chat:gpt-4o',
@@ -27,6 +29,7 @@ export const CodingAgentConfigSchema = z.object({
       'anthropic:claude-3-5-sonnet-latest',
     ]),
   baseUrl: z.string().nullable().default(null),
+  httpHeaders: z.record(z.string(), z.string()).default({}),
   cwd: z.string().default(process.cwd()),
   allowedPaths: z.array(z.string()).default([]),
   sessionDir: z.string().default(path.join(homedir(), '.ello', 'sessions')),
@@ -54,11 +57,9 @@ export async function loadCodingAgentConfig(
   overrides: CodingAgentConfigOverrides = {},
 ): Promise<CodingAgentConfig> {
   const cwd = path.resolve(overrides.cwd ?? process.cwd());
-  const user = await readJsonConfig(
-    path.join(homedir(), '.ello', 'config.json'),
-  );
-  const project = await readJsonConfig(path.join(cwd, '.ello', 'config.json'));
-  const local = await readJsonConfig(path.join(cwd, '.ello', 'local.json'));
+  const user = await readConfigFile(path.join(homedir(), '.ello', 'config.toml'));
+  const project = await readConfigFile(path.join(cwd, '.ello', 'config.toml'));
+  const local = await readConfigFile(path.join(cwd, '.ello', 'local.toml'));
   const env = readEnvConfig();
   const sessionDirValue = firstString(
     overrides.sessionDir,
@@ -95,7 +96,7 @@ export async function loadCodingAgentConfig(
  * 返回指定工作目录对应的项目级配置文件路径。
  */
 export function getProjectConfigPath(cwd: string): string {
-  return path.join(path.resolve(cwd), '.ello', 'config.json');
+  return path.join(path.resolve(cwd), '.ello', 'config.toml');
 }
 
 /**
@@ -107,21 +108,21 @@ export async function setProjectConfigValue(
   value: unknown,
 ): Promise<CodingAgentConfig> {
   const filePath = getProjectConfigPath(cwd);
-  const current = await readJsonConfig(filePath);
+  const current = await readConfigFile(filePath);
   const next = { ...current, [key]: value };
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  await writeFile(filePath, stringifyTomlConfig(next), 'utf8');
   return loadCodingAgentConfig({ cwd });
 }
 
-async function readJsonConfig(
+async function readConfigFile(
   filePath: string,
 ): Promise<Record<string, unknown>> {
   try {
-    return JSON.parse(await readFile(filePath, 'utf8')) as Record<
-      string,
-      unknown
-    >;
+    const text = await readFile(filePath, 'utf8');
+    return filePath.endsWith('.toml')
+      ? parseTomlConfig(text)
+      : (JSON.parse(text) as Record<string, unknown>);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
@@ -141,6 +142,9 @@ function readEnvConfig(): Record<string, unknown> {
       : {}),
     ...(process.env.ELLO_BASE_URL
       ? { baseUrl: process.env.ELLO_BASE_URL }
+      : {}),
+    ...(process.env.ELLO_HTTP_HEADERS
+      ? { httpHeaders: parseJsonObjectEnv('ELLO_HTTP_HEADERS') }
       : {}),
     ...(process.env.ELLO_SESSION_DIR
       ? { sessionDir: process.env.ELLO_SESSION_DIR }
@@ -179,6 +183,22 @@ function firstString(...values: unknown[]): string | null {
     }
   }
   return null;
+}
+
+function parseJsonObjectEnv(name: string): Record<string, string> {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') {
+    return {};
+  }
+  const parsed = JSON.parse(raw) as unknown;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${name} must be a JSON object.`);
+  }
+  return Object.fromEntries(
+    Object.entries(parsed).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
+  );
 }
 
 export function normalizeApprovalMode(value: unknown): ApprovalMode {

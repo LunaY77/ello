@@ -67,4 +67,57 @@ describe('view-reducer', () => {
     state = reduce(state, { type: 'status', state: 'idle' });
     expect(state.pendingApproval).toBeUndefined();
   });
+
+  it('renders product messages into the transcript', () => {
+    const state = reduce(initialViewState, {
+      type: 'ui.message',
+      text: 'Model switched to fake:test',
+    });
+
+    expect(state.transcript.at(-1)).toMatchObject({
+      kind: 'system',
+      text: 'Model switched to fake:test',
+    });
+  });
+
+  it('clears transcript and runtime view state', () => {
+    let state = reduce(initialViewState, {
+      type: 'user.input',
+      text: 'hello',
+    });
+    state = reduce(state, {
+      type: 'tool.started',
+      toolCallId: 't1',
+      name: 'read',
+      input: {},
+    });
+
+    state = reduce(state, { type: 'ui.clear' });
+
+    expect(state).toEqual(initialViewState);
+  });
+
+  it('shows an interrupt notice and clears live running state', () => {
+    let state = reduce(initialViewState, {
+      type: 'message.delta',
+      messageId: 'm1',
+      text: 'partial',
+    });
+    state = reduce(state, {
+      type: 'tool.started',
+      toolCallId: 't1',
+      name: 'read',
+      input: {},
+    });
+
+    state = reduce(state, {
+      type: 'ui.interrupted',
+      reason: 'user interrupted from TUI',
+    });
+
+    expect(state.status).toBe('idle');
+    expect(state.liveAssistantText).toBe('');
+    expect(state.runningTools.size).toBe(0);
+    expect(state.interruptNotice).toContain('user interrupted');
+  });
 });

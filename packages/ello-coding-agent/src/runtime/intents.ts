@@ -33,7 +33,11 @@ export type CodingSessionEvent =
       readonly cwd: string;
     }
   | { readonly type: 'session.switched'; readonly sessionId: string }
+  | { readonly type: 'model.changed'; readonly model: string }
   | { readonly type: 'status'; readonly state: CodingSessionState }
+  | { readonly type: 'ui.message'; readonly text: string }
+  | { readonly type: 'ui.clear' }
+  | { readonly type: 'ui.interrupted'; readonly reason: string }
   | {
       readonly type: 'approval.pending';
       readonly requestId: string;

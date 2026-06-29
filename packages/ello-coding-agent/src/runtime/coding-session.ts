@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  AiSdkModelAdapter,
   createAgent,
   createDelegateTool,
   createLocalShellEnvironment,
@@ -31,6 +32,10 @@ import { createCodingObserver } from '../observability/observer.js';
 import { RulesStore } from '../permission/rules-store.js';
 import { JsonlSessionStore } from '../session/jsonl-store.js';
 import { checkpointsDir } from '../session/paths.js';
+import type {
+  JsonlSessionSummary,
+  SessionTreeView,
+} from '../session/repository.js';
 import { loadCodingSkills } from '../skills.js';
 import { codingSubagents } from '../subagents.js';
 import { buildCodingSystemPrompt } from '../system-prompt.js';
@@ -72,8 +77,21 @@ export interface CodingSession {
     meta?: Record<string, unknown>,
   ): Promise<AgentRunResult>;
   steer(prompt: string): void;
+  clear(): Promise<void>;
   approve(requestId: string, decision: ApprovalDecision): Promise<void>;
   abort(reason?: string): void;
+  notify(text: string): void;
+  setModel(model: string): Promise<void>;
+  runShell(command: string): Promise<{
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+  }>;
+  sessionTree(): Promise<SessionTreeView>;
+  listSessions(): Promise<readonly JsonlSessionSummary[]>;
+  checkout(entryId: string | null): Promise<void>;
+  fork(reason?: string): Promise<string>;
+  exportSession(format?: 'jsonl' | 'html'): Promise<string>;
   newSession(): Promise<string>;
   resumeSession(idOrPath: string): Promise<void>;
   close(): Promise<void>;
@@ -120,9 +138,7 @@ export async function createCodingSession(
     rulesStore,
     compactor,
     skills,
-    ...(options.modelAdapter !== undefined
-      ? { modelAdapter: options.modelAdapter }
-      : {}),
+    modelAdapter: options.modelAdapter ?? createConfiguredModelAdapter(config),
   });
   session.emit({ type: 'session.opened', sessionId, cwd: config.cwd });
   return session;
@@ -139,6 +155,7 @@ class CodingSessionImpl implements CodingSession {
   private readonly pendingApprovals = new Map<string, DeferredApprovalItem>();
   private readonly steerQueue: string[] = [];
   private currentStream: AgentStream | undefined;
+  private model: string;
 
   constructor(
     public sessionId: string,
@@ -146,6 +163,7 @@ class CodingSessionImpl implements CodingSession {
     private readonly deps: SessionDeps,
   ) {
     this.checkpoints = new CheckpointStore(checkpointsDir(config.cwd));
+    this.model = config.model;
     this.agent = this.buildAgent();
   }
 
@@ -190,9 +208,22 @@ class CodingSessionImpl implements CodingSession {
     }
   }
 
-  /** 运行中追加输入（steer）。v1 缓冲到下一次 submit 前合并。 */
+  /** 运行中追加输入（steer）：优先注入当前 stream 的下一回合。 */
   steer(prompt: string): void {
+    if (this.currentStream !== undefined) {
+      this.currentStream.steer({ role: 'user', content: prompt });
+      return;
+    }
     this.steerQueue.push(prompt);
+  }
+
+  /** 清空当前可见上下文并切到新会话。 */
+  async clear(): Promise<void> {
+    if (this.currentStream !== undefined) {
+      this.abort('clear requested from TUI');
+    }
+    await this.newSession();
+    this.emit({ type: 'ui.clear' });
   }
 
   /** 审批决定：翻译成 DeferredRunResults 并 `agent.resume()`。 */
@@ -248,6 +279,96 @@ class CodingSessionImpl implements CodingSession {
   /** 中断当前 run。 */
   abort(reason?: string): void {
     this.currentStream?.abort(reason);
+    this.emit({ type: 'ui.interrupted', reason: reason ?? 'interrupted' });
+  }
+
+  /** 给前端视图写入一条产品级消息。 */
+  notify(text: string): void {
+    this.emit({ type: 'ui.message', text });
+  }
+
+  /** 切换模型并重建 Agent，当前运行中不允许切换。 */
+  async setModel(model: string): Promise<void> {
+    if (this.currentStream !== undefined) {
+      this.notify('Cannot change model while running.');
+      return;
+    }
+    this.model = model;
+    await this.rebuild();
+    this.emit({ type: 'model.changed', model });
+    this.notify(`Model switched to ${model}`);
+  }
+
+  /** TUI `!cmd` shell escape：受同一 cwd/allowedPaths 边界约束。 */
+  async runShell(command: string): Promise<{
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+  }> {
+    const environment = createLocalShellEnvironment({
+      cwd: this.config.cwd,
+      allowedPaths: this.config.allowedPaths,
+    });
+    try {
+      const result = await environment.shell?.run(command, {
+        cwd: this.config.cwd,
+        timeout: 30_000,
+      });
+      if (result === undefined) {
+        throw new Error('Shell environment is not available.');
+      }
+      return result;
+    } finally {
+      await environment.close?.();
+    }
+  }
+
+  /** 当前 session 的完整树视图。 */
+  sessionTree(): Promise<SessionTreeView> {
+    return this.deps.sessionStore.repository.tree(this.sessionId);
+  }
+
+  /** 列出可恢复的 session。 */
+  listSessions(): Promise<readonly JsonlSessionSummary[]> {
+    return this.deps.sessionStore.list();
+  }
+
+  /** 切换当前 session 的 active leaf，后续 turn 从该节点继续。 */
+  async checkout(entryId: string | null): Promise<void> {
+    if (this.currentStream !== undefined) {
+      this.abort('checkout requested from TUI');
+    }
+    await this.deps.sessionStore.repository.checkout(this.sessionId, entryId);
+    await this.rebuild();
+    this.emit({ type: 'session.switched', sessionId: this.sessionId });
+    this.emit({ type: 'ui.clear' });
+    this.notify(
+      entryId === null ? 'Checked out session root.' : `Checked out ${entryId}.`,
+    );
+  }
+
+  /** 从当前 active branch fork 出新 session，并立即切过去。 */
+  async fork(reason = 'fork from TUI'): Promise<string> {
+    if (this.currentStream !== undefined) {
+      this.abort('fork requested from TUI');
+    }
+    const next = await this.deps.sessionStore.repository.fork(
+      this.sessionId,
+      reason,
+    );
+    this.sessionId = next.sessionId;
+    await this.rebuild();
+    this.emit({ type: 'session.switched', sessionId: this.sessionId });
+    this.emit({ type: 'ui.clear' });
+    this.notify(`Forked session ${this.sessionId}.`);
+    return this.sessionId;
+  }
+
+  /** 导出当前 session。 */
+  exportSession(format: 'jsonl' | 'html' = 'jsonl'): Promise<string> {
+    return format === 'html'
+      ? this.deps.sessionStore.repository.exportHtml(this.sessionId)
+      : this.deps.sessionStore.repository.exportJsonl(this.sessionId);
   }
 
   /** 新建会话：换 sessionId 并重建 Agent。 */
@@ -332,7 +453,7 @@ class CodingSessionImpl implements CodingSession {
 
   /** 把各模块产物拼进 createAgent，这是整个会话运行时的核心装配。 */
   private buildAgent(): Agent {
-    const { config } = this;
+    const config: CodingAgentConfig = { ...this.config, model: this.model };
     const memory = createCodingMemory(config);
     const observer = createCodingObserver(config);
 
@@ -346,7 +467,7 @@ class CodingSessionImpl implements CodingSession {
     });
     const delegateTool = createDelegateTool({
       subagents: codingSubagents(config),
-      model: config.model,
+      model: this.model,
       parentTools: tools,
       session: this.deps.sessionStore,
       ...(this.deps.modelAdapter !== undefined
@@ -369,7 +490,7 @@ class CodingSessionImpl implements CodingSession {
 
     return createAgent({
       name: 'ello-coding-agent',
-      model: config.model,
+      model: this.model,
       instructions: buildCodingSystemPrompt(config),
       environment: createLocalShellEnvironment({
         cwd: config.cwd,
@@ -434,4 +555,15 @@ function makeSummarizer(
       await summarizer.close();
     }
   };
+}
+
+function createConfiguredModelAdapter(
+  config: CodingAgentConfig,
+): ModelAdapter {
+  return new AiSdkModelAdapter({
+    ...(config.baseUrl !== null ? { baseURL: config.baseUrl } : {}),
+    ...(Object.keys(config.httpHeaders).length > 0
+      ? { headers: config.httpHeaders }
+      : {}),
+  });
 }

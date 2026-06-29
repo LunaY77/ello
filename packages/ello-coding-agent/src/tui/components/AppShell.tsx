@@ -1,11 +1,9 @@
-import path from 'node:path';
-
 import type { AgentUsage } from '@ello/agent';
-import { Spinner, StatusMessage } from '@inkjs/ui';
 import { Box, Static, Text } from 'ink';
 import type { ReactNode } from 'react';
 
 import type { TranscriptItem, ToolCallView } from '../state/view-reducer.js';
+import { tokyoNight } from '../tokyo-night.js';
 
 import { Footer } from './Footer.js';
 import { ToolCard } from './ToolCard.js';
@@ -18,7 +16,12 @@ export interface AppShellProps {
   readonly liveAssistantText: string;
   readonly runningTools: readonly ToolCallView[];
   readonly running: boolean;
+  readonly workingSeconds?: number;
+  readonly workedFor?: string;
+  readonly interruptNotice?: string;
+  readonly pendingSteers?: readonly string[];
   readonly usage?: AgentUsage;
+  readonly version?: string;
   /** 浮层（审批/help/模型选择）。 */
   readonly overlay: ReactNode;
   /** 输入区（Composer）。 */
@@ -33,41 +36,144 @@ export interface AppShellProps {
  * 才随事件重渲染——对应文档的“渲染预算”。
  */
 export function AppShell(props: AppShellProps) {
+  const hasTranscript =
+    props.transcript.length > 0 ||
+    props.liveAssistantText !== '' ||
+    props.runningTools.length > 0;
+  const hero = {
+    id: 'hero',
+    cwd: props.cwd,
+    model: props.model,
+    approvalMode: props.approvalMode,
+    running: props.running,
+    version: props.version,
+  };
+
   return (
     <Box flexDirection="column" width="100%" paddingX={1}>
-      <Box justifyContent="space-between" paddingX={1}>
-        <Text color="cyan">ello</Text>
-        {props.running ? (
-          <Spinner label="running" />
-        ) : (
-          <Text dimColor>ready</Text>
+      <Static items={[hero]}>
+        {(item) => (
+          <HeroPanel
+            key={item.id}
+            cwd={item.cwd}
+            model={item.model}
+            approvalMode={item.approvalMode}
+            running={item.running}
+            {...(item.version !== undefined ? { version: item.version } : {})}
+          />
         )}
-        <Text color="gray">{formatCwd(props.cwd)}</Text>
-      </Box>
-
-      <Static items={[...props.transcript]}>
-        {(item) => <TranscriptLine key={item.id} item={item} />}
       </Static>
 
-      {props.liveAssistantText !== '' ? (
-        <Box marginTop={1}>
-          <Text wrap="wrap">{props.liveAssistantText}</Text>
+      {hasTranscript ? (
+        <Box marginTop={1} flexDirection="column">
+          {props.transcript.map((item) => (
+            <TranscriptLine key={item.id} item={item} />
+          ))}
+
+          {props.liveAssistantText !== '' ? (
+            <Box marginTop={1}>
+              <Text color={tokyoNight.foreground} wrap="wrap">
+                {props.liveAssistantText}
+              </Text>
+            </Box>
+          ) : null}
+
+          {props.runningTools.map((tool) => (
+            <ToolCard key={tool.id} call={tool} />
+          ))}
         </Box>
       ) : null}
 
-      {props.runningTools.map((tool) => (
-        <ToolCard key={tool.id} call={tool} />
-      ))}
+      {props.pendingSteers !== undefined && props.pendingSteers.length > 0 ? (
+        <PendingSteers prompts={props.pendingSteers} />
+      ) : null}
+
+      {props.running ? (
+        <Box marginTop={1} paddingX={1}>
+          <Text color={tokyoNight.yellow}>
+            {`working... ${props.workingSeconds ?? 0}s`}
+          </Text>
+        </Box>
+      ) : props.interruptNotice !== undefined ? (
+        <Box marginTop={1} paddingX={1}>
+          <Text color={tokyoNight.red}>{props.interruptNotice}</Text>
+        </Box>
+      ) : props.workedFor !== undefined ? (
+        <Box marginTop={1} paddingX={1}>
+          <Text color={tokyoNight.muted}>{`worked for ${props.workedFor}`}</Text>
+        </Box>
+      ) : null}
 
       {props.overlay}
 
-      <Box marginTop={1}>{props.composer}</Box>
+      <Box marginTop={1}>
+        {props.composer}
+      </Box>
 
-      <Footer
-        model={props.model}
-        approvalMode={props.approvalMode}
-        {...(props.usage !== undefined ? { usage: props.usage } : {})}
-      />
+      <Box>
+        <Footer
+          model={props.model}
+          approvalMode={props.approvalMode}
+          {...(props.usage !== undefined ? { usage: props.usage } : {})}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+function PendingSteers({ prompts }: { readonly prompts: readonly string[] }) {
+  return (
+    <Box marginTop={1} flexDirection="column" paddingX={1}>
+      <Text color={tokyoNight.yellow}>
+        Messages to be submitted after next tool call
+      </Text>
+      <Text color={tokyoNight.muted}>
+        (press esc to interrupt and send immediately)
+      </Text>
+      {prompts.map((prompt, index) => (
+        <Text key={`${index}:${prompt}`} color={tokyoNight.foreground}>
+          {`↳ ${prompt}`}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+function HeroPanel(props: {
+  readonly cwd: string;
+  readonly model: string;
+  readonly approvalMode: string;
+  readonly running: boolean;
+  readonly version?: string;
+}) {
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={props.running ? tokyoNight.yellow : tokyoNight.blue}
+      paddingX={1}
+    >
+      <Box justifyContent="space-between">
+        <Text color={tokyoNight.cyan}>{`>_ Ello Coding Agent${props.version ? ` (v${props.version})` : ''}`}</Text>
+        <Text color={props.running ? tokyoNight.yellow : tokyoNight.green}>
+          {props.running ? 'running' : 'ready'}
+        </Text>
+      </Box>
+      <Text>
+        <Text color={tokyoNight.muted}>model:       </Text>
+        <Text color={tokyoNight.foreground}>{props.model}</Text>
+        <Text color={tokyoNight.muted}>   /model to change</Text>
+      </Text>
+      <Text>
+        <Text color={tokyoNight.muted}>directory:   </Text>
+        <Text color={tokyoNight.foreground}>{compactPath(props.cwd)}</Text>
+      </Text>
+      <Text>
+        <Text color={tokyoNight.muted}>permissions: </Text>
+        <Text color={tokyoNight.foreground}>
+          {formatPermission(props.approvalMode)}
+        </Text>
+      </Text>
     </Box>
   );
 }
@@ -75,31 +181,71 @@ export function AppShell(props: AppShellProps) {
 /** 渲染一行 transcript：按 kind 分流。 */
 function TranscriptLine({ item }: { readonly item: TranscriptItem }) {
   if (item.kind === 'tool') {
-    return <ToolCard call={item.tool} compact />;
-  }
-  if (item.kind === 'diagnostic') {
     return (
-      <Box marginBottom={1}>
-        <StatusMessage variant="error">{item.text}</StatusMessage>
+      <Box marginBottom={1} marginLeft={4} flexDirection="column">
+        <ToolCard call={item.tool} compact />
       </Box>
     );
   }
-  const color = item.kind === 'user' ? 'green' : 'white';
-  const label = item.kind === 'user' ? 'user' : 'assistant';
+  if (item.kind === 'diagnostic') {
+    return (
+      <Box marginBottom={1} flexDirection="column">
+        <Text color={tokyoNight.red}>× error</Text>
+        <Text color={tokyoNight.red} wrap="wrap">
+          {item.text}
+        </Text>
+      </Box>
+    );
+  }
+  if (item.kind === 'system') {
+    return (
+      <Box flexDirection="column" marginBottom={1}>
+        <Text color={tokyoNight.cyan}>• ello</Text>
+        <Text color={tokyoNight.foreground} wrap="wrap">
+          {item.text}
+        </Text>
+      </Box>
+    );
+  }
+  const color =
+    item.kind === 'user' ? tokyoNight.green : tokyoNight.foreground;
+  const label = item.kind === 'user' ? 'you' : 'ello';
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Text color={color}>{label}</Text>
-      <Text wrap="wrap">{item.text}</Text>
+    <Box marginBottom={1}>
+      <Box width={10}>
+        <Text color={color}>{item.kind === 'user' ? '› you' : '✦ ello'}</Text>
+      </Box>
+      <Box flexDirection="column" flexGrow={1}>
+        <Text
+          color={label === 'you' ? tokyoNight.green : tokyoNight.foreground}
+          wrap="wrap"
+        >
+          {item.text}
+        </Text>
+      </Box>
     </Box>
   );
 }
 
-/** 把 cwd 压成 `parent/base` 形式，home 替换成 ~。 */
-function formatCwd(cwd: string): string {
+function compactPath(cwd: string): string {
   const home = process.env.HOME;
   const display =
     home !== undefined && cwd.startsWith(home) ? cwd.replace(home, '~') : cwd;
-  const base = path.basename(display);
-  const parent = path.basename(path.dirname(display));
-  return parent && parent !== '.' ? `${parent}/${base}` : display;
+  if (display.length <= 68) {
+    return display;
+  }
+  return `…${display.slice(-67)}`;
+}
+
+function formatPermission(mode: string): string {
+  switch (mode) {
+    case 'bypass':
+      return 'YOLO mode';
+    case 'dont-ask':
+      return 'no prompts';
+    case 'accept-edits':
+      return 'auto-accept edits';
+    default:
+      return mode;
+  }
 }

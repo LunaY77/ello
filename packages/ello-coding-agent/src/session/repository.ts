@@ -88,6 +88,9 @@ export interface JsonlSessionSummary {
   readonly entryCount: number;
   readonly createdAt?: string;
   readonly updatedAt?: string;
+  readonly lastUserText?: string;
+  readonly lastAssistantText?: string;
+  readonly lastToolText?: string;
 }
 
 /** active path 的读取结果。 */
@@ -381,12 +384,22 @@ export class JsonlSessionRepository {
             record.kind === 'header',
         );
         const fileStat = await stat(fullPath);
+        const preview = summarizeRecentMessages(records);
         summaries.push({
           sessionId: header?.sessionId ?? path.basename(file, '.jsonl'),
           path: fullPath,
           cwd: header?.cwd ?? this.options.cwd,
           entryCount: records.filter((record) => record.kind === 'entry')
             .length,
+          ...(preview.lastUserText !== undefined
+            ? { lastUserText: preview.lastUserText }
+            : {}),
+          ...(preview.lastAssistantText !== undefined
+            ? { lastAssistantText: preview.lastAssistantText }
+            : {}),
+          ...(preview.lastToolText !== undefined
+            ? { lastToolText: preview.lastToolText }
+            : {}),
           ...(header?.createdAt !== undefined
             ? { createdAt: header.createdAt }
             : {}),
@@ -466,6 +479,35 @@ function labelEntry(record: Extract<SessionRecord, { kind: 'entry' }>): string {
     return `${record.message.role} ${text.slice(0, 80)}`;
   }
   return record.event.type;
+}
+
+function summarizeRecentMessages(records: readonly SessionRecord[]): {
+  readonly lastUserText?: string;
+  readonly lastAssistantText?: string;
+  readonly lastToolText?: string;
+} {
+  let lastUserText: string | undefined;
+  let lastAssistantText: string | undefined;
+  let lastToolText: string | undefined;
+  for (const record of records) {
+    if (record.kind !== 'entry' || record.type !== 'message') {
+      continue;
+    }
+    const content = (record.message as { content?: unknown }).content;
+    const text = typeof content === 'string' ? content : JSON.stringify(content);
+    if (record.message.role === 'user') {
+      lastUserText = text;
+    } else if (record.message.role === 'assistant') {
+      lastAssistantText = text;
+    } else if (record.message.role === 'tool') {
+      lastToolText = text;
+    }
+  }
+  return {
+    ...(lastUserText !== undefined ? { lastUserText } : {}),
+    ...(lastAssistantText !== undefined ? { lastAssistantText } : {}),
+    ...(lastToolText !== undefined ? { lastToolText } : {}),
+  };
 }
 
 function escapeHtml(value: string): string {

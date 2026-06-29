@@ -22,7 +22,13 @@ export type CommandResult =
     }
   | {
       readonly type: 'runtime-action';
-      readonly action: 'compact' | 'new-session' | 'fork' | 'export' | 'quit';
+      readonly action:
+        | 'clear'
+        | 'compact'
+        | 'new-session'
+        | 'fork'
+        | 'export'
+        | 'quit';
       readonly args?: string[];
     }
   | { readonly type: 'set-model'; readonly model: string }
@@ -56,16 +62,16 @@ export const slashCommands: readonly SlashCommand[] = [
   },
   {
     name: 'clear',
-    description: 'Clear visible transcript',
-    run: () => ({ type: 'message', message: 'Transcript clear requested.' }),
+    description: 'Clear context and reset the TUI',
+    run: () => ({ type: 'runtime-action', action: 'clear' }),
   },
   {
     name: 'model',
     description: 'Switch or show model',
-    run: (ctx, args) =>
+    run: (_ctx, args) =>
       args[0]
         ? { type: 'set-model', model: args[0] }
-        : { type: 'message', message: `Current model: ${ctx.config.model}` },
+        : { type: 'open-overlay', overlay: 'model-selector' },
   },
   {
     name: 'settings',

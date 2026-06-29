@@ -4,6 +4,8 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import { parseTomlConfig, stringifyTomlConfig } from './config-toml.js';
+
 /** 产品层权限动作。 */
 export type PermissionAction = 'allow' | 'ask' | 'deny';
 
@@ -196,7 +198,10 @@ export class PermissionStore {
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(
       filePath,
-      `${JSON.stringify({ ...current, permissionRules: [...currentRules, rule] }, null, 2)}\n`,
+      stringifyTomlConfig({
+        ...current,
+        permissionRules: [...currentRules, rule],
+      }),
       'utf8',
     );
   }
@@ -276,10 +281,10 @@ function globLikeMatch(pattern: string, value: string): boolean {
 
 async function readConfig(filePath: string): Promise<Record<string, unknown>> {
   try {
-    return JSON.parse(await readFile(filePath, 'utf8')) as Record<
-      string,
-      unknown
-    >;
+    const text = await readFile(filePath, 'utf8');
+    return filePath.endsWith('.toml')
+      ? parseTomlConfig(text)
+      : (JSON.parse(text) as Record<string, unknown>);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return {};

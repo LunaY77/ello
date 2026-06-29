@@ -1,6 +1,7 @@
 import type { AgentUsage } from '@ello/agent';
-import { Badge } from '@inkjs/ui';
 import { Box, Text } from 'ink';
+
+import { tokyoNight } from '../tokyo-night.js';
 
 export interface FooterProps {
   readonly model: string;
@@ -13,7 +14,7 @@ export interface FooterProps {
 /**
  * 底部状态栏。
  *
- * 用 `Badge` 标审批模式，文本展示 model / token 用量 / 上下文占用。
+ * 展示 model / token 用量 / 上下文占用和审批模式。
  */
 export function Footer(props: FooterProps) {
   const tokens =
@@ -21,34 +22,36 @@ export function Footer(props: FooterProps) {
       ? props.usage.inputTokens + props.usage.outputTokens
       : 0;
   return (
-    <Box justifyContent="space-between" paddingX={1} marginTop={1}>
-      <Box gap={1}>
-        <Text color="gray">{props.model}</Text>
-        <Badge color={approvalColor(props.approvalMode)}>
-          {props.approvalMode}
-        </Badge>
+    <Box width="100%" justifyContent="space-between" paddingX={1} marginTop={1}>
+      <Box gap={1} flexShrink={0}>
+        <Text color={tokyoNight.muted}>{props.model}</Text>
+        <Text color={approvalColor(props.approvalMode)}>
+          {`[${props.approvalMode}]`}
+        </Text>
       </Box>
       <Box gap={1}>
-        <Text dimColor>{`${formatTokens(tokens)} tok`}</Text>
+        <Text color={tokyoNight.muted}>{`${formatTokens(tokens)} tok`}</Text>
         {props.contextRatio !== undefined ? (
-          <Text dimColor>{`ctx ${Math.round(props.contextRatio * 100)}%`}</Text>
+          <Text color={tokyoNight.muted}>{`ctx ${Math.round(
+            props.contextRatio * 100,
+          )}%`}</Text>
         ) : null}
       </Box>
     </Box>
   );
 }
 
-/** 审批模式 → Badge 颜色：越宽松越偏红。 */
+/** 审批模式 → 文本颜色：越宽松越偏红。 */
 function approvalColor(mode: string): string {
   switch (mode) {
     case 'bypass':
-      return 'red';
+      return tokyoNight.red;
     case 'accept-edits':
-      return 'yellow';
+      return tokyoNight.yellow;
     case 'dont-ask':
-      return 'magenta';
+      return tokyoNight.purple;
     default:
-      return 'green';
+      return tokyoNight.green;
   }
 }
 
