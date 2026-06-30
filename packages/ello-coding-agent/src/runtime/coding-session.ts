@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
 import {
-  AiSdkModelAdapter,
   createAgent,
   createDelegateTool,
   createLocalShellEnvironment,
@@ -10,6 +9,7 @@ import {
   skillIndexContext,
   type Agent,
   type AgentMessage,
+  type AgentModel,
   type AgentRunResult,
   type AgentSkill,
   type AgentStream,
@@ -21,7 +21,7 @@ import {
 } from '@ello/agent';
 
 import { CheckpointStore } from '../change/checkpoint.js';
-import type { CodingAgentConfig } from '../config/index.js';
+import type { CodingAgentConfig, ProfileSuiteConfig } from '../config/index.js';
 import {
   SUMMARIZATION_SYSTEM_PROMPT,
   SUMMARIZATION_PROMPT,
@@ -32,6 +32,14 @@ import { createCodingMemory } from '../context/memory.js';
 import { buildSystemSections } from '../context/sections.js';
 import { createCodingObserver } from '../observability/observer.js';
 import { RulesStore } from '../permission/rules-store.js';
+import {
+  createProviderRegistry,
+  modelSettingsFromRole,
+  prepareModelInputForRuntimeModel,
+  providerOptionsForRole,
+  type ProviderRegistry,
+  type RuntimeRoleModel,
+} from '../provider/index.js';
 import { JsonlSessionStore } from '../session/jsonl-store.js';
 import { checkpointsDir } from '../session/paths.js';
 import type {
@@ -51,6 +59,10 @@ import type {
 
 /** 模型上下文窗口默认值，用于压缩触发判定。 */
 const DEFAULT_CONTEXT_WINDOW = 160_000;
+
+function cloneProfileConfig(profile: ProfileSuiteConfig): ProfileSuiteConfig {
+  return structuredClone(profile) as ProfileSuiteConfig;
+}
 
 /** {@link createCodingSession} 的入参。 */
 export interface CreateCodingSessionOptions {
@@ -83,7 +95,15 @@ export interface CodingSession {
   approve(requestId: string, decision: ApprovalDecision): Promise<void>;
   abort(reason?: string): void;
   notify(text: string): void;
-  setModel(selection: string): Promise<void>;
+  setProfile(profileName: string): Promise<string>;
+  createProfile(profileName: string, sourceProfileName: string): Promise<void>;
+  deleteProfile(profileName: string): Promise<void>;
+  setPrimaryModel(modelReference: string): Promise<string>;
+  setProfileRoleModel(
+    profileName: string,
+    role: RuntimeRoleModel['role'],
+    modelReference: string,
+  ): Promise<string>;
   runShell(command: string): Promise<{
     readonly exitCode: number;
     readonly stdout: string;
@@ -143,7 +163,9 @@ export async function createCodingSession(
     compactor,
     skills,
     subagents,
-    modelAdapter: options.modelAdapter ?? createConfiguredModelAdapter(config),
+    ...(options.modelAdapter !== undefined
+      ? { modelAdapter: options.modelAdapter }
+      : {}),
   });
   session.emit({ type: 'session.opened', sessionId, cwd: config.cwd });
   return session;
@@ -161,7 +183,8 @@ class CodingSessionImpl implements CodingSession {
   private readonly steerQueue: string[] = [];
   private currentStream: AgentStream | undefined;
   private config: CodingAgentConfig;
-  private model: string;
+  private providerRegistry: ProviderRegistry;
+  private primaryRole: RuntimeRoleModel;
 
   constructor(
     public sessionId: string,
@@ -169,8 +192,9 @@ class CodingSessionImpl implements CodingSession {
     private readonly deps: SessionDeps,
   ) {
     this.config = config;
+    this.providerRegistry = createProviderRegistry(config);
     this.checkpoints = new CheckpointStore(checkpointsDir(config.cwd));
-    this.model = config.model;
+    this.primaryRole = this.resolveRuntimeRole('primary');
     this.agent = this.buildAgent();
   }
 
@@ -286,22 +310,117 @@ class CodingSessionImpl implements CodingSession {
     this.emit({ type: 'ui.message', text });
   }
 
-  /** 切换模型并重建 Agent，当前运行中不允许切换。 */
-  async setModel(selection: string): Promise<void> {
+  /** 切换 profile suite 并重建 Agent，当前运行中不允许切换。 */
+  async setProfile(profileName: string): Promise<string> {
     if (this.currentStream !== undefined) {
-      this.notify('Cannot change model while running.');
-      return;
+      throw new Error('Cannot change profile while running.');
     }
-    const next = selectModelConfig(this.config, selection);
-    this.config = next;
-    this.model = next.model;
+    this.providerRegistry.getProfile(profileName);
+    this.config = {
+      ...this.config,
+      active_profile: profileName,
+    };
+    this.providerRegistry = createProviderRegistry(this.config);
+    this.primaryRole = this.resolveRuntimeRole('primary');
     await this.rebuild();
-    this.emit({ type: 'model.changed', model: next.model });
-    this.notify(
-      next.model_profile !== null
-        ? `Model profile switched to ${next.model_profile} (${next.model})`
-        : `Model switched to ${next.model}`,
+    this.emit({ type: 'model.changed', model: this.primaryRole.ref });
+    this.notify(`Profile switched to ${profileName} (${this.primaryRole.ref})`);
+    return this.primaryRole.ref;
+  }
+
+  /** 基于已有 profile suite 创建新的 profile suite。 */
+  async createProfile(
+    profileName: string,
+    sourceProfileName: string,
+  ): Promise<void> {
+    if (this.currentStream !== undefined) {
+      throw new Error('Cannot create profile while running.');
+    }
+    if (this.config.profile[profileName] !== undefined) {
+      throw new Error(`Profile already exists: ${profileName}`);
+    }
+    const source = this.config.profile[sourceProfileName];
+    if (source === undefined) {
+      throw new Error(`Unknown source profile: ${sourceProfileName}`);
+    }
+    this.config = {
+      ...this.config,
+      profile: {
+        ...this.config.profile,
+        [profileName]: cloneProfileConfig({
+          ...source,
+          label: profileName,
+          description: `基于 ${sourceProfileName} 创建。`,
+        }),
+      },
+    };
+    this.providerRegistry = createProviderRegistry(this.config);
+    this.notify(`Profile created: ${profileName}`);
+  }
+
+  /** 删除非当前 profile suite。 */
+  async deleteProfile(profileName: string): Promise<void> {
+    if (this.currentStream !== undefined) {
+      throw new Error('Cannot delete profile while running.');
+    }
+    if (profileName === this.config.active_profile) {
+      throw new Error(`Cannot delete active profile: ${profileName}`);
+    }
+    if (this.config.profile[profileName] === undefined) {
+      throw new Error(`Unknown profile: ${profileName}`);
+    }
+    const profile = { ...this.config.profile };
+    delete profile[profileName];
+    if (Object.keys(profile).length === 0) {
+      throw new Error('Cannot delete the final profile.');
+    }
+    this.config = {
+      ...this.config,
+      profile,
+    };
+    this.providerRegistry = createProviderRegistry(this.config);
+    this.notify(`Profile deleted: ${profileName}`);
+  }
+
+  /** 切换当前 profile suite 的 primary 模型，其它 role 绑定保持不变。 */
+  async setPrimaryModel(modelReference: string): Promise<string> {
+    return this.setProfileRoleModel(
+      this.config.active_profile,
+      'primary',
+      modelReference,
     );
+  }
+
+  /** 切换指定 profile suite 的 role 模型绑定。 */
+  async setProfileRoleModel(
+    profileName: string,
+    role: RuntimeRoleModel['role'],
+    modelReference: string,
+  ): Promise<string> {
+    if (this.currentStream !== undefined) {
+      throw new Error('Cannot change model while running.');
+    }
+    const model = this.providerRegistry.getModel(modelReference);
+    const profile = this.providerRegistry.getProfile(profileName);
+    this.config = {
+      ...this.config,
+      profile: {
+        ...this.config.profile,
+        [profile.name]: {
+          ...this.config.profile[profile.name]!,
+          models: {
+            ...profile.models,
+            [role]: model.ref,
+          },
+        },
+      },
+    };
+    this.providerRegistry = createProviderRegistry(this.config);
+    this.primaryRole = this.resolveRuntimeRole('primary');
+    await this.rebuild();
+    this.emit({ type: 'model.changed', model: this.primaryRole.ref });
+    this.notify(`Profile ${profileName} role ${role} bound to ${model.ref}`);
+    return model.ref;
   }
 
   /** TUI `!cmd` shell escape：受同一 cwd/allowedPaths 边界约束。 */
@@ -450,7 +569,7 @@ class CodingSessionImpl implements CodingSession {
     });
   }
 
-  /** 关掉旧 Agent，按当前 sessionId 重建。 */
+  /** 关闭当前 Agent，按当前 sessionId 重建。 */
   private async rebuild(): Promise<void> {
     await this.agent.close();
     this.pendingApprovals.clear();
@@ -460,9 +579,12 @@ class CodingSessionImpl implements CodingSession {
 
   /** 把各模块产物拼进 createAgent，这是整个会话运行时的核心装配。 */
   private buildAgent(): Agent {
-    const config: CodingAgentConfig = { ...this.config, model: this.model };
+    this.primaryRole = this.resolveRuntimeRole('primary');
+    const primaryRole = this.primaryRole;
+    const config = this.config;
+    const agentModel = this.resolveAgentModel(primaryRole);
     const memory = createCodingMemory(config);
-    const observer = createCodingObserver(config);
+    const observer = createCodingObserver(config, { model: primaryRole.ref });
 
     const tools = createCodingTools({
       config,
@@ -474,7 +596,7 @@ class CodingSessionImpl implements CodingSession {
     });
     const delegateTool = createDelegateTool({
       subagents: this.deps.subagents,
-      model: this.model,
+      model: agentModel,
       parentTools: tools,
       session: this.deps.sessionStore,
       ...(this.deps.modelAdapter !== undefined
@@ -502,9 +624,9 @@ class CodingSessionImpl implements CodingSession {
 
     return createAgent({
       name: 'ello-coding-agent',
-      model: this.model,
-      modelSettings: modelSettingsFromConfig(config),
-      instructions: buildCodingSystemPrompt(config),
+      model: agentModel,
+      modelSettings: modelSettingsFromRole(primaryRole),
+      instructions: buildCodingSystemPrompt(config, { model: primaryRole.ref }),
       environment: createLocalShellEnvironment({
         cwd: config.cwd,
         allowedPaths: config.allowedPaths,
@@ -518,12 +640,31 @@ class CodingSessionImpl implements CodingSession {
         maxInputTokens: 160_000,
         reservedOutputTokens: 8_000,
       },
-      modelInput: { systemSections: sections },
+      modelInput: {
+        systemSections: sections,
+        providerOptions: () => providerOptionsForRole(primaryRole),
+        prepare: (input) =>
+          prepareModelInputForRuntimeModel(primaryRole.model, input),
+      },
       ...(this.deps.modelAdapter !== undefined
         ? { modelAdapter: this.deps.modelAdapter }
         : {}),
       metadata: { sessionId: this.sessionId, cwd: config.cwd },
     });
+  }
+
+  private resolveRuntimeRole(role: RuntimeRoleModel['role']): RuntimeRoleModel {
+    return this.providerRegistry.resolveRole(this.config.active_profile, role);
+  }
+
+  private resolveAgentModel(binding: RuntimeRoleModel): AgentModel {
+    if (this.deps.modelAdapter !== undefined) {
+      return binding.ref;
+    }
+    return this.providerRegistry.resolveLanguageModel(
+      binding.ref,
+      binding.settings,
+    );
   }
 }
 
@@ -554,10 +695,17 @@ function makeSummarizer(
       })
       .join('\n\n');
     const prompt = `${head}\n<conversation>\n${conversation}\n</conversation>`;
+    const registry = createProviderRegistry(config);
+    const binding = registry.resolveRole(config.active_profile, 'summary');
+    const model =
+      modelAdapter !== undefined
+        ? binding.ref
+        : registry.resolveLanguageModel(binding.ref, binding.settings);
 
     const summarizer = createAgent({
       name: 'ello-compactor',
-      model: config.model,
+      model,
+      modelSettings: modelSettingsFromRole(binding),
       instructions: SUMMARIZATION_SYSTEM_PROMPT,
       ...(modelAdapter !== undefined ? { modelAdapter } : {}),
     });
@@ -570,58 +718,14 @@ function makeSummarizer(
   };
 }
 
-function createConfiguredModelAdapter(config: CodingAgentConfig): ModelAdapter {
-  return new AiSdkModelAdapter({
-    ...(config.baseUrl !== null ? { baseURL: config.baseUrl } : {}),
-    ...(config.apiKey !== null ? { apiKey: config.apiKey } : {}),
-    ...(Object.keys(config.httpHeaders).length > 0
-      ? { headers: config.httpHeaders }
-      : {}),
-  });
-}
-
-function selectModelConfig(
-  config: CodingAgentConfig,
-  selection: string,
-): CodingAgentConfig {
-  const profile = config.model_profiles[selection];
-  if (profile === undefined) {
-    return {
-      ...config,
-      model_profile: null,
-      model: selection,
-    };
-  }
-  return {
-    ...config,
-    model_profile: selection,
-    model_provider: profile.model_provider,
-    model: profile.model,
-    model_reasoning_effort: profile.model_reasoning_effort,
-    personality: profile.personality,
-  };
-}
-
-function modelSettingsFromConfig(
-  config: CodingAgentConfig,
-): Record<string, unknown> {
-  return {
-    ...(config.model_reasoning_effort !== null
-      ? { reasoningEffort: config.model_reasoning_effort }
-      : {}),
-  };
-}
-
-async function driveRun(
-  options: {
-    readonly currentStream: AgentStream;
-    readonly pendingApprovalCount: () => number;
-    readonly emit: (event: CodingSessionEvent) => void;
-    readonly onEvent: (event: AgentStreamEvent) => void;
-    readonly checkpoints: CheckpointStore;
-    readonly checkpointLabel?: string | undefined;
-  },
-): Promise<AgentRunResult> {
+async function driveRun(options: {
+  readonly currentStream: AgentStream;
+  readonly pendingApprovalCount: () => number;
+  readonly emit: (event: CodingSessionEvent) => void;
+  readonly onEvent: (event: AgentStreamEvent) => void;
+  readonly checkpoints: CheckpointStore;
+  readonly checkpointLabel?: string | undefined;
+}): Promise<AgentRunResult> {
   const {
     currentStream,
     pendingApprovalCount,

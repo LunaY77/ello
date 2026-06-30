@@ -19,9 +19,14 @@ describe('TUI completion', () => {
           description: 'Clear context and reset the TUI',
         },
         {
-          value: '/model',
-          label: '/model',
-          description: 'Switch or show model',
+          value: '/models',
+          label: '/models',
+          description: 'Browse model catalog',
+        },
+        {
+          value: '/profiles',
+          label: '/profiles',
+          description: 'Switch model profile suite',
         },
         {
           value: '/settings',
@@ -48,10 +53,20 @@ describe('TUI completion', () => {
 
     expect(suggestions).toEqual([
       {
-        value: '/model',
-        label: '/model',
-        description: 'Switch or show model',
+        value: '/models',
+        label: '/models',
+        description: 'Browse model catalog',
       },
     ]);
+  });
+
+  it('completes profile suite names for /profiles', () => {
+    const suggestions = completeInput(
+      '/profiles ma',
+      ['main', 'anthropic'],
+      [],
+    );
+
+    expect(suggestions).toEqual(['/profiles main']);
   });
 });

@@ -7,10 +7,7 @@ import {
   closeCodingDatabase,
   openGlobalCodingDatabaseSync,
 } from '../database.js';
-import {
-  usagePriceSnapshots,
-  usageRecords,
-} from '../schema.js';
+import { usagePriceSnapshots, usageRecords } from '../schema.js';
 
 export type UsageInvocation = 'tui' | 'run' | 'tool' | 'test' | 'unknown';
 export type UsageStatus = 'completed' | 'failed' | 'interrupted';
@@ -219,11 +216,22 @@ function zeroUsage(): AgentUsage {
 
 function buildUsageFilter(filter: UsageFilter) {
   const conditions = [
-    filter.since !== undefined ? gte(usageRecords.startedAt, filter.since) : undefined,
-    filter.until !== undefined ? lte(usageRecords.startedAt, filter.until) : undefined,
-    filter.model !== undefined ? eq(usageRecords.model, filter.model) : undefined,
-    filter.status !== undefined ? eq(usageRecords.status, filter.status) : undefined,
-  ].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined);
+    filter.since !== undefined
+      ? gte(usageRecords.startedAt, filter.since)
+      : undefined,
+    filter.until !== undefined
+      ? lte(usageRecords.startedAt, filter.until)
+      : undefined,
+    filter.model !== undefined
+      ? eq(usageRecords.model, filter.model)
+      : undefined,
+    filter.status !== undefined
+      ? eq(usageRecords.status, filter.status)
+      : undefined,
+  ].filter(
+    (condition): condition is NonNullable<typeof condition> =>
+      condition !== undefined,
+  );
   return conditions.length > 0 ? and(...conditions) : undefined;
 }
 
@@ -232,7 +240,9 @@ function normalizeUsageRecord(
 ): UsageRecord {
   return {
     id: row.id,
-    ...(row.runId !== null && row.runId !== undefined ? { runId: row.runId } : {}),
+    ...(row.runId !== null && row.runId !== undefined
+      ? { runId: row.runId }
+      : {}),
     invocation: row.invocation as UsageInvocation,
     ...(row.provider !== null && row.provider !== undefined
       ? { provider: row.provider }

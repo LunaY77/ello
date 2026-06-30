@@ -16,6 +16,13 @@ import {
 } from '../config/index.js';
 import { loadCodingMemory, summarizeMemory } from '../memory.js';
 import { formatPermissionRules } from '../permissions.js';
+import {
+  createProviderRegistry,
+  normalizeModelRef,
+  type ProviderRegistry,
+  type RuntimeModel,
+  type RuntimeProvider,
+} from '../provider/index.js';
 import { createCodingSession } from '../runtime/coding-session.js';
 import { JsonlSessionStore } from '../session/jsonl-store.js';
 import {
@@ -61,7 +68,7 @@ const defaultIo: CliIo = {
 
 /** commander 全局选项的形状（`optsWithGlobals()` 的返回）。 */
 interface GlobalOpts {
-  readonly model?: string;
+  readonly profile?: string;
   readonly cwd?: string;
   readonly allowedPath?: string[];
   readonly approval?: string;
@@ -77,7 +84,7 @@ interface GlobalOpts {
  */
 async function resolveConfig(opts: GlobalOpts): Promise<CodingAgentConfig> {
   return loadCodingAgentConfig({
-    ...(opts.model !== undefined ? { model: opts.model } : {}),
+    ...(opts.profile !== undefined ? { active_profile: opts.profile } : {}),
     ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
     ...(opts.allowedPath !== undefined && opts.allowedPath.length > 0
       ? { allowedPaths: opts.allowedPath }
@@ -94,8 +101,8 @@ async function resolveConfig(opts: GlobalOpts): Promise<CodingAgentConfig> {
  * 构造 commander 命令树。
  *
  * CLI 是 {@link createCodingSession} 的薄前端：解析命令 → 装配配置 →
- * 创建/驱动会话 → 渲染事件。命令树覆盖旧 CLI 的全部能力（run/resume/
- * sessions/tools/permissions/memory/config），但改由 commander 表达。
+ * 创建/驱动会话 → 渲染事件。命令树覆盖 run/resume/sessions/tools/
+ * permissions/memory/config，由 commander 表达。
  */
 export function buildProgram(io: CliIo = defaultIo): Command {
   const program = new Command();
@@ -103,7 +110,7 @@ export function buildProgram(io: CliIo = defaultIo): Command {
     .name('ello')
     .description('ello coding agent')
     .version(VERSION)
-    .option('--model <id>', 'model id')
+    .option('--profile <name>', 'profile suite name')
     .option('--cwd <path>', 'working directory')
     .option('--allowed-path <path...>', 'extra allowed roots')
     .option('--approval <mode>', 'default | accept-edits | bypass | dont-ask')
@@ -240,6 +247,76 @@ function registerInfoCommands(program: Command, io: CliIo): void {
     .description('list available tools')
     .action(() => {
       io.stdout.write(`${describeCodingTools()}\n`);
+    });
+
+  const providersCmd = program
+    .command('providers')
+    .description('inspect configured model providers');
+  providersCmd
+    .command('list')
+    .description('list providers')
+    .action(async (_opts: unknown, cmd: Command) => {
+      const config = await resolveConfig(cmd.optsWithGlobals());
+      const registry = createProviderRegistry(config);
+      const providers = registry.listProviders();
+      io.stdout.write(
+        `${
+          config.json
+            ? JSON.stringify(providers.map(providerForOutput), null, 2)
+            : formatProviderList(providers, registry)
+        }\n`,
+      );
+    });
+  providersCmd
+    .command('doctor')
+    .description('check local provider auth/config status')
+    .action(async (_opts: unknown, cmd: Command) => {
+      const config = await resolveConfig(cmd.optsWithGlobals());
+      const registry = createProviderRegistry(config);
+      const report = registry
+        .listProviders()
+        .map((provider) => providerDoctorReport(provider, registry));
+      io.stdout.write(
+        `${config.json ? JSON.stringify(report, null, 2) : formatProviderDoctor(report)}\n`,
+      );
+    });
+
+  const modelsCmd = program
+    .command('models')
+    .description('inspect provider model catalog');
+  modelsCmd
+    .command('list')
+    .argument('[provider]', 'provider id')
+    .description('list configured models')
+    .action(
+      async (provider: string | undefined, _opts: unknown, cmd: Command) => {
+        const config = await resolveConfig(cmd.optsWithGlobals());
+        const registry = createProviderRegistry(config);
+        const models = registry.listModels(provider);
+        io.stdout.write(
+          `${
+            config.json
+              ? JSON.stringify(models, null, 2)
+              : formatModelList(models)
+          }\n`,
+        );
+      },
+    );
+  modelsCmd
+    .command('show')
+    .argument('<model>', 'model ref, e.g. openai/gpt-5.5')
+    .description('show one model')
+    .action(async (model: string, _opts: unknown, cmd: Command) => {
+      const config = await resolveConfig(cmd.optsWithGlobals());
+      const registry = createProviderRegistry(config);
+      const runtimeModel = registry.getModel(normalizeModelRef(model));
+      io.stdout.write(
+        `${
+          config.json
+            ? JSON.stringify(runtimeModel, null, 2)
+            : formatModelDetail(runtimeModel)
+        }\n`,
+      );
     });
 
   program
@@ -835,10 +912,7 @@ function registerInfoCommands(program: Command, io: CliIo): void {
     .option('--prune', 'mark removed checkouts in the global DB')
     .description('sync workspace DB state with filesystem/git observations')
     .action(
-      async (
-        opts: { fixMissing?: boolean; prune?: boolean },
-        cmd: Command,
-      ) => {
+      async (opts: { fixMissing?: boolean; prune?: boolean }, cmd: Command) => {
         const config = await resolveConfig(cmd.optsWithGlobals());
         const result = await new WorkspaceStore().sync({
           fixMissing: opts.fixMissing ?? false,
@@ -888,6 +962,110 @@ function registerInfoCommands(program: Command, io: CliIo): void {
         `${config.json ? JSON.stringify(sessions, null, 2) : sessions.join('\n')}\n`,
       );
     });
+}
+
+function providerForOutput(provider: RuntimeProvider): Record<string, unknown> {
+  const { apiKey: _apiKey, ...safe } = provider;
+  return {
+    ...safe,
+    auth: providerAuthState(provider),
+  };
+}
+
+function formatProviderList(
+  providers: readonly RuntimeProvider[],
+  registry: ProviderRegistry,
+): string {
+  if (providers.length === 0) {
+    return 'No providers configured';
+  }
+  return providers
+    .map(
+      (provider) =>
+        `${provider.id}\t${provider.enabled ? 'enabled' : 'disabled'}\t${providerAuthState(provider)}\tmodels=${registry.listModels(provider.id).length}\t${provider.kind}`,
+    )
+    .join('\n');
+}
+
+function providerDoctorReport(
+  provider: RuntimeProvider,
+  registry: ProviderRegistry,
+): Record<string, unknown> {
+  return {
+    id: provider.id,
+    enabled: provider.enabled,
+    auth: providerAuthState(provider),
+    apiKeyEnv: provider.apiKeyEnv ?? null,
+    baseUrl: provider.baseUrl ?? null,
+    kind: provider.kind,
+    models: registry.listModels(provider.id).length,
+  };
+}
+
+function formatProviderDoctor(
+  report: readonly Record<string, unknown>[],
+): string {
+  if (report.length === 0) {
+    return 'No providers configured';
+  }
+  return report
+    .map(
+      (item) =>
+        `${item.id}\t${item.enabled === true ? 'enabled' : 'disabled'}\t${item.auth}\tmodels=${item.models}\tapi_key_env=${String(item.apiKeyEnv ?? '<none>')}`,
+    )
+    .join('\n');
+}
+
+function providerAuthState(provider: RuntimeProvider): string {
+  if (!provider.enabled) {
+    return 'disabled';
+  }
+  if (provider.apiKey !== undefined) {
+    return 'ready';
+  }
+  return provider.apiKeyEnv === undefined ? 'none' : 'missing';
+}
+
+function formatModelList(models: readonly RuntimeModel[]): string {
+  if (models.length === 0) {
+    return 'No models configured';
+  }
+  return models
+    .map(
+      (model) =>
+        `${model.ref}\t${formatEndpoint(model)}\tctx=${model.limit.context}\tout=${model.limit.output}\t${formatCapabilities(model)}`,
+    )
+    .join('\n');
+}
+
+function formatModelDetail(model: RuntimeModel): string {
+  return [
+    `ref\t${model.ref}`,
+    `provider\t${model.providerId}`,
+    `api_id\t${model.apiId}`,
+    `endpoint\t${formatEndpoint(model)}`,
+    `status\t${model.status}`,
+    `context\t${model.limit.context}`,
+    `output\t${model.limit.output}`,
+    `capabilities\t${formatCapabilities(model)}`,
+    `variants\t${Object.keys(model.variants).join(', ') || '<none>'}`,
+  ].join('\n');
+}
+
+function formatEndpoint(model: RuntimeModel): string {
+  return model.endpoint ?? 'languageModel';
+}
+
+function formatCapabilities(model: RuntimeModel): string {
+  return [
+    model.capabilities.reasoning ? 'reasoning' : null,
+    model.capabilities.temperature ? 'temperature' : null,
+    model.capabilities.toolCall ? 'tools' : null,
+    `in:${model.capabilities.input.join('+')}`,
+    `out:${model.capabilities.output.join('+')}`,
+  ]
+    .filter((item): item is string => item !== null)
+    .join(',');
 }
 
 function normalizeConfigSource(

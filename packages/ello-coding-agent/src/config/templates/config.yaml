@@ -1,0 +1,102 @@
+# 当前激活的模型套件；TUI 使用 /profiles 切换。
+active_profile: main
+
+# provider 只描述连接、认证和 provider 类型，不承载 agent 使用意图。
+provider:
+  openai:
+    name: OpenAI
+    enabled: true
+    kind: openai
+    api_key_env: OPENAI_API_KEY
+    base_url: https://api.openai.com/v1
+  anthropic:
+    name: Anthropic
+    enabled: true
+    kind: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+
+# profile 是一组 role 到模型的明确绑定。
+profile:
+  main:
+    label: Main
+    description: 高质量编码任务的默认模型套件。
+    models:
+      primary: openai/gpt-5.5
+      small: openai/gpt-5.4
+      summary: openai/gpt-5.4
+      title: openai/gpt-5.4
+      review: anthropic/claude-sonnet-4.6
+    settings:
+      primary:
+        reasoning_effort: medium
+      small:
+        reasoning_effort: low
+      summary:
+        reasoning_effort: low
+      title:
+        reasoning_effort: low
+      review:
+        reasoning_effort: high
+  anthropic:
+    label: Anthropic
+    description: 偏向 Anthropic 的编码与审查模型套件。
+    models:
+      primary: anthropic/claude-sonnet-4.6
+      small: anthropic/claude-haiku-4.5
+      summary: anthropic/claude-haiku-4.5
+      title: anthropic/claude-haiku-4.5
+      review: anthropic/claude-opus-4.8
+    settings:
+      primary:
+        reasoning_effort: medium
+      small:
+        reasoning_effort: low
+      summary:
+        reasoning_effort: low
+      title:
+        reasoning_effort: low
+      review:
+        reasoning_effort: high
+
+# 默认工作目录；通常不要写死，命令行 --cwd 会覆盖。
+# cwd: /path/to/project
+
+# 会话保存目录；留空时使用 ~/.ello/sessions。
+# sessionDir: ~/.ello/sessions
+
+# 默认审批模式。可选 default、plan、accept-edits、dont-ask、bypass。
+# approvalMode: default
+
+# 允许工具访问的路径根目录；默认至少包含当前 cwd。
+# allowedPaths:
+#   - /path/to/project
+
+# 细粒度权限规则；通常由权限命令或 TUI 写入，不建议手写复杂规则。
+# permissionRules: []
+
+# MCP 配置文件路径；默认使用 ~/.ello/mcp.json。
+# mcpConfigPath: ~/.ello/mcp.json
+
+# system prompt 配置名；默认 coding。
+# systemPromptProfile: coding
+
+# 默认启用交互式 TUI；命令行 --no-tui 可临时关闭。
+# tui: true
+
+# 工具配置；disabled 表示完全不注册，needApproval 表示无论审批模式如何都要询问。
+# tools:
+#   disabled: []
+#   needApproval:
+#     - bash
+#     - web_fetch
+
+# provider 专属 HTTP headers。
+# provider:
+#   openai:
+#     headers:
+#       OpenAI-Organization: ${OPENAI_ORG_ID}
+
+# 项目信任配置；路径可以直接作为 YAML key。
+# projects:
+#   /path/to/project:
+#     trust_level: trusted

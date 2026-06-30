@@ -9,7 +9,7 @@ describe('AppShell', () => {
     const output = renderToString(
       <AppShell
         cwd="/tmp/ello-workspace"
-        model="fake:test"
+        profile="main"
         approvalMode="bypass"
         transcript={[]}
         liveAssistantText=""
@@ -22,8 +22,8 @@ describe('AppShell', () => {
     );
 
     expect(output).toContain('Ello Coding Agent');
-    expect(output).toContain('model:');
-    expect(output).toContain('fake:test');
+    expect(output).toContain('profile:');
+    expect(output).toContain('main');
     expect(output).toContain('directory:');
     expect(output).toContain('permissions:');
     expect(output).toContain('YOLO mode');
@@ -33,7 +33,7 @@ describe('AppShell', () => {
     const output = renderToString(
       <AppShell
         cwd="/tmp/ello-workspace"
-        model="fake:test"
+        profile="main"
         approvalMode="default"
         transcript={[
           { kind: 'user', id: 'u1', text: 'hello' },
@@ -59,7 +59,7 @@ describe('AppShell', () => {
     const output = renderToString(
       <AppShell
         cwd="/tmp/ello-workspace"
-        model="fake:test"
+        profile="main"
         approvalMode="default"
         transcript={[]}
         liveAssistantText=""
@@ -79,7 +79,7 @@ describe('AppShell', () => {
     const output = renderToString(
       <AppShell
         cwd="/tmp/ello-workspace"
-        model="fake:test"
+        profile="main"
         approvalMode="default"
         transcript={[]}
         liveAssistantText=""
@@ -99,7 +99,7 @@ describe('AppShell', () => {
     const output = renderToString(
       <AppShell
         cwd="/tmp/ello-workspace"
-        model="fake:test"
+        profile="main"
         approvalMode="default"
         transcript={[]}
         liveAssistantText=""

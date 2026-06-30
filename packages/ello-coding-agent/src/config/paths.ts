@@ -13,7 +13,7 @@ export const globalHomeDir = elloHomeDir;
 
 /** 全局用户配置文件，随启动自动初始化。 */
 export function globalConfigPath(): string {
-  return path.join(elloHomeDir(), 'config.toml');
+  return path.join(elloHomeDir(), 'config.yaml');
 }
 
 /** MCP 服务器配置文件，仍单独保存为 JSON。 */
@@ -68,7 +68,7 @@ export function projectElloDir(cwd: string): string {
 
 /** 项目级共享配置文件。 */
 export function projectConfigPath(cwd: string): string {
-  return path.join(projectElloDir(cwd), 'config.toml');
+  return path.join(projectElloDir(cwd), 'config.yaml');
 }
 
 /** 项目级 skills 覆盖目录。 */
@@ -83,5 +83,5 @@ export function projectTasksDir(cwd: string): string {
 
 /** workspace 工具写入的项目指针文件。 */
 export function projectWorkspacePointerPath(cwd: string): string {
-  return path.join(projectElloDir(cwd), 'workspace.toml');
+  return path.join(projectElloDir(cwd), 'workspace.yaml');
 }

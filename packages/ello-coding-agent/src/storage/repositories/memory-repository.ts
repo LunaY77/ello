@@ -57,11 +57,15 @@ export class MemoryRepository {
     return rows.map(normalizeMemoryItem);
   }
 
-  async createManual(input: Omit<CreateMemoryInput, 'source'>): Promise<MemoryItem> {
+  async createManual(
+    input: Omit<CreateMemoryInput, 'source'>,
+  ): Promise<MemoryItem> {
     return this.create({ ...input, source: 'manual' });
   }
 
-  async recordLearned(input: Omit<CreateMemoryInput, 'source'>): Promise<MemoryItem> {
+  async recordLearned(
+    input: Omit<CreateMemoryInput, 'source'>,
+  ): Promise<MemoryItem> {
     return this.create({ ...input, source: 'learned' });
   }
 

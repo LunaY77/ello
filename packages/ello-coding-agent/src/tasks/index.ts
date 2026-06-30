@@ -19,9 +19,7 @@ export type {
 export type { TaskEvent, TaskEventListener } from './events.js';
 
 /** 创建默认任务服务。 */
-export function createTaskService(
-  events = new TaskEventBus(),
-): TaskService {
+export function createTaskService(events = new TaskEventBus()): TaskService {
   return new TaskService(new SqliteTaskStore(), events);
 }
 

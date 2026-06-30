@@ -46,7 +46,9 @@ export interface WorkspaceSyncResult {
  * 不再扫描 manifest，也不会在 DB 丢失时从 manifest 自动恢复。
  */
 export class WorkspaceRepository {
-  constructor(private readonly db: CodingDatabase = openGlobalCodingDatabaseSync()) {}
+  constructor(
+    private readonly db: CodingDatabase = openGlobalCodingDatabaseSync(),
+  ) {}
 
   async upsertRepo(entry: RepoEntry): Promise<string> {
     const id = stableRepoId(entry.key);
@@ -138,7 +140,10 @@ export class WorkspaceRepository {
       .map((row) => this.toManifest(row));
   }
 
-  async open(kind: WorkspaceKind, name: string): Promise<WorkspaceManifest | null> {
+  async open(
+    kind: WorkspaceKind,
+    name: string,
+  ): Promise<WorkspaceManifest | null> {
     const row = this.db
       .select()
       .from(workspaces)
@@ -167,7 +172,12 @@ export class WorkspaceRepository {
         rootPath: manifest.rootPath,
         updatedAt: now,
       })
-      .where(and(eq(workspaces.kind, manifest.kind), eq(workspaces.name, manifest.name)))
+      .where(
+        and(
+          eq(workspaces.kind, manifest.kind),
+          eq(workspaces.name, manifest.name),
+        ),
+      )
       .run();
     return { ...manifest, updatedAt: now };
   }
@@ -181,7 +191,10 @@ export class WorkspaceRepository {
     let fixedCount = 0;
     transaction(this.db, () => {
       for (const diff of diffs) {
-        const workspaceId = workspaceKey(diff.workspace.kind, diff.workspace.name);
+        const workspaceId = workspaceKey(
+          diff.workspace.kind,
+          diff.workspace.name,
+        );
         if (options.fixMissing === true && diff.missingRoot) {
           this.db
             .update(workspaces)
@@ -209,7 +222,10 @@ export class WorkspaceRepository {
               .where(
                 and(
                   eq(workspaceRepositories.workspaceId, workspaceId),
-                  eq(workspaceRepositories.repositoryId, stableRepoId(repo.key)),
+                  eq(
+                    workspaceRepositories.repositoryId,
+                    stableRepoId(repo.key),
+                  ),
                 ),
               )
               .run();
@@ -248,7 +264,10 @@ export class WorkspaceRepository {
         branch: workspaceRepositories.branch,
       })
       .from(workspaceRepositories)
-      .innerJoin(repositories, eq(workspaceRepositories.repositoryId, repositories.id))
+      .innerJoin(
+        repositories,
+        eq(workspaceRepositories.repositoryId, repositories.id),
+      )
       .where(eq(workspaceRepositories.workspaceId, row.id))
       .orderBy(asc(repositories.key))
       .all();

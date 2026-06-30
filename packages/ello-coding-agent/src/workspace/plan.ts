@@ -45,7 +45,9 @@ export function buildWorkspaceManifest(input: {
     kind: input.plan.kind,
     rootPath: input.plan.rootPath,
     ...(input.plan.branch !== undefined ? { branch: input.plan.branch } : {}),
-    ...(input.tmuxSession !== undefined ? { tmuxSession: input.tmuxSession } : {}),
+    ...(input.tmuxSession !== undefined
+      ? { tmuxSession: input.tmuxSession }
+      : {}),
     repos: input.repos,
     createdAt: input.now,
     updatedAt: input.now,
@@ -107,7 +109,10 @@ export function renameWorkspace(
     rootPath: targetRootPath,
     repos: manifest.repos.map((repo) => ({
       ...repo,
-      path: path.join(targetRootPath, path.relative(manifest.rootPath, repo.path)),
+      path: path.join(
+        targetRootPath,
+        path.relative(manifest.rootPath, repo.path),
+      ),
     })),
     updatedAt: now,
   };

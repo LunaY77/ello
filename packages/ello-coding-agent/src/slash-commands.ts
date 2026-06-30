@@ -14,7 +14,8 @@ export type CommandResult =
       readonly type: 'open-overlay';
       readonly overlay:
         | 'help'
-        | 'model-selector'
+        | 'models'
+        | 'profiles'
         | 'session-selector'
         | 'session-tree'
         | 'settings'
@@ -34,7 +35,7 @@ export type CommandResult =
         | 'quit';
       readonly args?: string[];
     }
-  | { readonly type: 'set-model'; readonly model: string }
+  | { readonly type: 'set-profile'; readonly profile: string }
   | { readonly type: 'set-permission-mode'; readonly mode: PermissionMode }
   | { readonly type: 'submit'; readonly prompt: string };
 
@@ -69,12 +70,17 @@ export const slashCommands: readonly SlashCommand[] = [
     run: () => ({ type: 'runtime-action', action: 'clear' }),
   },
   {
-    name: 'model',
-    description: 'Switch or show model',
+    name: 'models',
+    description: 'Browse model catalog',
+    run: () => ({ type: 'open-overlay', overlay: 'models' }),
+  },
+  {
+    name: 'profiles',
+    description: 'Switch model profile suite',
     run: (_ctx, args) =>
       args[0]
-        ? { type: 'set-model', model: args[0] }
-        : { type: 'open-overlay', overlay: 'model-selector' },
+        ? { type: 'set-profile', profile: args[0] }
+        : { type: 'open-overlay', overlay: 'profiles' },
   },
   {
     name: 'settings',
@@ -236,7 +242,7 @@ function renderCommandResult(result: CommandResult): string {
   if (result.type === 'open-overlay') return `Open overlay: ${result.overlay}`;
   if (result.type === 'runtime-action')
     return `Runtime action: ${result.action}`;
-  if (result.type === 'set-model') return `Switch model: ${result.model}`;
+  if (result.type === 'set-profile') return `Switch profile: ${result.profile}`;
   if (result.type === 'set-permission-mode')
     return `Set permission mode: ${result.mode}`;
   return result.prompt;

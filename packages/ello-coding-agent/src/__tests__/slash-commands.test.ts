@@ -5,26 +5,35 @@ import type { JsonlSessionSummary } from '../session/repository.js';
 import { handleSlashCommand } from '../slash-commands.js';
 
 describe('slash commands', () => {
-  it('opens the model selector when /model has no argument', async () => {
-    const config = await loadCodingAgentConfig({ model: 'fake:one' });
+  it('opens the model catalog with /models', async () => {
+    const config = await loadCodingAgentConfig();
 
-    expect(handleSlashCommand('/model', config).command).toEqual({
+    expect(handleSlashCommand('/models', config).command).toEqual({
       type: 'open-overlay',
-      overlay: 'model-selector',
+      overlay: 'models',
     });
   });
 
-  it('sets the model when /model receives an argument', async () => {
-    const config = await loadCodingAgentConfig({ model: 'fake:one' });
+  it('sets the active profile when /profiles receives an argument', async () => {
+    const config = await loadCodingAgentConfig();
 
-    expect(handleSlashCommand('/model fake:two', config).command).toEqual({
-      type: 'set-model',
-      model: 'fake:two',
+    expect(handleSlashCommand('/profiles main', config).command).toEqual({
+      type: 'set-profile',
+      profile: 'main',
+    });
+  });
+
+  it('does not keep the removed /model command', async () => {
+    const config = await loadCodingAgentConfig();
+
+    expect(handleSlashCommand('/model', config)).toMatchObject({
+      handled: true,
+      output: 'Unknown command: /model',
     });
   });
 
   it('opens implemented TUI overlays for settings and session tree', async () => {
-    const config = await loadCodingAgentConfig({ model: 'fake:one' });
+    const config = await loadCodingAgentConfig();
 
     expect(handleSlashCommand('/settings', config).command).toEqual({
       type: 'open-overlay',

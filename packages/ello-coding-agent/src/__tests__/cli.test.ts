@@ -1,6 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildProgram, type CliIo } from '../cli/main.js';
+
+const dirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
+});
 
 /** 收集 stdout/stderr 的假 IO。 */
 function fakeIo(): { io: CliIo; out: () => string; err: () => string } {
@@ -25,9 +37,18 @@ describe('cli buildProgram', () => {
   });
 
   it('prints merged config as JSON with --json config get', async () => {
+    const cwd = await tempDir();
     const { io, out } = fakeIo();
-    await buildProgram(io).parseAsync(['config', 'get'], { from: 'user' });
-    const parsed = JSON.parse(out()) as { model: string };
-    expect(typeof parsed.model).toBe('string');
+    await buildProgram(io).parseAsync(['--cwd', cwd, 'config', 'get'], {
+      from: 'user',
+    });
+    const parsed = JSON.parse(out()) as { active_profile: string };
+    expect(parsed.active_profile).toBe('main');
   });
 });
+
+async function tempDir(): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), 'ello-cli-'));
+  dirs.push(dir);
+  return dir;
+}

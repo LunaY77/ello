@@ -4,7 +4,18 @@ import path from 'node:path';
 import { useApp, useInput } from 'ink';
 import { useEffect, useMemo, useState } from 'react';
 
-import type { CodingAgentConfig } from '../config/index.js';
+import {
+  deleteConfigValues,
+  setConfigValue,
+  type CodingAgentConfig,
+  type ProfileSuiteConfig,
+} from '../config/index.js';
+import {
+  createProviderRegistry,
+  type ModelRole,
+  type RuntimeModel,
+  type RuntimeProfileSuite,
+} from '../provider/index.js';
 import type { CodingSession, ApprovalDecision } from '../runtime/index.js';
 import { loadCodingSkills } from '../skills/index.js';
 import { handleSlashCommand, type CommandResult } from '../slash-commands.js';
@@ -14,6 +25,7 @@ import { WorkspaceStore } from '../workspace/index.js';
 import { completeInput } from './completion.js';
 import { AppShell } from './components/AppShell.js';
 import { Composer } from './components/Composer.js';
+import type { SelectOption } from './components/InlineSelect.js';
 import { useRuntimeEvents } from './hooks/use-runtime-events.js';
 import { OverlayHost, type OverlayState } from './overlays/OverlayHost.js';
 
@@ -31,21 +43,33 @@ export interface CodingAgentAppProps {
 export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   const { exit } = useApp();
   const { state, pushUser } = useRuntimeEvents(session);
+  const [runtimeConfig, setRuntimeConfig] = useState(config);
   const [overlay, setOverlay] = useState<OverlayState>({ type: 'none' });
   const [input, setInput] = useState('');
-  const [model, setModel] = useState(config.model);
+  const [profile, setProfile] = useState(runtimeConfig.active_profile);
+  const [primaryModel, setPrimaryModel] = useState(() =>
+    currentPrimaryModel(runtimeConfig),
+  );
   const [fileSuggestions, setFileSuggestions] = useState<readonly string[]>([]);
   const [workingSeconds, setWorkingSeconds] = useState(0);
   const [lastWorkedFor, setLastWorkedFor] = useState<string | undefined>();
   const [inputHistory, setInputHistory] = useState<readonly string[]>([]);
   const [pendingSteers, setPendingSteers] = useState<readonly string[]>([]);
   const shouldCompleteFiles = input.trimStart().startsWith('@');
-  const modelSelections = useMemo(
+  const profileOptions = useMemo(
+    () => buildProfileSelectorOptions(runtimeConfig),
+    [runtimeConfig],
+  );
+  const modelCatalogOptions = useMemo(
+    () => buildModelCatalogOptions(runtimeConfig),
+    [runtimeConfig],
+  );
+  const profileSelections = useMemo(
     () =>
-      Object.keys(config.model_profiles).length > 0
-        ? Object.keys(config.model_profiles)
-        : config.modelCandidates,
-    [config.modelCandidates, config.model_profiles],
+      profileOptions
+        .filter((option) => option.disabled !== true)
+        .map((option) => option.value),
+    [profileOptions],
   );
 
   // 审批是最高优先级浮层：pendingApproval 一来就盖过其它浮层。
@@ -97,21 +121,24 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   const runCommand = (command: CommandResult): void => {
     switch (command.type) {
       case 'open-overlay':
-        if (command.overlay === 'model-selector') {
+        if (command.overlay === 'profiles') {
+          openProfiles();
+        } else if (command.overlay === 'models') {
           setOverlay({
-            type: 'model-selector',
-            models: modelSelections,
+            type: 'models',
+            title: `Select primary model for profile.${runtimeConfig.active_profile}.models.primary`,
+            options: modelCatalogOptions,
           });
         } else if (command.overlay === 'help') {
           setOverlay({ type: 'help' });
         } else if (command.overlay === 'settings') {
-          setOverlay({ type: 'settings', config: { ...config, model } });
+          setOverlay({ type: 'settings', config: runtimeConfig });
         } else if (command.overlay === 'tasks') {
           void createTaskService()
             .list()
             .then((tasks) => setOverlay({ type: 'tasks', tasks }));
         } else if (command.overlay === 'skills') {
-          void loadCodingSkills(config).then((skills) =>
+          void loadCodingSkills(runtimeConfig).then((skills) =>
             setOverlay({ type: 'skills', skills }),
           );
         } else if (command.overlay === 'workspace') {
@@ -156,10 +183,8 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         pushUser(command.prompt);
         void session.submit(command.prompt);
         return;
-      case 'set-model':
-        void session
-          .setModel(command.model)
-          .then(() => setModel(command.model));
+      case 'set-profile':
+        applyProfileSelection(command.profile);
         return;
       case 'message':
         session.notify(command.message);
@@ -185,7 +210,7 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
       void submitFileReference(prompt);
       return;
     }
-    const slash = handleSlashCommand(prompt, config);
+    const slash = handleSlashCommand(prompt, runtimeConfig);
     if (slash.handled) {
       if (slash.command !== undefined) {
         runCommand(slash.command);
@@ -217,7 +242,7 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
 
   async function submitFileReference(prompt: string): Promise<void> {
     try {
-      const expanded = await expandFileReference(prompt, config.cwd);
+      const expanded = await expandFileReference(prompt, runtimeConfig.cwd);
       pushUser(prompt);
       void session.submit(expanded);
     } catch (error) {
@@ -228,6 +253,22 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   }
 
   function cancelOrExit(): void {
+    if (effectiveOverlay.type === 'profile-detail') {
+      openProfiles();
+      return;
+    }
+    if (effectiveOverlay.type === 'profile-create') {
+      openProfiles();
+      return;
+    }
+    if (effectiveOverlay.type === 'profile-delete-confirm') {
+      openProfiles();
+      return;
+    }
+    if (effectiveOverlay.type === 'profile-model-catalog') {
+      openProfileDetail(effectiveOverlay.target.profileName);
+      return;
+    }
     if (
       effectiveOverlay.type !== 'none' &&
       effectiveOverlay.type !== 'approval'
@@ -245,6 +286,22 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   }
 
   function escapeOverlayOrAbort(): void {
+    if (effectiveOverlay.type === 'profile-detail') {
+      openProfiles();
+      return;
+    }
+    if (effectiveOverlay.type === 'profile-create') {
+      openProfiles();
+      return;
+    }
+    if (effectiveOverlay.type === 'profile-delete-confirm') {
+      openProfiles();
+      return;
+    }
+    if (effectiveOverlay.type === 'profile-model-catalog') {
+      openProfileDetail(effectiveOverlay.target.profileName);
+      return;
+    }
     if (
       effectiveOverlay.type !== 'none' &&
       effectiveOverlay.type !== 'approval'
@@ -274,7 +331,7 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   async function exportCurrentSession(formatArg: string | undefined) {
     const format = formatArg === 'html' ? 'html' : 'jsonl';
     const content = await session.exportSession(format);
-    const exportDir = path.join(config.cwd, '.ello', 'exports');
+    const exportDir = path.join(runtimeConfig.cwd, '.ello', 'exports');
     await mkdir(exportDir, { recursive: true });
     const target = path.join(exportDir, `session-${Date.now()}.${format}`);
     await writeFile(target, content, 'utf8');
@@ -287,21 +344,268 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
     );
   }
 
+  function applyProfileSelection(selection: string): void {
+    void session
+      .setProfile(selection)
+      .then((resolvedPrimary) => {
+        const next = {
+          ...runtimeConfig,
+          active_profile: selection,
+        };
+        setProfile(selection);
+        setPrimaryModel(resolvedPrimary);
+        setRuntimeConfig(next);
+        openProfileDetail(selection, next);
+      })
+      .catch((error) => {
+        session.notify(
+          `Profile selection failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  function applyPrimaryModelSelection(selection: string): void {
+    void session
+      .setPrimaryModel(selection)
+      .then((resolvedPrimary) => {
+        setPrimaryModel(resolvedPrimary);
+        setRuntimeConfig((current) =>
+          bindRoleInConfig(
+            current,
+            current.active_profile,
+            'primary',
+            resolvedPrimary,
+          ),
+        );
+      })
+      .catch((error) => {
+        session.notify(
+          `Model selection failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  function applyProfileRoleModelSelection(
+    profileName: string,
+    role: ModelRole,
+    selection: string,
+  ): void {
+    void session
+      .setProfileRoleModel(profileName, role, selection)
+      .then((resolvedModel) => {
+        const next = bindRoleInConfig(
+          runtimeConfig,
+          profileName,
+          role,
+          resolvedModel,
+        );
+        setRuntimeConfig(next);
+        if (profileName === next.active_profile && role === 'primary') {
+          setPrimaryModel(resolvedModel);
+        }
+        openProfileDetail(profileName, next);
+      })
+      .catch((error) => {
+        session.notify(
+          `Model binding failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  function openProfiles(): void {
+    openProfilesFrom(runtimeConfig);
+  }
+
+  function openProfilesFrom(sourceConfig: CodingAgentConfig): void {
+    setOverlay({
+      type: 'profiles',
+      options: buildProfileSelectorOptions(sourceConfig),
+    });
+  }
+
+  function openCreateProfile(sourceProfile: string): void {
+    setOverlay({
+      type: 'profile-create',
+      sourceProfile,
+    });
+  }
+
+  function openProfileDetail(
+    profileName: string,
+    sourceConfig = runtimeConfig,
+  ): void {
+    const registry = createProviderRegistry(sourceConfig);
+    const selected = registry.getProfile(profileName);
+    setOverlay({
+      type: 'profile-detail',
+      profile: selected,
+      options: buildProfileRoleOptions(sourceConfig, selected),
+    });
+  }
+
+  function openRoleModelCatalog(profileName: string, role: ModelRole): void {
+    setOverlay({
+      type: 'profile-model-catalog',
+      target: { profileName, role },
+      options: modelCatalogOptions,
+    });
+  }
+
+  function saveProfile(profileName: string): void {
+    const profileConfig = runtimeConfig.profile[profileName];
+    if (profileConfig === undefined) {
+      session.notify(`Unknown profile: ${profileName}`);
+      return;
+    }
+    void setConfigValue(
+      runtimeConfig.cwd,
+      'global',
+      `profile.${profileName}`,
+      profileConfig,
+    )
+      .then((nextConfig) => {
+        setRuntimeConfig(nextConfig);
+        session.notify(`Profile saved: ${profileName}`);
+      })
+      .catch((error) => {
+        session.notify(
+          `Profile save failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  function createProfile(
+    profileNameInput: string,
+    sourceProfile: string,
+  ): void {
+    const profileName = profileNameInput.trim();
+    if (!isProfileName(profileName)) {
+      session.notify(
+        'Profile name must contain only letters, numbers, underscores, and hyphens.',
+      );
+      return;
+    }
+    const source = runtimeConfig.profile[sourceProfile];
+    if (source === undefined) {
+      session.notify(`Unknown source profile: ${sourceProfile}`);
+      return;
+    }
+    if (runtimeConfig.profile[profileName] !== undefined) {
+      session.notify(`Profile already exists: ${profileName}`);
+      return;
+    }
+    const nextProfile: ProfileSuiteConfig = cloneProfileConfig({
+      ...source,
+      label: profileName,
+      description: `基于 ${sourceProfile} 创建。`,
+    });
+    void session
+      .createProfile(profileName, sourceProfile)
+      .then(() =>
+        setConfigValue(
+          runtimeConfig.cwd,
+          'global',
+          `profile.${profileName}`,
+          nextProfile,
+        ),
+      )
+      .then((nextConfig) => {
+        setRuntimeConfig(nextConfig);
+        openProfileDetail(profileName, nextConfig);
+      })
+      .catch((error) => {
+        session.notify(
+          `Profile create failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  function requestDeleteProfile(profileName: string): void {
+    if (profileName === runtimeConfig.active_profile) {
+      session.notify(`Cannot delete active profile: ${profileName}`);
+      return;
+    }
+    if (runtimeConfig.profile[profileName] === undefined) {
+      session.notify(`Unknown profile: ${profileName}`);
+      return;
+    }
+    setOverlay({
+      type: 'profile-delete-confirm',
+      profile: profileName,
+    });
+  }
+
+  function deleteProfile(profileName: string): void {
+    if (profileName === runtimeConfig.active_profile) {
+      session.notify(`Cannot delete active profile: ${profileName}`);
+      return;
+    }
+    if (runtimeConfig.profile[profileName] === undefined) {
+      session.notify(`Unknown profile: ${profileName}`);
+      return;
+    }
+    if (Object.keys(runtimeConfig.profile).length <= 1) {
+      session.notify('Cannot delete the final profile.');
+      return;
+    }
+    void session
+      .deleteProfile(profileName)
+      .then(() =>
+        deleteConfigValues(runtimeConfig.cwd, 'global', [
+          `profile.${profileName}`,
+        ]),
+      )
+      .then((nextConfig) => {
+        setRuntimeConfig(nextConfig);
+        openProfilesFrom(nextConfig);
+      })
+      .catch((error) => {
+        session.notify(
+          `Profile delete failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  function activateProfile(profileName: string): void {
+    void session
+      .setProfile(profileName)
+      .then((resolvedPrimary) =>
+        setConfigValue(
+          runtimeConfig.cwd,
+          'global',
+          'active_profile',
+          profileName,
+        ).then((nextConfig) => ({ nextConfig, resolvedPrimary })),
+      )
+      .then(({ nextConfig, resolvedPrimary }) => {
+        setProfile(profileName);
+        setPrimaryModel(resolvedPrimary);
+        setRuntimeConfig(nextConfig);
+        openProfilesFrom(nextConfig);
+        session.notify(`Active profile set: ${profileName}`);
+      })
+      .catch((error) => {
+        session.notify(
+          `Set active profile failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
   const runningTools = useMemo(
     () => [...state.runningTools.values()],
     [state.runningTools],
   );
 
   const suggestions = useMemo(
-    () => completeInput(input, modelSelections, fileSuggestions),
-    [fileSuggestions, input, modelSelections],
+    () => completeInput(input, profileSelections, fileSuggestions),
+    [fileSuggestions, input, profileSelections],
   );
 
   return (
     <AppShell
-      cwd={config.cwd}
-      model={model}
-      approvalMode={config.approvalMode}
+      cwd={runtimeConfig.cwd}
+      profile={`${profile} / ${primaryModel}`}
+      approvalMode={runtimeConfig.approvalMode}
       transcript={state.transcript}
       liveAssistantText={state.liveAssistantText}
       runningTools={runningTools}
@@ -325,8 +629,20 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
           onApprove={onApprove}
           onSelectModel={(selected) => {
             setOverlay({ type: 'none' });
-            void session.setModel(selected).then(() => setModel(selected));
+            applyPrimaryModelSelection(selected);
           }}
+          onSelectProfile={(selected) => {
+            openProfileDetail(selected);
+          }}
+          onCreateProfile={openCreateProfile}
+          onRequestDeleteProfile={requestDeleteProfile}
+          onConfirmDeleteProfile={deleteProfile}
+          onActivateProfile={activateProfile}
+          onSubmitNewProfile={createProfile}
+          onSelectProfileRole={openRoleModelCatalog}
+          onBindProfileRoleModel={applyProfileRoleModelSelection}
+          onOpenProfiles={openProfiles}
+          onSaveProfile={saveProfile}
           onSelectSession={onSelectSession}
           onCheckout={onCheckout}
         />
@@ -339,8 +655,20 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
             onApprove={onApprove}
             onSelectModel={(selected) => {
               setOverlay({ type: 'none' });
-              void session.setModel(selected).then(() => setModel(selected));
+              applyPrimaryModelSelection(selected);
             }}
+            onSelectProfile={(selected) => {
+              openProfileDetail(selected);
+            }}
+            onCreateProfile={openCreateProfile}
+            onRequestDeleteProfile={requestDeleteProfile}
+            onConfirmDeleteProfile={deleteProfile}
+            onActivateProfile={activateProfile}
+            onSubmitNewProfile={createProfile}
+            onSelectProfileRole={openRoleModelCatalog}
+            onBindProfileRoleModel={applyProfileRoleModelSelection}
+            onOpenProfiles={openProfiles}
+            onSaveProfile={saveProfile}
             onSelectSession={onSelectSession}
             onCheckout={onCheckout}
           />
@@ -370,6 +698,121 @@ function formatDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+function currentPrimaryModel(config: CodingAgentConfig): string {
+  const registry = createProviderRegistry(config);
+  return registry.resolveRole(config.active_profile, 'primary').ref;
+}
+
+const profileRoleOrder: readonly ModelRole[] = [
+  'primary',
+  'small',
+  'summary',
+  'title',
+  'review',
+];
+
+function buildProfileRoleOptions(
+  config: CodingAgentConfig,
+  profile: RuntimeProfileSuite,
+): readonly SelectOption[] {
+  const registry = createProviderRegistry(config);
+  return profileRoleOrder.map((role) => {
+    const model = registry.getModel(profile.models[role]);
+    return {
+      value: role,
+      label: `${role.padEnd(8)} ${model.ref.padEnd(31)} ${String(model.limit.context).padEnd(10)} ${String(model.limit.output).padEnd(8)}`,
+    };
+  });
+}
+
+function bindRoleInConfig(
+  config: CodingAgentConfig,
+  profileName: string,
+  role: ModelRole,
+  modelReference: string,
+): CodingAgentConfig {
+  const profile = config.profile[profileName];
+  if (profile === undefined) {
+    throw new Error(`Unknown profile: ${profileName}`);
+  }
+  return {
+    ...config,
+    profile: {
+      ...config.profile,
+      [profileName]: {
+        ...profile,
+        models: {
+          ...profile.models,
+          [role]: modelReference,
+        },
+      },
+    },
+  };
+}
+
+export function buildProfileSelectorOptions(
+  config: CodingAgentConfig,
+): readonly SelectOption[] {
+  const registry = createProviderRegistry(config);
+  const options: SelectOption[] = [];
+  const profiles = registry.listProfiles();
+  options.push(groupOption('Profiles'));
+  for (const profile of profiles) {
+    options.push(profileOption(profile, config));
+  }
+  return options;
+}
+
+export function buildModelCatalogOptions(
+  config: CodingAgentConfig,
+): readonly SelectOption[] {
+  const registry = createProviderRegistry(config);
+  const options: SelectOption[] = [];
+  const providers = registry
+    .listProviders()
+    .filter(
+      (provider) =>
+        provider.enabled && registry.listModels(provider.id).length > 0,
+    );
+  for (const provider of providers) {
+    options.push(groupOption(provider.name));
+    for (const model of registry.listModels(provider.id)) {
+      options.push(modelOption(model));
+    }
+  }
+  return options;
+}
+
+function groupOption(label: string): SelectOption {
+  return {
+    label,
+    value: `group:${label}`,
+    disabled: true,
+  };
+}
+
+function profileOption(
+  profile: RuntimeProfileSuite,
+  config: CodingAgentConfig,
+): SelectOption {
+  const markers = [
+    profile.name === config.active_profile ? 'active' : null,
+  ].filter((item): item is string => item !== null);
+  const label = profile.label ?? profile.name;
+  const description = profile.description ?? '';
+  return {
+    label: `  ${profile.name}${markers.length > 0 ? ` [${markers.join(', ')}]` : ''}  ${label}${description.length > 0 ? `  ${description}` : ''}`,
+    value: profile.name,
+  };
+}
+
+function modelOption(model: RuntimeModel): SelectOption {
+  return {
+    label: `  ${model.ref}  ctx ${model.limit.context} / out ${model.limit.output}`,
+    value: model.ref,
+  };
 }
 
 async function completeFiles(
@@ -442,4 +885,12 @@ function isInside(root: string, target: string): boolean {
     relative === '' ||
     (!relative.startsWith('..') && !path.isAbsolute(relative))
   );
+}
+
+function isProfileName(value: string): boolean {
+  return /^[A-Za-z0-9_-]+$/u.test(value);
+}
+
+function cloneProfileConfig(profile: ProfileSuiteConfig): ProfileSuiteConfig {
+  return structuredClone(profile) as ProfileSuiteConfig;
 }

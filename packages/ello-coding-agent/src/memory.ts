@@ -77,9 +77,9 @@ export function renderMemoryForPrompt(
   cwd: string,
 ): string {
   const fileSections = manifest.files.map((file) => {
-      const displayPath = path.relative(cwd, file.path) || file.path;
-      return `# ${displayPath} (${file.scope})\n\n${file.content}`;
-    });
+    const displayPath = path.relative(cwd, file.path) || file.path;
+    return `# ${displayPath} (${file.scope})\n\n${file.content}`;
+  });
   const dbSections = manifest.items.map(
     (item) =>
       `# global memory:${item.kind} (${item.source})\n\n${item.content}`,

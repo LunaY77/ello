@@ -36,7 +36,11 @@ describe('global coding storage', () => {
       await expect(access(globalStateDatabasePath())).resolves.toBeUndefined();
       expect(db.$client.pragma('foreign_keys', { simple: true })).toBe(1);
       expect(db.$client.pragma('busy_timeout', { simple: true })).toBe(5000);
-      expect(String(db.$client.pragma('journal_mode', { simple: true })).toLowerCase()).toBe('wal');
+      expect(
+        String(
+          db.$client.pragma('journal_mode', { simple: true }),
+        ).toLowerCase(),
+      ).toBe('wal');
     } finally {
       closeCodingDatabase(db);
     }

@@ -4,7 +4,7 @@ import { Box, Text } from 'ink';
 import { tokyoNight } from '../tokyo-night.js';
 
 export interface FooterProps {
-  readonly model: string;
+  readonly profile: string;
   readonly approvalMode: string;
   readonly usage?: AgentUsage;
   /** 上下文窗口占用比例（0~1），用于粗略展示预算。 */
@@ -14,7 +14,7 @@ export interface FooterProps {
 /**
  * 底部状态栏。
  *
- * 展示 model / token 用量 / 上下文占用和审批模式。
+ * 展示 profile / token 用量 / 上下文占用和审批模式。
  */
 export function Footer(props: FooterProps) {
   const tokens =
@@ -24,7 +24,7 @@ export function Footer(props: FooterProps) {
   return (
     <Box width="100%" justifyContent="space-between" paddingX={1} marginTop={1}>
       <Box gap={1} flexShrink={0}>
-        <Text color={tokyoNight.muted}>{props.model}</Text>
+        <Text color={tokyoNight.muted}>{props.profile}</Text>
         <Text color={approvalColor(props.approvalMode)}>
           {`[${props.approvalMode}]`}
         </Text>

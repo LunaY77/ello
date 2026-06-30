@@ -105,18 +105,22 @@ describe('workspace helpers', () => {
     ]);
     expect(created.kind).toBe('explore');
     expect(created.repos[0]?.key).toBe('demo2');
-    await expect(access(workspaceManifestPath(created.rootPath))).rejects.toThrow();
-    await expect(access(workspaceYamlManifestPath(created.rootPath))).rejects.toThrow();
+    await expect(
+      access(workspaceManifestPath(created.rootPath)),
+    ).rejects.toThrow();
+    await expect(
+      access(workspaceYamlManifestPath(created.rootPath)),
+    ).rejects.toThrow();
     expect(await workspaces.open('explore', 'inspect-demo')).toMatchObject({
       kind: 'explore',
       name: 'inspect-demo',
     });
     expect(
       await readFile(
-        path.join(created.repos[0]!.path, '.ello', 'workspace.toml'),
+        path.join(created.repos[0]!.path, '.ello', 'workspace.yaml'),
         'utf8',
       ),
-    ).toContain('repoKey = "demo2"');
+    ).toContain('repoKey: demo2');
 
     await writeFile(
       path.join(created.repos[0]!.path, 'dirty.txt'),

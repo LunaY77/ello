@@ -8,11 +8,11 @@ export function completeInput(
   files: readonly string[],
 ): readonly ComposerSuggestion[] | undefined {
   const trimmedLeft = input.trimStart();
-  if (trimmedLeft.startsWith('/model ')) {
-    const query = trimmedLeft.slice('/model '.length).toLowerCase();
+  if (trimmedLeft.startsWith('/profiles ')) {
+    const query = trimmedLeft.slice('/profiles '.length).toLowerCase();
     return models
       .filter((item) => item.toLowerCase().includes(query))
-      .map((item) => `/model ${item}`);
+      .map((item) => `/profiles ${item}`);
   }
   if (trimmedLeft.startsWith('/')) {
     const query = trimmedLeft.slice(1).toLowerCase();

@@ -25,7 +25,9 @@ import {
  * 这样 rollback/list/detail 可以结构化查询，同时避免把代码快照直接塞进 SQLite。
  */
 export class CheckpointRepository {
-  constructor(private readonly db: CodingDatabase = openGlobalCodingDatabaseSync()) {}
+  constructor(
+    private readonly db: CodingDatabase = openGlobalCodingDatabaseSync(),
+  ) {}
 
   async seal(input: {
     readonly runId: string;
@@ -147,7 +149,10 @@ export class CheckpointRepository {
   async markRolledBack(
     checkpointId: string,
     status: 'completed' | 'failed',
-    input: { readonly runId?: string | undefined; readonly errorMessage?: string | undefined } = {},
+    input: {
+      readonly runId?: string | undefined;
+      readonly errorMessage?: string | undefined;
+    } = {},
   ): Promise<void> {
     const now = new Date().toISOString();
     transaction(this.db, () => {

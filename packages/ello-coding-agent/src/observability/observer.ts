@@ -20,14 +20,17 @@ import { UsageRepository } from '../storage/repositories/usage-repository.js';
  *
  * 被动原则：observer 抛错绝不能影响 agent 执行，所有写日志的失败都被吞掉。
  */
-export function createCodingObserver(config: CodingAgentConfig): AgentObserver {
+export function createCodingObserver(
+  config: CodingAgentConfig,
+  runtime: { readonly model: string },
+): AgentObserver {
   const file = path.join(logsDir(), 'coding-agent.ndjson');
   const starts = new Map<string, string>();
   const log = (event: string, data: Record<string, unknown>): void => {
     void writeLine(file, {
       ts: new Date().toISOString(),
       event,
-      model: config.model,
+      model: runtime.model,
       ...data,
     });
   };
@@ -53,6 +56,7 @@ export function createCodingObserver(config: CodingAgentConfig): AgentObserver {
       });
       void recordUsageSafe(config, {
         runId: result.id,
+        model: runtime.model,
         status: 'completed',
         finishReason: result.finishReason,
         usage: result.usage,
@@ -64,6 +68,7 @@ export function createCodingObserver(config: CodingAgentConfig): AgentObserver {
       log('run.failed', { error: event.error.message });
       void recordUsageSafe(config, {
         runId: ctx.runId,
+        model: runtime.model,
         status: 'failed',
         startedAt: starts.get(ctx.runId),
       });
@@ -101,6 +106,7 @@ async function recordUsageSafe(
   config: CodingAgentConfig,
   input: {
     readonly runId: string;
+    readonly model: string;
     readonly status: 'completed' | 'failed';
     readonly finishReason?: string | undefined;
     readonly usage?: AgentUsage | undefined;
@@ -112,7 +118,7 @@ async function recordUsageSafe(
     await repository.recordUsage({
       runId: input.runId,
       invocation: config.tui ? 'tui' : 'run',
-      model: config.model,
+      model: input.model,
       status: input.status,
       finishReason: input.finishReason,
       usage: input.usage,

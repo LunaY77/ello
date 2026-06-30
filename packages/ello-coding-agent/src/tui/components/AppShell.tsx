@@ -10,7 +10,7 @@ import { ToolCard } from './ToolCard.js';
 
 export interface AppShellProps {
   readonly cwd: string;
-  readonly model: string;
+  readonly profile: string;
   readonly approvalMode: string;
   readonly transcript: readonly TranscriptItem[];
   readonly liveAssistantText: string;
@@ -43,7 +43,7 @@ export function AppShell(props: AppShellProps) {
   const hero = {
     id: 'hero',
     cwd: props.cwd,
-    model: props.model,
+    profile: props.profile,
     approvalMode: props.approvalMode,
     running: props.running,
     version: props.version,
@@ -56,7 +56,7 @@ export function AppShell(props: AppShellProps) {
           <HeroPanel
             key={item.id}
             cwd={item.cwd}
-            model={item.model}
+            profile={item.profile}
             approvalMode={item.approvalMode}
             running={item.running}
             {...(item.version !== undefined ? { version: item.version } : {})}
@@ -112,7 +112,7 @@ export function AppShell(props: AppShellProps) {
 
       <Box>
         <Footer
-          model={props.model}
+          profile={props.profile}
           approvalMode={props.approvalMode}
           {...(props.usage !== undefined ? { usage: props.usage } : {})}
         />
@@ -141,7 +141,7 @@ function PendingSteers({ prompts }: { readonly prompts: readonly string[] }) {
 
 function HeroPanel(props: {
   readonly cwd: string;
-  readonly model: string;
+  readonly profile: string;
   readonly approvalMode: string;
   readonly running: boolean;
   readonly version?: string;
@@ -162,9 +162,9 @@ function HeroPanel(props: {
         </Text>
       </Box>
       <Text>
-        <Text color={tokyoNight.muted}>model: </Text>
-        <Text color={tokyoNight.foreground}>{props.model}</Text>
-        <Text color={tokyoNight.muted}> /model to change</Text>
+        <Text color={tokyoNight.muted}>profile: </Text>
+        <Text color={tokyoNight.foreground}>{props.profile}</Text>
+        <Text color={tokyoNight.muted}> /profiles to change</Text>
       </Text>
       <Text>
         <Text color={tokyoNight.muted}>directory: </Text>

@@ -1,8 +1,11 @@
 import type { AgentSkill } from '@ello/agent';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
+import TextInput from 'ink-text-input';
 import type { ReactNode } from 'react';
+import { useState } from 'react';
 
 import type { CodingAgentConfig } from '../../config/index.js';
+import type { ModelRole, RuntimeProfileSuite } from '../../provider/index.js';
 import type { ApprovalDecision } from '../../runtime/intents.js';
 import type {
   JsonlSessionSummary,
@@ -10,20 +13,49 @@ import type {
 } from '../../session/repository.js';
 import type { Task } from '../../tasks/index.js';
 import type { WorkspaceManifest } from '../../workspace/index.js';
-import { InlineSelect } from '../components/InlineSelect.js';
+import { InlineSelect, type SelectOption } from '../components/InlineSelect.js';
 import type { ApprovalView } from '../state/view-reducer.js';
 import { tokyoNight } from '../tokyo-night.js';
 
 /**
  * 浮层状态。
  *
- * v1 保留三类浮层：审批（最高优先级，`approval.pending` 自动弹出）、help、
- * 模型选择。其余浮层（会话树/设置等）留作后续。
+ * 审批浮层由运行态 pending approval 驱动；其它浮层由 slash command 或
+ * Settings 页面显式打开。
  */
 export type OverlayState =
   | { readonly type: 'none' }
   | { readonly type: 'approval'; readonly request: ApprovalView }
-  | { readonly type: 'model-selector'; readonly models: readonly string[] }
+  | {
+      readonly type: 'models';
+      readonly title: string;
+      readonly options: readonly SelectOption[];
+    }
+  | {
+      readonly type: 'profiles';
+      readonly options: readonly SelectOption[];
+    }
+  | {
+      readonly type: 'profile-create';
+      readonly sourceProfile: string;
+    }
+  | {
+      readonly type: 'profile-delete-confirm';
+      readonly profile: string;
+    }
+  | {
+      readonly type: 'profile-detail';
+      readonly profile: RuntimeProfileSuite;
+      readonly options: readonly SelectOption[];
+    }
+  | {
+      readonly type: 'profile-model-catalog';
+      readonly target: {
+        readonly profileName: string;
+        readonly role: ModelRole;
+      };
+      readonly options: readonly SelectOption[];
+    }
   | { readonly type: 'help' }
   | { readonly type: 'settings'; readonly config: CodingAgentConfig }
   | { readonly type: 'skills'; readonly skills: readonly AgentSkill[] }
@@ -53,6 +85,22 @@ export interface OverlayHostProps {
   onApprove(requestId: string, decision: ApprovalDecision): void;
   /** 模型选择回调。 */
   onSelectModel(model: string): void;
+  /** profile suite 选择回调。 */
+  onSelectProfile(profile: string): void;
+  /** profile suite 列表快捷动作。 */
+  onCreateProfile(sourceProfile: string): void;
+  onRequestDeleteProfile(profile: string): void;
+  onConfirmDeleteProfile(profile: string): void;
+  onActivateProfile(profile: string): void;
+  onSubmitNewProfile(name: string, sourceProfile: string): void;
+  /** profile detail 中的 role 选择回调。 */
+  onSelectProfileRole(profile: string, role: ModelRole): void;
+  /** profile role 模型绑定回调。 */
+  onBindProfileRoleModel(profile: string, role: ModelRole, model: string): void;
+  /** 打开 profiles 管理页。 */
+  onOpenProfiles(): void;
+  /** 保存当前 profile suite。 */
+  onSaveProfile(profile: string): void;
   /** session 选择回调。 */
   onSelectSession?(sessionId: string): void;
   /** session tree checkout 回调。 */
@@ -70,9 +118,27 @@ export function OverlayHost({
   marginTop = 1,
   onApprove,
   onSelectModel,
+  onSelectProfile,
+  onCreateProfile,
+  onRequestDeleteProfile,
+  onConfirmDeleteProfile,
+  onActivateProfile,
+  onSubmitNewProfile,
+  onSelectProfileRole,
+  onBindProfileRoleModel,
+  onOpenProfiles,
+  onSaveProfile,
   onSelectSession = () => {},
   onCheckout = () => {},
 }: OverlayHostProps) {
+  useInput(
+    (input) => {
+      if (overlay.type === 'profile-detail' && input === 's') {
+        onSaveProfile(overlay.profile.name);
+      }
+    },
+    { isActive: overlay.type === 'profile-detail' },
+  );
   if (overlay.type === 'none') {
     return null;
   }
@@ -99,21 +165,131 @@ export function OverlayHost({
           />
         </Box>
       ) : null}
-      {overlay.type === 'model-selector' ? (
+      {overlay.type === 'models' ? (
         <Box
           flexDirection="column"
           borderStyle="round"
           borderColor={tokyoNight.blue}
           paddingX={1}
         >
-          <Text color={tokyoNight.cyan}>Select model profile</Text>
+          <Text color={tokyoNight.cyan}>{overlay.title}</Text>
+          <Text color={tokyoNight.muted}>Model catalog</Text>
+          <InlineSelect options={overlay.options} onChange={onSelectModel} />
+          <Text color={tokyoNight.muted}>Enter: select Esc: cancel</Text>
+        </Box>
+      ) : null}
+      {overlay.type === 'profiles' ? (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor={tokyoNight.blue}
+          paddingX={1}
+        >
+          <Text color={tokyoNight.cyan}>Settings / Profiles</Text>
           <InlineSelect
-            options={overlay.models.map((model) => ({
-              label: model,
-              value: model,
-            }))}
-            onChange={onSelectModel}
+            options={overlay.options}
+            onChange={onSelectProfile}
+            onShortcut={(input, profile) => {
+              if (input === 'c') {
+                onCreateProfile(profile);
+              } else if (input === 'd') {
+                onRequestDeleteProfile(profile);
+              } else if (input === 'f') {
+                onActivateProfile(profile);
+              }
+            }}
           />
+          <Text color={tokyoNight.muted}>
+            Enter: open profile c: create d: delete f: active Esc: close
+          </Text>
+        </Box>
+      ) : null}
+      {overlay.type === 'profile-create' ? (
+        <ProfileCreatePanel
+          sourceProfile={overlay.sourceProfile}
+          onSubmit={onSubmitNewProfile}
+        />
+      ) : null}
+      {overlay.type === 'profile-delete-confirm' ? (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor={tokyoNight.red}
+          paddingX={1}
+        >
+          <Text color={tokyoNight.red}>Delete profile</Text>
+          <Text color={tokyoNight.foreground}>
+            {`Profile: ${overlay.profile}`}
+          </Text>
+          <InlineSelect
+            options={[
+              { value: 'delete', label: 'Delete' },
+              { value: 'cancel', label: 'Cancel' },
+            ]}
+            onChange={(value) => {
+              if (value === 'delete') {
+                onConfirmDeleteProfile(overlay.profile);
+              } else {
+                onOpenProfiles();
+              }
+            }}
+          />
+          <Text color={tokyoNight.muted}>Enter: confirm Esc: cancel</Text>
+        </Box>
+      ) : null}
+      {overlay.type === 'profile-detail' ? (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor={tokyoNight.blue}
+          paddingX={1}
+        >
+          <Text
+            color={tokyoNight.cyan}
+          >{`Profile: ${overlay.profile.name}`}</Text>
+          <Text color={tokyoNight.foreground}>
+            {`Label: ${overlay.profile.label ?? overlay.profile.name}`}
+          </Text>
+          <Text color={tokyoNight.foreground} wrap="wrap">
+            {`Description: ${overlay.profile.description ?? ''}`}
+          </Text>
+          <Box marginTop={1} flexDirection="column">
+            <Text color={tokyoNight.muted}>Role bindings</Text>
+            <Text color={tokyoNight.muted}>Role Model Context Output</Text>
+            <InlineSelect
+              options={overlay.options}
+              onChange={(role) =>
+                onSelectProfileRole(overlay.profile.name, role as ModelRole)
+              }
+            />
+          </Box>
+          <Text color={tokyoNight.muted}>
+            Enter: change model s: save Esc: back
+          </Text>
+        </Box>
+      ) : null}
+      {overlay.type === 'profile-model-catalog' ? (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor={tokyoNight.blue}
+          paddingX={1}
+        >
+          <Text color={tokyoNight.cyan}>
+            {`Select model for profile.${overlay.target.profileName}.models.${overlay.target.role}`}
+          </Text>
+          <Text color={tokyoNight.muted}>Model catalog</Text>
+          <InlineSelect
+            options={overlay.options}
+            onChange={(model) =>
+              onBindProfileRoleModel(
+                overlay.target.profileName,
+                overlay.target.role,
+                model,
+              )
+            }
+          />
+          <Text color={tokyoNight.muted}>Enter: bind Esc: cancel</Text>
         </Box>
       ) : null}
       {overlay.type === 'help' ? (
@@ -125,7 +301,7 @@ export function OverlayHost({
         >
           <Text color={tokyoNight.cyan}>Commands</Text>
           <Text color={tokyoNight.foreground} wrap="wrap">
-            /help /model /new /tools /permissions /memory /quit
+            /help /models /profiles /new /tools /permissions /memory /quit
           </Text>
           <Text color={tokyoNight.muted}>
             @path attaches files · !cmd runs shell · Esc closes or interrupts
@@ -135,36 +311,25 @@ export function OverlayHost({
       {overlay.type === 'settings' ? (
         <Panel title="Settings" color={tokyoNight.purple}>
           <Text color={tokyoNight.muted}>
-            General / Model / Permissions / Skills / Tasks / Workspace / Display
+            General / Profiles / Permissions / Skills / Tasks / Workspace /
+            Display
           </Text>
+          <InlineSelect
+            options={[{ value: 'profiles', label: 'Profiles' }]}
+            onChange={onOpenProfiles}
+          />
+          <SettingLine label="active" value={overlay.config.active_profile} />
           <SettingLine
-            label="profile"
-            value={overlay.config.model_profile ?? '<direct>'}
+            label="providers"
+            value={`${Object.keys(overlay.config.provider).length}`}
           />
           <SettingLine
-            label="provider"
-            value={overlay.config.model_provider ?? '<default>'}
-          />
-          <SettingLine label="model" value={overlay.config.model} />
-          <SettingLine
-            label="reasoning"
-            value={overlay.config.model_reasoning_effort ?? '<default>'}
-          />
-          <SettingLine
-            label="personality"
-            value={overlay.config.personality ?? '<default>'}
-          />
-          <SettingLine
-            label="base url"
-            value={overlay.config.baseUrl ?? '<default>'}
-          />
-          <SettingLine
-            label="headers"
-            value={`${Object.keys(overlay.config.httpHeaders).length} custom`}
+            label="models"
+            value={`${countModels(overlay.config.models)}`}
           />
           <SettingLine label="sessions" value={overlay.config.sessionDir} />
           <SettingLine label="cwd" value={overlay.config.cwd} />
-          <SettingLine label="write" value=".ello/config.toml" />
+          <SettingLine label="write" value=".ello/config.yaml" />
         </Panel>
       ) : null}
       {overlay.type === 'tasks' ? (
@@ -256,6 +421,36 @@ export function OverlayHost({
   );
 }
 
+function ProfileCreatePanel({
+  sourceProfile,
+  onSubmit,
+}: {
+  readonly sourceProfile: string;
+  onSubmit(name: string, sourceProfile: string): void;
+}) {
+  const [value, setValue] = useState('');
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={tokyoNight.blue}
+      paddingX={1}
+    >
+      <Text color={tokyoNight.cyan}>Create profile</Text>
+      <Text color={tokyoNight.muted}>{`Source: ${sourceProfile}`}</Text>
+      <Box>
+        <Text color={tokyoNight.muted}>Name: </Text>
+        <TextInput
+          value={value}
+          onChange={setValue}
+          onSubmit={(name) => onSubmit(name, sourceProfile)}
+        />
+      </Box>
+      <Text color={tokyoNight.muted}>Enter: create Esc: cancel</Text>
+    </Box>
+  );
+}
+
 function Panel({
   title,
   color,
@@ -275,6 +470,13 @@ function Panel({
       <Text color={color}>{title}</Text>
       {children}
     </Box>
+  );
+}
+
+function countModels(models: CodingAgentConfig['models']): number {
+  return Object.values(models).reduce(
+    (count, entries) => count + Object.keys(entries).length,
+    0,
   );
 }
 

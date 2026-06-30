@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { projectWorkspacePointerPath } from '../config/index.js';
 import { WorkspaceRepository } from '../storage/repositories/workspace-repository.js';
-import { stringifyTomlConfig } from '../utils/toml.js';
+import { stringifyYamlConfig } from '../utils/yaml.js';
 
 import { git } from './git.js';
 import { archiveDir, workspaceDir } from './paths.js';
@@ -41,7 +41,10 @@ export class WorkspaceStore {
       readonly tmuxSession?: string | undefined;
     } = {},
   ): Promise<WorkspaceManifest> {
-    const rootPath = await workspaceDir(validateKind(kindInput), slugify(nameInput));
+    const rootPath = await workspaceDir(
+      validateKind(kindInput),
+      slugify(nameInput),
+    );
     const plan = planWorkspaceCreate({
       kind: kindInput,
       name: nameInput,
@@ -80,7 +83,10 @@ export class WorkspaceStore {
   }
 
   async open(kind: string, name: string): Promise<WorkspaceManifest> {
-    const manifest = await this.repository.open(validateKind(kind), slugify(name));
+    const manifest = await this.repository.open(
+      validateKind(kind),
+      slugify(name),
+    );
     if (manifest === null) {
       throw new Error(`Unknown workspace: ${kind}/${name}`);
     }
@@ -301,7 +307,7 @@ async function writeProjectWorkspacePointer(
       await mkdir(path.join(repo.path, '.ello'), { recursive: true });
       await writeFile(
         projectWorkspacePointerPath(repo.path),
-        stringifyTomlConfig({
+        stringifyYamlConfig({
           name: manifest.name,
           kind: manifest.kind,
           rootPath: manifest.rootPath,

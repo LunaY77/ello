@@ -68,9 +68,7 @@ export const workspaceRepositories = sqliteTable(
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
-  (table) => [
-    primaryKey({ columns: [table.workspaceId, table.repositoryId] }),
-  ],
+  (table) => [primaryKey({ columns: [table.workspaceId, table.repositoryId] })],
 );
 
 /** 显式 sync 的执行记录；sync 只校验/标记漂移，不隐式改真实 worktree。 */

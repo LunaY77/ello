@@ -5,8 +5,8 @@ Use this reference when working on workspace registry or worktree behavior.
 ## Locations
 
 - Global workspace registry: `~/.ello/workspaces`
-- Project workspace pointer: `.ello/workspace.toml`
-- Project config: `.ello/config.toml`
+- Project workspace pointer: `.ello/workspace.yaml`
+- Project config: `.ello/config.yaml`
 
 ## Commands
 

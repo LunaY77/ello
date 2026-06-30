@@ -1,6 +1,6 @@
 ---
 name: workspace
-description: Manage Ello coding-agent repo and workspace state. Use for repo mirrors, workspaces, worktrees, archive/open/list flows, tmux integration, or diagnosing workspace metadata under ~/.ello/workspaces and .ello/workspace.toml.
+description: Manage Ello coding-agent repo and workspace state. Use for repo mirrors, workspaces, worktrees, archive/open/list flows, tmux integration, or diagnosing workspace metadata under ~/.ello/workspaces and .ello/workspace.yaml.
 allowed-tools:
   - bash
   - read
@@ -25,5 +25,5 @@ Use workspace commands and stores as the source of truth for multi-repo organiza
 Read `references/state.md` when changing workspace paths, manifests, or CLI commands.
 
 - Global registry lives under `~/.ello/workspaces`.
-- Project pointer lives at `.ello/workspace.toml`.
+- Project pointer lives at `.ello/workspace.yaml`.
 - Workspace manifests should remain readable and stable across process restarts.

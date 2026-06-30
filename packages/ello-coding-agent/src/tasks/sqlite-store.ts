@@ -5,11 +5,7 @@ import {
   transaction,
   type CodingDatabase,
 } from '../storage/database.js';
-import {
-  taskCounters,
-  taskLinks,
-  tasks,
-} from '../storage/schema.js';
+import { taskCounters, taskLinks, tasks } from '../storage/schema.js';
 
 import type { Task, TaskStore, TaskStatus } from './types.js';
 
@@ -185,7 +181,9 @@ export class SqliteTaskStore implements TaskStore {
 function parseMetadata(text: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(text) as unknown;
-    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+    return parsed !== null &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed)
       ? (parsed as Record<string, unknown>)
       : {};
   } catch {

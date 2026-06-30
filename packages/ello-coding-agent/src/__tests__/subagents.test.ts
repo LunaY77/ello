@@ -5,7 +5,7 @@ import { codingSubagents } from '../subagents/index.js';
 
 describe('coding subagents', () => {
   it('registers the explorer subagent name used by the system prompt', async () => {
-    const config = await loadCodingAgentConfig({ model: 'fake:test' });
+    const config = await loadCodingAgentConfig();
     const subagents = await codingSubagents(config);
     const names = subagents.map((item) => item.name);
 

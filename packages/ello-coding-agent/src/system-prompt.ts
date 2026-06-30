@@ -16,7 +16,10 @@ import { loadProjectInstructions } from './context/sections.js';
  * @param config 已合并的运行时配置，用于注入环境段。
  * @returns 拼接好的多段系统提示词文本。
  */
-export function buildCodingSystemPrompt(config: CodingAgentConfig): string {
+export function buildCodingSystemPrompt(
+  config: CodingAgentConfig,
+  runtime: { readonly model: string },
+): string {
   return [
     identitySection(),
     toneSection(),
@@ -27,7 +30,7 @@ export function buildCodingSystemPrompt(config: CodingAgentConfig): string {
     toolUseSection(),
     securitySection(),
     approvalSection(config),
-    environmentSection(config),
+    environmentSection(config, runtime),
   ].join('\n\n');
 }
 
@@ -174,7 +177,10 @@ function approvalSection(config: CodingAgentConfig): string {
 }
 
 /** 运行环境：把当前会话的可变约束以结构化形式注入。 */
-function environmentSection(config: CodingAgentConfig): string {
+function environmentSection(
+  config: CodingAgentConfig,
+  runtime: { readonly model: string },
+): string {
   const allowed =
     config.allowedPaths.length > 0
       ? config.allowedPaths.join(', ')
@@ -183,7 +189,7 @@ function environmentSection(config: CodingAgentConfig): string {
     '# Environment',
     `- Working directory: ${config.cwd}`,
     `- Writable roots: ${allowed}`,
-    `- Model: ${config.model}`,
+    `- Model: ${runtime.model}`,
     'Stay within the writable roots above unless the user explicitly broadens the scope.',
   ].join('\n');
 }

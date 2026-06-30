@@ -3,7 +3,10 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import Database from 'better-sqlite3';
-import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import {
+  drizzle,
+  type BetterSQLite3Database,
+} from 'drizzle-orm/better-sqlite3';
 
 import { runCodingStorageMigrations } from './migrations.js';
 import { globalStateDatabasePath } from './paths.js';

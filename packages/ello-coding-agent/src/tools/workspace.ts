@@ -164,14 +164,18 @@ export function createWorkspaceTools(approval: ApprovalFor): AnyAgentTool[] {
     }),
     defineTool({
       name: 'workspace_sync',
-      description: 'Check global SQLite workspace records against filesystem/git state.',
+      description:
+        'Check global SQLite workspace records against filesystem/git state.',
       input: z.object({
         fixMissing: z.boolean().optional(),
         prune: z.boolean().optional(),
       }),
       approval: approval('workspace_sync'),
       execute: ({ fixMissing, prune }) =>
-        workspaces.sync({ fixMissing: fixMissing ?? false, prune: prune ?? false }),
+        workspaces.sync({
+          fixMissing: fixMissing ?? false,
+          prune: prune ?? false,
+        }),
     }),
   ] as AnyAgentTool[];
 }

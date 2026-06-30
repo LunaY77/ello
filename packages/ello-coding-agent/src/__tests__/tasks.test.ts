@@ -24,7 +24,7 @@ describe('TaskService', () => {
   it('支持任务 CRUD', async () => {
     const created = await service.create({
       subject: '实现配置初始化',
-      description: '确保 ~/.ello/config.toml 存在',
+      description: '确保 ~/.ello/config.yaml 存在',
     });
 
     expect(created.id).toBe('1');

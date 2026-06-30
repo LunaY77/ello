@@ -68,7 +68,6 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      model: 'fake:test',
       approvalMode: 'default',
     });
     const session = await createCodingSession({
@@ -87,13 +86,76 @@ describe('createCodingSession', () => {
     expect(result.output).toBe('OK');
   });
 
+  it('switches the active profile primary model for the next run', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+    const seenModels: AgentModelRequest['model'][] = [];
+    const adapter: ModelAdapter = {
+      async generate(request) {
+        seenModels.push(request.model);
+        return {
+          text: 'OK',
+          messages: [...request.messages, { role: 'assistant', content: 'OK' }],
+          newMessages: [{ role: 'assistant', content: 'OK' }],
+          usage,
+          finishReason: 'stop',
+          provider: null,
+        };
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
+
+    expect(await session.setPrimaryModel('openai/gpt-5.4')).toBe(
+      'openai/gpt-5.4',
+    );
+    await session.submit('Say OK');
+    await session.close();
+
+    expect(seenModels).toEqual(['openai/gpt-5.4']);
+  });
+
+  it('creates and deletes profile suites in the runtime registry', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: new TextAdapter('OK'),
+    });
+
+    await session.createProfile('fast', 'main');
+    expect(
+      await session.setProfileRoleModel('fast', 'primary', 'openai/gpt-5.4'),
+    ).toBe('openai/gpt-5.4');
+    await session.deleteProfile('fast');
+
+    await expect(
+      session.setProfileRoleModel('fast', 'primary', 'openai/gpt-5.5'),
+    ).rejects.toThrow('Unknown profile: fast');
+    await session.close();
+  });
+
   it('defers write tools for approval and resumes after approve_once', async () => {
     const cwd = await tempDir();
     const sessionDir = await tempDir();
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      model: 'fake:test',
       approvalMode: 'default',
     });
 
@@ -177,7 +239,6 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      model: 'fake:test',
       approvalMode: 'default',
     });
     const session = await createCodingSession({
@@ -208,7 +269,6 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      model: 'fake:test',
       approvalMode: 'default',
     });
     const session = await createCodingSession({

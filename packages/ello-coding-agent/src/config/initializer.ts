@@ -32,7 +32,7 @@ export async function ensureElloHome(): Promise<void> {
  * 初始化全局配置和运行目录。
  *
  * 只会在文件不存在时复制模板；传入 force 时才覆盖现有 config/mcp 文件。
- * 工具配置写在 config.toml 的 `[tools]` 分组中。
+ * 工具配置写在 config.yaml 的 `tools` 分组中。
  */
 export async function ensureGlobalConfig(
   options: { readonly force?: boolean } = {},
@@ -44,7 +44,7 @@ export async function ensureGlobalConfig(
   await mkdir(globalSessionsDir(), { recursive: true });
   await mkdir(globalLogsDir(), { recursive: true });
   await mkdir(globalCacheDir(), { recursive: true });
-  await ensureTemplateFile(globalConfigPath(), 'config.toml', options);
+  await ensureTemplateFile(globalConfigPath(), 'config.yaml', options);
   await ensureTemplateFile(globalMcpPath(), 'mcp.json', options);
   const existing = await readTextIfExists(globalGitignorePath());
   const nextGitignore = globalGitignoreTemplate(existing);
@@ -59,14 +59,14 @@ export async function ensureBuiltinAssets(): Promise<void> {
   await mkdir(globalSubagentsDir(), { recursive: true });
 }
 
-/** 创建项目级 `.ello/config.toml` 空文件。 */
+/** 创建项目级 `.ello/config.yaml` 空文件。 */
 export async function ensureProjectConfig(
   cwd: string,
   options: { readonly force?: boolean } = {},
 ): Promise<void> {
   const projectDir = `${path.resolve(cwd)}/.ello`;
   await mkdir(projectDir, { recursive: true });
-  const filePath = path.join(projectDir, 'config.toml');
+  const filePath = path.join(projectDir, 'config.yaml');
   if (options.force === true) {
     await rm(filePath, { force: true });
   }

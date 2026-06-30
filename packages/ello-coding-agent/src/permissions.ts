@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import { globalConfigPath, projectConfigPath } from './config/index.js';
 import { isReadOnlyTool } from './tools/registry.js';
-import { parseTomlConfig, stringifyTomlConfig } from './utils/toml.js';
+import { parseYamlConfig, stringifyYamlConfig } from './utils/yaml.js';
 
 /** 产品层权限动作。 */
 export type PermissionAction = 'allow' | 'ask' | 'deny';
@@ -194,7 +194,7 @@ export class PermissionStore {
     const currentRules = parsePermissionRules(current.permissionRules);
     await writeFile(
       filePath,
-      stringifyTomlConfig({
+      stringifyYamlConfig({
         ...current,
         permissionRules: [...currentRules, rule],
       }),
@@ -267,9 +267,7 @@ function globLikeMatch(pattern: string, value: string): boolean {
 async function readConfig(filePath: string): Promise<Record<string, unknown>> {
   try {
     const text = await readFile(filePath, 'utf8');
-    return filePath.endsWith('.toml')
-      ? parseTomlConfig(text)
-      : (JSON.parse(text) as Record<string, unknown>);
+    return parseYamlConfig(text);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return {};
