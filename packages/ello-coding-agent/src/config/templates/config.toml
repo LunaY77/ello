@@ -1,0 +1,61 @@
+# 默认模型档案名；TUI 可以在多个 model_profiles 之间切换。
+default_model_profile = "gpt-5.5"
+
+# 模型连接配置。provider 只表示 endpoint/auth/header profile，不表示模型协议。
+[model_providers.openai]
+name = "openai"
+protocols = ["openai-chat", "openai-responses"]
+requires_auth = true
+env_key = "OPENAI_API_KEY"
+
+# 默认模型档案。model 前缀表示模型协议或 adapter。
+[model_profiles."gpt-5.5"]
+model_provider = "openai"
+model = "openai-responses:gpt-5.5"
+model_reasoning_effort = "medium"
+personality = "pragmatic"
+
+# 备用模型档案。
+[model_profiles."gpt-5.4"]
+model_provider = "openai"
+model = "openai-responses:gpt-5.4"
+model_reasoning_effort = "medium"
+personality = "pragmatic"
+
+# [ello]
+# 默认工作目录；通常不要写死，命令行 --cwd 会覆盖。
+# cwd = "/path/to/project"
+
+# 会话保存目录；留空时使用 ~/.ello/sessions。
+# sessionDir = "~/.ello/sessions"
+
+# 默认审批模式。可选 default、plan、accept-edits、dont-ask、bypass。
+# approvalMode = "default"
+
+# 允许工具访问的路径根目录；默认至少包含当前 cwd。
+# allowedPaths = ["/path/to/project"]
+
+# 细粒度权限规则；通常由权限命令或 TUI 写入，不建议手写复杂规则。
+# permissionRules = []
+
+# MCP 配置文件路径；默认使用 ~/.ello/mcp.json。
+# mcpConfigPath = "~/.ello/mcp.json"
+
+# system prompt 配置名；默认 coding。
+# systemPromptProfile = "coding"
+
+# 默认启用交互式 TUI；命令行 --no-tui 可临时关闭。
+# tui = true
+
+# 工具配置；disabled 表示完全不注册，needApproval 表示无论审批模式如何都要询问。
+# [tools]
+# disabled = []
+# needApproval = ["bash", "web_fetch"]
+
+# provider 专属 HTTP headers
+# [model_providers.openai.http_headers]
+# Custom-Header = "xxx"
+
+# 项目信任配置；路径必须写成 TOML quoted table key。
+# [projects."/path/to/project"]
+# trust_level = "trusted"

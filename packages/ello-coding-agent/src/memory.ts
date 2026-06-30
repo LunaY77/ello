@@ -1,6 +1,11 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import path from 'node:path';
+
+import { globalHomeDir } from './config/index.js';
+import {
+  MemoryRepository,
+  type MemoryItem,
+} from './storage/repositories/memory-repository.js';
 
 export type MemoryScope = 'project' | 'user';
 
@@ -12,12 +17,15 @@ export interface MemoryFile {
 
 export interface MemoryManifest {
   files: MemoryFile[];
+  /** 全局结构化 memory 来自 SQLite；项目 Markdown 文件不会被索引入库。 */
+  items: MemoryItem[];
 }
 
 /**
  * 加载会影响当前会话的项目级和用户级记忆文件。
  */
 export async function loadCodingMemory(cwd: string): Promise<MemoryManifest> {
+  const home = globalHomeDir();
   const candidates = [
     { scope: 'project' as const, path: path.join(cwd, 'AGENTS.md') },
     { scope: 'project' as const, path: path.join(cwd, 'CLAUDE.md') },
@@ -28,10 +36,10 @@ export async function loadCodingMemory(cwd: string): Promise<MemoryManifest> {
     { scope: 'project' as const, path: path.join(cwd, '.ello', 'memory.md') },
     {
       scope: 'user' as const,
-      path: path.join(homedir(), '.ello', 'memory.md'),
+      path: path.join(home, 'memory.md'),
     },
   ];
-  const userMemoryDir = path.join(homedir(), '.ello', 'memory');
+  const userMemoryDir = path.join(home, 'memory');
   for (const file of await listMarkdownFiles(userMemoryDir)) {
     candidates.push({ scope: 'user', path: file });
   }
@@ -55,7 +63,10 @@ export async function loadCodingMemory(cwd: string): Promise<MemoryManifest> {
       }
     }
   }
-  return { files };
+  const repository = new MemoryRepository();
+  const items = await repository.listEnabled();
+  repository.close();
+  return { files, items: [...items] };
 }
 
 /**
@@ -65,26 +76,30 @@ export function renderMemoryForPrompt(
   manifest: MemoryManifest,
   cwd: string,
 ): string {
-  return manifest.files
-    .map((file) => {
+  const fileSections = manifest.files.map((file) => {
       const displayPath = path.relative(cwd, file.path) || file.path;
       return `# ${displayPath} (${file.scope})\n\n${file.content}`;
-    })
-    .join('\n\n');
+    });
+  const dbSections = manifest.items.map(
+    (item) =>
+      `# global memory:${item.kind} (${item.source})\n\n${item.content}`,
+  );
+  return [...fileSections, ...dbSections].join('\n\n');
 }
 
 /**
  * 汇总已加载的记忆来源，供 CLI 和 TUI 状态输出使用。
  */
 export function summarizeMemory(manifest: MemoryManifest, cwd: string): string {
-  if (manifest.files.length === 0) {
+  if (manifest.files.length === 0 && manifest.items.length === 0) {
     return 'No memory files loaded.';
   }
-  return manifest.files
-    .map(
+  return [
+    ...manifest.files.map(
       (file) => `${file.scope}\t${path.relative(cwd, file.path) || file.path}`,
-    )
-    .join('\n');
+    ),
+    ...manifest.items.map((item) => `user-db\t${item.kind}\t${item.id}`),
+  ].join('\n');
 }
 
 async function listMarkdownFiles(dir: string): Promise<string[]> {

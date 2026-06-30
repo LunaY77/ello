@@ -494,7 +494,8 @@ function summarizeRecentMessages(records: readonly SessionRecord[]): {
       continue;
     }
     const content = (record.message as { content?: unknown }).content;
-    const text = typeof content === 'string' ? content : JSON.stringify(content);
+    const text =
+      typeof content === 'string' ? content : JSON.stringify(content);
     if (record.message.role === 'user') {
       lastUserText = text;
     } else if (record.message.role === 'assistant') {

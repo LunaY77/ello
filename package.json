@@ -12,6 +12,11 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  },
   "devDependencies": {
     "@ello/coding-agent": "workspace:*",
     "@eslint/js": "^10.0.1",

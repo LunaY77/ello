@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
 
-import type { CodingAgentConfig } from '../config.js';
+import type { CodingAgentConfig } from '../config/index.js';
 
 /**
  * `~/.ello` 与 `<repo>/.ello` 的目录布局解析。
@@ -44,7 +44,7 @@ export function checkpointsDir(cwd: string): string {
   return path.join(projectDir(cwd), 'checkpoints');
 }
 
-/** 项目级任务/todo 快照目录：`<cwd>/.ello/state`。 */
+/** 项目级视图状态目录：`<cwd>/.ello/state`。 */
 export function stateDir(cwd: string): string {
   return path.join(projectDir(cwd), 'state');
 }
@@ -62,6 +62,16 @@ export function globalSkillsDir(): string {
 /** 项目技能目录：`<cwd>/.ello/skills`。 */
 export function projectSkillsDir(cwd: string): string {
   return path.join(projectDir(cwd), 'skills');
+}
+
+/** 全局子代理目录：`~/.ello/subagents`。 */
+export function globalSubagentsDir(): string {
+  return path.join(globalDir(), 'subagents');
+}
+
+/** 项目子代理目录：`<cwd>/.ello/subagents`。 */
+export function projectSubagentsDir(cwd: string): string {
+  return path.join(projectDir(cwd), 'subagents');
 }
 
 /** 全局日志目录：`~/.ello/logs`。 */

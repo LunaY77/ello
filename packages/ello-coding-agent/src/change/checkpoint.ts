@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+
+import { CheckpointRepository } from '../storage/repositories/checkpoint-repository.js';
 
 /**
  * 代码改动与检查点。
@@ -40,14 +42,18 @@ export interface Checkpoint {
 /**
  * 检查点存储：累积改动 → 封存 → 列出 → 回滚。
  *
- * v1 范围：改动收集 + `seal` + `list` + 最近一次 `rollback`。
- * 检查点持久化到 `<repo>/.ello/checkpoints/<id>.json`。
+ * 当前实现：改动收集 + `seal` + `list` + 最近一次 `rollback`。
+ * 检查点元数据持久化到全局 `~/.ello/state.sqlite`，before/after 内容写入
+ * `~/.ello/artifacts/`。项目 `<repo>/.ello/checkpoints` 不再写入新 JSON。
  */
 export class CheckpointStore {
   /** 当前 run 累积、尚未封存的改动。 */
   private pending: FileChange[] = [];
+  private readonly repository: CheckpointRepository;
 
-  constructor(private readonly dir: string) {}
+  constructor(_legacyDir?: string, repository = new CheckpointRepository()) {
+    this.repository = repository;
+  }
 
   /** 把一次文件改动累积到当前 open checkpoint。 */
   record(change: FileChange): void {
@@ -76,34 +82,16 @@ export class CheckpointStore {
       changes: this.pending,
     };
     this.pending = [];
-    await mkdir(this.dir, { recursive: true });
-    await writeFile(
-      path.join(this.dir, `${checkpoint.id}.json`),
-      `${JSON.stringify(checkpoint, null, 2)}\n`,
-      'utf8',
-    );
-    return checkpoint;
+    return this.repository.seal({
+      runId,
+      ...(label !== undefined ? { label } : {}),
+      changes: checkpoint.changes,
+    });
   }
 
   /** 列出全部已封存检查点，按创建时间升序。 */
   async list(): Promise<Checkpoint[]> {
-    let files: string[];
-    try {
-      files = (await readdir(this.dir)).filter((file) =>
-        file.endsWith('.json'),
-      );
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return [];
-      }
-      throw error;
-    }
-    const checkpoints: Checkpoint[] = [];
-    for (const file of files) {
-      const text = await readFile(path.join(this.dir, file), 'utf8');
-      checkpoints.push(JSON.parse(text) as Checkpoint);
-    }
-    return checkpoints.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...(await this.repository.list())];
   }
 
   /**
@@ -129,14 +117,22 @@ export class CheckpointStore {
       );
     }
     // 反向应用：按记录的相反顺序写回 before。
-    for (const change of [...target.changes].reverse()) {
-      if (change.before === null) {
-        // 原本是新建：回滚 = 清空内容（v1 不做真正删除，避免误删父目录结构）。
-        await writeFile(change.path, '', 'utf8');
-      } else {
-        await mkdir(path.dirname(change.path), { recursive: true });
-        await writeFile(change.path, change.before, 'utf8');
+    try {
+      for (const change of [...target.changes].reverse()) {
+        if (change.before === null) {
+          // 原本是新建：回滚 = 删除该文件。目录清理由调用方或后续 GC 决定。
+          await rm(change.path, { force: true });
+        } else {
+          await mkdir(path.dirname(change.path), { recursive: true });
+          await writeFile(change.path, change.before, 'utf8');
+        }
       }
+      await this.repository.markRolledBack(target.id, 'completed');
+    } catch (error) {
+      await this.repository.markRolledBack(target.id, 'failed', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     }
     return target.changes;
   }
