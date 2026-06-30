@@ -5,6 +5,7 @@ import type {
   AgentFileSystem,
   AgentShell,
   AgentToolContext,
+  MaybePromise,
 } from '@ello/agent';
 
 /** 工具输出最大字符数，避免单个 tool result 撑爆上下文和 TUI。 */
@@ -21,7 +22,10 @@ export const MAX_TOOL_OUTPUT = 12_000;
  */
 export type ApprovalFor = (
   toolName: string,
-) => (input: never, ctx: AgentToolContext) => AgentApprovalDecision;
+) => (
+  input: never,
+  ctx: AgentToolContext,
+) => MaybePromise<AgentApprovalDecision>;
 
 /** 截断超长文本，标注省略。 */
 export function truncate(value: string): string {

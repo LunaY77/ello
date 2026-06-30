@@ -1,6 +1,7 @@
-import { Text } from 'ink';
+import { Box, Text } from 'ink';
 import { createElement, type ReactNode } from 'react';
 
+import type { ToolResultView } from '../state/view-reducer.js';
 import { tokyoNight } from '../tokyo-night.js';
 
 /**
@@ -38,7 +39,7 @@ const defaultPresenter: ToolPresenter = {
     createElement(
       Text,
       { color: tokyoNight.muted },
-      clip(stringify(output), 200),
+      clip(readToolOutput(output) ?? stringify(output), 200),
     ),
 };
 
@@ -48,11 +49,19 @@ const readPresenter: ToolPresenter = {
   renderCall: (input) =>
     createElement(Text, { color: tokyoNight.muted }, str(input, 'path')),
   renderResult: (_input, output) => {
-    const total = (output as { totalLines?: number })?.totalLines;
+    const metadata = readToolMetadata(output);
+    const total = readNumber(metadata, 'totalLines');
+    const entryCount = readNumber(metadata, 'entryCount');
+    const rendered =
+      total !== undefined
+        ? `${total} lines`
+        : entryCount !== undefined
+          ? `${entryCount} entries`
+          : readToolOutput(output) ?? 'read';
     return createElement(
       Text,
       { color: tokyoNight.muted },
-      total ? `${total} lines` : 'read',
+      rendered,
     );
   },
 };
@@ -63,7 +72,10 @@ const diffPresenter: ToolPresenter = {
   renderCall: (input) =>
     createElement(Text, { color: tokyoNight.muted }, str(input, 'path')),
   renderResult: (_input, output) =>
-    createElement(DiffPreview, { diff: str(output, 'diff') }),
+    createElement(DiffPreview, {
+      diff: readString(readToolMetadata(output), 'diff'),
+      file: readString(readToolMetadata(output), 'path'),
+    }),
 };
 
 /** bash 工具：展示命令与退出码/输出摘要。 */
@@ -72,12 +84,7 @@ const bashPresenter: ToolPresenter = {
   renderCall: (input) =>
     createElement(Text, { color: tokyoNight.muted }, str(input, 'command')),
   renderResult: (_input, output) => {
-    const record = output as {
-      exitCode?: number;
-      stdout?: string;
-      stderr?: string;
-    };
-    const head = record?.stdout || record?.stderr || '';
+    const head = readToolOutput(output) ?? '';
     return createElement(Text, { color: tokyoNight.muted }, clip(head, 200));
   },
 };
@@ -153,21 +160,81 @@ function clip(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-function DiffPreview({ diff }: { readonly diff: string }) {
-  const lines = diff.split(/\r?\n/u).slice(0, 24);
+export function DiffPreview({
+  diff,
+  file,
+  maxLines = 80,
+}: {
+  readonly diff: string;
+  readonly file?: string;
+  readonly maxLines?: number;
+}): ReactNode {
+  const lines = normalizeUnifiedDiff(diff).slice(0, maxLines);
   return createElement(
-    Text,
-    { color: tokyoNight.foreground },
-    lines
-      .map((line) => {
-        if (line.startsWith('+ ')) {
-          return `+ ${line.slice(2)}`;
-        }
-        if (line.startsWith('- ')) {
-          return `- ${line.slice(2)}`;
-        }
-        return `  ${line}`;
-      })
-      .join('\n'),
+    Box,
+    { flexDirection: 'column' },
+    file !== undefined && file !== ''
+      ? createElement(Text, { color: tokyoNight.muted }, file)
+      : null,
+    ...lines.map((line, index) =>
+      createElement(
+        Text,
+        {
+          key: `${index}:${line}`,
+          color: diffLineColor(line),
+          wrap: 'truncate',
+        },
+        line,
+      ),
+    ),
   );
+}
+
+function readToolMetadata(output: unknown): Record<string, unknown> {
+  if (typeof output !== 'object' || output === null) {
+    return {};
+  }
+  const metadata = (output as ToolResultView).metadata;
+  return metadata ?? {};
+}
+
+function readToolOutput(output: unknown): string | undefined {
+  if (typeof output === 'object' && output !== null) {
+    const value = (output as ToolResultView).output;
+    return typeof value === 'string' ? value : undefined;
+  }
+  return typeof output === 'string' ? output : undefined;
+}
+
+function readString(obj: Record<string, unknown>, key: string): string {
+  const value = obj[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function readNumber(obj: Record<string, unknown>, key: string): number | undefined {
+  const value = obj[key];
+  return typeof value === 'number' ? value : undefined;
+}
+
+function normalizeUnifiedDiff(diff: string): string[] {
+  if (diff.trim() === '') {
+    return ['(no diff)'];
+  }
+  return diff.split(/\r?\n/u).filter((line) => line.length > 0);
+}
+
+function diffLineColor(line: string): string {
+  if (line.startsWith('+') && !line.startsWith('+++')) {
+    return tokyoNight.green;
+  }
+  if (line.startsWith('-') && !line.startsWith('---')) {
+    return tokyoNight.red;
+  }
+  if (line.startsWith('@@')) {
+    return tokyoNight.purple;
+  }
+  if (line.startsWith('+++') || line.startsWith('---')) {
+    return tokyoNight.muted;
+  }
+  return tokyoNight.foreground;
 }

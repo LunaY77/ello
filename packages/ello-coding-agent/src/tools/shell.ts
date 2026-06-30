@@ -1,8 +1,12 @@
-import { defineTool, type AnyAgentTool } from '@ello/agent';
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
 
+import {
+  createCodingToolResult,
+  defineCodingTool,
+  type ToolMetadata,
+} from './runtime/coding-tool.js';
 import { requireShell, truncate, type ApprovalFor } from './shared.js';
 
 /**
@@ -14,9 +18,9 @@ import { requireShell, truncate, type ApprovalFor } from './shared.js';
 export function createShellTools(
   config: CodingAgentConfig,
   approval: ApprovalFor,
-): AnyAgentTool[] {
+) {
   return [
-    defineTool({
+    defineCodingTool({
       name: 'bash',
       description:
         'Run a shell command in the workspace with timeout and captured stdout/stderr.',
@@ -26,20 +30,75 @@ export function createShellTools(
         cwd: z.string().optional(),
         reason: z.string().optional(),
       }),
-      approval: approval('bash'),
+      approval: async (input, ctx) =>
+        withShellApprovalMetadata(
+          await approval('bash')(input as never, ctx.agent),
+          shellMetadata(input, config),
+        ),
       execute: async ({ command, timeoutMs, cwd }, ctx) => {
         const started = Date.now();
-        const result = await requireShell(ctx).run(command, {
+        const workingDirectory = cwd ?? config.cwd;
+        const result = await requireShell(ctx.agent).run(command, {
           timeout: timeoutMs,
-          ...(cwd !== undefined ? { cwd } : { cwd: config.cwd }),
+          cwd: workingDirectory,
         });
-        return {
-          exitCode: result.exitCode,
-          durationMs: Date.now() - started,
-          stdout: truncate(result.stdout),
-          stderr: truncate(result.stderr),
-        };
+        const durationMs = Date.now() - started;
+        const output = [
+          result.stdout.length > 0 ? result.stdout : '',
+          result.stderr.length > 0 ? `stderr:\n${result.stderr}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+        return createCodingToolResult({
+          title: `bash ${command}`,
+          output: truncate(output),
+          metadata: {
+            kind: 'shell',
+            command,
+            cwd: workingDirectory,
+            exitCode: result.exitCode,
+            durationMs,
+            stdoutBytes: Buffer.byteLength(result.stdout),
+            stderrBytes: Buffer.byteLength(result.stderr),
+          },
+        });
       },
     }),
   ];
+}
+
+function shellMetadata(
+  input: {
+    readonly command: string;
+    readonly cwd?: string | undefined;
+    readonly reason?: string | undefined;
+  },
+  config: CodingAgentConfig,
+): ToolMetadata {
+  return {
+    kind: 'shell',
+    command: input.command,
+    cwd: input.cwd ?? config.cwd,
+    reason: input.reason ?? 'run shell command',
+    risk: analyzeCommandRisk(input.command),
+  };
+}
+
+function analyzeCommandRisk(command: string): 'normal' | 'dangerous' {
+  return /\b(rm\s+-rf|sudo|chmod\s+-R|chown\s+-R|mkfs|dd\s+if=)/u.test(command)
+    ? 'dangerous'
+    : 'normal';
+}
+
+function withShellApprovalMetadata(
+  decision: Awaited<ReturnType<ReturnType<ApprovalFor>>>,
+  metadata: ToolMetadata,
+): typeof decision {
+  if (typeof decision === 'string') {
+    return { action: decision, metadata };
+  }
+  return {
+    ...decision,
+    metadata: { ...metadata, ...(decision.metadata ?? {}) },
+  };
 }

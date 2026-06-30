@@ -102,7 +102,7 @@ describe('skills', () => {
       ],
     });
 
-    expect(section()).toContain('# Available skills');
+    expect(section()).toContain('<skills-context>');
   });
 
   async function writeSkill(name: string, content: string): Promise<void> {

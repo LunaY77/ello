@@ -537,6 +537,9 @@ class CodingSessionImpl implements CodingSession {
         requestId: event.item.toolCallId,
         toolName: event.item.toolName,
         input: event.item.input,
+        ...(event.item.metadata !== undefined
+          ? { metadata: event.item.metadata }
+          : {}),
       });
       return;
     }
@@ -551,7 +554,14 @@ class CodingSessionImpl implements CodingSession {
     if (typeof output !== 'object' || output === null) {
       return;
     }
-    const record = output as {
+    const metadata =
+      (output as { metadata?: unknown }).metadata !== undefined
+        ? (output as { metadata?: unknown }).metadata
+        : output;
+    if (typeof metadata !== 'object' || metadata === null) {
+      return;
+    }
+    const record = metadata as {
       path?: unknown;
       diff?: unknown;
       before?: unknown;

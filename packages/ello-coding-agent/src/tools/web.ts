@@ -1,8 +1,12 @@
-import { defineTool, type AnyAgentTool } from '@ello/agent';
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
 
+import {
+  createCodingToolResult,
+  defineCodingTool,
+  type ToolMetadata,
+} from './runtime/coding-tool.js';
 import { truncate, type ApprovalFor } from './shared.js';
 
 /**
@@ -11,19 +15,32 @@ import { truncate, type ApprovalFor } from './shared.js';
  * 真正发 `fetch`，默认审批 `required`（网络副作用）。`web_search` 依赖外部
  * adapter，未配置时**不注册**（不再注册一个返回占位文本的假工具）
  */
-export function webFetchTool(approval: ApprovalFor): AnyAgentTool {
-  return defineTool({
+export function webFetchTool(
+  _config: CodingAgentConfig,
+  approval: ApprovalFor,
+) {
+  return defineCodingTool({
     name: 'web_fetch',
     description: 'Fetch a URL. Network access requires approval by default.',
     input: z.object({ url: z.string().url() }),
-    approval: approval('web_fetch'),
+    approval: async (input, ctx) =>
+      withNetworkApprovalMetadata(
+        await approval('web_fetch')(input as never, ctx.agent),
+        networkMetadata(input.url),
+      ),
     execute: async ({ url }) => {
       const response = await fetch(url);
-      return {
-        url,
-        status: response.status,
-        text: truncate(await response.text()),
-      };
+      const text = await response.text();
+      return createCodingToolResult({
+        title: `Fetch ${url}`,
+        output: truncate(text),
+        metadata: {
+          ...networkMetadata(url),
+          status: response.status,
+          contentType: response.headers.get('content-type') ?? undefined,
+          bytes: Buffer.byteLength(text),
+        },
+      });
     },
   });
 }
@@ -36,4 +53,26 @@ export function webFetchTool(approval: ApprovalFor): AnyAgentTool {
  */
 export function canFetch(_config: CodingAgentConfig): boolean {
   return typeof fetch === 'function';
+}
+
+function networkMetadata(url: string): ToolMetadata {
+  const parsed = new URL(url);
+  return {
+    kind: 'network',
+    url,
+    domain: parsed.hostname,
+  };
+}
+
+function withNetworkApprovalMetadata(
+  decision: Awaited<ReturnType<ReturnType<ApprovalFor>>>,
+  metadata: ToolMetadata,
+): typeof decision {
+  if (typeof decision === 'string') {
+    return { action: decision, metadata };
+  }
+  return {
+    ...decision,
+    metadata: { ...metadata, ...(decision.metadata ?? {}) },
+  };
 }

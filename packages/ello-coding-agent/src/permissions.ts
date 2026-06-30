@@ -66,7 +66,9 @@ export interface PermissionDecision {
 export function evaluateToolPermission(
   ctx: PermissionContext,
 ): PermissionDecision {
-  const explicit = ctx.rules?.find((rule) => matchRule(rule, ctx));
+  const explicit = [...(ctx.rules ?? [])]
+    .reverse()
+    .find((rule) => matchRule(rule, ctx));
   if (explicit !== undefined) {
     return {
       action: explicit.action,

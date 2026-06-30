@@ -187,10 +187,18 @@ function environmentSection(
       : config.cwd;
   return [
     '# Environment',
-    `- Working directory: ${config.cwd}`,
-    `- Writable roots: ${allowed}`,
-    `- Model: ${runtime.model}`,
-    'Stay within the writable roots above unless the user explicitly broadens the scope.',
+    '<environment-context>',
+    `<model>${runtime.model}</model>`,
+    '<file-system>',
+    `  <working-directory>${config.cwd}</working-directory>`,
+    `  <allowed-path>${allowed}</allowed-path>`,
+    '</file-system>',
+    '<shell>',
+    `  <working-directory>${config.cwd}</working-directory>`,
+    `  <allowed-path>${allowed}</allowed-path>`,
+    '</shell>',
+    '</environment-context>',
+    'Stay within the allowed paths unless the user explicitly broadens the scope.',
   ].join('\n');
 }
 

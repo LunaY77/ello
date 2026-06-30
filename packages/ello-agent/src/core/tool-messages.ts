@@ -119,6 +119,10 @@ function createToolOutput(output: unknown, status: ToolResultStatus): unknown {
   if (typeof output === 'string') {
     return { type: 'text', value: output };
   }
+  const textOutput = readStructuredTextOutput(output);
+  if (textOutput !== undefined) {
+    return { type: 'text', value: textOutput };
+  }
   return { type: 'json', value: toJsonValue(output) };
 }
 
@@ -137,4 +141,15 @@ function toJsonValue(value: unknown): unknown {
     return null;
   }
   return JSON.parse(JSON.stringify(value)) as unknown;
+}
+
+function readStructuredTextOutput(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  return record.kind === 'coding-tool-result' &&
+    typeof record.output === 'string'
+    ? record.output
+    : undefined;
 }

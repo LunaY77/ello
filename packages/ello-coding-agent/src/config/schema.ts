@@ -105,6 +105,13 @@ export const ToolConfigSchema = z.object({
   disabled: z.array(z.string()).default([]),
 });
 
+/** 工具长输出策略：模型拿 preview，完整内容写入 session artifact。 */
+export const ToolOutputConfigSchema = z.object({
+  max_bytes: z.number().int().positive().default(12_000),
+  max_lines: z.number().int().positive().default(400),
+  preview_lines: z.number().int().positive().default(120),
+});
+
 /** 项目信任配置，按绝对路径做 key。 */
 export const ProjectTrustSchema = z.object({
   trust_level: z.enum(['trusted', 'untrusted']).default('untrusted'),
@@ -127,6 +134,11 @@ export const CodingAgentConfigSchema = z.object({
   profile: z.record(z.string(), ProfileSuiteSchema).default({}),
   projects: z.record(z.string(), ProjectTrustSchema).default({}),
   tools: ToolConfigSchema.default({ needApproval: [], disabled: [] }),
+  tool_output: ToolOutputConfigSchema.default({
+    max_bytes: 12_000,
+    max_lines: 400,
+    preview_lines: 120,
+  }),
   cwd: z.string().default(process.cwd()),
   allowedPaths: z.array(z.string()).default([]),
   sessionDir: z.string().default(''),
@@ -145,6 +157,7 @@ export type ModelCatalogEntryConfig = z.infer<typeof ModelCatalogEntrySchema>;
 export type ModelRoleSettingsConfig = z.infer<typeof ModelRoleSettingsSchema>;
 export type ProfileSuiteConfig = z.infer<typeof ProfileSuiteSchema>;
 export type ToolConfig = z.infer<typeof ToolConfigSchema>;
+export type ToolOutputConfig = z.infer<typeof ToolOutputConfigSchema>;
 export type PermissionRule = z.infer<typeof PermissionRuleSchema>;
 export type CodingAgentConfig = z.infer<typeof CodingAgentConfigSchema>;
 export type CodingAgentConfigOverrides = Partial<CodingAgentConfig>;

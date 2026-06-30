@@ -43,6 +43,7 @@ export type CodingSessionEvent =
       readonly requestId: string;
       readonly toolName: string;
       readonly input: unknown;
+      readonly metadata?: Record<string, unknown>;
     }
   | { readonly type: 'usage'; readonly usage: AgentRunResult['usage'] };
 

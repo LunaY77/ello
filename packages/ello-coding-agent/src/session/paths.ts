@@ -49,9 +49,9 @@ export function stateDir(cwd: string): string {
   return path.join(projectDir(cwd), 'state');
 }
 
-/** 项目级权限规则文件：`<cwd>/.ello/permissions.json`。 */
+/** 项目级权限规则文件：`<cwd>/.ello/permissions.yaml`。 */
 export function projectPermissionsFile(cwd: string): string {
-  return path.join(projectDir(cwd), 'permissions.json');
+  return path.join(projectDir(cwd), 'permissions.yaml');
 }
 
 /** 全局技能目录：`~/.ello/skills`。 */

@@ -30,14 +30,12 @@ export function ToolCard({
   readonly compact?: boolean;
 }) {
   const presenter = presenterFor(call.name);
-  const icon =
-    call.status === 'running' ? '·' : call.status === 'ok' ? '⎿' : '×';
+  const icon = call.status === 'fail' ? '×' : '→';
   return (
     <Box flexDirection="column">
       <Box gap={1}>
         <Text color={statusColor(call.status)}>{icon}</Text>
-        <Text color={tokyoNight.muted}>tool</Text>
-        <Text color={statusColor(call.status)}>{call.name}</Text>
+        <Text color={statusColor(call.status)}>{formatToolName(call.name)}</Text>
         <Text color={tokyoNight.muted}>{presenter.summarize(call.input)}</Text>
       </Box>
       {call.status === 'running' ? (
@@ -52,4 +50,11 @@ export function ToolCard({
       ) : null}
     </Box>
   );
+}
+
+function formatToolName(name: string): string {
+  return name
+    .split('_')
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
 }

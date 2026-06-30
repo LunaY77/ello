@@ -5,6 +5,7 @@ import type { DeferredApprovalItem } from '@ello/agent';
 
 import { parsePermissionRules, type PermissionRule } from '../permissions.js';
 import { projectPermissionsFile } from '../session/paths.js';
+import { parseYamlConfig, stringifyYamlConfig } from '../utils/yaml.js';
 
 /** “总是允许/拒绝”的作用域。 */
 export type RuleScope = 'session' | 'project';
@@ -15,7 +16,7 @@ export type RuleScope = 'session' | 'project';
  * 当用户在审批浮层选择 “always allow / deny” 时，{@link CodingSession.approve}
  * 调用本 store 落规则：
  * - `session` 作用域：仅存进程内存，随会话消失；
- * - `project` 作用域：写 `<repo>/.ello/permissions.json`，跨会话生效。
+ * - `project` 作用域：写 `<repo>/.ello/permissions.yaml`，跨会话生效。
  *
  * `rules()` 合并内存与磁盘规则，交给 {@link makeApprovalPolicy} 实时匹配。
  * 规则结构沿用 `permissions.ts` 的 {@link PermissionRule}。
@@ -24,7 +25,7 @@ export class RulesStore {
   /** 进程内 session 规则。 */
   private readonly sessionRules: PermissionRule[] = [];
 
-  /** 从 permissions.json 读到的 project 规则（首次访问时懒加载）。 */
+  /** 从 permissions.yaml 读到的 project 规则（首次访问时懒加载）。 */
   private projectRules: PermissionRule[] | undefined;
 
   constructor(private readonly cwd: string) {}
@@ -65,7 +66,7 @@ export class RulesStore {
     this.projectRules = next;
     const filePath = projectPermissionsFile(this.cwd);
     await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(filePath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+    await writeFile(filePath, stringifyYamlConfig({ rules: next }), 'utf8');
   }
 
   private async readProjectRules(): Promise<PermissionRule[]> {
@@ -74,7 +75,8 @@ export class RulesStore {
     }
     try {
       const text = await readFile(projectPermissionsFile(this.cwd), 'utf8');
-      this.projectRules = parsePermissionRules(text);
+      const parsed = parseYamlConfig(text);
+      this.projectRules = parsePermissionRules(parsed.rules);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         throw error;
@@ -85,7 +87,7 @@ export class RulesStore {
   }
 }
 
-/** 把审批待决项映射成可持久化规则：带上 path / command 约束以精确匹配。 */
+/** 把审批待决项映射成可持久化规则：优先使用 typed metadata 精确匹配。 */
 function toRule(
   item: DeferredApprovalItem,
   action: 'allow' | 'deny',
@@ -94,13 +96,25 @@ function toRule(
   const input = (item.input ?? undefined) as
     | Record<string, unknown>
     | undefined;
+  const metadata = (item.metadata ?? undefined) as
+    | Record<string, unknown>
+    | undefined;
   return {
     action,
     tool: item.toolName,
     scope,
-    ...(typeof input?.path === 'string' ? { pathGlob: input.path } : {}),
-    ...(typeof input?.command === 'string'
-      ? { commandPattern: escapeRegExp(input.command) }
+    ...(typeof metadata?.path === 'string'
+      ? { pathGlob: metadata.path }
+      : typeof input?.path === 'string'
+        ? { pathGlob: input.path }
+        : {}),
+    ...(typeof metadata?.command === 'string'
+      ? { commandPattern: escapeRegExp(metadata.command) }
+      : typeof input?.command === 'string'
+        ? { commandPattern: escapeRegExp(input.command) }
+        : {}),
+    ...(typeof metadata?.domain === 'string'
+      ? { domain: metadata.domain }
       : {}),
     ...(item.reason !== undefined ? { reason: item.reason } : {}),
   };

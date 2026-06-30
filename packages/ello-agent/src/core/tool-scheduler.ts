@@ -9,6 +9,7 @@
 
 import { normalizeAgentError } from '../public/errors.js';
 import type {
+  AgentApprovalDecision,
   AgentEnvironment,
   AgentMessage,
   AgentToolCall,
@@ -45,6 +46,7 @@ export interface ToolSchedulerEventSink {
     readonly toolName: string;
     readonly input?: unknown;
     readonly reason?: string;
+    readonly metadata?: Record<string, unknown>;
   }): Promise<void>;
   /** 某个工具执行成功时触发，携带其输出。 */
   onToolCompleted(toolCallId: string, output: unknown): Promise<void>;
@@ -65,6 +67,7 @@ export interface ToolScheduleResult {
     readonly toolName: string;
     readonly input?: unknown;
     readonly reason?: string;
+    readonly metadata?: Record<string, unknown>;
   }>;
 }
 
@@ -109,12 +112,15 @@ export class ToolScheduler {
         );
         continue;
       }
-      const ctx = this.createContext();
+      const ctx = this.createContext(call.id);
       // 执行前先跑工具自带的审批策略（若有），据其结果决定拒绝 / 挂起 / 放行。
-      const decision = await tool.approval?.(call.input, ctx);
-      if (decision === 'denied') {
+      const decision = normalizeApprovalDecision(
+        await tool.approval?.(call.input, ctx),
+      );
+      if (decision.action === 'denied') {
         const error = new Error(
-          `Tool '${call.name}' was denied by approval policy.`,
+          decision.reason ??
+            `Tool '${call.name}' was denied by approval policy.`,
         );
         await sink.onToolStarted(call.id, call.name, call.input);
         await sink.onToolFailed(call.id, error);
@@ -129,13 +135,16 @@ export class ToolScheduler {
         continue;
       }
       // 需要人工审批：仅入队挂起并通知，不执行，等待产品层批准后再重放。
-      if (decision === 'required') {
+      if (decision.action === 'required') {
         const item = {
           kind: 'approval' as const,
           toolCallId: call.id,
           toolName: call.name,
           input: call.input,
-          reason: `Tool '${call.name}' requires approval.`,
+          reason: decision.reason ?? `Tool '${call.name}' requires approval.`,
+          ...(decision.metadata !== undefined
+            ? { metadata: decision.metadata }
+            : {}),
         };
         pending.push(item);
         await sink.onApprovalRequired(item);
@@ -179,7 +188,10 @@ export class ToolScheduler {
     }
     await sink.onToolStarted(call.id, call.name, call.input);
     try {
-      const output = await tool.execute(call.input, this.createContext());
+      const output = await tool.execute(
+        call.input,
+        this.createContext(call.id),
+      );
       await sink.onToolCompleted(call.id, output);
       return { ...call, output };
     } catch (error) {
@@ -191,11 +203,31 @@ export class ToolScheduler {
   }
 
   /** 构造工具执行上下文。 */
-  private createContext(): AgentToolContext {
+  private createContext(toolCallId: string): AgentToolContext {
     return {
       runId: this.options.runId,
       environment: this.options.environment,
-      metadata: this.options.metadata,
+      metadata: { ...this.options.metadata, toolCallId },
     };
   }
+}
+
+function normalizeApprovalDecision(
+  decision: AgentApprovalDecision | undefined,
+): {
+  action: 'auto' | 'required' | 'denied';
+  reason?: string;
+  metadata?: Record<string, unknown>;
+} {
+  if (decision === undefined) {
+    return { action: 'auto' };
+  }
+  if (typeof decision === 'string') {
+    return { action: decision };
+  }
+  return {
+    action: decision.action,
+    ...(decision.reason !== undefined ? { reason: decision.reason } : {}),
+    ...(decision.metadata !== undefined ? { metadata: decision.metadata } : {}),
+  };
 }

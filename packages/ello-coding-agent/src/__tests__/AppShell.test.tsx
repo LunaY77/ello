@@ -50,8 +50,10 @@ describe('AppShell', () => {
     );
 
     expect(output).toContain('Ello Coding Agent');
-    expect(output).toContain('› you');
-    expect(output).toContain('✦ ello');
+    expect(output).toContain('hello');
+    expect(output).toContain('hi');
+    expect(output).not.toContain('› you');
+    expect(output).not.toContain('✦ ello');
     expect(output).toContain('working... 12s');
   });
 
@@ -121,11 +123,54 @@ describe('AppShell', () => {
     const diff = presenterFor('write').renderResult(
       { path: 'tmp.txt' },
       {
-        diff: ['--- tmp.txt', '+++ tmp.txt', '- old', '+ new'].join('\n'),
+        metadata: {
+          diff: ['--- tmp.txt', '+++ tmp.txt', '- old', '+ new'].join('\n'),
+        },
       },
     );
     const output = renderToString(<>{diff}</>, { columns: 100 });
 
+    expect(output).toContain('- old');
+    expect(output).toContain('+ new');
+  });
+
+  it('expands write/edit diffs in transcript history', () => {
+    const output = renderToString(
+      <AppShell
+        cwd="/tmp/ello-workspace"
+        profile="main"
+        approvalMode="default"
+        transcript={[
+          {
+            kind: 'tool',
+            id: 'tool-1',
+            tool: {
+              id: 'tool-1',
+              name: 'edit',
+              input: { path: 'tmp.txt' },
+              status: 'ok',
+              output: {
+                metadata: {
+                  path: 'tmp.txt',
+                  diff: ['--- tmp.txt', '+++ tmp.txt', '- old', '+ new'].join(
+                    '\n',
+                  ),
+                },
+              },
+            },
+          },
+        ]}
+        liveAssistantText=""
+        runningTools={[]}
+        running={false}
+        overlay={null}
+        composer={null}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('Edit');
+    expect(output).toContain('tmp.txt');
     expect(output).toContain('- old');
     expect(output).toContain('+ new');
   });

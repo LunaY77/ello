@@ -3,11 +3,14 @@ import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { defineTool, type AnyAgentTool } from '@ello/agent';
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
 
+import {
+  createCodingToolResult,
+  defineCodingTool,
+} from './runtime/coding-tool.js';
 import { resolveWorkspacePath, truncate, type ApprovalFor } from './shared.js';
 
 const execFileAsync = promisify(execFile);
@@ -20,10 +23,10 @@ const execFileAsync = promisify(execFile);
  */
 export function createSearchTools(
   config: CodingAgentConfig,
-  approval: ApprovalFor,
-): AnyAgentTool[] {
+  _approval: ApprovalFor,
+) {
   return [
-    defineTool({
+    defineCodingTool({
       name: 'grep',
       description:
         'Search files with ripgrep when available and a Node fallback otherwise.',
@@ -33,7 +36,6 @@ export function createSearchTools(
         glob: z.string().optional(),
         limit: z.number().int().min(1).max(500).default(100),
       }),
-      approval: approval('grep'),
       execute: async ({ pattern, path: targetPath, glob, limit }) => {
         const cwd = resolveWorkspacePath(
           config.cwd,
@@ -58,7 +60,18 @@ export function createSearchTools(
             timeout: 15_000,
             maxBuffer: 2 * 1024 * 1024,
           });
-          return { matches: truncate(result.stdout) };
+          return createCodingToolResult({
+            title: `Search ${pattern}`,
+            output: truncate(result.stdout),
+            metadata: {
+              kind: 'search',
+              summary: `rg ${pattern}`,
+              path: targetPath,
+              pattern,
+              glob,
+              matchCount: countLines(result.stdout),
+            },
+          });
         } catch (error) {
           const err = error as {
             stdout?: string;
@@ -66,17 +79,37 @@ export function createSearchTools(
             code?: number;
           };
           if (err.stdout) {
-            return { matches: truncate(err.stdout) };
+            return createCodingToolResult({
+              title: `Search ${pattern}`,
+              output: truncate(err.stdout),
+              metadata: {
+                kind: 'search',
+                path: targetPath,
+                pattern,
+                glob,
+                matchCount: countLines(err.stdout),
+              },
+            });
           }
           // ripgrep exit code 1 = 无匹配（软失败，返回空而非抛错）。
           if (err.code === 1) {
-            return { matches: '' };
+            return createCodingToolResult({
+              title: `Search ${pattern}`,
+              output: '',
+              metadata: {
+                kind: 'search',
+                path: targetPath,
+                pattern,
+                glob,
+                matchCount: 0,
+              },
+            });
           }
           throw new Error(err.stderr ?? String(error), { cause: error });
         }
       },
     }),
-    defineTool({
+    defineCodingTool({
       name: 'glob',
       description: 'Find files by a simple glob pattern inside the workspace.',
       input: z.object({
@@ -84,7 +117,6 @@ export function createSearchTools(
         path: z.string().default('.'),
         limit: z.number().int().min(1).max(1000).default(200),
       }),
-      approval: approval('glob'),
       execute: async ({ pattern, path: targetPath, limit }) => {
         const cwd = resolveWorkspacePath(
           config.cwd,
@@ -96,7 +128,17 @@ export function createSearchTools(
         const matches = files
           .filter((file) => matcher.test(path.relative(cwd, file)))
           .slice(0, limit);
-        return { matches };
+        return createCodingToolResult({
+          title: `Glob ${pattern}`,
+          output: matches.map((file) => path.relative(cwd, file)).join('\n'),
+          metadata: {
+            kind: 'search',
+            path: targetPath,
+            pattern,
+            paths: matches.map((file) => path.relative(cwd, file)),
+            matchCount: matches.length,
+          },
+        });
       },
     }),
   ];
@@ -130,6 +172,13 @@ async function walk(root: string, limit: number): Promise<string[]> {
   }
   await visit(root);
   return result;
+}
+
+function countLines(value: string): number {
+  if (value.trim() === '') {
+    return 0;
+  }
+  return value.split(/\r?\n/u).filter((line) => line.length > 0).length;
 }
 
 /** 把简单 glob（`*` / `**`）编译成正则。 */

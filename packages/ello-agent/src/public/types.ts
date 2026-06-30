@@ -147,6 +147,8 @@ export interface AgentToolCall {
   readonly output?: unknown;
   /** 工具执行错误（失败时存在）。 */
   readonly error?: AgentError;
+  /** 产品层附加的工具元数据，供 UI/日志/审批展示使用。 */
+  readonly metadata?: Record<string, unknown>;
 }
 
 /** 一次运行结束后的完整结果。 */
@@ -322,10 +324,20 @@ export interface AgentApprovalRequest {
   readonly input: unknown;
   /** 需要审批的原因。 */
   readonly reason?: string;
+  /** 类型化审批元数据，供产品层渲染 diff、命令、路径、URL 等信息。 */
+  readonly metadata?: Record<string, unknown>;
 }
 
-/** 审批判定：`auto` 自动放行、`required` 需人工审批、`denied` 直接拒绝。 */
-export type AgentApprovalDecision = 'auto' | 'required' | 'denied';
+/** 审批动作：`auto` 自动放行、`required` 需人工审批、`denied` 直接拒绝。 */
+export type AgentApprovalAction = 'auto' | 'required' | 'denied';
+/** 审批判定：可只返回动作，也可附加产品层展示 metadata。 */
+export type AgentApprovalDecision =
+  | AgentApprovalAction
+  | {
+      readonly action: AgentApprovalAction;
+      readonly reason?: string;
+      readonly metadata?: Record<string, unknown>;
+    };
 /** 审批策略：根据工具入参与上下文给出 {@link AgentApprovalDecision}。 */
 export type AgentApprovalPolicy<TInput = unknown> = (
   input: TInput,
@@ -573,6 +585,8 @@ export interface DeferredApprovalItem {
   readonly input?: unknown;
   /** 需审批原因。 */
   readonly reason?: string;
+  /** 类型化审批元数据，供恢复、规则落盘和 UI 展示使用。 */
+  readonly metadata?: Record<string, unknown>;
 }
 
 /** 待执行工具调用项：工具调用被延迟到 `resume` 时执行。 */

@@ -8,6 +8,8 @@ import type { AnyAgentTool, SubagentDefinition } from '@ello/agent';
 import type { CodingAgentConfig } from '../config/index.js';
 import { globalSubagentsDir, projectSubagentsDir } from '../session/paths.js';
 import { createFsTools } from '../tools/fs.js';
+import { adaptCodingTools } from '../tools/runtime/adapter.js';
+import { SessionToolOutputStore } from '../tools/runtime/output-store.js';
 import { createSearchTools } from '../tools/search.js';
 import type { ApprovalFor } from '../tools/shared.js';
 
@@ -229,8 +231,12 @@ function readBoolean(
 function readOnlyTools(config: CodingAgentConfig): AnyAgentTool[] {
   const autoApproval: ApprovalFor = () => () => 'auto';
   const readOnlyNames = new Set(['read', 'ls', 'grep', 'glob']);
-  return [
+  const tools = [
     ...createFsTools(config, autoApproval),
     ...createSearchTools(config, autoApproval),
   ].filter((tool) => readOnlyNames.has(tool.name));
+  return adaptCodingTools(tools, {
+    config,
+    outputStore: new SessionToolOutputStore(config.sessionDir),
+  });
 }

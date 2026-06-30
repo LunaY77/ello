@@ -185,7 +185,7 @@ function TranscriptLine({ item }: { readonly item: TranscriptItem }) {
   if (item.kind === 'tool') {
     return (
       <Box marginBottom={1} marginLeft={4} flexDirection="column">
-        <ToolCard call={item.tool} compact />
+        <ToolCard call={item.tool} compact={!hasDiffOutput(item.tool)} />
       </Box>
     );
   }
@@ -210,22 +210,25 @@ function TranscriptLine({ item }: { readonly item: TranscriptItem }) {
     );
   }
   const color = item.kind === 'user' ? tokyoNight.green : tokyoNight.foreground;
-  const label = item.kind === 'user' ? 'you' : 'ello';
   return (
-    <Box marginBottom={1}>
-      <Box width={10}>
-        <Text color={color}>{item.kind === 'user' ? '› you' : '✦ ello'}</Text>
-      </Box>
-      <Box flexDirection="column" flexGrow={1}>
-        <Text
-          color={label === 'you' ? tokyoNight.green : tokyoNight.foreground}
-          wrap="wrap"
-        >
-          {item.text}
-        </Text>
-      </Box>
+    <Box marginBottom={1} flexDirection="column">
+      <Text color={color} wrap="wrap">
+        {item.text}
+      </Text>
     </Box>
   );
+}
+
+function hasDiffOutput(tool: ToolCallView): boolean {
+  const output = tool.output;
+  if (typeof output !== 'object' || output === null) {
+    return false;
+  }
+  const metadata = (output as { metadata?: unknown }).metadata;
+  if (typeof metadata !== 'object' || metadata === null) {
+    return false;
+  }
+  return typeof (metadata as { diff?: unknown }).diff === 'string';
 }
 
 function compactPath(cwd: string): string {

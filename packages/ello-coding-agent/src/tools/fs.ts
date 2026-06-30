@@ -1,11 +1,18 @@
-import { defineTool, type AnyAgentTool } from '@ello/agent';
+import { readFile, stat } from 'node:fs/promises';
+
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
 
 import {
+  createCodingToolResult,
+  defineCodingTool,
+  type ToolMetadata,
+} from './runtime/coding-tool.js';
+import {
   createPreviewDiff,
   requireFs,
+  resolveWorkspacePath,
   truncate,
   type ApprovalFor,
 } from './shared.js';
@@ -17,11 +24,11 @@ import {
  * 工具本身只负责产品化输出（行号、diff、字节数）和声明审批策略。
  */
 export function createFsTools(
-  _config: CodingAgentConfig,
+  config: CodingAgentConfig,
   approval: ApprovalFor,
-): AnyAgentTool[] {
+) {
   return [
-    defineTool({
+    defineCodingTool({
       name: 'read',
       description:
         'Read a UTF-8 text file with optional offset and limit. Output includes line numbers.',
@@ -30,36 +37,94 @@ export function createFsTools(
         offset: z.number().int().min(1).optional(),
         limit: z.number().int().min(1).max(2000).optional(),
       }),
-      approval: approval('read'),
       execute: async ({ path: targetPath, offset = 1, limit = 400 }, ctx) => {
-        const text = await requireFs(ctx).readText(targetPath);
+        const absolutePath = resolveWorkspacePath(
+          config.cwd,
+          config.allowedPaths,
+          targetPath,
+        );
+        const info = await stat(absolutePath);
+        if (info.isDirectory()) {
+          const entries = await requireFs(ctx.agent).listDir(targetPath);
+          return createCodingToolResult({
+            title: `Directory ${targetPath}`,
+            output: entries.join('\n'),
+            metadata: {
+              kind: 'read',
+              path: targetPath,
+              bytes: 0,
+              entryCount: entries.length,
+              isDirectory: true,
+            },
+          });
+        }
+        const buffer = await readFile(absolutePath);
+        if (isBinary(buffer)) {
+          return createCodingToolResult({
+            title: `Binary file ${targetPath}`,
+            output: `Binary file ${targetPath} (${buffer.byteLength} bytes). Content is available as an attachment artifact only.`,
+            metadata: {
+              kind: 'read',
+              path: targetPath,
+              bytes: buffer.byteLength,
+              mime: 'application/octet-stream',
+              binary: true,
+            },
+            attachments: [
+              {
+                type: 'binary',
+                mime: 'application/octet-stream',
+                path: absolutePath,
+                name: targetPath,
+                bytes: buffer.byteLength,
+              },
+            ],
+          });
+        }
+        const text = buffer.toString('utf8');
         const lines = text.split(/\r?\n/u);
         const slice = lines.slice(offset - 1, offset - 1 + limit);
-        return {
-          path: targetPath,
-          totalLines: lines.length,
-          content: truncate(
-            slice
-              .map(
-                (line, index) =>
-                  `${String(offset + index).padStart(5, ' ')}  ${line}`,
-              )
-              .join('\n'),
-          ),
-        };
+        const content = truncate(
+          slice
+            .map(
+              (line, index) =>
+                `${String(offset + index).padStart(5, ' ')}  ${line}`,
+            )
+            .join('\n'),
+        );
+        return createCodingToolResult({
+          title: `Read ${targetPath}`,
+          output: content,
+          metadata: {
+            kind: 'read',
+            path: targetPath,
+            bytes: buffer.byteLength,
+            lineStart: offset,
+            lineEnd: offset + slice.length - 1,
+            totalLines: lines.length,
+            mime: 'text/plain; charset=utf-8',
+          },
+        });
       },
     }),
-    defineTool({
+    defineCodingTool({
       name: 'ls',
       description: 'List directory entries inside the workspace.',
       input: z.object({ path: z.string().default('.') }),
-      approval: approval('ls'),
       execute: async ({ path: targetPath }, ctx) => {
-        const entries = await requireFs(ctx).listDir(targetPath);
-        return { path: targetPath, entries };
+        const entries = await requireFs(ctx.agent).listDir(targetPath);
+        return createCodingToolResult({
+          title: `List ${targetPath}`,
+          output: entries.join('\n'),
+          metadata: {
+            kind: 'read',
+            path: targetPath,
+            entryCount: entries.length,
+          },
+        });
       },
     }),
-    defineTool({
+    defineCodingTool({
       name: 'write',
       description:
         'Create or overwrite a file. Requires approval outside bypass or accept-edits mode.',
@@ -68,23 +133,32 @@ export function createFsTools(
         content: z.string(),
         reason: z.string().optional(),
       }),
-      approval: approval('write'),
+      approval: async (input, ctx) =>
+        withApprovalMetadata(
+          await approval('write')(input as never, ctx.agent),
+          await writeMetadata(input, ctx.agent),
+        ),
       execute: async ({ path: targetPath, content, reason }, ctx) => {
-        const fs = requireFs(ctx);
+        const fs = requireFs(ctx.agent);
         const previous = await readOptional(fs, targetPath);
         await fs.writeText(targetPath, content);
-        return {
-          path: targetPath,
-          bytes: Buffer.byteLength(content),
-          reason: reason ?? 'write file',
-          diff: createPreviewDiff(targetPath, previous, content),
-          // before/after 供 09 的检查点做回滚（v1 取舍：直接带在输出里）。
-          before: previous,
-          after: content,
-        };
+        const diff = createPreviewDiff(targetPath, previous, content);
+        return createCodingToolResult({
+          title: `Write ${targetPath}`,
+          output: `Wrote ${Buffer.byteLength(content)} bytes to ${targetPath}.`,
+          metadata: {
+            kind: 'edit',
+            path: targetPath,
+            bytes: Buffer.byteLength(content),
+            reason: reason ?? 'write file',
+            diff,
+            before: previous,
+            after: content,
+          },
+        });
       },
     }),
-    defineTool({
+    defineCodingTool({
       name: 'edit',
       description:
         'Replace a unique text fragment in a file. Fails when the old text is not unique.',
@@ -94,9 +168,13 @@ export function createFsTools(
         newText: z.string(),
         reason: z.string().optional(),
       }),
-      approval: approval('edit'),
+      approval: async (input, ctx) =>
+        withApprovalMetadata(
+          await approval('edit')(input as never, ctx.agent),
+          await editMetadata(input, ctx.agent),
+        ),
       execute: async ({ path: targetPath, oldText, newText, reason }, ctx) => {
-        const fs = requireFs(ctx);
+        const fs = requireFs(ctx.agent);
         const current = await fs.readText(targetPath);
         const first = current.indexOf(oldText);
         if (first === -1) {
@@ -110,14 +188,19 @@ export function createFsTools(
           newText +
           current.slice(first + oldText.length);
         await fs.writeText(targetPath, next);
-        return {
-          path: targetPath,
-          reason: reason ?? 'edit file',
-          diff: createPreviewDiff(targetPath, current, next),
-          // before/after 供 09 的检查点做回滚。
-          before: current,
-          after: next,
-        };
+        const diff = createPreviewDiff(targetPath, current, next);
+        return createCodingToolResult({
+          title: `Edit ${targetPath}`,
+          output: `Edited ${targetPath}.`,
+          metadata: {
+            kind: 'edit',
+            path: targetPath,
+            reason: reason ?? 'edit file',
+            diff,
+            before: current,
+            after: next,
+          },
+        });
       },
     }),
   ];
@@ -136,4 +219,60 @@ async function readOptional(
     }
     throw error;
   }
+}
+
+function isBinary(buffer: Buffer): boolean {
+  if (buffer.includes(0)) {
+    return true;
+  }
+  return buffer.toString('utf8').includes('\uFFFD');
+}
+
+function withApprovalMetadata(
+  decision: Awaited<ReturnType<ReturnType<ApprovalFor>>>,
+  metadata: ToolMetadata,
+): typeof decision {
+  if (typeof decision === 'string') {
+    return { action: decision, metadata };
+  }
+  return {
+    ...decision,
+    metadata: { ...metadata, ...(decision.metadata ?? {}) },
+  };
+}
+
+async function writeMetadata(
+  input: {
+    readonly path: string;
+    readonly content: string;
+    readonly reason?: string | undefined;
+  },
+  ctx: Parameters<ReturnType<ApprovalFor>>[1],
+): Promise<ToolMetadata> {
+  const previous = await readOptional(requireFs(ctx), input.path);
+  return {
+    kind: 'edit',
+    path: input.path,
+    reason: input.reason ?? 'write file',
+    diff: createPreviewDiff(input.path, previous, input.content),
+  };
+}
+
+async function editMetadata(
+  input: {
+    readonly path: string;
+    readonly oldText: string;
+    readonly newText: string;
+    readonly reason?: string | undefined;
+  },
+  ctx: Parameters<ReturnType<ApprovalFor>>[1],
+): Promise<ToolMetadata> {
+  const current = await requireFs(ctx).readText(input.path);
+  const next = current.replace(input.oldText, input.newText);
+  return {
+    kind: 'edit',
+    path: input.path,
+    reason: input.reason ?? 'edit file',
+    diff: createPreviewDiff(input.path, current, next),
+  };
 }

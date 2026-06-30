@@ -90,6 +90,12 @@ profile:
 #     - bash
 #     - web_fetch
 
+# 工具长输出策略；超过阈值时模型只收到 preview，完整内容写入 session artifact。
+# tool_output:
+#   max_bytes: 12000
+#   max_lines: 400
+#   preview_lines: 120
+
 # provider 专属 HTTP headers。
 # provider:
 #   openai:

@@ -15,6 +15,13 @@ export interface ToolCallView {
   readonly error?: AgentError;
 }
 
+export interface ToolResultView {
+  readonly kind?: string;
+  readonly title?: string;
+  readonly output?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
 /** transcript（历史区）的一行。 */
 export type TranscriptItem =
   | { readonly kind: 'user'; readonly id: string; readonly text: string }
@@ -28,6 +35,7 @@ export interface ApprovalView {
   readonly requestId: string;
   readonly toolName: string;
   readonly input: unknown;
+  readonly metadata?: Record<string, unknown>;
 }
 
 /**
@@ -137,6 +145,7 @@ export function reduce(state: ViewState, event: ViewInput): ViewState {
           requestId: event.requestId,
           toolName: event.toolName,
           input: event.input,
+          ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
         },
       };
 

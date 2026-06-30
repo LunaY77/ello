@@ -231,7 +231,7 @@ export function skillIndexContext(options: {
       400,
       Math.floor((options.contextWindow ?? 160_000) * 4 * 0.01),
     );
-    const lines = ['# Available skills'];
+    const lines = ['<skills-context>'];
     for (const skill of options.skills) {
       const line = `- ${skill.name}: ${skill.description}${skill.whenToUse ? ` (${skill.whenToUse})` : ''}`;
       if ([...lines, line].join('\n').length > budget) {
@@ -240,6 +240,7 @@ export function skillIndexContext(options: {
         lines.push(line);
       }
     }
+    lines.push('</skills-context>');
     return lines.join('\n');
   };
 }

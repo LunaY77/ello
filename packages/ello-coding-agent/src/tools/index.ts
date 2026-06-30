@@ -6,6 +6,8 @@ import type { PermissionRule } from '../permissions.js';
 
 import { createFsTools } from './fs.js';
 import { formatToolRegistry } from './registry.js';
+import { adaptCodingTools } from './runtime/adapter.js';
+import { SessionToolOutputStore } from './runtime/output-store.js';
 import { createSearchTools } from './search.js';
 import type { ApprovalFor } from './shared.js';
 import { createShellTools } from './shell.js';
@@ -43,14 +45,19 @@ export function createCodingTools(
     options.denied,
   );
   const disabled = new Set(config.tools.disabled);
+  const outputStore = new SessionToolOutputStore(config.sessionDir);
 
-  return [
+  const codingTools = [
     ...createFsTools(config, approval),
     ...createSearchTools(config, approval),
     ...createShellTools(config, approval),
+    ...(canFetch(config) ? [webFetchTool(config, approval)] : []),
+  ];
+
+  return [
+    ...adaptCodingTools(codingTools, { config, outputStore }),
     ...createTaskTools(approval),
     ...createWorkspaceTools(approval),
-    ...(canFetch(config) ? [webFetchTool(approval)] : []),
   ].filter((tool) => !disabled.has(tool.name));
 }
 

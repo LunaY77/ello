@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -168,10 +168,21 @@ describe('createCodingSession', () => {
         seenRequests.push(request);
         // 第一轮请求写文件（需审批）；恢复后第二轮收尾。
         if (turn === 1) {
+          const toolCallMessage = {
+            role: 'assistant' as const,
+            content: [
+              {
+                type: 'tool-call',
+                toolCallId: 'call_read',
+                toolName: 'read',
+                input: { path: target, limit: 100 },
+              },
+            ],
+          };
           return {
             text: '',
-            messages: [...request.messages],
-            newMessages: [],
+            messages: [...request.messages, toolCallMessage],
+            newMessages: [toolCallMessage],
             toolCalls: [
               {
                 id: 'call_1',
@@ -205,16 +216,29 @@ describe('createCodingSession', () => {
       config,
       modelAdapter: adapter,
     });
-    const pending: { requestId: string; toolName: string }[] = [];
+    const pending: {
+      requestId: string;
+      toolName: string;
+      metadata?: Record<string, unknown>;
+    }[] = [];
     session.subscribe((event) => {
       if (event.type === 'approval.pending') {
-        pending.push({ requestId: event.requestId, toolName: event.toolName });
+        pending.push({
+          requestId: event.requestId,
+          toolName: event.toolName,
+          ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
+        });
       }
     });
 
     await session.submit('write a note');
     expect(pending).toHaveLength(1);
     expect(pending[0]?.toolName).toBe('write');
+    expect(pending[0]?.metadata).toMatchObject({
+      kind: 'edit',
+      path: target,
+    });
+    expect(String(pending[0]?.metadata?.diff)).toContain('+++');
 
     await session.approve(pending[0]!.requestId, { action: 'approve_once' });
     await session.close();
@@ -231,6 +255,102 @@ describe('createCodingSession', () => {
           ),
       ),
     ).toBe(true);
+  });
+
+  it('writes oversized tool output to a session artifact and sends preview to the model', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const target = path.join(cwd, 'big.txt');
+    const content = Array.from(
+      { length: 20 },
+      (_, index) => `line-${index}`,
+    ).join('\n');
+    await import('node:fs/promises').then(({ writeFile }) =>
+      writeFile(target, content, 'utf8'),
+    );
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+      tool_output: {
+        max_bytes: 20,
+        max_lines: 3,
+        preview_lines: 2,
+      },
+    });
+
+    let turn = 0;
+    let secondTurnMessages = '';
+    const adapter: ModelAdapter = {
+      async generate(request) {
+        turn += 1;
+        if (turn === 1) {
+          const toolCallMessage = {
+            role: 'assistant' as const,
+            content: [
+              {
+                type: 'tool-call',
+                toolCallId: 'call_read',
+                toolName: 'read',
+                input: { path: target, limit: 100 },
+              },
+            ],
+          };
+          return {
+            text: '',
+            messages: [...request.messages, toolCallMessage],
+            newMessages: [toolCallMessage],
+            toolCalls: [
+              {
+                id: 'call_read',
+                name: 'read',
+                input: { path: target, limit: 100 },
+              },
+            ],
+            usage,
+            finishReason: 'tool-calls',
+            provider: null,
+          };
+        }
+        secondTurnMessages = JSON.stringify(request.messages);
+        return {
+          text: 'done',
+          messages: [
+            ...request.messages,
+            { role: 'assistant', content: 'done' },
+          ],
+          newMessages: [{ role: 'assistant', content: 'done' }],
+          usage,
+          finishReason: 'stop',
+          provider: null,
+        };
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
+    const completed: Array<{ output: unknown }> = [];
+    session.subscribe((event) => {
+      if (event.type === 'tool.completed') {
+        completed.push({ output: event.output });
+      }
+    });
+
+    await session.submit('read big file');
+    await session.close();
+
+    const output = completed[0]?.output as {
+      metadata?: { outputPath?: string; truncated?: boolean };
+    };
+    expect(output.metadata?.truncated).toBe(true);
+    expect(output.metadata?.outputPath).toBeDefined();
+    await expect(access(output.metadata!.outputPath!)).resolves.toBeUndefined();
+    expect(secondTurnMessages).toContain('"type":"text"');
+    expect(secondTurnMessages).not.toContain('metadata');
   });
 
   it('supports session tree checkout and fork from the coding runtime', async () => {

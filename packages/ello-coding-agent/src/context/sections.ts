@@ -121,7 +121,7 @@ function repoOverviewSection(config: CodingAgentConfig): SystemSection {
 function gitStatusSection(config: CodingAgentConfig): SystemSection {
   return async () => {
     const text = await loadGitContext(config.cwd);
-    return text.trim() ? `# Git status\n${text}` : null;
+    return text.trim() ? `<git-context>\n${text}\n</git-context>` : null;
   };
 }
 
@@ -130,7 +130,7 @@ function activeSkillsSection(deps: ContextDeps): SystemSection {
   return async () => {
     const skills = [...(await (deps.activeSkills?.() ?? []))];
     return skills.length > 0
-      ? `# Active skills\n${skills.map((skill) => `- ${skill}`).join('\n')}`
+      ? `<active-skills>\n${skills.map((skill) => `- ${skill}`).join('\n')}\n</active-skills>`
       : null;
   };
 }
@@ -146,7 +146,7 @@ function sessionSummarySection(deps: ContextDeps): SystemSection {
   return async () => {
     const summary = await (deps.sessionSummary?.() ?? null);
     return summary !== null && summary.trim()
-      ? `# Session summary (compacted history)\n${summary.trim()}`
+      ? `<session-summary>\n${summary.trim()}\n</session-summary>`
       : null;
   };
 }
@@ -197,7 +197,9 @@ async function buildRepoOverview(cwd: string): Promise<string | null> {
     lines.push(`readme: ${firstParagraph.slice(0, 400)}`);
   }
 
-  return lines.length > 0 ? `# Repository overview\n${lines.join('\n')}` : null;
+  return lines.length > 0
+    ? `<repository-context>\n${lines.join('\n')}\n</repository-context>`
+    : null;
 }
 
 /** 读取 git 上下文：分支、短状态、最近一条提交标题。 */
@@ -214,10 +216,17 @@ async function loadGitContext(cwd: string): Promise<string> {
         timeout: 3000,
       }).catch(() => ({ stdout: '' })),
     ]);
+    const statusLines = status.stdout
+      .trim()
+      .split(/\r?\n/u)
+      .filter(Boolean);
+    const visibleStatus = statusLines.slice(0, 30);
+    const omitted = Math.max(0, statusLines.length - visibleStatus.length);
     return [
       `branch: ${branch.stdout.trim() || 'detached'}`,
       'status:',
-      status.stdout.trim() || '<clean>',
+      visibleStatus.length > 0 ? visibleStatus.join('\n') : '<clean>',
+      omitted > 0 ? `... ${omitted} more changed paths omitted` : '',
       log.stdout.trim() ? `latest: ${log.stdout.trim()}` : '',
     ]
       .filter(Boolean)

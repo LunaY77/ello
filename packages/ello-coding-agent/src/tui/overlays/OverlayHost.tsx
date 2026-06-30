@@ -154,9 +154,7 @@ export function OverlayHost({
           <Text
             color={tokyoNight.yellow}
           >{`Approve ${overlay.request.toolName}?`}</Text>
-          <Text color={tokyoNight.muted} wrap="wrap">
-            {preview(overlay.request.input)}
-          </Text>
+          <ApprovalRequestPreview request={overlay.request} />
           <InlineSelect
             options={APPROVAL_OPTIONS}
             onChange={(value) =>
@@ -507,6 +505,39 @@ function toDecision(value: string): ApprovalDecision {
     default:
       return { action: 'approve_once' };
   }
+}
+
+function ApprovalRequestPreview({
+  request,
+}: {
+  readonly request: ApprovalView;
+}) {
+  const metadata = request.metadata ?? {};
+  const path = readMetadataString(metadata, 'path');
+  const command = readMetadataString(metadata, 'command');
+  const url = readMetadataString(metadata, 'url');
+  if (path !== '') {
+    return <Text color={tokyoNight.muted}>{path}</Text>;
+  }
+  if (command !== '') {
+    return <Text color={tokyoNight.muted}>{`$ ${command}`}</Text>;
+  }
+  if (url !== '') {
+    return <Text color={tokyoNight.muted}>{url}</Text>;
+  }
+  return (
+    <Text color={tokyoNight.muted} wrap="wrap">
+      {preview(request.input)}
+    </Text>
+  );
+}
+
+function readMetadataString(
+  metadata: Record<string, unknown>,
+  key: string,
+): string {
+  const value = metadata[key];
+  return typeof value === 'string' ? value : '';
 }
 
 /** 入参预览（截断）。 */
