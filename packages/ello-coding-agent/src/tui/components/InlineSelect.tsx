@@ -46,7 +46,9 @@ export function InlineSelect({
       {options.map((option, optionIndex) => (
         <Text
           key={option.value}
-          color={optionIndex === index ? tokyoNight.cyan : tokyoNight.foreground}
+          color={
+            optionIndex === index ? tokyoNight.cyan : tokyoNight.foreground
+          }
         >
           {`${optionIndex === index ? '›' : ' '} ${option.label}`}
         </Text>

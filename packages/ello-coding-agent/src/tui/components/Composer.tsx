@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from 'ink';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { tokyoNight } from '../tokyo-night.js';
 
@@ -40,6 +40,8 @@ export function Composer(props: ComposerProps) {
   const [cursorVisible, setCursorVisible] = useState(true);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const valueRef = useRef(value);
+  const cursorIndexRef = useRef(cursorIndex);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -49,9 +51,24 @@ export function Composer(props: ComposerProps) {
   }, []);
 
   const updateValue = (next: string, nextCursorIndex = next.length): void => {
+    const normalizedCursorIndex = Math.max(
+      0,
+      Math.min(next.length, nextCursorIndex),
+    );
+    valueRef.current = next;
+    cursorIndexRef.current = normalizedCursorIndex;
     setValue(next);
-    setCursorIndex(Math.max(0, Math.min(next.length, nextCursorIndex)));
+    setCursorIndex(normalizedCursorIndex);
     props.onChange?.(next);
+  };
+
+  const updateCursorIndex = (next: number): void => {
+    const normalizedCursorIndex = Math.max(
+      0,
+      Math.min(valueRef.current.length, next),
+    );
+    cursorIndexRef.current = normalizedCursorIndex;
+    setCursorIndex(normalizedCursorIndex);
   };
 
   const acceptSuggestion = (): void => {
@@ -90,8 +107,10 @@ export function Composer(props: ComposerProps) {
 
   useInput(
     (input, key) => {
+      const currentValue = valueRef.current;
+      const currentCursorIndex = cursorIndexRef.current;
       if (key.return) {
-        const submitted = value;
+        const submitted = currentValue;
         props.onSubmit(submitted);
         if (submitted.trim() !== '') {
           setHistoryIndex(null);
@@ -100,11 +119,11 @@ export function Composer(props: ComposerProps) {
         return;
       }
       if (key.leftArrow) {
-        setCursorIndex((current) => Math.max(0, current - 1));
+        updateCursorIndex(currentCursorIndex - 1);
         return;
       }
       if (key.rightArrow) {
-        setCursorIndex((current) => Math.min(value.length, current + 1));
+        updateCursorIndex(currentCursorIndex + 1);
         return;
       }
       if (key.upArrow) {
@@ -128,7 +147,7 @@ export function Composer(props: ComposerProps) {
         return;
       }
       if (key.ctrl && input === 'c') {
-        if (value.length > 0) {
+        if (currentValue.length > 0) {
           setHistoryIndex(null);
           updateValue('');
         } else {
@@ -136,19 +155,13 @@ export function Composer(props: ComposerProps) {
         }
         return;
       }
-      if (key.backspace || key.delete) {
+      if (isBackspace(input, key) || isDelete(input, key)) {
         setHistoryIndex(null);
-        if (key.backspace || input === 'backspace') {
-          if (cursorIndex > 0) {
-            updateValue(
-              value.slice(0, cursorIndex - 1) + value.slice(cursorIndex),
-              cursorIndex - 1,
-            );
-          }
-        } else if (cursorIndex < value.length) {
+        if (currentCursorIndex > 0) {
           updateValue(
-            value.slice(0, cursorIndex) + value.slice(cursorIndex + 1),
-            cursorIndex,
+            currentValue.slice(0, currentCursorIndex - 1) +
+              currentValue.slice(currentCursorIndex),
+            currentCursorIndex - 1,
           );
         }
         return;
@@ -160,8 +173,10 @@ export function Composer(props: ComposerProps) {
       if (input.length > 0 && !key.ctrl && !key.meta) {
         setHistoryIndex(null);
         updateValue(
-          value.slice(0, cursorIndex) + input + value.slice(cursorIndex),
-          cursorIndex + input.length,
+          currentValue.slice(0, currentCursorIndex) +
+            input +
+            currentValue.slice(currentCursorIndex),
+          currentCursorIndex + input.length,
         );
       }
     },
@@ -170,6 +185,10 @@ export function Composer(props: ComposerProps) {
 
   const showCursor = props.isActive !== false && cursorVisible;
   const activeSuggestionIndex = effectiveSuggestionIndex();
+  const visibleSuggestions = visibleSuggestionWindow(
+    props.suggestions ?? [],
+    activeSuggestionIndex,
+  );
   const beforeCursor = value.slice(0, cursorIndex);
   const cursorChar = value[cursorIndex] ?? ' ';
   const afterCursor =
@@ -179,10 +198,7 @@ export function Composer(props: ComposerProps) {
     <Box flexDirection="column" paddingX={1}>
       <Box gap={1}>
         <Text color={tokyoNight.cyan}>{'>'}</Text>
-        <Text
-          color={tokyoNight.foreground}
-          wrap="wrap"
-        >
+        <Text color={tokyoNight.foreground} wrap="wrap">
           {beforeCursor}
           <Text
             color={showCursor ? tokyoNight.cyan : tokyoNight.background}
@@ -195,17 +211,49 @@ export function Composer(props: ComposerProps) {
       </Box>
       {props.suggestions !== undefined && props.suggestions.length > 0 ? (
         <Box marginLeft={2} flexDirection="column">
-          {props.suggestions.map((item, index) => (
+          {visibleSuggestions.items.map((item, index) => (
             <SuggestionLine
               key={typeof item === 'string' ? item : item.value}
               item={item}
-              active={index === activeSuggestionIndex}
+              active={
+                index + visibleSuggestions.start === activeSuggestionIndex
+              }
             />
           ))}
         </Box>
       ) : null}
     </Box>
   );
+}
+
+const MAX_VISIBLE_SUGGESTIONS = 5;
+
+function visibleSuggestionWindow(
+  suggestions: readonly ComposerSuggestion[],
+  activeIndex: number,
+): { readonly items: readonly ComposerSuggestion[]; readonly start: number } {
+  if (suggestions.length <= MAX_VISIBLE_SUGGESTIONS) {
+    return { items: suggestions, start: 0 };
+  }
+  const start = Math.min(
+    Math.max(0, activeIndex - MAX_VISIBLE_SUGGESTIONS + 1),
+    suggestions.length - MAX_VISIBLE_SUGGESTIONS,
+  );
+  return {
+    items: suggestions.slice(start, start + MAX_VISIBLE_SUGGESTIONS),
+    start,
+  };
+}
+
+function isBackspace(
+  input: string,
+  key: { readonly backspace?: boolean },
+): boolean {
+  return key.backspace === true || input === '\b' || input === '\u007f';
+}
+
+function isDelete(input: string, key: { readonly delete?: boolean }): boolean {
+  return key.delete === true || input === '\u001b[3~';
 }
 
 function SuggestionLine({
@@ -230,7 +278,7 @@ function SuggestionLine({
       {item.description !== undefined ? (
         <Text color={tokyoNight.muted}>{item.description}</Text>
       ) : null}
-      {active ? <Text color={tokyoNight.muted}>  &lt;tab&gt;</Text> : null}
+      {active ? <Text color={tokyoNight.muted}> &lt;tab&gt;</Text> : null}
     </Text>
   );
 }

@@ -4,9 +4,12 @@ import path from 'node:path';
 import { useApp, useInput } from 'ink';
 import { useEffect, useMemo, useState } from 'react';
 
-import type { CodingAgentConfig } from '../config.js';
+import type { CodingAgentConfig } from '../config/index.js';
 import type { CodingSession, ApprovalDecision } from '../runtime/index.js';
+import { loadCodingSkills } from '../skills/index.js';
 import { handleSlashCommand, type CommandResult } from '../slash-commands.js';
+import { createTaskService } from '../tasks/index.js';
+import { WorkspaceStore } from '../workspace/index.js';
 
 import { completeInput } from './completion.js';
 import { AppShell } from './components/AppShell.js';
@@ -37,6 +40,13 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   const [inputHistory, setInputHistory] = useState<readonly string[]>([]);
   const [pendingSteers, setPendingSteers] = useState<readonly string[]>([]);
   const shouldCompleteFiles = input.trimStart().startsWith('@');
+  const modelSelections = useMemo(
+    () =>
+      Object.keys(config.model_profiles).length > 0
+        ? Object.keys(config.model_profiles)
+        : config.modelCandidates,
+    [config.modelCandidates, config.model_profiles],
+  );
 
   // 审批是最高优先级浮层：pendingApproval 一来就盖过其它浮层。
   const effectiveOverlay: OverlayState =
@@ -90,16 +100,32 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         if (command.overlay === 'model-selector') {
           setOverlay({
             type: 'model-selector',
-            models: config.modelCandidates,
+            models: modelSelections,
           });
         } else if (command.overlay === 'help') {
           setOverlay({ type: 'help' });
         } else if (command.overlay === 'settings') {
           setOverlay({ type: 'settings', config: { ...config, model } });
-        } else if (command.overlay === 'session-selector') {
-          void session.listSessions().then((sessions) =>
-            setOverlay({ type: 'session-selector', sessions }),
+        } else if (command.overlay === 'tasks') {
+          void createTaskService()
+            .list()
+            .then((tasks) => setOverlay({ type: 'tasks', tasks }));
+        } else if (command.overlay === 'skills') {
+          void loadCodingSkills(config).then((skills) =>
+            setOverlay({ type: 'skills', skills }),
           );
+        } else if (command.overlay === 'workspace') {
+          void new WorkspaceStore()
+            .list()
+            .then((workspaces) =>
+              setOverlay({ type: 'workspace', workspaces }),
+            );
+        } else if (command.overlay === 'session-selector') {
+          void session
+            .listSessions()
+            .then((sessions) =>
+              setOverlay({ type: 'session-selector', sessions }),
+            );
         } else if (command.overlay === 'session-tree') {
           void session
             .sessionTree()
@@ -121,7 +147,9 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         } else if (command.action === 'quit') {
           void session.close().then(() => exit());
         } else {
-          session.notify(`Runtime action is not implemented: ${command.action}`);
+          session.notify(
+            `Runtime action is not implemented: ${command.action}`,
+          );
         }
         return;
       case 'submit':
@@ -129,7 +157,9 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         void session.submit(command.prompt);
         return;
       case 'set-model':
-        void session.setModel(command.model).then(() => setModel(command.model));
+        void session
+          .setModel(command.model)
+          .then(() => setModel(command.model));
         return;
       case 'message':
         session.notify(command.message);
@@ -263,8 +293,8 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   );
 
   const suggestions = useMemo(
-    () => completeInput(input, config.modelCandidates, fileSuggestions),
-    [config.modelCandidates, fileSuggestions, input],
+    () => completeInput(input, modelSelections, fileSuggestions),
+    [fileSuggestions, input, modelSelections],
   );
 
   return (
@@ -372,7 +402,10 @@ async function completeFiles(
   }
 }
 
-async function expandFileReference(input: string, cwd: string): Promise<string> {
+async function expandFileReference(
+  input: string,
+  cwd: string,
+): Promise<string> {
   const [fileToken = '', ...rest] = input.trim().split(/\s+/u);
   const target = fileToken.slice(1);
   const resolved = path.resolve(cwd, target);
@@ -388,7 +421,11 @@ async function expandFileReference(input: string, cwd: string): Promise<string> 
 
 function formatShellResult(
   command: string,
-  result: { readonly exitCode: number; readonly stdout: string; readonly stderr: string },
+  result: {
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+  },
 ): string {
   const body = [result.stdout, result.stderr].filter(Boolean).join('\n');
   const output = body.length > 0 ? body : '<no output>';
@@ -401,5 +438,8 @@ function clip(text: string, max: number): string {
 
 function isInside(root: string, target: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(target));
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  return (
+    relative === '' ||
+    (!relative.startsWith('..') && !path.isAbsolute(relative))
+  );
 }

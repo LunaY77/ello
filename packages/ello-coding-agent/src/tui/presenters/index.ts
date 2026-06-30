@@ -95,16 +95,21 @@ const grepPresenter: ToolPresenter = {
     ),
 };
 
-/** todo 工具：展示任务条数。 */
-const todoPresenter: ToolPresenter = {
-  summarize: () => 'todo',
+/** task 工具：展示任务 ID 或任务条数。 */
+const taskPresenter: ToolPresenter = {
+  summarize: (input) => str(input, 'id') || 'tasks',
   renderCall: () => null,
   renderResult: (_input, output) => {
-    const items = (output as { items?: unknown[] })?.items;
+    const items = Array.isArray(output) ? output : undefined;
+    const task = output as { id?: string; subject?: string };
     return createElement(
       Text,
       { color: tokyoNight.muted },
-      `${items?.length ?? 0} items`,
+      items !== undefined
+        ? `${items.length} tasks`
+        : task.id !== undefined
+          ? `task ${task.id}: ${task.subject ?? ''}`
+          : clip(stringify(output), 120),
     );
   },
 };
@@ -116,7 +121,13 @@ export const toolPresenters: Record<string, ToolPresenter> = {
   edit: diffPresenter,
   bash: bashPresenter,
   grep: grepPresenter,
-  todo: todoPresenter,
+  task_create: taskPresenter,
+  task_list: taskPresenter,
+  task_get: taskPresenter,
+  task_update: taskPresenter,
+  task_delete: taskPresenter,
+  task_claim: taskPresenter,
+  task_reset: taskPresenter,
 };
 
 /** 按工具名取 presenter，缺省走兜底。 */

@@ -1,7 +1,7 @@
 import { render } from 'ink';
 import { createElement } from 'react';
 
-import type { CodingAgentConfig } from '../config.js';
+import type { CodingAgentConfig } from '../config/index.js';
 import { createCodingSession } from '../runtime/coding-session.js';
 
 import { CodingAgentApp } from './App.js';

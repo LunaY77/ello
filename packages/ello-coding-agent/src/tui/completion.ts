@@ -28,8 +28,7 @@ export function completeInput(
         value: `/${command.name}`,
         label: `/${command.name}`,
         description: command.description,
-      }))
-      .slice(0, 5);
+      }));
   }
   if (trimmedLeft.startsWith('@')) {
     return files;

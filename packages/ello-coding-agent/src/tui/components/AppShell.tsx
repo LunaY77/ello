@@ -100,15 +100,15 @@ export function AppShell(props: AppShellProps) {
         </Box>
       ) : props.workedFor !== undefined ? (
         <Box marginTop={1} paddingX={1}>
-          <Text color={tokyoNight.muted}>{`worked for ${props.workedFor}`}</Text>
+          <Text
+            color={tokyoNight.muted}
+          >{`worked for ${props.workedFor}`}</Text>
         </Box>
       ) : null}
 
       {props.overlay}
 
-      <Box marginTop={1}>
-        {props.composer}
-      </Box>
+      <Box marginTop={1}>{props.composer}</Box>
 
       <Box>
         <Footer
@@ -154,18 +154,20 @@ function HeroPanel(props: {
       paddingX={1}
     >
       <Box justifyContent="space-between">
-        <Text color={tokyoNight.cyan}>{`>_ Ello Coding Agent${props.version ? ` (v${props.version})` : ''}`}</Text>
+        <Text
+          color={tokyoNight.cyan}
+        >{`>_ Ello Coding Agent${props.version ? ` (v${props.version})` : ''}`}</Text>
         <Text color={props.running ? tokyoNight.yellow : tokyoNight.green}>
           {props.running ? 'running' : 'ready'}
         </Text>
       </Box>
       <Text>
-        <Text color={tokyoNight.muted}>model:       </Text>
+        <Text color={tokyoNight.muted}>model: </Text>
         <Text color={tokyoNight.foreground}>{props.model}</Text>
-        <Text color={tokyoNight.muted}>   /model to change</Text>
+        <Text color={tokyoNight.muted}> /model to change</Text>
       </Text>
       <Text>
-        <Text color={tokyoNight.muted}>directory:   </Text>
+        <Text color={tokyoNight.muted}>directory: </Text>
         <Text color={tokyoNight.foreground}>{compactPath(props.cwd)}</Text>
       </Text>
       <Text>
@@ -207,8 +209,7 @@ function TranscriptLine({ item }: { readonly item: TranscriptItem }) {
       </Box>
     );
   }
-  const color =
-    item.kind === 'user' ? tokyoNight.green : tokyoNight.foreground;
+  const color = item.kind === 'user' ? tokyoNight.green : tokyoNight.foreground;
   const label = item.kind === 'user' ? 'you' : 'ello';
   return (
     <Box marginBottom={1}>

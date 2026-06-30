@@ -1,12 +1,15 @@
+import type { AgentSkill } from '@ello/agent';
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 
-import type { CodingAgentConfig } from '../../config.js';
+import type { CodingAgentConfig } from '../../config/index.js';
 import type { ApprovalDecision } from '../../runtime/intents.js';
 import type {
   JsonlSessionSummary,
   SessionTreeView,
 } from '../../session/repository.js';
+import type { Task } from '../../tasks/index.js';
+import type { WorkspaceManifest } from '../../workspace/index.js';
 import { InlineSelect } from '../components/InlineSelect.js';
 import type { ApprovalView } from '../state/view-reducer.js';
 import { tokyoNight } from '../tokyo-night.js';
@@ -23,6 +26,12 @@ export type OverlayState =
   | { readonly type: 'model-selector'; readonly models: readonly string[] }
   | { readonly type: 'help' }
   | { readonly type: 'settings'; readonly config: CodingAgentConfig }
+  | { readonly type: 'skills'; readonly skills: readonly AgentSkill[] }
+  | { readonly type: 'tasks'; readonly tasks: readonly Task[] }
+  | {
+      readonly type: 'workspace';
+      readonly workspaces: readonly WorkspaceManifest[];
+    }
   | {
       readonly type: 'session-selector';
       readonly sessions: readonly JsonlSessionSummary[];
@@ -76,7 +85,9 @@ export function OverlayHost({
           borderColor={tokyoNight.yellow}
           paddingX={1}
         >
-          <Text color={tokyoNight.yellow}>{`Approve ${overlay.request.toolName}?`}</Text>
+          <Text
+            color={tokyoNight.yellow}
+          >{`Approve ${overlay.request.toolName}?`}</Text>
           <Text color={tokyoNight.muted} wrap="wrap">
             {preview(overlay.request.input)}
           </Text>
@@ -95,7 +106,7 @@ export function OverlayHost({
           borderColor={tokyoNight.blue}
           paddingX={1}
         >
-          <Text color={tokyoNight.cyan}>Select model</Text>
+          <Text color={tokyoNight.cyan}>Select model profile</Text>
           <InlineSelect
             options={overlay.models.map((model) => ({
               label: model,
@@ -123,14 +134,89 @@ export function OverlayHost({
       ) : null}
       {overlay.type === 'settings' ? (
         <Panel title="Settings" color={tokyoNight.purple}>
+          <Text color={tokyoNight.muted}>
+            General / Model / Permissions / Skills / Tasks / Workspace / Display
+          </Text>
+          <SettingLine
+            label="profile"
+            value={overlay.config.model_profile ?? '<direct>'}
+          />
+          <SettingLine
+            label="provider"
+            value={overlay.config.model_provider ?? '<default>'}
+          />
           <SettingLine label="model" value={overlay.config.model} />
-          <SettingLine label="base url" value={overlay.config.baseUrl ?? '<default>'} />
+          <SettingLine
+            label="reasoning"
+            value={overlay.config.model_reasoning_effort ?? '<default>'}
+          />
+          <SettingLine
+            label="personality"
+            value={overlay.config.personality ?? '<default>'}
+          />
+          <SettingLine
+            label="base url"
+            value={overlay.config.baseUrl ?? '<default>'}
+          />
           <SettingLine
             label="headers"
             value={`${Object.keys(overlay.config.httpHeaders).length} custom`}
           />
           <SettingLine label="sessions" value={overlay.config.sessionDir} />
           <SettingLine label="cwd" value={overlay.config.cwd} />
+          <SettingLine label="write" value=".ello/config.toml" />
+        </Panel>
+      ) : null}
+      {overlay.type === 'tasks' ? (
+        <Panel title="Tasks" color={tokyoNight.green}>
+          {overlay.tasks.length === 0 ? (
+            <Text color={tokyoNight.muted}>tasks &lt;none&gt;</Text>
+          ) : (
+            overlay.tasks.slice(0, 12).map((task) => (
+              <Text key={task.id} color={tokyoNight.foreground}>
+                <Text color={tokyoNight.muted}>{task.id.padEnd(4)}</Text>
+                <Text color={statusColor(task.status)}>
+                  {task.status.padEnd(12)}
+                </Text>
+                <Text>{clip(task.subject, 64)}</Text>
+              </Text>
+            ))
+          )}
+        </Panel>
+      ) : null}
+      {overlay.type === 'skills' ? (
+        <Panel title="Skills" color={tokyoNight.blue}>
+          {overlay.skills.length === 0 ? (
+            <Text color={tokyoNight.muted}>skills &lt;none&gt;</Text>
+          ) : (
+            overlay.skills.slice(0, 12).map((skill) => (
+              <Text key={skill.name} color={tokyoNight.foreground}>
+                <Text color={tokyoNight.muted}>{skill.name.padEnd(16)}</Text>
+                <Text color={tokyoNight.cyan}>
+                  {(skill.source ?? 'global').padEnd(9)}
+                </Text>
+                <Text>{clip(skill.description, 58)}</Text>
+              </Text>
+            ))
+          )}
+        </Panel>
+      ) : null}
+      {overlay.type === 'workspace' ? (
+        <Panel title="Workspace" color={tokyoNight.cyan}>
+          {overlay.workspaces.length === 0 ? (
+            <Text color={tokyoNight.muted}>workspaces &lt;none&gt;</Text>
+          ) : (
+            overlay.workspaces.slice(0, 10).map((workspace) => (
+              <Text
+                key={`${workspace.kind}/${workspace.name}`}
+                color={tokyoNight.foreground}
+              >
+                <Text color={tokyoNight.muted}>{workspace.kind.padEnd(8)}</Text>
+                <Text color={tokyoNight.cyan}>{workspace.name.padEnd(18)}</Text>
+                <Text>{clip(workspace.rootPath, 60)}</Text>
+              </Text>
+            ))
+          )}
         </Panel>
       ) : null}
       {overlay.type === 'session-selector' ? (
@@ -235,10 +321,7 @@ function compactPath(value: string): string {
 }
 
 function renderResumeLabel(session: JsonlSessionSummary): string {
-  const bits = [
-    `${session.sessionId.slice(0, 8)}`,
-    compactPath(session.cwd),
-  ];
+  const bits = [`${session.sessionId.slice(0, 8)}`, compactPath(session.cwd)];
   if (session.lastUserText !== undefined) {
     bits.push(`you: ${clip(session.lastUserText, 36)}`);
   }
@@ -277,4 +360,17 @@ function renderEntryPath(tree: SessionTreeView, entryId: string): string {
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/gu, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+function statusColor(status: Task['status']): string {
+  switch (status) {
+    case 'completed':
+      return tokyoNight.green;
+    case 'in_progress':
+      return tokyoNight.yellow;
+    case 'cancelled':
+      return tokyoNight.red;
+    default:
+      return tokyoNight.blue;
+  }
 }

@@ -30,7 +30,8 @@ export function ToolCard({
   readonly compact?: boolean;
 }) {
   const presenter = presenterFor(call.name);
-  const icon = call.status === 'running' ? '·' : call.status === 'ok' ? '⎿' : '×';
+  const icon =
+    call.status === 'running' ? '·' : call.status === 'ok' ? '⎿' : '×';
   return (
     <Box flexDirection="column">
       <Box gap={1}>
@@ -40,7 +41,7 @@ export function ToolCard({
         <Text color={tokyoNight.muted}>{presenter.summarize(call.input)}</Text>
       </Box>
       {call.status === 'running' ? (
-        <Text color={tokyoNight.yellow}>  working</Text>
+        <Text color={tokyoNight.yellow}> working</Text>
       ) : compact ? null : call.output !== undefined ? (
         presenter.renderResult(call.input, call.output)
       ) : (
