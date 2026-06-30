@@ -7,19 +7,21 @@ import {
   createLocalShellEnvironment,
   createSkillTools,
   activeSkillsContext,
+  skillIndexContext,
   type Agent,
   type AgentMessage,
   type AgentRunResult,
   type AgentSkill,
   type AgentStream,
   type AgentStreamEvent,
+  type SubagentDefinition,
   type DeferredApprovalItem,
   type ModelAdapter,
   type SessionCompactor,
 } from '@ello/agent';
 
 import { CheckpointStore } from '../change/checkpoint.js';
-import type { CodingAgentConfig } from '../config.js';
+import type { CodingAgentConfig } from '../config/index.js';
 import {
   SUMMARIZATION_SYSTEM_PROMPT,
   SUMMARIZATION_PROMPT,
@@ -36,8 +38,8 @@ import type {
   JsonlSessionSummary,
   SessionTreeView,
 } from '../session/repository.js';
-import { loadCodingSkills } from '../skills.js';
-import { codingSubagents } from '../subagents.js';
+import { loadCodingSkills } from '../skills/index.js';
+import { codingSubagents } from '../subagents/index.js';
 import { buildCodingSystemPrompt } from '../system-prompt.js';
 import { createCodingTools } from '../tools/index.js';
 
@@ -81,7 +83,7 @@ export interface CodingSession {
   approve(requestId: string, decision: ApprovalDecision): Promise<void>;
   abort(reason?: string): void;
   notify(text: string): void;
-  setModel(model: string): Promise<void>;
+  setModel(selection: string): Promise<void>;
   runShell(command: string): Promise<{
     readonly exitCode: number;
     readonly stdout: string;
@@ -103,6 +105,7 @@ interface SessionDeps {
   readonly rulesStore: RulesStore;
   readonly compactor: SessionCompactor;
   readonly skills: readonly AgentSkill[];
+  readonly subagents: readonly SubagentDefinition[];
   readonly modelAdapter?: ModelAdapter;
 }
 
@@ -132,12 +135,14 @@ export async function createCodingSession(
   });
 
   const skills = await loadCodingSkills(config);
+  const subagents = await codingSubagents(config);
 
   const session = new CodingSessionImpl(sessionId, config, {
     sessionStore,
     rulesStore,
     compactor,
     skills,
+    subagents,
     modelAdapter: options.modelAdapter ?? createConfiguredModelAdapter(config),
   });
   session.emit({ type: 'session.opened', sessionId, cwd: config.cwd });
@@ -149,19 +154,21 @@ class CodingSessionImpl implements CodingSession {
   readonly checkpoints: CheckpointStore;
 
   private agent: Agent;
-  /** 当前激活技能名集合，被 activate_skill 工具与 section 共享。 */
+  /** 当前激活技能名集合，被 skill 工具与 section 共享。 */
   private readonly activeSkills = new Set<string>();
   private readonly listeners = new Set<CodingEventListener>();
   private readonly pendingApprovals = new Map<string, DeferredApprovalItem>();
   private readonly steerQueue: string[] = [];
   private currentStream: AgentStream | undefined;
+  private config: CodingAgentConfig;
   private model: string;
 
   constructor(
     public sessionId: string,
-    private readonly config: CodingAgentConfig,
+    config: CodingAgentConfig,
     private readonly deps: SessionDeps,
   ) {
+    this.config = config;
     this.checkpoints = new CheckpointStore(checkpointsDir(config.cwd));
     this.model = config.model;
     this.agent = this.buildAgent();
@@ -186,23 +193,19 @@ class CodingSessionImpl implements CodingSession {
     const input =
       drained.length > 0 ? [...drained, prompt].join('\n\n') : prompt;
 
-    this.emit({ type: 'status', state: 'running' });
     this.currentStream = this.agent.stream(input, {
       sessionId: this.sessionId,
       ...(meta !== undefined ? { metadata: meta } : {}),
     });
     try {
-      for await (const event of this.currentStream) {
-        this.forward(event);
-      }
-      const result = await this.currentStream.final;
-      this.emit({ type: 'usage', usage: result.usage });
-      await this.checkpoints.seal(result.id, prompt.slice(0, 80));
-      this.emit({
-        type: 'status',
-        state: this.pendingApprovals.size > 0 ? 'awaiting_approval' : 'idle',
+      return await driveRun({
+        currentStream: this.currentStream,
+        pendingApprovalCount: () => this.pendingApprovals.size,
+        emit: (event) => this.emit(event),
+        onEvent: (event) => this.forward(event),
+        checkpoints: this.checkpoints,
+        checkpointLabel: prompt.slice(0, 80),
       });
-      return result;
     } finally {
       this.currentStream = undefined;
     }
@@ -244,7 +247,6 @@ class CodingSessionImpl implements CodingSession {
       await this.deps.rulesStore.addDenyRule(item, decision.scope ?? 'session');
     }
 
-    this.emit({ type: 'status', state: 'running' });
     const resumed = this.agent.resume(
       {
         deferred: [item],
@@ -261,15 +263,12 @@ class CodingSessionImpl implements CodingSession {
     );
     this.currentStream = resumed;
     try {
-      for await (const event of resumed) {
-        this.forward(event);
-      }
-      const result = await resumed.final;
-      this.emit({ type: 'usage', usage: result.usage });
-      await this.checkpoints.seal(result.id);
-      this.emit({
-        type: 'status',
-        state: this.pendingApprovals.size > 0 ? 'awaiting_approval' : 'idle',
+      await driveRun({
+        currentStream: this.currentStream,
+        pendingApprovalCount: () => this.pendingApprovals.size,
+        emit: (event) => this.emit(event),
+        onEvent: (event) => this.forward(event),
+        checkpoints: this.checkpoints,
       });
     } finally {
       this.currentStream = undefined;
@@ -288,15 +287,21 @@ class CodingSessionImpl implements CodingSession {
   }
 
   /** 切换模型并重建 Agent，当前运行中不允许切换。 */
-  async setModel(model: string): Promise<void> {
+  async setModel(selection: string): Promise<void> {
     if (this.currentStream !== undefined) {
       this.notify('Cannot change model while running.');
       return;
     }
-    this.model = model;
+    const next = selectModelConfig(this.config, selection);
+    this.config = next;
+    this.model = next.model;
     await this.rebuild();
-    this.emit({ type: 'model.changed', model });
-    this.notify(`Model switched to ${model}`);
+    this.emit({ type: 'model.changed', model: next.model });
+    this.notify(
+      next.model_profile !== null
+        ? `Model profile switched to ${next.model_profile} (${next.model})`
+        : `Model switched to ${next.model}`,
+    );
   }
 
   /** TUI `!cmd` shell escape：受同一 cwd/allowedPaths 边界约束。 */
@@ -343,7 +348,9 @@ class CodingSessionImpl implements CodingSession {
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
     this.emit({ type: 'ui.clear' });
     this.notify(
-      entryId === null ? 'Checked out session root.' : `Checked out ${entryId}.`,
+      entryId === null
+        ? 'Checked out session root.'
+        : `Checked out ${entryId}.`,
     );
   }
 
@@ -466,7 +473,7 @@ class CodingSessionImpl implements CodingSession {
       active: this.activeSkills,
     });
     const delegateTool = createDelegateTool({
-      subagents: codingSubagents(config),
+      subagents: this.deps.subagents,
       model: this.model,
       parentTools: tools,
       session: this.deps.sessionStore,
@@ -483,7 +490,12 @@ class CodingSessionImpl implements CodingSession {
       }),
       activeSkillsContext({
         skills: this.deps.skills,
+        active: this.activeSkills,
         activation: 'activated',
+      }),
+      skillIndexContext({
+        skills: this.deps.skills,
+        contextWindow: DEFAULT_CONTEXT_WINDOW,
       }),
       memory.section,
     ];
@@ -491,6 +503,7 @@ class CodingSessionImpl implements CodingSession {
     return createAgent({
       name: 'ello-coding-agent',
       model: this.model,
+      modelSettings: modelSettingsFromConfig(config),
       instructions: buildCodingSystemPrompt(config),
       environment: createLocalShellEnvironment({
         cwd: config.cwd,
@@ -557,13 +570,76 @@ function makeSummarizer(
   };
 }
 
-function createConfiguredModelAdapter(
-  config: CodingAgentConfig,
-): ModelAdapter {
+function createConfiguredModelAdapter(config: CodingAgentConfig): ModelAdapter {
   return new AiSdkModelAdapter({
     ...(config.baseUrl !== null ? { baseURL: config.baseUrl } : {}),
+    ...(config.apiKey !== null ? { apiKey: config.apiKey } : {}),
     ...(Object.keys(config.httpHeaders).length > 0
       ? { headers: config.httpHeaders }
       : {}),
   });
+}
+
+function selectModelConfig(
+  config: CodingAgentConfig,
+  selection: string,
+): CodingAgentConfig {
+  const profile = config.model_profiles[selection];
+  if (profile === undefined) {
+    return {
+      ...config,
+      model_profile: null,
+      model: selection,
+    };
+  }
+  return {
+    ...config,
+    model_profile: selection,
+    model_provider: profile.model_provider,
+    model: profile.model,
+    model_reasoning_effort: profile.model_reasoning_effort,
+    personality: profile.personality,
+  };
+}
+
+function modelSettingsFromConfig(
+  config: CodingAgentConfig,
+): Record<string, unknown> {
+  return {
+    ...(config.model_reasoning_effort !== null
+      ? { reasoningEffort: config.model_reasoning_effort }
+      : {}),
+  };
+}
+
+async function driveRun(
+  options: {
+    readonly currentStream: AgentStream;
+    readonly pendingApprovalCount: () => number;
+    readonly emit: (event: CodingSessionEvent) => void;
+    readonly onEvent: (event: AgentStreamEvent) => void;
+    readonly checkpoints: CheckpointStore;
+    readonly checkpointLabel?: string | undefined;
+  },
+): Promise<AgentRunResult> {
+  const {
+    currentStream,
+    pendingApprovalCount,
+    emit,
+    onEvent,
+    checkpoints,
+    checkpointLabel,
+  } = options;
+  emit({ type: 'status', state: 'running' });
+  for await (const event of currentStream) {
+    onEvent(event);
+  }
+  const result = await currentStream.final;
+  emit({ type: 'usage', usage: result.usage });
+  await checkpoints.seal(result.id, checkpointLabel);
+  emit({
+    type: 'status',
+    state: pendingApprovalCount() > 0 ? 'awaiting_approval' : 'idle',
+  });
+  return result;
 }

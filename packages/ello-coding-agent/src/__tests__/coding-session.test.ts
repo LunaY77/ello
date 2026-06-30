@@ -11,7 +11,7 @@ import type {
 } from '@ello/agent';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { loadCodingAgentConfig } from '../config.js';
+import { loadCodingAgentConfig } from '../config/index.js';
 import { createCodingSession } from '../runtime/coding-session.js';
 import type { CodingSessionEvent } from '../runtime/intents.js';
 
@@ -195,9 +195,9 @@ describe('createCodingSession', () => {
 
     const forked = await session.fork('test branch');
     expect(forked).toHaveLength(36);
-    expect((await session.listSessions()).map((item) => item.sessionId)).toContain(
-      forked,
-    );
+    expect(
+      (await session.listSessions()).map((item) => item.sessionId),
+    ).toContain(forked);
 
     await session.close();
   });

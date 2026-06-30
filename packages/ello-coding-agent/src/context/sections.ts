@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 
 import type { SystemSection } from '@ello/agent';
 
-import type { CodingAgentConfig } from '../config.js';
+import type { CodingAgentConfig } from '../config/index.js';
 
 const execFileAsync = promisify(execFile);
 

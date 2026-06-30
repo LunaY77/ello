@@ -1,10 +1,11 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { z } from 'zod';
 
-import { parseTomlConfig, stringifyTomlConfig } from './config-toml.js';
+import { globalConfigPath, projectConfigPath } from './config/index.js';
+import { isReadOnlyTool } from './tools/registry.js';
+import { parseTomlConfig, stringifyTomlConfig } from './utils/toml.js';
 
 /** 产品层权限动作。 */
 export type PermissionAction = 'allow' | 'ask' | 'deny';
@@ -188,14 +189,9 @@ export class PermissionStore {
       return;
     }
     const filePath =
-      rule.scope === 'user'
-        ? path.join(homedir(), '.ello', 'config.json')
-        : rule.scope === 'project'
-          ? path.join(this.cwd, '.ello', 'config.json')
-          : path.join(this.cwd, '.ello', 'local.json');
+      rule.scope === 'user' ? globalConfigPath() : projectConfigPath(this.cwd);
     const current = await readConfig(filePath);
     const currentRules = parsePermissionRules(current.permissionRules);
-    await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(
       filePath,
       stringifyTomlConfig({
@@ -234,17 +230,6 @@ function matchRule(rule: PermissionRule, ctx: PermissionContext): boolean {
     }
   }
   return true;
-}
-
-function isReadOnlyTool(toolName: string): boolean {
-  return (
-    toolName === 'read' ||
-    toolName === 'ls' ||
-    toolName === 'grep' ||
-    toolName === 'glob' ||
-    toolName === 'todo' ||
-    toolName === 'tool_search'
-  );
 }
 
 function targetInsideAllowedPath(ctx: PermissionContext): boolean {

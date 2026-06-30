@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { defineTool, type AnyAgentTool } from '@ello/agent';
 import { z } from 'zod';
 
-import type { CodingAgentConfig } from '../config.js';
+import type { CodingAgentConfig } from '../config/index.js';
 
 import { resolveWorkspacePath, truncate, type ApprovalFor } from './shared.js';
 

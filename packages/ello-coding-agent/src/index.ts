@@ -13,11 +13,10 @@ export {
   getProjectConfigPath,
   loadCodingAgentConfig,
   normalizeApprovalMode,
-  setProjectConfigValue,
   type ApprovalMode,
   type CodingAgentConfig,
   type CodingAgentConfigOverrides,
-} from './config.js';
+} from './config/index.js';
 
 // —— 共享运行时 ——
 export {
@@ -27,9 +26,9 @@ export {
 } from './runtime/coding-session.js';
 export type {
   ApprovalDecision,
-  CodingSessionState,
-  CodingSessionEvent,
   CodingEventListener,
+  CodingSessionEvent,
+  CodingSessionState,
 } from './runtime/intents.js';
 
 // —— 会话存储与会话树 ——
@@ -39,12 +38,14 @@ export {
   SESSION_FILE_VERSION,
   type ActiveSessionPath,
   type JsonlSessionSummary,
+  type SessionRecord,
   type SessionTreeNode,
   type SessionTreeView,
-  type SessionRecord,
 } from './session/repository.js';
 
 // —— 权限与规则 ——
+export { makeApprovalPolicy } from './permission/policy.js';
+export { RulesStore, type RuleScope } from './permission/rules-store.js';
 export {
   applyPermissionPolicy,
   denialKey,
@@ -59,8 +60,6 @@ export {
   type PermissionMode,
   type PermissionRule,
 } from './permissions.js';
-export { makeApprovalPolicy } from './permission/policy.js';
-export { RulesStore, type RuleScope } from './permission/rules-store.js';
 
 // —— 工具集 ——
 export {
@@ -70,13 +69,12 @@ export {
 } from './tools/index.js';
 
 // —— 上下文与系统提示 ——
-export { buildCodingSystemPrompt } from './system-prompt.js';
+export { createSessionCompactor } from './context/compactor.js';
+export { createCodingMemory } from './context/memory.js';
 export {
   buildSystemSections,
   loadProjectInstructions,
 } from './context/sections.js';
-export { createCodingMemory } from './context/memory.js';
-export { createSessionCompactor } from './context/compactor.js';
 export {
   loadCodingMemory,
   renderMemoryForPrompt,
@@ -84,6 +82,7 @@ export {
   type MemoryFile,
   type MemoryManifest,
 } from './memory.js';
+export { buildCodingSystemPrompt } from './system-prompt.js';
 
 // —— 改动与检查点 ——
 export {
@@ -93,8 +92,57 @@ export {
 } from './change/checkpoint.js';
 
 // —— 技能与子代理 ——
-export { loadCodingSkills } from './skills.js';
-export { codingSubagents } from './subagents.js';
+export {
+  formatSkill,
+  formatSkillList,
+  loadCodingSkills,
+} from './skills/index.js';
+export { codingSubagents } from './subagents/index.js';
+
+// —— 持久化任务 ——
+export {
+  createTaskService,
+  FileTaskStore,
+  formatClaimResult,
+  formatTask,
+  formatTaskList,
+  taskListDir,
+  TaskService,
+  SqliteTaskStore,
+  type ClaimResult,
+  type CreateTaskInput,
+  type Task,
+  type TaskStatus,
+  type TaskStore,
+  type UpdateTaskInput,
+} from './tasks/index.js';
+
+// —— 全局 SQLite 状态库 ——
+export {
+  closeCodingDatabase,
+  globalArtifactsDir,
+  globalStateDatabasePath,
+  openGlobalCodingDatabase,
+  openGlobalCodingDatabaseSync,
+  transaction,
+  type CodingDatabase,
+} from './storage/index.js';
+export { CheckpointRepository } from './storage/repositories/checkpoint-repository.js';
+export { MemoryRepository } from './storage/repositories/memory-repository.js';
+export { UsageRepository } from './storage/repositories/usage-repository.js';
+export { WorkspaceRepository } from './storage/repositories/workspace-repository.js';
+
+// —— 多仓 workspace ——
+export {
+  formatRepoList,
+  formatWorkspaceList,
+  RepoStore,
+  WorkspaceStore,
+  type RepoEntry,
+  type WorkspaceKind,
+  type WorkspaceManifest,
+  type WorkspaceRepo,
+} from './workspace/index.js';
 
 // —— 可观测 ——
 export {
@@ -104,8 +152,8 @@ export {
 
 // —— slash 命令 ——
 export {
-  slashCommands,
   handleSlashCommand,
+  slashCommands,
   type CommandContext,
   type CommandResult,
   type SlashCommand,

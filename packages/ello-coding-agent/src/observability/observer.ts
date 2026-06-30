@@ -3,8 +3,9 @@ import path from 'node:path';
 
 import type { AgentObserver, AgentUsage } from '@ello/agent';
 
-import type { CodingAgentConfig } from '../config.js';
+import type { CodingAgentConfig } from '../config/index.js';
 import { logsDir } from '../session/paths.js';
+import { UsageRepository } from '../storage/repositories/usage-repository.js';
 
 /**
  * coding-agent 结构化日志 observer。
@@ -21,6 +22,7 @@ import { logsDir } from '../session/paths.js';
  */
 export function createCodingObserver(config: CodingAgentConfig): AgentObserver {
   const file = path.join(logsDir(), 'coding-agent.ndjson');
+  const starts = new Map<string, string>();
   const log = (event: string, data: Record<string, unknown>): void => {
     void writeLine(file, {
       ts: new Date().toISOString(),
@@ -32,6 +34,7 @@ export function createCodingObserver(config: CodingAgentConfig): AgentObserver {
 
   return {
     onRunStarted: (event, ctx) => {
+      starts.set(event.runId, new Date().toISOString());
       log('run.started', { runId: event.runId, sessionId: ctx.sessionId });
     },
     onToolApprovalRequired: (item) => {
@@ -48,9 +51,23 @@ export function createCodingObserver(config: CodingAgentConfig): AgentObserver {
         finishReason: result.finishReason,
         usage: summarizeUsage(result.usage),
       });
+      void recordUsageSafe(config, {
+        runId: result.id,
+        status: 'completed',
+        finishReason: result.finishReason,
+        usage: result.usage,
+        startedAt: starts.get(result.id),
+      });
+      starts.delete(result.id);
     },
-    onRunFailed: (event) => {
+    onRunFailed: (event, ctx) => {
       log('run.failed', { error: event.error.message });
+      void recordUsageSafe(config, {
+        runId: ctx.runId,
+        status: 'failed',
+        startedAt: starts.get(ctx.runId),
+      });
+      starts.delete(ctx.runId);
     },
   };
 }
@@ -77,5 +94,33 @@ async function writeLine(
     await appendFile(file, `${JSON.stringify(payload)}\n`, 'utf8');
   } catch {
     // 日志写入失败被动吞掉，绝不影响 agent 运行。
+  }
+}
+
+async function recordUsageSafe(
+  config: CodingAgentConfig,
+  input: {
+    readonly runId: string;
+    readonly status: 'completed' | 'failed';
+    readonly finishReason?: string | undefined;
+    readonly usage?: AgentUsage | undefined;
+    readonly startedAt?: string | undefined;
+  },
+): Promise<void> {
+  try {
+    const repository = new UsageRepository();
+    await repository.recordUsage({
+      runId: input.runId,
+      invocation: config.tui ? 'tui' : 'run',
+      model: config.model,
+      status: input.status,
+      finishReason: input.finishReason,
+      usage: input.usage,
+      startedAt: input.startedAt,
+      completedAt: new Date().toISOString(),
+    });
+    repository.close();
+  } catch {
+    // usage 是报表辅助数据，写入失败不能影响 agent 主流程。
   }
 }

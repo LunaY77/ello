@@ -1,4 +1,4 @@
-import type { CodingAgentConfig } from './config.js';
+import type { CodingAgentConfig } from './config/index.js';
 import { loadProjectInstructions } from './context/sections.js';
 
 /**
@@ -100,14 +100,15 @@ function codeStyleSection(): string {
   ].join('\n');
 }
 
-/** 任务管理：用 todo 工具拆解、跟踪较复杂的多步任务。 */
+/** 任务管理：用持久化 task 工具拆解、跟踪较复杂的多步任务。 */
 function taskManagementSection(): string {
   return [
     '# Task management',
-    'For non-trivial work spanning multiple steps, use the `todo` tool to plan and track',
-    'progress. Create todos up front, mark exactly one as in-progress while you work on',
-    'it, and complete it as soon as it is done. This keeps the user informed and ensures',
-    'nothing is dropped. Skip the todo list for single, trivial actions.',
+    'For non-trivial work spanning multiple steps, use `task_create`, `task_list`,',
+    '`task_update`, and `task_claim` to plan and track progress in the persisted',
+    'coding-agent task list. Create tasks up front, claim exactly one as in-progress',
+    'while you work on it, and complete it as soon as it is done. Skip task tracking',
+    'for single, trivial actions.',
   ].join('\n');
 }
 

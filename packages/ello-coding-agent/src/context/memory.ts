@@ -1,6 +1,6 @@
 import type { AgentObserver, SystemSection } from '@ello/agent';
 
-import type { CodingAgentConfig } from '../config.js';
+import type { CodingAgentConfig } from '../config/index.js';
 import { loadCodingMemory, renderMemoryForPrompt } from '../memory.js';
 
 /**

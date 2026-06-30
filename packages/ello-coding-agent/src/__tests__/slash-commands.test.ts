@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { loadCodingAgentConfig } from '../config.js';
+import { loadCodingAgentConfig } from '../config/index.js';
 import type { JsonlSessionSummary } from '../session/repository.js';
 import { handleSlashCommand } from '../slash-commands.js';
 

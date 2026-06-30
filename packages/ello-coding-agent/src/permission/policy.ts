@@ -1,6 +1,6 @@
 import type { AgentApprovalDecision, AgentToolContext } from '@ello/agent';
 
-import type { CodingAgentConfig } from '../config.js';
+import type { CodingAgentConfig } from '../config/index.js';
 import { applyPermissionPolicy, type PermissionRule } from '../permissions.js';
 
 /**
@@ -32,7 +32,16 @@ export function makeApprovalPolicy(
         cwd: config.cwd,
         allowedPaths: config.allowedPaths,
         mode: config.approvalMode,
-        rules: [...config.permissionRules, ...rules()],
+        rules: [
+          ...config.tools.needApproval.map((tool) => ({
+            action: 'ask' as const,
+            tool,
+            scope: 'user' as const,
+            reason: 'configured in tools.needApproval',
+          })),
+          ...config.permissionRules,
+          ...rules(),
+        ],
         ...(denied !== undefined ? { repeatedDenials: denied } : {}),
       });
 }

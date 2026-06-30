@@ -1,4 +1,4 @@
-import type { CodingAgentConfig } from './config.js';
+import type { CodingAgentConfig } from './config/index.js';
 import type { PermissionMode } from './permissions.js';
 import { describeCodingTools } from './tools/index.js';
 
@@ -18,6 +18,9 @@ export type CommandResult =
         | 'session-selector'
         | 'session-tree'
         | 'settings'
+        | 'skills'
+        | 'tasks'
+        | 'workspace'
         | 'permission-rules';
     }
   | {
@@ -82,6 +85,56 @@ export const slashCommands: readonly SlashCommand[] = [
     name: 'resume',
     description: 'Open session selector',
     run: () => ({ type: 'open-overlay', overlay: 'session-selector' }),
+  },
+  {
+    name: 'tasks',
+    description: 'Open task list',
+    run: () => ({ type: 'open-overlay', overlay: 'tasks' }),
+  },
+  {
+    name: 'skills',
+    description: 'Open skill browser',
+    run: () => ({ type: 'open-overlay', overlay: 'skills' }),
+  },
+  {
+    name: 'skill',
+    description: 'Invoke a skill',
+    run: (_ctx, args) => {
+      const [name, ...rest] = args;
+      if (name === undefined) {
+        return { type: 'open-overlay', overlay: 'skills' };
+      }
+      return {
+        type: 'submit',
+        prompt: [
+          `Invoke skill \`${name}\`.`,
+          rest.length > 0 ? `Arguments: ${rest.join(' ')}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      };
+    },
+  },
+  {
+    name: 'skill-search',
+    description: 'Search skills',
+    run: (_ctx, args) => ({
+      type: 'submit',
+      prompt: `Search available skills for: ${args.join(' ')}`,
+    }),
+  },
+  {
+    name: 'skill-create',
+    description: 'Create a skill package',
+    run: (_ctx, args) => ({
+      type: 'submit',
+      prompt: `Invoke skill \`skill-creator\` to create: ${args.join(' ')}`,
+    }),
+  },
+  {
+    name: 'workspace',
+    description: 'Open workspace status',
+    run: () => ({ type: 'open-overlay', overlay: 'workspace' }),
   },
   {
     name: 'new',
