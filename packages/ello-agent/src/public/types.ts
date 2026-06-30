@@ -654,8 +654,38 @@ export interface AgentTurnDiagnostics {
 export interface AgentSkill {
   /** 技能名。 */
   readonly name: string;
+  /** 展示名。 */
+  readonly displayName?: string | undefined;
   /** 技能描述。 */
   readonly description: string;
+  /** 何时使用该技能。 */
+  readonly whenToUse?: string | undefined;
+  /** 参数提示。 */
+  readonly argumentHint?: string | undefined;
+  /** 允许的工具名。 */
+  readonly allowedTools?: readonly string[] | undefined;
+  /** 技能上下文模式。 */
+  readonly context?: 'inline' | 'fork' | undefined;
+  /** 技能建议模型。 */
+  readonly model?: string | undefined;
+  /** 技能建议推理强度。 */
+  readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | number | undefined;
+  /** 是否允许用户显式调用。 */
+  readonly userInvocable?: boolean | undefined;
+  /** 是否禁用模型调用。 */
+  readonly disableModelInvocation?: boolean | undefined;
+  /** 技能来源。 */
+  readonly source?:
+    | 'bundled'
+    | 'global'
+    | 'project'
+    | 'shared'
+    | 'mcp'
+    | undefined;
+  /** 技能目录。 */
+  readonly baseDir?: string | undefined;
+  /** 正文 hash，用于热加载与审计。 */
+  readonly contentHash?: string | undefined;
   /** 激活后注入的指令文本。 */
   readonly instructions: string;
   /** 技能附带的专属工具。 */

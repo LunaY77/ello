@@ -14,6 +14,7 @@ export {
   activeSkillsContext,
   createSkillTools,
   loadSkillsFromDir,
+  skillIndexContext,
 } from './core/skills.js';
 export { createDelegateTool, defineSubagent } from './core/subagent.js';
 export type { CreateDelegateToolOptions } from './core/subagent.js';

@@ -29,6 +29,7 @@ import type {
 
 export interface AiSdkModelAdapterOptions {
   readonly baseURL?: string;
+  readonly apiKey?: string;
   readonly headers?: Record<string, string>;
 }
 
@@ -49,6 +50,7 @@ export class AiSdkModelAdapter implements ModelAdapter {
             ...(options.baseURL !== undefined
               ? { baseURL: options.baseURL }
               : {}),
+            ...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
             ...(options.headers !== undefined
               ? { headers: options.headers }
               : {}),
@@ -60,6 +62,7 @@ export class AiSdkModelAdapter implements ModelAdapter {
             ...(options.baseURL !== undefined
               ? { baseURL: options.baseURL }
               : {}),
+            ...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
             ...(options.headers !== undefined
               ? { headers: options.headers }
               : {}),
@@ -246,9 +249,7 @@ export function resolveLanguageModel(
   const [provider, ...rest] = model.split(':');
   const modelName = rest.join(':') || provider || model;
   if (provider === 'openai-chat') {
-    return openaiProvider.chat(
-      modelName as Parameters<typeof openai.chat>[0],
-    );
+    return openaiProvider.chat(modelName as Parameters<typeof openai.chat>[0]);
   }
   if (provider === 'openai-responses' || provider === 'openai') {
     return openaiProvider.responses(
@@ -262,7 +263,11 @@ export function resolveLanguageModel(
 }
 
 function createToolCallMessageGroup(
-  calls: readonly { readonly id: string; readonly name: string; readonly input: unknown }[],
+  calls: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly input: unknown;
+  }[],
 ): ModelMessage {
   const parts = calls.flatMap((call) => {
     const message = createToolCallMessage(call) as {

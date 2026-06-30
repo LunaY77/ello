@@ -104,7 +104,9 @@ export class ToolScheduler {
         await sink.onToolStarted(call.id, call.name, call.input);
         await sink.onToolFailed(call.id, error);
         toolCalls.push({ ...call, error: normalizeAgentError(error) });
-        messages.push(createToolResultMessage(call, { error: error.message }, 'error'));
+        messages.push(
+          createToolResultMessage(call, { error: error.message }, 'error'),
+        );
         continue;
       }
       const ctx = this.createContext();

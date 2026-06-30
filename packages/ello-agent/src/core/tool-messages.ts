@@ -101,10 +101,7 @@ function isToolPart(
   );
 }
 
-function createToolOutput(
-  output: unknown,
-  status: ToolResultStatus,
-): unknown {
+function createToolOutput(output: unknown, status: ToolResultStatus): unknown {
   if (status === 'denied') {
     return {
       type: 'execution-denied',
