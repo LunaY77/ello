@@ -9,6 +9,12 @@
 export { createAgent } from './public/create-agent.js';
 export { AiSdkModelAdapter } from './adapters/ai-sdk.js';
 export type { AiSdkModelAdapterOptions } from './adapters/ai-sdk.js';
+export { createAiSdkLanguageModel } from './adapters/ai-sdk-provider.js';
+export type {
+  AiSdkLanguageModelDescriptor,
+  AiSdkLanguageModelEndpoint,
+  AiSdkProviderKind,
+} from './adapters/ai-sdk-provider.js';
 export { defineTool } from './public/tool.js';
 export {
   activeSkillsContext,
