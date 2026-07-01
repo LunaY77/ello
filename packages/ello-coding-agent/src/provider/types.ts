@@ -6,12 +6,12 @@ import type {
   ProviderConnectionConfig,
 } from '../config/schema.js';
 
-export type ModelRole = 'primary' | 'small' | 'summary' | 'title' | 'review';
+export type ModelRole = 'primary' | 'small' | 'compact' | 'title' | 'review';
 
 export const MODEL_ROLES: readonly ModelRole[] = [
   'primary',
   'small',
-  'summary',
+  'compact',
   'title',
   'review',
 ];

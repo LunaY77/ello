@@ -85,6 +85,10 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   });
 
   useEffect(() => {
+    void session.loadHistory();
+  }, [session]);
+
+  useEffect(() => {
     if (!shouldCompleteFiles) {
       return;
     }
@@ -153,10 +157,6 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
             .then((sessions) =>
               setOverlay({ type: 'session-selector', sessions }),
             );
-        } else if (command.overlay === 'session-tree') {
-          void session
-            .sessionTree()
-            .then((tree) => setOverlay({ type: 'session-tree', tree }));
         } else {
           session.notify(`Overlay is not implemented: ${command.overlay}`);
         }
@@ -167,8 +167,38 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         } else if (command.action === 'new-session') {
           void session.newSession();
         } else if (command.action === 'fork') {
-          const reason = command.args?.join(' ') || 'fork from TUI';
-          void session.fork(reason);
+          const targetEntryId = command.args?.[0];
+          const reason =
+            targetEntryId === undefined
+              ? 'fork from TUI'
+              : `fork from ${targetEntryId}`;
+          void session.fork(reason, targetEntryId).catch((error) => {
+            session.notify(
+              `Fork failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+        } else if (command.action === 'compact') {
+          session.notify('Manual compact triggered — will run on next turn.');
+        } else if (command.action === 'summary') {
+          void session.summarize().catch((error) => {
+            session.notify(
+              `Summary failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+        } else if (command.action === 'rewind') {
+          const entryId = command.args?.[0];
+          if (entryId === undefined) {
+            session.notify('Usage: /rewind <user-entry-id>');
+            return;
+          }
+          void session
+            .rewind(entryId)
+            .then((prompt) => setInput(prompt))
+            .catch((error) => {
+              session.notify(
+                `Rewind failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
         } else if (command.action === 'export') {
           void exportCurrentSession(command.args?.[0]);
         } else if (command.action === 'quit') {
@@ -320,12 +350,11 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
 
   const onSelectSession = (sessionId: string): void => {
     setOverlay({ type: 'none' });
-    void session.resumeSession(sessionId);
-  };
-
-  const onCheckout = (entryId: string | null): void => {
-    setOverlay({ type: 'none' });
-    void session.checkout(entryId);
+    void session.resumeSession(sessionId).catch((error) => {
+      session.notify(
+        `Resume failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
   };
 
   async function exportCurrentSession(formatArg: string | undefined) {
@@ -644,7 +673,6 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
           onOpenProfiles={openProfiles}
           onSaveProfile={saveProfile}
           onSelectSession={onSelectSession}
-          onCheckout={onCheckout}
         />
       }
       composer={
@@ -670,13 +698,13 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
             onOpenProfiles={openProfiles}
             onSaveProfile={saveProfile}
             onSelectSession={onSelectSession}
-            onCheckout={onCheckout}
           />
         ) : (
           <Composer
             running={state.status === 'running'}
             isActive={effectiveOverlay.type === 'none'}
             history={inputHistory}
+            value={input}
             {...(suggestions !== undefined ? { suggestions } : {})}
             onChange={(value) => {
               setInput(value);
@@ -708,7 +736,7 @@ function currentPrimaryModel(config: CodingAgentConfig): string {
 const profileRoleOrder: readonly ModelRole[] = [
   'primary',
   'small',
-  'summary',
+  'compact',
   'title',
   'review',
 ];

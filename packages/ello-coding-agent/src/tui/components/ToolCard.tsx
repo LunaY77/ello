@@ -35,7 +35,9 @@ export function ToolCard({
     <Box flexDirection="column">
       <Box gap={1}>
         <Text color={statusColor(call.status)}>{icon}</Text>
-        <Text color={statusColor(call.status)}>{formatToolName(call.name)}</Text>
+        <Text color={statusColor(call.status)}>
+          {formatToolName(call.name)}
+        </Text>
         <Text color={tokyoNight.muted}>{presenter.summarize(call.input)}</Text>
       </Box>
       {call.status === 'running' ? (

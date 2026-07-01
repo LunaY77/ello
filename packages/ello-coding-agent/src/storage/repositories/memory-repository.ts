@@ -143,12 +143,14 @@ function normalizeMemoryItem(
 }
 
 function safeJsonArray(text: string): readonly string[] {
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === 'string')
-      : [];
-  } catch {
-    return [];
+  const parsed = JSON.parse(text) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error('Invalid memory item tags: expected JSON array');
   }
+  for (const item of parsed) {
+    if (typeof item !== 'string') {
+      throw new Error('Invalid memory item tags: expected string tags');
+    }
+  }
+  return parsed;
 }

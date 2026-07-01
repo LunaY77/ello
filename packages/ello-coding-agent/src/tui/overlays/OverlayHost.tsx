@@ -7,10 +7,7 @@ import { useState } from 'react';
 import type { CodingAgentConfig } from '../../config/index.js';
 import type { ModelRole, RuntimeProfileSuite } from '../../provider/index.js';
 import type { ApprovalDecision } from '../../runtime/intents.js';
-import type {
-  JsonlSessionSummary,
-  SessionTreeView,
-} from '../../session/repository.js';
+import type { JsonlSessionSummary } from '../../session/repository.js';
 import type { Task } from '../../tasks/index.js';
 import type { WorkspaceManifest } from '../../workspace/index.js';
 import { InlineSelect, type SelectOption } from '../components/InlineSelect.js';
@@ -67,8 +64,7 @@ export type OverlayState =
   | {
       readonly type: 'session-selector';
       readonly sessions: readonly JsonlSessionSummary[];
-    }
-  | { readonly type: 'session-tree'; readonly tree: SessionTreeView };
+    };
 
 /** 审批浮层四个选项 → 决定。 */
 const APPROVAL_OPTIONS = [
@@ -103,8 +99,6 @@ export interface OverlayHostProps {
   onSaveProfile(profile: string): void;
   /** session 选择回调。 */
   onSelectSession?(sessionId: string): void;
-  /** session tree checkout 回调。 */
-  onCheckout?(entryId: string | null): void;
 }
 
 /**
@@ -129,7 +123,6 @@ export function OverlayHost({
   onOpenProfiles,
   onSaveProfile,
   onSelectSession = () => {},
-  onCheckout = () => {},
 }: OverlayHostProps) {
   useInput(
     (input) => {
@@ -401,20 +394,6 @@ export function OverlayHost({
           />
         </Panel>
       ) : null}
-      {overlay.type === 'session-tree' ? (
-        <Panel title="Session Tree" color={tokyoNight.cyan}>
-          <InlineSelect
-            options={[
-              { value: '<root>', label: 'checkout root' },
-              ...overlay.tree.nodes.map((node) => ({
-                value: node.id,
-                label: renderTreeLabel(node, overlay.tree),
-              })),
-            ]}
-            onChange={(value) => onCheckout(value === '<root>' ? null : value)}
-          />
-        </Panel>
-      ) : null}
     </Box>
   );
 }
@@ -549,45 +528,26 @@ function preview(value: unknown): string {
   return text.length > 240 ? `${text.slice(0, 240)} …` : text;
 }
 
-function compactPath(value: string): string {
-  return value.length <= 48 ? value : `…${value.slice(-47)}`;
-}
-
 function renderResumeLabel(session: JsonlSessionSummary): string {
-  const bits = [`${session.sessionId.slice(0, 8)}`, compactPath(session.cwd)];
-  if (session.lastUserText !== undefined) {
-    bits.push(`you: ${clip(session.lastUserText, 36)}`);
-  }
-  if (session.lastAssistantText !== undefined) {
-    bits.push(`ello: ${clip(session.lastAssistantText, 36)}`);
-  }
-  if (session.lastToolText !== undefined) {
-    bits.push(`tool: ${clip(session.lastToolText, 36)}`);
-  }
-  return bits.join('  ');
+  const time = formatSessionTime(session.updatedAt ?? session.createdAt);
+  const title =
+    session.title ??
+    (session.lastUserText !== undefined
+      ? clip(session.lastUserText, 56)
+      : 'Untitled session');
+  return `${time}  ${title}`;
 }
 
-function renderTreeLabel(
-  node: SessionTreeView['nodes'][number],
-  tree: SessionTreeView,
-): string {
-  const prefix = node.active ? '●' : '○';
-  const path = renderEntryPath(tree, node.id);
-  return `${prefix} ${path}  ${clip(node.label, 44)}`;
-}
-
-function renderEntryPath(tree: SessionTreeView, entryId: string): string {
-  const chain: string[] = [];
-  let current: string | null = entryId;
-  while (current !== null) {
-    const node = tree.nodes.find((item) => item.id === current);
-    if (node === undefined) {
-      break;
-    }
-    chain.push(node.label);
-    current = node.parentId;
+function formatSessionTime(value: string | undefined): string {
+  if (value === undefined) {
+    return 'unknown time';
   }
-  return chain.reverse().join(' › ');
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const pad = (item: number) => String(item).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function clip(text: string, max: number): string {

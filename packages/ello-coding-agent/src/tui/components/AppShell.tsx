@@ -67,7 +67,7 @@ export function AppShell(props: AppShellProps) {
       {hasTranscript ? (
         <Box marginTop={1} flexDirection="column">
           {props.transcript.map((item) => (
-            <TranscriptLine key={item.id} item={item} />
+              <TranscriptLine key={item.id} item={item} />
           ))}
 
           {props.liveAssistantText !== '' ? (
@@ -212,11 +212,24 @@ function TranscriptLine({ item }: { readonly item: TranscriptItem }) {
   const color = item.kind === 'user' ? tokyoNight.green : tokyoNight.foreground;
   return (
     <Box marginBottom={1} flexDirection="column">
+      {item.kind === 'user' && item.entryId !== undefined ? (
+        <Box gap={1}>
+          <Text color={tokyoNight.muted}>user</Text>
+          <Text color={tokyoNight.cyan}>{shortEntryId(item.entryId)}</Text>
+          <Text color={tokyoNight.muted}>
+            {`/rewind ${shortEntryId(item.entryId)} /fork ${shortEntryId(item.entryId)}`}
+          </Text>
+        </Box>
+      ) : null}
       <Text color={color} wrap="wrap">
         {item.text}
       </Text>
     </Box>
   );
+}
+
+function shortEntryId(entryId: string): string {
+  return entryId.slice(0, 8);
 }
 
 function hasDiffOutput(tool: ToolCallView): boolean {

@@ -2,6 +2,7 @@ import type { AgentObserver, SystemSection } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
 import { loadCodingMemory, renderMemoryForPrompt } from '../memory.js';
+import { MemoryRepository } from '../storage/repositories/memory-repository.js';
 
 /**
  * 记忆 = section（注入）+ observer（回写）。
@@ -20,7 +21,7 @@ import { loadCodingMemory, renderMemoryForPrompt } from '../memory.js';
  * const memory = createCodingMemory(config);
  * createAgent({
  *   observers: [memory.observer, ...],
- *   modelInput: { systemSections: [...buildSystemSections(config, deps), memory.section] },
+ *   modelInput: { systemSections: [createCodingSystemPromptSection(config, deps), memory.section] },
  * });
  * ```
  */
@@ -28,6 +29,13 @@ export function createCodingMemory(config: CodingAgentConfig): {
   section: SystemSection;
   observer: AgentObserver;
 } {
+  if (!config.context.memory.enabled) {
+    return {
+      section: () => null,
+      observer: {},
+    };
+  }
+
   /** once-per-run 缓存：key = runId，value = 已渲染的记忆文本（空串表示无记忆）。 */
   const cache = new Map<string, string>();
 
@@ -38,6 +46,19 @@ export function createCodingMemory(config: CodingAgentConfig): {
       const rendered = renderMemoryForPrompt(manifest, config.cwd).trim();
       text = rendered ? `# Relevant memory\n${rendered}` : '';
       cache.set(run.runId, text);
+      if (
+        config.context.memory.structured.enabled &&
+        manifest.items.length > 0
+      ) {
+        const repo = new MemoryRepository();
+        for (const item of manifest.items) {
+          await repo.markUsed(item.id, {
+            runId: run.runId,
+            usedFor: 'context-injection',
+          });
+        }
+        repo.close();
+      }
     }
     return text || null;
   };

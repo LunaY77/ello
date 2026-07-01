@@ -8,6 +8,7 @@ import {
   activeSkillsContext,
   skillIndexContext,
   type Agent,
+  type AgentEnvironment,
   type AgentMessage,
   type AgentModel,
   type AgentRunResult,
@@ -23,13 +24,20 @@ import {
 import { CheckpointStore } from '../change/checkpoint.js';
 import type { CodingAgentConfig, ProfileSuiteConfig } from '../config/index.js';
 import {
-  SUMMARIZATION_SYSTEM_PROMPT,
-  SUMMARIZATION_PROMPT,
-  UPDATE_SUMMARIZATION_PROMPT,
+  COMPACTION_PROMPT,
+  UPDATE_COMPACTION_PROMPT,
   createSessionCompactor,
+  serializeForCompact,
 } from '../context/compactor.js';
 import { createCodingMemory } from '../context/memory.js';
-import { buildSystemSections } from '../context/sections.js';
+import {
+  createCodingSystemPromptSection,
+  renderPromptTemplate,
+} from '../context/prompts.js';
+import {
+  createToolResultBudget,
+  type ToolResultBudget,
+} from '../context/tool-result-budget.js';
 import { createCodingObserver } from '../observability/observer.js';
 import { RulesStore } from '../permission/rules-store.js';
 import {
@@ -48,7 +56,6 @@ import type {
 } from '../session/repository.js';
 import { loadCodingSkills } from '../skills/index.js';
 import { codingSubagents } from '../subagents/index.js';
-import { buildCodingSystemPrompt } from '../system-prompt.js';
 import { createCodingTools } from '../tools/index.js';
 
 import type {
@@ -59,6 +66,26 @@ import type {
 
 /** 模型上下文窗口默认值，用于压缩触发判定。 */
 const DEFAULT_CONTEXT_WINDOW = 160_000;
+
+function createRuntimeEnvironment(config: CodingAgentConfig): AgentEnvironment {
+  const environment = createLocalShellEnvironment({
+    cwd: config.cwd,
+    allowedPaths: config.allowedPaths,
+  });
+  return {
+    ...environment,
+    getContextInstructions: () => null,
+    getInstructions: () => null,
+  };
+}
+
+function isMissingSessionError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as NodeJS.ErrnoException).code === 'ENOENT'
+  );
+}
 
 function cloneProfileConfig(profile: ProfileSuiteConfig): ProfileSuiteConfig {
   return structuredClone(profile) as ProfileSuiteConfig;
@@ -111,8 +138,11 @@ export interface CodingSession {
   }>;
   sessionTree(): Promise<SessionTreeView>;
   listSessions(): Promise<readonly JsonlSessionSummary[]>;
+  loadHistory(): Promise<void>;
   checkout(entryId: string | null): Promise<void>;
-  fork(reason?: string): Promise<string>;
+  rewind(entryId: string): Promise<string>;
+  fork(reason?: string, targetEntryId?: string): Promise<string>;
+  summarize(): Promise<string>;
   exportSession(format?: 'jsonl' | 'html'): Promise<string>;
   newSession(): Promise<string>;
   resumeSession(idOrPath: string): Promise<void>;
@@ -150,8 +180,20 @@ export async function createCodingSession(
 
   const compactor = createSessionCompactor({
     contextWindow: DEFAULT_CONTEXT_WINDOW,
-    previousSummary: () => sessionStore.latestCompactionSummary(sessionId),
-    summarize: makeSummarizer(config, options.modelAdapter),
+    port: sessionStore,
+    generateCheckpoint: makeCompactCheckpointGenerator(
+      config,
+      options.modelAdapter,
+    ),
+    settings: {
+      enabled: config.context.compaction.auto,
+      reserveTokens: config.context.compaction.reserved_tokens,
+      keepRecentTokens: config.context.compaction.preserve_recent_tokens,
+      tailTurns: config.context.compaction.tail_turns,
+      splitTurns: config.context.compaction.split_turns,
+      pruneToolOutput: config.context.compaction.prune_tool_output,
+      toolOutputMaxChars: config.context.compaction.tool_output_max_chars,
+    },
   });
 
   const skills = await loadCodingSkills(config);
@@ -185,6 +227,7 @@ class CodingSessionImpl implements CodingSession {
   private config: CodingAgentConfig;
   private providerRegistry: ProviderRegistry;
   private primaryRole: RuntimeRoleModel;
+  private readonly toolResultBudget: ToolResultBudget;
 
   constructor(
     public sessionId: string,
@@ -195,6 +238,11 @@ class CodingSessionImpl implements CodingSession {
     this.providerRegistry = createProviderRegistry(config);
     this.checkpoints = new CheckpointStore(checkpointsDir(config.cwd));
     this.primaryRole = this.resolveRuntimeRole('primary');
+    this.toolResultBudget = createToolResultBudget({
+      sessionStore: this.deps.sessionStore,
+      sessionId: () => this.sessionId,
+      config: config.context.tool_result_budget,
+    });
     this.agent = this.buildAgent();
   }
 
@@ -222,7 +270,7 @@ class CodingSessionImpl implements CodingSession {
       ...(meta !== undefined ? { metadata: meta } : {}),
     });
     try {
-      return await driveRun({
+      const result = await driveRun({
         currentStream: this.currentStream,
         pendingApprovalCount: () => this.pendingApprovals.size,
         emit: (event) => this.emit(event),
@@ -230,6 +278,10 @@ class CodingSessionImpl implements CodingSession {
         checkpoints: this.checkpoints,
         checkpointLabel: prompt.slice(0, 80),
       });
+      if ((result.pending?.length ?? 0) === 0) {
+        this.scheduleSessionTitle(result.messages);
+      }
+      return result;
     } finally {
       this.currentStream = undefined;
     }
@@ -287,13 +339,16 @@ class CodingSessionImpl implements CodingSession {
     );
     this.currentStream = resumed;
     try {
-      await driveRun({
+      const result = await driveRun({
         currentStream: this.currentStream,
         pendingApprovalCount: () => this.pendingApprovals.size,
         emit: (event) => this.emit(event),
         onEvent: (event) => this.forward(event),
         checkpoints: this.checkpoints,
       });
+      if ((result.pending?.length ?? 0) === 0) {
+        this.scheduleSessionTitle(result.messages);
+      }
     } finally {
       this.currentStream = undefined;
     }
@@ -457,6 +512,11 @@ class CodingSessionImpl implements CodingSession {
     return this.deps.sessionStore.list();
   }
 
+  /** 把当前 session 的 active path 历史推给前端。 */
+  loadHistory(): Promise<void> {
+    return this.emitHistoryLoaded({ allowMissing: true });
+  }
+
   /** 切换当前 session 的 active leaf，后续 turn 从该节点继续。 */
   async checkout(entryId: string | null): Promise<void> {
     if (this.currentStream !== undefined) {
@@ -465,7 +525,7 @@ class CodingSessionImpl implements CodingSession {
     await this.deps.sessionStore.repository.checkout(this.sessionId, entryId);
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
-    this.emit({ type: 'ui.clear' });
+    await this.emitHistoryLoaded();
     this.notify(
       entryId === null
         ? 'Checked out session root.'
@@ -473,21 +533,85 @@ class CodingSessionImpl implements CodingSession {
     );
   }
 
+  /** 回退到指定 user entry 之前，并把该 user 文本交给 TUI 回填输入框。 */
+  async rewind(entryId: string): Promise<string> {
+    if (this.currentStream !== undefined) {
+      this.abort('rewind requested from TUI');
+    }
+    const target = await this.deps.sessionStore.repository.resolveMessageEntry(
+      this.sessionId,
+      entryId,
+    );
+    if (target.message.role !== 'user') {
+      throw new Error(`Cannot rewind non-user entry: ${entryId}`);
+    }
+    const prompt = messageText(target.message);
+    await this.deps.sessionStore.repository.checkout(
+      this.sessionId,
+      target.parentId,
+    );
+    await this.rebuild();
+    this.emit({ type: 'session.switched', sessionId: this.sessionId });
+    await this.emitHistoryLoaded();
+    this.emit({
+      type: 'session.rewound',
+      sessionId: this.sessionId,
+      entryId: target.id,
+      prompt,
+    });
+    return prompt;
+  }
+
   /** 从当前 active branch fork 出新 session，并立即切过去。 */
-  async fork(reason = 'fork from TUI'): Promise<string> {
+  async fork(
+    reason = 'fork from TUI',
+    targetEntryId?: string,
+  ): Promise<string> {
     if (this.currentStream !== undefined) {
       this.abort('fork requested from TUI');
     }
-    const next = await this.deps.sessionStore.repository.fork(
-      this.sessionId,
+    const resolvedTarget =
+      targetEntryId === undefined
+        ? undefined
+        : (
+            await this.deps.sessionStore.repository.resolveMessageEntry(
+              this.sessionId,
+              targetEntryId,
+            )
+          ).id;
+    const next = await this.deps.sessionStore.repository.fork(this.sessionId, {
       reason,
-    );
+      ...(resolvedTarget !== undefined ? { targetEntryId: resolvedTarget } : {}),
+    });
     this.sessionId = next.sessionId;
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
-    this.emit({ type: 'ui.clear' });
+    await this.emitHistoryLoaded();
     this.notify(`Forked session ${this.sessionId}.`);
     return this.sessionId;
+  }
+
+  /** 生成给人看的手动会话摘要，旁路写入 session-summary，不进入模型上下文。 */
+  async summarize(): Promise<string> {
+    if (this.currentStream !== undefined) {
+      throw new Error('Cannot summarize while running.');
+    }
+    const loaded = await this.deps.sessionStore.repository.load(this.sessionId);
+    if (loaded.messages.length === 0) {
+      throw new Error('Cannot summarize an empty session.');
+    }
+    const previous = await this.deps.sessionStore.latestSummary(this.sessionId);
+    const summary = await this.generateSessionSummary(
+      loaded.messages,
+      previous?.summary,
+    );
+    await this.deps.sessionStore.appendSummary(this.sessionId, summary);
+    this.emit({
+      type: 'session.summary.created',
+      sessionId: this.sessionId,
+      summary,
+    });
+    return summary;
   }
 
   /** 导出当前 session。 */
@@ -502,6 +626,7 @@ class CodingSessionImpl implements CodingSession {
     this.sessionId = randomUUID();
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
+    this.emit({ type: 'ui.clear' });
     return this.sessionId;
   }
 
@@ -511,9 +636,11 @@ class CodingSessionImpl implements CodingSession {
     const id = idOrPath.endsWith('.jsonl')
       ? idOrPath.replace(/.*\/(.+)\.jsonl$/u, '$1')
       : idOrPath;
+    const loaded = await this.deps.sessionStore.repository.load(id);
     this.sessionId = id;
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
+    this.emitHistoryLoadedFromMessages(loaded.messages, loaded.messageEntryIds);
   }
 
   async close(): Promise<void> {
@@ -528,7 +655,7 @@ class CodingSessionImpl implements CodingSession {
   }
 
   /** 原样转发内核事件，并截获 approval/写改动维护内部状态。 */
-  private forward(event: AgentStreamEvent): void {
+  private async forward(event: AgentStreamEvent): Promise<void> {
     if (event.type === 'approval.required') {
       this.pendingApprovals.set(event.item.toolCallId, event.item);
       this.emit(event);
@@ -545,8 +672,21 @@ class CodingSessionImpl implements CodingSession {
     }
     if (event.type === 'tool.completed') {
       this.maybeRecordChange(event.toolCallId, event.output);
+      await this.maybeBudgetToolResult(event.toolCallId, event.output);
     }
     this.emit(event);
+  }
+
+  /** 大 tool 输出在下一次模型输入前替换成 artifact stub。 */
+  private async maybeBudgetToolResult(
+    toolCallId: string,
+    output: unknown,
+  ): Promise<void> {
+    const text = extractToolOutputText(output);
+    if (text === null) {
+      return;
+    }
+    await this.toolResultBudget.maybeReplace(toolCallId, text);
   }
 
   /** 写类工具（输出带 path + diff）的改动累积到检查点。 */
@@ -595,6 +735,11 @@ class CodingSessionImpl implements CodingSession {
     const agentModel = this.resolveAgentModel(primaryRole);
     const memory = createCodingMemory(config);
     const observer = createCodingObserver(config, { model: primaryRole.ref });
+    const contentReplacementTransform = (messages: readonly AgentMessage[]) =>
+      this.deps.sessionStore.repository.applyContentReplacements(
+        this.sessionId,
+        messages,
+      );
 
     const tools = createCodingTools({
       config,
@@ -615,10 +760,10 @@ class CodingSessionImpl implements CodingSession {
     });
 
     const sections = [
-      ...buildSystemSections(config, {
+      createCodingSystemPromptSection(config, {
+        model: primaryRole.ref,
         activeSkills: () => [...this.activeSkills],
-        sessionSummary: () =>
-          this.deps.sessionStore.latestCompactionSummary(this.sessionId),
+        onContextEvent: (event) => this.emit(event),
       }),
       activeSkillsContext({
         skills: this.deps.skills,
@@ -636,22 +781,19 @@ class CodingSessionImpl implements CodingSession {
       name: 'ello-coding-agent',
       model: agentModel,
       modelSettings: modelSettingsFromRole(primaryRole),
-      instructions: buildCodingSystemPrompt(config, { model: primaryRole.ref }),
-      environment: createLocalShellEnvironment({
-        cwd: config.cwd,
-        allowedPaths: config.allowedPaths,
-      }),
+      environment: createRuntimeEnvironment(config),
       tools: [...tools, ...skillTools, delegateTool],
       session: this.deps.sessionStore,
       compactor: this.deps.compactor,
       observers: [observer, memory.observer],
       sessionWindow: { maxMessages: 200 },
       modelInputBudget: {
-        maxInputTokens: 160_000,
-        reservedOutputTokens: 8_000,
+        maxInputTokens: config.context.max_input_tokens,
+        reservedOutputTokens: config.context.reserved_output_tokens,
       },
       modelInput: {
         systemSections: sections,
+        messageTransforms: [contentReplacementTransform],
         providerOptions: () => providerOptionsForRole(primaryRole),
         prepare: (input) =>
           prepareModelInputForRuntimeModel(primaryRole.model, input),
@@ -676,26 +818,191 @@ class CodingSessionImpl implements CodingSession {
       binding.settings,
     );
   }
+
+  private async emitHistoryLoaded(
+    options: {
+      readonly allowMissing?: boolean;
+    } = {},
+  ): Promise<void> {
+    try {
+      const loaded = await this.deps.sessionStore.repository.load(
+        this.sessionId,
+      );
+      this.emitHistoryLoadedFromMessages(
+        loaded.messages,
+        loaded.messageEntryIds,
+      );
+    } catch (error) {
+      if (options.allowMissing === true && isMissingSessionError(error)) {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private emitHistoryLoadedFromMessages(
+    messages: readonly AgentMessage[],
+    entryIds?: readonly string[],
+  ): void {
+    this.emit({
+      type: 'session.history.loaded',
+      sessionId: this.sessionId,
+      messages,
+      ...(entryIds !== undefined ? { entryIds } : {}),
+    });
+  }
+
+  private scheduleSessionTitle(messages: readonly AgentMessage[]): void {
+    const sessionId = this.sessionId;
+    void this.ensureSessionTitle(sessionId, messages).catch((error) => {
+      this.emit({
+        type: 'context.source.failed',
+        origin: 'session-title',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  private async ensureSessionTitle(
+    sessionId: string,
+    messages: readonly AgentMessage[],
+  ): Promise<void> {
+    if (messages.length === 0) {
+      return;
+    }
+    const existing = await this.deps.sessionStore.repository.title(sessionId);
+    if (existing !== null) {
+      return;
+    }
+    const binding = this.resolveRuntimeRole('title');
+    const model = this.resolveAgentModel(binding);
+    const titleAgent = createAgent({
+      name: 'ello-title-generator',
+      model,
+      modelSettings: modelSettingsFromRole(binding),
+      instructions: renderPromptTemplate('title'),
+      ...(this.deps.modelAdapter !== undefined
+        ? { modelAdapter: this.deps.modelAdapter }
+        : {}),
+    });
+    try {
+      const result = await titleAgent.run(renderTitleConversation(messages));
+      const title = normalizeGeneratedTitle(result.output || result.text || '');
+      if (!title) {
+        return;
+      }
+      await this.deps.sessionStore.repository.setTitle(sessionId, title);
+      this.emit({ type: 'session.title.updated', sessionId, title });
+    } finally {
+      await titleAgent.close();
+    }
+  }
+
+  private async generateSessionSummary(
+    messages: readonly AgentMessage[],
+    previousSummary?: string,
+  ): Promise<string> {
+    const binding = this.resolveRuntimeRole('compact');
+    const model = this.resolveAgentModel(binding);
+    const summaryAgent = createAgent({
+      name: 'ello-session-summary',
+      model,
+      modelSettings: modelSettingsFromRole(binding),
+      instructions: renderPromptTemplate('summary'),
+      ...(this.deps.modelAdapter !== undefined
+        ? { modelAdapter: this.deps.modelAdapter }
+        : {}),
+    });
+    const prompt = renderSummaryInput(messages, previousSummary, this.config);
+    try {
+      const result = await summaryAgent.run(prompt);
+      const summary = (result.output || result.text || '').trim();
+      if (summary === '') {
+        throw new Error('Session summary model returned empty output.');
+      }
+      return summary;
+    } finally {
+      await summaryAgent.close();
+    }
+  }
+}
+
+function messageText(message: AgentMessage): string {
+  const content = (message as { content?: unknown }).content;
+  return typeof content === 'string' ? content : JSON.stringify(content);
+}
+
+function extractToolOutputText(output: unknown): string | null {
+  if (typeof output === 'string') {
+    return output;
+  }
+  if (typeof output !== 'object' || output === null) {
+    return null;
+  }
+  const record = output as { output?: unknown };
+  if (typeof record.output === 'string') {
+    return record.output;
+  }
+  return JSON.stringify(output);
+}
+
+function renderSummaryInput(
+  messages: readonly AgentMessage[],
+  previousSummary: string | undefined,
+  config: CodingAgentConfig,
+): string {
+  const compacted = serializeForCompact(messages, {
+    pruneToolOutput: true,
+    toolOutputMaxChars: config.context.compaction.tool_output_max_chars,
+  });
+  const conversation = compacted
+    .map((message) => `### ${message.role}\n${messageText(message)}`)
+    .join('\n\n');
+  const seed =
+    previousSummary !== undefined
+      ? `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`
+      : '';
+  return `${seed}<conversation>\n${conversation}\n</conversation>`;
+}
+
+function renderTitleConversation(messages: readonly AgentMessage[]): string {
+  return messages
+    .slice(-12)
+    .map((message) => {
+      const content = (message as { content?: unknown }).content;
+      const text =
+        typeof content === 'string' ? content : JSON.stringify(content);
+      return `### ${message.role}\n${text.slice(0, 1000)}`;
+    })
+    .join('\n\n');
+}
+
+function normalizeGeneratedTitle(value: string): string {
+  return value
+    .trim()
+    .replace(/^["'`]+|["'`]+$/gu, '')
+    .replace(/\s+/gu, ' ')
+    .slice(0, 80);
 }
 
 /**
- * 构造压缩器用的一次性摘要回调。
+ * 构造压缩器用的一次性 compact checkpoint 生成回调。
  *
  * 临时起一个无工具的小 Agent 跑一次补全，用与主会话相同的 model / adapter，
  * 避免压缩器直接依赖 provider 细节（保持与内核解耦）。
  */
-function makeSummarizer(
+function makeCompactCheckpointGenerator(
   config: CodingAgentConfig,
   modelAdapter?: ModelAdapter,
 ) {
   return async (
     messages: readonly AgentMessage[],
-    opts: { previousSummary?: string; maxTokens?: number },
+    opts: { previousCheckpoint?: string; maxTokens?: number },
   ): Promise<string> => {
     const head =
-      opts.previousSummary !== undefined
-        ? `${UPDATE_SUMMARIZATION_PROMPT}<previous-summary>\n${opts.previousSummary}\n</previous-summary>\n`
-        : SUMMARIZATION_PROMPT;
+      opts.previousCheckpoint !== undefined
+        ? `${UPDATE_COMPACTION_PROMPT}<previous-compact>\n${opts.previousCheckpoint}\n</previous-compact>\n`
+        : COMPACTION_PROMPT;
     const conversation = messages
       .map((message) => {
         const content = (message as { content?: unknown }).content;
@@ -706,24 +1013,24 @@ function makeSummarizer(
       .join('\n\n');
     const prompt = `${head}\n<conversation>\n${conversation}\n</conversation>`;
     const registry = createProviderRegistry(config);
-    const binding = registry.resolveRole(config.active_profile, 'summary');
+    const binding = registry.resolveRole(config.active_profile, 'compact');
     const model =
       modelAdapter !== undefined
         ? binding.ref
         : registry.resolveLanguageModel(binding.ref, binding.settings);
 
-    const summarizer = createAgent({
+    const compactor = createAgent({
       name: 'ello-compactor',
       model,
       modelSettings: modelSettingsFromRole(binding),
-      instructions: SUMMARIZATION_SYSTEM_PROMPT,
+      instructions: renderPromptTemplate('compact'),
       ...(modelAdapter !== undefined ? { modelAdapter } : {}),
     });
     try {
-      const result = await summarizer.run(prompt);
+      const result = await compactor.run(prompt);
       return result.output || result.text || '';
     } finally {
-      await summarizer.close();
+      await compactor.close();
     }
   };
 }
@@ -732,7 +1039,7 @@ async function driveRun(options: {
   readonly currentStream: AgentStream;
   readonly pendingApprovalCount: () => number;
   readonly emit: (event: CodingSessionEvent) => void;
-  readonly onEvent: (event: AgentStreamEvent) => void;
+  readonly onEvent: (event: AgentStreamEvent) => Promise<void>;
   readonly checkpoints: CheckpointStore;
   readonly checkpointLabel?: string | undefined;
 }): Promise<AgentRunResult> {
@@ -746,7 +1053,7 @@ async function driveRun(options: {
   } = options;
   emit({ type: 'status', state: 'running' });
   for await (const event of currentStream) {
-    onEvent(event);
+    await onEvent(event);
   }
   const result = await currentStream.final;
   emit({ type: 'usage', usage: result.usage });

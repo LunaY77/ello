@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, rm, utimes } from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { loadCodingAgentConfig } from '../config/index.js';
 import { createCodingSession } from '../runtime/coding-session.js';
 import type { CodingSessionEvent } from '../runtime/intents.js';
+import { JsonlSessionRepository } from '../session/repository.js';
 
 const dirs: string[] = [];
 
@@ -27,6 +28,20 @@ async function tempDir(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), 'ello-session-'));
   dirs.push(dir);
   return dir;
+}
+
+async function waitFor<T>(
+  read: () => Promise<T>,
+  accept: (value: T) => boolean,
+): Promise<T> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const value = await read();
+    if (accept(value)) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return read();
 }
 
 /** 统一的 usage 占位。 */
@@ -353,6 +368,98 @@ describe('createCodingSession', () => {
     expect(secondTurnMessages).not.toContain('metadata');
   });
 
+  it('applies context tool_result_budget before the next model input', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const target = path.join(cwd, 'big-budget.txt');
+    const content = 'x'.repeat(120);
+    await import('node:fs/promises').then(({ writeFile }) =>
+      writeFile(target, content, 'utf8'),
+    );
+    const baseConfig = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+      tool_output: {
+        max_bytes: 1000,
+        max_lines: 100,
+        preview_lines: 100,
+      },
+    });
+    const config = {
+      ...baseConfig,
+      context: {
+        ...baseConfig.context,
+        tool_result_budget: {
+          enabled: true,
+          max_chars: 20,
+          artifact_dir: path.join(cwd, '.ello', 'tool-results'),
+        },
+      },
+    };
+
+    let turn = 0;
+    let secondTurnMessages = '';
+    const adapter: ModelAdapter = {
+      async generate(request) {
+        turn += 1;
+        if (turn === 1) {
+          const toolCallMessage = {
+            role: 'assistant' as const,
+            content: [
+              {
+                type: 'tool-call',
+                toolCallId: 'call_read_budget',
+                toolName: 'read',
+                input: { path: target, limit: 100 },
+              },
+            ],
+          };
+          return {
+            text: '',
+            messages: [...request.messages, toolCallMessage],
+            newMessages: [toolCallMessage],
+            toolCalls: [
+              {
+                id: 'call_read_budget',
+                name: 'read',
+                input: { path: target, limit: 100 },
+              },
+            ],
+            usage,
+            finishReason: 'tool-calls',
+            provider: null,
+          };
+        }
+        secondTurnMessages = JSON.stringify(request.messages);
+        return {
+          text: 'done',
+          messages: [
+            ...request.messages,
+            { role: 'assistant', content: 'done' },
+          ],
+          newMessages: [{ role: 'assistant', content: 'done' }],
+          usage,
+          finishReason: 'stop',
+          provider: null,
+        };
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
+
+    await session.submit('read big file');
+    await session.close();
+
+    expect(secondTurnMessages).toContain('tool-output-truncated');
+    expect(secondTurnMessages).toContain('.ello/tool-results');
+  });
+
   it('supports session tree checkout and fork from the coding runtime', async () => {
     const cwd = await tempDir();
     const sessionDir = await tempDir();
@@ -371,19 +478,108 @@ describe('createCodingSession', () => {
     expect(tree.nodes.length).toBeGreaterThan(0);
     expect(tree.activeEntryId).not.toBeNull();
 
-    await session.checkout(null);
-    expect((await session.sessionTree()).activeEntryId).toBeNull();
-
     const forked = await session.fork('test branch');
     expect(forked).toHaveLength(36);
     expect(
       (await session.listSessions()).map((item) => item.sessionId),
     ).toContain(forked);
 
+    await session.checkout(null);
+    expect((await session.sessionTree()).activeEntryId).toBeNull();
+
     await session.close();
   });
 
-  it('exposes session summaries with last message previews for resume browsing', async () => {
+  it('rewinds to a user entry parent and returns the prompt for editing', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: new TextAdapter('OK'),
+    });
+
+    await session.submit('first');
+    await session.submit('second');
+    const loaded = await new JsonlSessionRepository({ cwd, sessionDir }).load(
+      session.sessionId,
+    );
+    const secondEntryId = loaded.messageEntryIds.find(
+      (id, index) => loaded.messages[index]?.content === 'second',
+    );
+    expect(secondEntryId).toBeDefined();
+
+    const prompt = await session.rewind(secondEntryId!.slice(0, 8));
+    const rewound = await new JsonlSessionRepository({ cwd, sessionDir }).load(
+      session.sessionId,
+    );
+    await session.close();
+
+    expect(prompt).toBe('second');
+    expect(rewound.messages.map((message) => message.content)).toEqual([
+      'first',
+      'OK',
+    ]);
+  });
+
+  it('forks from a target message entry prefix', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: new TextAdapter('OK'),
+    });
+
+    await session.submit('first');
+    await session.submit('second');
+    const repo = new JsonlSessionRepository({ cwd, sessionDir });
+    const loaded = await repo.load(session.sessionId);
+    const firstEntryId = loaded.messageEntryIds[0]!;
+
+    const forked = await session.fork('targeted fork', firstEntryId.slice(0, 8));
+    const forkedSession = await repo.load(forked);
+    await session.close();
+
+    expect(forkedSession.messages.map((message) => message.content)).toEqual([
+      'first',
+    ]);
+  });
+
+  it('generates and stores a human-facing session summary', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: new TextAdapter('summary text'),
+    });
+
+    await session.submit('hello');
+    const summary = await session.summarize();
+    const stored = await new JsonlSessionRepository({
+      cwd,
+      sessionDir,
+    }).latestSummary(session.sessionId);
+    await session.close();
+
+    expect(summary).toBe('summary text');
+    expect(stored?.summary).toBe('summary text');
+  });
+
+  it('exposes titled session summaries for resume browsing', async () => {
     const cwd = await tempDir();
     const sessionDir = await tempDir();
     const config = await loadCodingAgentConfig({
@@ -397,12 +593,93 @@ describe('createCodingSession', () => {
     });
 
     await session.submit('hello');
-    const sessions = await session.listSessions();
+    const sessions = await waitFor(
+      () => session.listSessions(),
+      (items) => items.some((item) => item.title === 'OK'),
+    );
     await session.close();
 
+    expect(sessions.at(0)?.title).toBe('OK');
     expect(sessions.at(0)?.lastUserText).toBeDefined();
     expect(
       sessions.at(0)?.lastAssistantText ?? sessions.at(0)?.lastToolText,
     ).toBeDefined();
+  });
+
+  it('sorts resumable sessions by latest conversation time descending', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const repository = new JsonlSessionRepository({ cwd, sessionDir });
+    await repository.open('older');
+    await repository.appendMessages('older', null, [
+      { role: 'user', content: 'older' },
+    ]);
+    await repository.open('newer');
+    await repository.appendMessages('newer', null, [
+      { role: 'user', content: 'newer' },
+    ]);
+    await repository.open('empty');
+
+    const oldDate = new Date('2026-01-01T00:00:00.000Z');
+    const newDate = new Date('2026-01-02T00:00:00.000Z');
+    const emptyDate = new Date('2026-01-03T00:00:00.000Z');
+    await utimes(path.join(sessionDir, 'older.jsonl'), oldDate, oldDate);
+    await utimes(path.join(sessionDir, 'newer.jsonl'), newDate, newDate);
+    await utimes(path.join(sessionDir, 'empty.jsonl'), emptyDate, emptyDate);
+
+    expect((await repository.list()).map((item) => item.sessionId)).toEqual([
+      'newer',
+      'older',
+    ]);
+  });
+
+  it('does not create an empty session when resume target is missing', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: new TextAdapter('OK'),
+    });
+    const originalId = session.sessionId;
+
+    await expect(session.resumeSession('missing-session')).rejects.toThrow();
+    await expect(
+      access(path.join(sessionDir, 'missing-session.jsonl')),
+    ).rejects.toThrow();
+    expect(session.sessionId).toBe(originalId);
+    await session.close();
+  });
+
+  it('emits transcript history when resuming a session', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: new TextAdapter('OK'),
+    });
+    const loaded: number[] = [];
+    session.subscribe((event) => {
+      if (event.type === 'session.history.loaded') {
+        loaded.push(event.messages.length);
+      }
+    });
+
+    await session.submit('hello');
+    const originalId = session.sessionId;
+    await session.newSession();
+    await session.resumeSession(originalId);
+    await session.close();
+
+    expect(loaded.at(-1)).toBeGreaterThan(0);
   });
 });

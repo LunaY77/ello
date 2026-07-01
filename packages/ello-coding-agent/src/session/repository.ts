@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
+  appendFile,
   mkdir,
   readdir,
   readFile,
   stat,
   writeFile,
-  appendFile,
 } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -20,19 +20,8 @@ export interface SessionInfo {
   readonly cwd: string;
   readonly path: string;
   readonly createdAt: string;
+  readonly title?: string;
   readonly activeEntryId?: string;
-}
-
-/**
- * 一次压缩边界的描述。
- *
- * `summary` 为压缩摘要正文，`boundaryEntryId` 指向压缩发生时的 active leaf，
- * 便于回放时定位“摘要之前的历史”。
- */
-export interface CompactSummary {
-  readonly id: string;
-  readonly boundaryEntryId?: string;
-  readonly summary: string;
 }
 
 /** append-only session tree 的记录形状。 */
@@ -73,9 +62,56 @@ export type SessionRecord =
       readonly createdAt: string;
     }
   | {
+      readonly kind: 'session-title';
+      readonly title: string;
+      readonly createdAt: string;
+    }
+  | {
       readonly kind: 'compaction';
       readonly id: string;
-      readonly boundaryEntryId?: string;
+      /**
+       * compaction 是 active path 上的真实节点，挂在压缩时的 leaf 之下，
+       * 参与 `buildActivePath` 回溯。删除它会让投影失效。
+       */
+      readonly parentId: string | null;
+      /**
+       * 投影起点：从该 entry 起的 kept 消息进入模型视图，之前的消息被 summary 取代。
+       * 同样参与投影，不能当作可丢弃的元数据。
+       */
+      readonly firstKeptEntryId: string;
+      /** checkpoint 正文。 */
+      readonly summary: string;
+      /** 投影前上下文 token 估算，用于诊断与 TUI。 */
+      readonly tokensBefore: number;
+      /**
+       * 机器可用的累计文件清单，跨多次压缩继承；与 summary 正文里的
+       * `<read-files>`/`<modified-files>` 双写，正文给模型、details 给机器/TUI。
+       */
+      readonly details?: {
+        readonly readFiles?: readonly string[];
+        readonly modifiedFiles?: readonly string[];
+      };
+      readonly createdAt: string;
+    }
+  | {
+      /**
+       * 大 tool 输出的预算替换决策。按 toolCallId 记录，latest-wins；
+       * 不参与 active path 回溯，但在投影模型视图时把对应 tool result 换成 stub。
+       */
+      readonly kind: 'content-replacement';
+      readonly toolCallId: string;
+      readonly artifactId: string;
+      readonly artifactPath: string;
+      readonly preview: string;
+      readonly originalBytes: number;
+      readonly createdAt: string;
+    }
+  | {
+      /**
+       * 手动 `/summary` 纪要：旁路记录，latest-wins，不带 parentId、
+       * 不进 `buildActivePath`、不影响 modelMessages。纯人类 deliverable。
+       */
+      readonly kind: 'session-summary';
       readonly summary: string;
       readonly createdAt: string;
     };
@@ -88,6 +124,7 @@ export interface JsonlSessionSummary {
   readonly entryCount: number;
   readonly createdAt?: string;
   readonly updatedAt?: string;
+  readonly title?: string;
   readonly lastUserText?: string;
   readonly lastAssistantText?: string;
   readonly lastToolText?: string;
@@ -97,8 +134,20 @@ export interface JsonlSessionSummary {
 export interface ActiveSessionPath {
   readonly info: SessionInfo;
   readonly records: SessionRecord[];
+  /** raw 视图：active path 上全部 message（TUI 历史/fork/export 用，保真）。 */
   readonly messages: AgentMessage[];
+  /** raw message 的来源 entry id（与 messages 平行，供 TUI 定位/选中）。 */
+  readonly messageEntryIds: string[];
+  /** 模型视图：投影后的 [summary, ...kept, ...after]（store.load 返回它）。 */
+  readonly modelMessages: AgentMessage[];
   readonly leafEntryId: string | null;
+}
+
+/** raw active path 上可供 TUI 导航的 message entry。 */
+export interface SessionMessageEntry {
+  readonly id: string;
+  readonly parentId: string | null;
+  readonly message: AgentMessage;
 }
 
 /** TUI/RPC 使用的 session tree 节点。 */
@@ -124,18 +173,75 @@ export interface SessionTreeView {
   }>;
   readonly compactions: Array<{
     readonly id: string;
-    readonly boundaryEntryId?: string;
+    readonly parentId: string | null;
+    readonly firstKeptEntryId: string;
     readonly summary: string;
+    readonly tokensBefore: number;
+    readonly active: boolean;
     readonly createdAt: string;
   }>;
+}
+
+/** 追加一个 compaction 节点所需的输入。 */
+export interface AppendCompactionInput {
+  readonly parentId: string | null;
+  readonly firstKeptEntryId: string;
+  readonly summary: string;
+  readonly tokensBefore: number;
+  readonly details?: {
+    readonly readFiles?: readonly string[];
+    readonly modifiedFiles?: readonly string[];
+  };
+}
+
+/** 上一次 compaction 的可读视图，供 compact 迭代 seed 与累计文件清单。 */
+export interface CompactionRef {
+  readonly firstKeptEntryId: string;
+  readonly summary: string;
+  readonly details?: {
+    readonly readFiles?: readonly string[];
+    readonly modifiedFiles?: readonly string[];
+  };
+}
+
+/** active path 上单条 message entry（带 id/role），供 compactor 选切点。 */
+export interface CompactionActiveEntry {
+  readonly id: string;
+  readonly role: AgentMessage['role'];
+  readonly message: AgentMessage;
+}
+
+/** compactor 需要的会话端口；由 JsonlSessionStore 背书，避免 compactor 依赖磁盘格式。 */
+export interface CompactionSessionPort {
+  /** raw active path（含 entry id/role），用于选切点与定位 firstKeptEntryId。 */
+  loadActivePath(sessionId: string): Promise<{
+    readonly entries: readonly CompactionActiveEntry[];
+    readonly leafEntryId: string | null;
+    readonly latestCompaction: CompactionRef | null;
+    /** 投影后上下文 token（= tokensBefore 口径）。 */
+    readonly projectedTokens: number;
+  }>;
+  /** 追加 compaction 节点并把 leaf 指向它。 */
+  appendCompaction(
+    sessionId: string,
+    input: AppendCompactionInput,
+  ): Promise<void>;
+}
+
+/** 投影起点常量包裹：把 summary 正文包成置顶的 `role:'user'` `<compact-checkpoint>` 消息。 */
+export function createCompactionSummaryMessage(summary: string): AgentMessage {
+  return {
+    role: 'user',
+    content: `<compact-checkpoint>\n${summary}\n</compact-checkpoint>`,
+  } as AgentMessage;
 }
 
 /**
  * append-only JSONL 会话仓库。
  *
- * 文件结构显式区分 header、entry、leaf、branch 和 compaction，避免旧实现把
- * result.messages 全量重复写入。仓库只暴露 active path 和 append 操作，
- * UI 不需要理解磁盘格式。
+ * 文件结构显式区分 header、entry、leaf、branch、compaction、content-replacement
+ * 和 session-summary。compaction 是 active path 上的真实节点：读取时按 active path
+ * 上最后一个 compaction 投影出模型视图，raw JSONL 完整保留。
  */
 export class JsonlSessionRepository {
   constructor(
@@ -165,7 +271,7 @@ export class JsonlSessionRepository {
     return this.load(sessionId);
   }
 
-  /** 读取 active branch 的消息和元数据。 */
+  /** 读取 active branch 的 raw 视图与投影后的模型视图。 */
   async load(sessionId: string): Promise<ActiveSessionPath> {
     const records = await this.readRecords(sessionId);
     const header = records.find(
@@ -177,21 +283,33 @@ export class JsonlSessionRepository {
     }
     const leaf = findLeaf(records);
     const activeRecords = buildActivePath(records, leaf);
-    const messages = activeRecords.flatMap((record) =>
-      record.kind === 'entry' && record.type === 'message'
-        ? [record.message]
-        : [],
-    );
+    const title = latestTitle(records);
+
+    const messages: AgentMessage[] = [];
+    const messageEntryIds: string[] = [];
+    for (const record of activeRecords) {
+      if (record.kind === 'entry' && record.type === 'message') {
+        messages.push(record.message);
+        messageEntryIds.push(record.id);
+      }
+    }
+
+    const replacements = collectContentReplacements(records);
+    const modelMessages = buildModelMessages(activeRecords, replacements);
+
     return {
       info: {
         sessionId: header.sessionId,
         cwd: header.cwd,
         path: this.filePath(sessionId),
         createdAt: header.createdAt,
+        ...(title !== undefined ? { title } : {}),
         ...(leaf !== null ? { activeEntryId: leaf } : {}),
       },
       records: activeRecords,
       messages,
+      messageEntryIds,
+      modelMessages,
       leafEntryId: leaf,
     };
   }
@@ -255,9 +373,64 @@ export class JsonlSessionRepository {
     ]);
   }
 
-  /** 从当前 active path fork 到一个新 session 文件。 */
-  async fork(sessionId: string, reason = 'fork'): Promise<SessionInfo> {
+  /** 读取 active path 上的 raw message entry，保留 entry id 与 parentId。 */
+  async messageEntries(sessionId: string): Promise<readonly SessionMessageEntry[]> {
+    const loaded = await this.load(sessionId);
+    return loaded.records.flatMap((record) =>
+      record.kind === 'entry' && record.type === 'message'
+        ? [{ id: record.id, parentId: record.parentId, message: record.message }]
+        : [],
+    );
+  }
+
+  /** 返回 active path 上某 message entry 的父节点，用于 rewind 到该 user 之前。 */
+  async parentOfMessageEntry(
+    sessionId: string,
+    entryId: string,
+  ): Promise<string | null> {
+    const entry = await this.resolveMessageEntry(sessionId, entryId);
+    if (entry === undefined) {
+      throw new Error(`Unknown message entry: ${entryId}`);
+    }
+    return entry.parentId;
+  }
+
+  /** 按完整 id 或唯一前缀解析 active path 上的 message entry。 */
+  async resolveMessageEntry(
+    sessionId: string,
+    idOrPrefix: string,
+  ): Promise<SessionMessageEntry> {
+    const matches = (await this.messageEntries(sessionId)).filter((entry) =>
+      entry.id.startsWith(idOrPrefix),
+    );
+    if (matches.length === 0) {
+      throw new Error(`Unknown message entry: ${idOrPrefix}`);
+    }
+    if (matches.length > 1) {
+      throw new Error(`Ambiguous message entry prefix: ${idOrPrefix}`);
+    }
+    return matches[0]!;
+  }
+
+  /**
+   * 从当前 active path fork 到一个新 session 文件。
+   *
+   * 复制 active path 上的 entry **与 compaction 节点**（保留其
+   * `parentId`/`firstKeptEntryId`），否则 fork 后投影会失效（§1.8）。
+   * 传 `targetEntryId` 则只复制 root→targetEntryId 的前缀（§3.1）。
+   */
+  async fork(
+    sessionId: string,
+    options: { readonly reason?: string; readonly targetEntryId?: string } = {},
+  ): Promise<SessionInfo> {
+    const reason = options.reason ?? 'fork';
     const source = await this.load(sessionId);
+    if (source.messages.length === 0) {
+      throw new Error('Cannot fork an empty session.');
+    }
+    const target = options.targetEntryId ?? source.leafEntryId;
+    // 沿 active path 截取 root→target 的前缀（含 entry 与 compaction 节点）。
+    const prefix = takePrefix(source.records, target);
     const nextId = randomUUID();
     const createdAt = new Date().toISOString();
     const records: SessionRecord[] = [
@@ -268,14 +441,18 @@ export class JsonlSessionRepository {
         createdAt,
         version: SESSION_FILE_VERSION,
       },
-      ...source.records.filter(
+      ...prefix.filter(
         (record): record is Extract<SessionRecord, { kind: 'entry' }> =>
           record.kind === 'entry',
       ),
-      { kind: 'leaf', entryId: source.leafEntryId, createdAt },
+      ...prefix.filter(
+        (record): record is Extract<SessionRecord, { kind: 'compaction' }> =>
+          record.kind === 'compaction',
+      ),
+      { kind: 'leaf', entryId: target, createdAt },
       {
         kind: 'branch',
-        from: source.leafEntryId,
+        from: target,
         to: nextId,
         reason,
         createdAt,
@@ -289,14 +466,16 @@ export class JsonlSessionRepository {
     return (await this.load(nextId)).info;
   }
 
-  /** 返回完整 session tree，供 /tree 和 TUI 时间线使用。 */
+  /** 返回完整 session tree，供 fork/checkout/export 等底层会话能力使用。 */
   async tree(sessionId: string): Promise<SessionTreeView> {
     const records = await this.readRecords(sessionId);
     const activeEntryId = findLeaf(records);
     const activePath = new Set(
-      buildActivePath(records, activeEntryId)
-        .filter((record) => record.kind === 'entry')
-        .map((record) => record.id),
+      buildActivePath(records, activeEntryId).map((record) =>
+        record.kind === 'entry' || record.kind === 'compaction'
+          ? record.id
+          : '',
+      ),
     );
     return {
       sessionId,
@@ -332,40 +511,193 @@ export class JsonlSessionRepository {
         )
         .map((record) => ({
           id: record.id,
-          ...(record.boundaryEntryId !== undefined
-            ? { boundaryEntryId: record.boundaryEntryId }
-            : {}),
+          parentId: record.parentId,
+          firstKeptEntryId: record.firstKeptEntryId,
           summary: record.summary,
+          tokensBefore: record.tokensBefore,
+          active: activePath.has(record.id),
           createdAt: record.createdAt,
         })),
     };
   }
 
-  /** 追加 compact boundary。 */
-  async compact(sessionId: string, summary: CompactSummary): Promise<void> {
+  /**
+   * 追加一个 compaction 节点并把 leaf 指向它。
+   *
+   * 追加 compaction 节点并把 leaf 指向它。raw 历史完整保留，
+   * 模型视图在 `load()` 时按 `firstKeptEntryId` 投影。
+   * 返回新 leaf（= compaction 节点 id），便于调用方刷新 leaf 缓存。
+   */
+  async appendCompaction(
+    sessionId: string,
+    input: AppendCompactionInput,
+  ): Promise<string> {
+    const id = randomUUID();
     await this.appendRecords(sessionId, [
       {
         kind: 'compaction',
-        id: summary.id,
-        ...(summary.boundaryEntryId !== undefined
-          ? { boundaryEntryId: summary.boundaryEntryId }
-          : {}),
-        summary: summary.summary,
+        id,
+        parentId: input.parentId,
+        firstKeptEntryId: input.firstKeptEntryId,
+        summary: input.summary,
+        tokensBefore: input.tokensBefore,
+        ...(input.details !== undefined ? { details: input.details } : {}),
+        createdAt: new Date().toISOString(),
+      },
+      { kind: 'leaf', entryId: id, createdAt: new Date().toISOString() },
+    ]);
+    return id;
+  }
+
+  /** 追加一条大 tool 输出替换记录（§2）。latest-wins，不动 leaf。 */
+  async appendContentReplacement(
+    sessionId: string,
+    input: {
+      readonly toolCallId: string;
+      readonly artifactId: string;
+      readonly artifactPath: string;
+      readonly preview: string;
+      readonly originalBytes: number;
+    },
+  ): Promise<void> {
+    await this.appendRecords(sessionId, [
+      {
+        kind: 'content-replacement',
+        toolCallId: input.toolCallId,
+        artifactId: input.artifactId,
+        artifactPath: input.artifactPath,
+        preview: input.preview,
+        originalBytes: input.originalBytes,
         createdAt: new Date().toISOString(),
       },
     ]);
   }
 
-  /** 读取最近一次 compact summary，作为后续 turn 的 sessionSummaryContext。 */
-  async latestCompactionSummary(sessionId: string): Promise<string | null> {
+  /** 持久化 session 标题。 */
+  async setTitle(sessionId: string, title: string): Promise<void> {
+    const normalized = normalizeTitle(title);
+    if (!normalized) {
+      return;
+    }
+    await this.appendRecords(sessionId, [
+      {
+        kind: 'session-title',
+        title: normalized,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  }
+
+  /** 读取最新 session 标题。 */
+  async title(sessionId: string): Promise<string | null> {
+    return latestTitle(await this.readRecords(sessionId)) ?? null;
+  }
+
+  /** 追加一条手动 `/summary` 纪要（§4.2）。旁路记录，不进 active path。 */
+  async appendSummary(sessionId: string, summary: string): Promise<void> {
+    const trimmed = summary.trim();
+    if (!trimmed) {
+      return;
+    }
+    await this.appendRecords(sessionId, [
+      {
+        kind: 'session-summary',
+        summary: trimmed,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  }
+
+  /** 读取最近一次手动 `/summary` 纪要（仅供 `/summary` 迭代自己的 seed）。 */
+  async latestSummary(sessionId: string): Promise<{ summary: string } | null> {
+    const latest = [...(await this.readRecords(sessionId))]
+      .reverse()
+      .find(
+        (
+          record,
+        ): record is Extract<SessionRecord, { kind: 'session-summary' }> =>
+          record.kind === 'session-summary',
+      );
+    return latest !== undefined ? { summary: latest.summary } : null;
+  }
+
+  /** 读取 active path 上最近一次 compaction，供 compact 迭代 seed 与累计文件清单。 */
+  async latestCompaction(sessionId: string): Promise<CompactionRef | null> {
     const records = await this.readRecords(sessionId);
-    const latest = [...records]
+    const leaf = findLeaf(records);
+    const activePath = buildActivePath(records, leaf);
+    const latest = [...activePath]
       .reverse()
       .find(
         (record): record is Extract<SessionRecord, { kind: 'compaction' }> =>
           record.kind === 'compaction',
       );
-    return latest?.summary ?? null;
+    if (latest === undefined) {
+      return null;
+    }
+    return {
+      firstKeptEntryId: latest.firstKeptEntryId,
+      summary: latest.summary,
+      ...(latest.details !== undefined ? { details: latest.details } : {}),
+    };
+  }
+
+  /** compactor 端口实现：raw active path 的 message entry + 最近 compaction + 投影 token。 */
+  async loadActivePathForCompaction(sessionId: string): Promise<{
+    readonly entries: readonly CompactionActiveEntry[];
+    readonly leafEntryId: string | null;
+    readonly latestCompaction: CompactionRef | null;
+    readonly projectedTokens: number;
+  }> {
+    const records = await this.readRecords(sessionId);
+    const leaf = findLeaf(records);
+    const activePath = buildActivePath(records, leaf);
+    const entries: CompactionActiveEntry[] = [];
+    for (const record of activePath) {
+      if (record.kind === 'entry' && record.type === 'message') {
+        entries.push({
+          id: record.id,
+          role: record.message.role,
+          message: record.message,
+        });
+      }
+    }
+    const latest = [...activePath]
+      .reverse()
+      .find(
+        (record): record is Extract<SessionRecord, { kind: 'compaction' }> =>
+          record.kind === 'compaction',
+      );
+    const replacements = collectContentReplacements(records);
+    const modelMessages = buildModelMessages(activePath, replacements);
+    return {
+      entries,
+      leafEntryId: leaf,
+      latestCompaction:
+        latest !== undefined
+          ? {
+              firstKeptEntryId: latest.firstKeptEntryId,
+              summary: latest.summary,
+              ...(latest.details !== undefined
+                ? { details: latest.details }
+                : {}),
+            }
+          : null,
+      projectedTokens: estimateMessagesTokens(modelMessages),
+    };
+  }
+
+  /** 对任意模型输入消息应用当前 session 的 content-replacement 决策。 */
+  async applyContentReplacements(
+    sessionId: string,
+    messages: readonly AgentMessage[],
+  ): Promise<AgentMessage[]> {
+    const replacements = collectContentReplacements(
+      await this.readRecords(sessionId),
+    );
+    return replacements.size > 0
+      ? applyReplacementMap(messages, replacements)
+      : [...messages];
   }
 
   /** 列出 session 文件摘要。 */
@@ -379,18 +711,25 @@ export class JsonlSessionRepository {
       const fullPath = path.join(this.options.sessionDir, file);
       try {
         const records = await this.readRecords(path.basename(file, '.jsonl'));
+        const messageEntryCount = records.filter(
+          (record) => record.kind === 'entry' && record.type === 'message',
+        ).length;
+        if (messageEntryCount === 0) {
+          continue;
+        }
         const header = records.find(
           (record): record is Extract<SessionRecord, { kind: 'header' }> =>
             record.kind === 'header',
         );
         const fileStat = await stat(fullPath);
         const preview = summarizeRecentMessages(records);
+        const title = latestTitle(records);
         summaries.push({
           sessionId: header?.sessionId ?? path.basename(file, '.jsonl'),
           path: fullPath,
           cwd: header?.cwd ?? this.options.cwd,
-          entryCount: records.filter((record) => record.kind === 'entry')
-            .length,
+          entryCount: messageEntryCount,
+          ...(title !== undefined ? { title } : {}),
           ...(preview.lastUserText !== undefined
             ? { lastUserText: preview.lastUserText }
             : {}),
@@ -405,17 +744,15 @@ export class JsonlSessionRepository {
             : {}),
           updatedAt: fileStat.mtime.toISOString(),
         });
-      } catch (error) {
-        summaries.push({
-          sessionId: path.basename(file, '.jsonl'),
-          path: fullPath,
-          cwd: this.options.cwd,
-          entryCount: 0,
-          updatedAt: `corrupt: ${error instanceof Error ? error.message : String(error)}`,
-        });
+      } catch {
+        continue;
       }
     }
-    return summaries;
+    return summaries.sort((left, right) => {
+      const leftTime = sortableTime(left.updatedAt ?? left.createdAt);
+      const rightTime = sortableTime(right.updatedAt ?? right.createdAt);
+      return rightTime - leftTime;
+    });
   }
 
   /** 导出原始 JSONL 内容。 */
@@ -471,6 +808,15 @@ export class JsonlSessionRepository {
   }
 }
 
+/** 节点 id（entry / compaction 都有 id）。 */
+type NodeRecord =
+  | Extract<SessionRecord, { kind: 'entry' }>
+  | Extract<SessionRecord, { kind: 'compaction' }>;
+
+function isNode(record: SessionRecord): record is NodeRecord {
+  return record.kind === 'entry' || record.kind === 'compaction';
+}
+
 function labelEntry(record: Extract<SessionRecord, { kind: 'entry' }>): string {
   if (record.type === 'message') {
     const content = (record.message as { content?: unknown }).content;
@@ -511,6 +857,32 @@ function summarizeRecentMessages(records: readonly SessionRecord[]): {
   };
 }
 
+function latestTitle(records: readonly SessionRecord[]): string | undefined {
+  const latest = [...records]
+    .reverse()
+    .find(
+      (record): record is Extract<SessionRecord, { kind: 'session-title' }> =>
+        record.kind === 'session-title',
+    );
+  return latest?.title;
+}
+
+function normalizeTitle(value: string): string {
+  return value
+    .trim()
+    .replace(/^["'`]+|["'`]+$/gu, '')
+    .replace(/\s+/gu, ' ')
+    .slice(0, 80);
+}
+
+function sortableTime(value: string | undefined): number {
+  if (value === undefined) {
+    return 0;
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -529,6 +901,12 @@ function findLeaf(records: readonly SessionRecord[]): string | null {
   return leaf?.entryId ?? null;
 }
 
+/**
+ * 沿 `parentId` 从 leaf 回溯出 active path（root→leaf）。
+ *
+ * entry 与 compaction 节点都参与回溯（都有 id/parentId）；compaction 节点
+ * 也会出现在返回序列里，供投影定位 firstKeptEntryId。
+ */
 function buildActivePath(
   records: readonly SessionRecord[],
   leaf: string | null,
@@ -536,9 +914,9 @@ function buildActivePath(
   if (leaf === null) {
     return records.filter((record) => record.kind === 'header');
   }
-  const byId = new Map<string, Extract<SessionRecord, { kind: 'entry' }>>();
+  const byId = new Map<string, NodeRecord>();
   for (const record of records) {
-    if (record.kind === 'entry') {
+    if (isNode(record)) {
       byId.set(record.id, record);
     }
   }
@@ -553,4 +931,153 @@ function buildActivePath(
     current = record.parentId;
   }
   return active.reverse();
+}
+
+/** 收集所有 content-replacement，按 toolCallId latest-wins。 */
+function collectContentReplacements(
+  records: readonly SessionRecord[],
+): Map<string, Extract<SessionRecord, { kind: 'content-replacement' }>> {
+  const map = new Map<
+    string,
+    Extract<SessionRecord, { kind: 'content-replacement' }>
+  >();
+  for (const record of records) {
+    if (record.kind === 'content-replacement') {
+      map.set(record.toolCallId, record);
+    }
+  }
+  return map;
+}
+
+/**
+ * 投影模型视图。
+ *
+ * active path 上若有 compaction，取最后一个：返回
+ * `[summary, ...从 firstKeptEntryId 起的 message]`；否则返回全部 message。
+ * 投影后再对 tool result 应用 content-replacement（§2）。
+ */
+function buildModelMessages(
+  activePath: readonly SessionRecord[],
+  replacements: ReadonlyMap<
+    string,
+    Extract<SessionRecord, { kind: 'content-replacement' }>
+  >,
+): AgentMessage[] {
+  const lastCompactionIndex = findLastIndex(
+    activePath,
+    (record) => record.kind === 'compaction',
+  );
+
+  let projected: AgentMessage[];
+  if (lastCompactionIndex < 0) {
+    projected = activePath.flatMap((record) =>
+      record.kind === 'entry' && record.type === 'message'
+        ? [record.message]
+        : [],
+    );
+  } else {
+    const compaction = activePath[lastCompactionIndex] as Extract<
+      SessionRecord,
+      { kind: 'compaction' }
+    >;
+    const firstKeptIndex = activePath.findIndex(
+      (record) => isNode(record) && record.id === compaction.firstKeptEntryId,
+    );
+    const keptStart = firstKeptIndex < 0 ? activePath.length : firstKeptIndex;
+    const kept = activePath
+      .slice(keptStart)
+      .flatMap((record) =>
+        record.kind === 'entry' && record.type === 'message'
+          ? [record.message]
+          : [],
+      );
+    projected = [createCompactionSummaryMessage(compaction.summary), ...kept];
+  }
+
+  return replacements.size > 0
+    ? applyReplacementMap(projected, replacements)
+    : projected;
+}
+
+/** 把投影消息里被替换的 tool result 换成 preview + artifact 指针 stub。 */
+function applyReplacementMap(
+  messages: readonly AgentMessage[],
+  replacements: ReadonlyMap<
+    string,
+    Extract<SessionRecord, { kind: 'content-replacement' }>
+  >,
+): AgentMessage[] {
+  return messages.map((message) => {
+    if (message.role !== 'tool') {
+      return message;
+    }
+    const content = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) {
+      return message;
+    }
+    let changed = false;
+    const nextContent = content.map((part) => {
+      const toolCallId = (part as { toolCallId?: unknown }).toolCallId;
+      if (typeof toolCallId !== 'string') {
+        return part;
+      }
+      const replacement = replacements.get(toolCallId);
+      if (replacement === undefined) {
+        return part;
+      }
+      changed = true;
+      const stub = `${replacement.preview}\n\n<tool-output-truncated artifact="${replacement.artifactPath}" bytes="${replacement.originalBytes}" />`;
+      return {
+        ...(part as Record<string, unknown>),
+        output: { type: 'text', value: stub },
+      };
+    });
+    return changed
+      ? ({ ...message, content: nextContent } as unknown as AgentMessage)
+      : message;
+  });
+}
+
+/** 沿 active path 截取 root→target 的前缀（含 entry 与 compaction 节点）。 */
+function takePrefix(
+  activePath: readonly SessionRecord[],
+  target: string | null,
+): SessionRecord[] {
+  if (target === null) {
+    return [];
+  }
+  const result: SessionRecord[] = [];
+  for (const record of activePath) {
+    result.push(record);
+    if (isNode(record) && record.id === target) {
+      break;
+    }
+  }
+  return result;
+}
+
+/** 估算消息序列 token（`ceil(chars/4)`），用于投影后触发判定。 */
+function estimateMessagesTokens(messages: readonly AgentMessage[]): number {
+  let chars = 0;
+  for (const message of messages) {
+    const content = (message as { content?: unknown }).content;
+    chars +=
+      typeof content === 'string'
+        ? content.length
+        : JSON.stringify(content ?? '').length;
+  }
+  return Math.ceil(chars / 4);
+}
+
+/** Array.prototype.findLastIndex 的本地实现，避免 lib 版本依赖。 */
+function findLastIndex<T>(
+  items: readonly T[],
+  predicate: (item: T) => boolean,
+): number {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (predicate(items[i]!)) {
+      return i;
+    }
+  }
+  return -1;
 }

@@ -80,6 +80,65 @@ describe('view-reducer', () => {
     });
   });
 
+  it('replays historical tool calls as compact tool cards instead of raw JSON', () => {
+    const state = reduce(initialViewState, {
+      type: 'session.history.loaded',
+      messages: [
+        { role: 'user', content: 'read package' },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'call-read',
+              toolName: 'read',
+              input: { path: 'package.json' },
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: 'call-read',
+              output: {
+                type: 'json',
+                value: {
+                  kind: 'coding-tool-result',
+                  title: 'Read package.json',
+                  output: '{ "name": "demo" }',
+                  metadata: { totalLines: 3 },
+                },
+              },
+            },
+          ],
+        },
+      ] as never,
+      entryIds: ['entry-user', 'entry-assistant', 'entry-tool'],
+    });
+
+    expect(state.transcript).toHaveLength(2);
+    expect(state.transcript[0]).toMatchObject({
+      kind: 'user',
+      entryId: 'entry-user',
+    });
+    expect(state.transcript.at(-1)).toMatchObject({
+      kind: 'tool',
+      tool: {
+        id: 'call-read',
+        name: 'read',
+        input: { path: 'package.json' },
+        status: 'ok',
+        output: {
+          kind: 'coding-tool-result',
+          metadata: { totalLines: 3 },
+        },
+      },
+    });
+    expect(state.transcript.some((item) => item.kind === 'system')).toBe(false);
+  });
+
   it('clears transcript and runtime view state', () => {
     let state = reduce(initialViewState, {
       type: 'user.input',

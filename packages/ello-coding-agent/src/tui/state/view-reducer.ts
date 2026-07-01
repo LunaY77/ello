@@ -1,4 +1,4 @@
-import type { AgentError, AgentUsage } from '@ello/agent';
+import type { AgentError, AgentMessage, AgentUsage } from '@ello/agent';
 
 import type {
   CodingSessionEvent,
@@ -24,10 +24,25 @@ export interface ToolResultView {
 
 /** transcript（历史区）的一行。 */
 export type TranscriptItem =
-  | { readonly kind: 'user'; readonly id: string; readonly text: string }
-  | { readonly kind: 'assistant'; readonly id: string; readonly text: string }
+  | {
+      readonly kind: 'user';
+      readonly id: string;
+      readonly entryId?: string | undefined;
+      readonly text: string;
+    }
+  | {
+      readonly kind: 'assistant';
+      readonly id: string;
+      readonly entryId?: string | undefined;
+      readonly text: string;
+    }
   | { readonly kind: 'tool'; readonly id: string; readonly tool: ToolCallView }
-  | { readonly kind: 'system'; readonly id: string; readonly text: string }
+  | {
+      readonly kind: 'system';
+      readonly id: string;
+      readonly entryId?: string | undefined;
+      readonly text: string;
+    }
   | { readonly kind: 'diagnostic'; readonly id: string; readonly text: string };
 
 /** 待审批项在视图里的形状。 */
@@ -96,6 +111,19 @@ export function reduce(state: ViewState, event: ViewInput): ViewState {
 
     case 'ui.clear':
       return initialViewState;
+
+    case 'session.history.loaded':
+      return {
+        ...initialViewState,
+        transcript: messagesToTranscript(event.messages, event.entryIds),
+      };
+
+    case 'session.summary.created':
+      return appendTranscript(state, {
+        kind: 'system',
+        id: `summary-${state.transcript.length}`,
+        text: event.summary,
+      });
 
     case 'ui.interrupted':
       return {
@@ -175,6 +203,166 @@ export function reduce(state: ViewState, event: ViewInput): ViewState {
     default:
       return state;
   }
+}
+
+function messagesToTranscript(
+  messages: readonly AgentMessage[],
+  entryIds: readonly string[] | undefined,
+): readonly TranscriptItem[] {
+  const items: TranscriptItem[] = [];
+  const toolCalls = new Map<
+    string,
+    { readonly id: string; readonly name: string; readonly input: unknown }
+  >();
+  messages.forEach((message, index) => {
+    for (const call of readToolCalls(message)) {
+      toolCalls.set(call.id, call);
+    }
+    const results = readToolResults(message);
+    if (results.length > 0) {
+      for (const result of results) {
+        const call = toolCalls.get(result.id);
+        items.push({
+          kind: 'tool',
+          id: `history-tool-${index}-${result.id}`,
+          tool: {
+            id: result.id,
+            name: call?.name ?? result.name ?? 'tool',
+            input: call?.input ?? {},
+            status: result.status,
+            ...(result.output !== undefined ? { output: result.output } : {}),
+          },
+        });
+      }
+      return;
+    }
+    if (readToolCalls(message).length > 0) {
+      return;
+    }
+    const text = messageContentText(message);
+    if (!text.trim()) {
+      return;
+    }
+    if (message.role === 'user') {
+      items.push({
+        kind: 'user',
+        id: `history-user-${index}`,
+        ...(entryIds?.[index] !== undefined ? { entryId: entryIds[index] } : {}),
+        text,
+      });
+      return;
+    }
+    if (message.role === 'assistant') {
+      items.push({
+        kind: 'assistant',
+        id: `history-assistant-${index}`,
+        ...(entryIds?.[index] !== undefined ? { entryId: entryIds[index] } : {}),
+        text,
+      });
+      return;
+    }
+    items.push({
+      kind: 'system',
+      id: `history-message-${index}`,
+      ...(entryIds?.[index] !== undefined ? { entryId: entryIds[index] } : {}),
+      text,
+    });
+  });
+  return items;
+}
+
+function messageContentText(message: AgentMessage): string {
+  const content = (message as { content?: unknown }).content;
+  return typeof content === 'string' ? content : JSON.stringify(content);
+}
+
+function readToolCalls(message: AgentMessage): Array<{
+  readonly id: string;
+  readonly name: string;
+  readonly input: unknown;
+}> {
+  if (message.role !== 'assistant') {
+    return [];
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  return content.flatMap((part) => {
+    if (!isRecord(part) || part.type !== 'tool-call') {
+      return [];
+    }
+    const id = readString(part.toolCallId ?? part.id);
+    const name = readString(part.toolName ?? part.name);
+    if (id === undefined || name === undefined) {
+      return [];
+    }
+    return [{ id, name, input: part.input ?? part.args ?? {} }];
+  });
+}
+
+function readToolResults(message: AgentMessage): Array<{
+  readonly id: string;
+  readonly name?: string;
+  readonly output?: unknown;
+  readonly status: ToolCallView['status'];
+}> {
+  if (message.role !== 'tool') {
+    return [];
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  return content.flatMap((part) => {
+    if (!isRecord(part) || part.type !== 'tool-result') {
+      return [];
+    }
+    const id = readString(part.toolCallId ?? part.id);
+    if (id === undefined) {
+      return [];
+    }
+    const output = part.output;
+    const name = readString(part.toolName ?? part.name);
+    return [
+      {
+        id,
+        ...(name !== undefined ? { name } : {}),
+        ...(output !== undefined
+          ? { output: normalizeToolOutput(output) }
+          : {}),
+        status: isToolErrorOutput(output) ? 'fail' : 'ok',
+      },
+    ];
+  });
+}
+
+function normalizeToolOutput(output: unknown): unknown {
+  if (!isRecord(output)) {
+    return output;
+  }
+  if (output.type === 'text') {
+    return output.value;
+  }
+  if (output.type === 'json') {
+    return normalizeToolOutput(output.value);
+  }
+  if (output.type === 'error-text') {
+    return output.value;
+  }
+  return output;
+}
+
+function isToolErrorOutput(output: unknown): boolean {
+  return isRecord(output) && output.type === 'error-text';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 /** 追加一行 transcript。 */

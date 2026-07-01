@@ -71,10 +71,23 @@ export {
 // —— 上下文与系统提示 ——
 export { createSessionCompactor } from './context/compactor.js';
 export { createCodingMemory } from './context/memory.js';
+export { loadInstructionSources } from './context/instructions.js';
 export {
-  buildSystemSections,
+  loadContextBundle,
+  renderContextSource,
+  renderContextSources,
+  type ContextBundle,
+  type ContextDiagnostic,
+  type ContextEvent,
+  type ContextSource,
+} from './context/source-registry.js';
+export {
+  buildContextBundle,
+  buildCodingSystemPrompt,
+  createCodingSystemPromptSection,
   loadProjectInstructions,
-} from './context/sections.js';
+  renderPromptTemplate,
+} from './context/prompts.js';
 export {
   loadCodingMemory,
   renderMemoryForPrompt,
@@ -82,7 +95,6 @@ export {
   type MemoryFile,
   type MemoryManifest,
 } from './memory.js';
-export { buildCodingSystemPrompt } from './system-prompt.js';
 
 // —— 改动与检查点 ——
 export {

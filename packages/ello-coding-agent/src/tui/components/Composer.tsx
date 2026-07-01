@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from 'ink';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { tokyoNight } from '../tokyo-night.js';
 
@@ -12,6 +12,8 @@ export interface ComposerProps {
   readonly suggestions?: readonly ComposerSuggestion[];
   /** 输入历史，空输入时可用上下键遍历。 */
   readonly history?: readonly string[];
+  /** 外部设置的输入值，用于 rewind 等运行时动作回填 Composer。 */
+  readonly value?: string;
   /** 输入内容变化，用于 App 计算补全和 Ctrl+C 语义。 */
   onChange?(value: string): void;
   onSubmit(value: string): void;
@@ -35,6 +37,7 @@ export type ComposerSuggestion =
  * 解释成 submit / steer / slash command / shell escape。
  */
 export function Composer(props: ComposerProps) {
+  const { onChange } = props;
   const [value, setValue] = useState('');
   const [cursorIndex, setCursorIndex] = useState(0);
   const [cursorVisible, setCursorVisible] = useState(true);
@@ -43,24 +46,34 @@ export function Composer(props: ComposerProps) {
   const valueRef = useRef(value);
   const cursorIndexRef = useRef(cursorIndex);
 
+  const updateValue = useCallback(
+    (next: string, nextCursorIndex = next.length): void => {
+      const normalizedCursorIndex = Math.max(
+        0,
+        Math.min(next.length, nextCursorIndex),
+      );
+      valueRef.current = next;
+      cursorIndexRef.current = normalizedCursorIndex;
+      setValue(next);
+      setCursorIndex(normalizedCursorIndex);
+      onChange?.(next);
+    },
+    [onChange],
+  );
+
+  useEffect(() => {
+    if (props.value === undefined || props.value === valueRef.current) {
+      return;
+    }
+    updateValue(props.value);
+  }, [props.value, updateValue]);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setCursorVisible((current) => !current);
     }, 530);
     return () => clearInterval(timer);
   }, []);
-
-  const updateValue = (next: string, nextCursorIndex = next.length): void => {
-    const normalizedCursorIndex = Math.max(
-      0,
-      Math.min(next.length, nextCursorIndex),
-    );
-    valueRef.current = next;
-    cursorIndexRef.current = normalizedCursorIndex;
-    setValue(next);
-    setCursorIndex(normalizedCursorIndex);
-    props.onChange?.(next);
-  };
 
   const updateCursorIndex = (next: number): void => {
     const normalizedCursorIndex = Math.max(

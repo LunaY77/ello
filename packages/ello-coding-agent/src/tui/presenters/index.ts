@@ -57,12 +57,8 @@ const readPresenter: ToolPresenter = {
         ? `${total} lines`
         : entryCount !== undefined
           ? `${entryCount} entries`
-          : readToolOutput(output) ?? 'read';
-    return createElement(
-      Text,
-      { color: tokyoNight.muted },
-      rendered,
-    );
+          : (readToolOutput(output) ?? 'read');
+    return createElement(Text, { color: tokyoNight.muted }, rendered);
   },
 };
 
@@ -211,7 +207,10 @@ function readString(obj: Record<string, unknown>, key: string): string {
   return typeof value === 'string' ? value : '';
 }
 
-function readNumber(obj: Record<string, unknown>, key: string): number | undefined {
+function readNumber(
+  obj: Record<string, unknown>,
+  key: string,
+): number | undefined {
   const value = obj[key];
   return typeof value === 'number' ? value : undefined;
 }

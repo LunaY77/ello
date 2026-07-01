@@ -51,7 +51,7 @@ describe('loadCodingAgentConfig', () => {
     expect(globalConfig).not.toContain('openai-compatible:');
     expect(globalConfig).toContain('profile:');
     expect(globalConfig).toContain('primary: openai/gpt-5.5');
-    expect(globalConfig).toContain('summary: openai/gpt-5.4');
+    expect(globalConfig).toContain('compact: openai/gpt-5.4');
     expect(globalConfig).toContain('review: anthropic/claude-sonnet-4.6');
     expect(await readFile(globalMcpPath(), 'utf8')).toContain('"servers"');
   });
@@ -82,7 +82,7 @@ describe('loadCodingAgentConfig', () => {
       expect(registry.resolveRole('main', 'primary').ref).toBe(
         'openai/gpt-5.5',
       );
-      expect(registry.resolveRole('main', 'summary').ref).toBe(
+      expect(registry.resolveRole('main', 'compact').ref).toBe(
         'openai/gpt-5.4',
       );
       expect(registry.resolveRole('main', 'review').ref).toBe(
@@ -180,13 +180,13 @@ describe('loadCodingAgentConfig', () => {
           models: {
             primary: 'hiyo/deep',
             small: 'hiyo/fast',
-            summary: 'hiyo/fast',
+            compact: 'hiyo/fast',
             title: 'hiyo/fast',
             review: 'hiyo/deep',
           },
           settings: {
             primary: { reasoning_effort: 'high' },
-            summary: { reasoning_effort: 'low' },
+            compact: { reasoning_effort: 'low' },
           },
         },
       },
@@ -197,7 +197,7 @@ describe('loadCodingAgentConfig', () => {
 
     expect(config.active_profile).toBe('deep');
     expect(registry.resolveRole('deep', 'primary').ref).toBe('hiyo/deep');
-    expect(registry.resolveRole('deep', 'summary').ref).toBe('hiyo/fast');
+    expect(registry.resolveRole('deep', 'compact').ref).toBe('hiyo/fast');
     expect(
       registry.resolveRole('deep', 'primary').settings.reasoningEffort,
     ).toBe('high');
@@ -272,7 +272,7 @@ describe('loadCodingAgentConfig', () => {
       '    models:',
       '      primary: openai/gpt-5.5',
       '      small: openai/gpt-5.4',
-      '      summary: openai/gpt-5.4',
+      '      compact: openai/gpt-5.4',
       '      title: openai/gpt-5.4',
       '      review: anthropic/claude-sonnet-4.6',
       '',
@@ -383,6 +383,51 @@ describe('loadCodingAgentConfig', () => {
     ).not.toThrow();
   });
 
+  it('用户自定义模型可只声明真实 API 映射和必要能力', async () => {
+    await writeProjectConfig({
+      provider: {
+        venus: {
+          enabled: true,
+          kind: 'openai-compatible',
+          api_key_env: 'OPENAI_API_KEY',
+          base_url: 'https://venus.example.test/v1',
+          headers: {
+            'Venus-Sticky-Routing': 'token',
+          },
+        },
+      },
+      models: {
+        venus: {
+          deepseek: {
+            provider: 'venus',
+            api_id: 'deepseek-v4-flash',
+            endpoint: 'chat',
+            cost: 'zeroCost',
+            tool_call: true,
+          },
+        },
+      },
+    });
+    await writeGlobalConfig({
+      active_profile: 'venus',
+      profile: {
+        venus: customProfile('venus/deepseek'),
+      },
+    });
+
+    const registry = createProviderRegistry(
+      await loadCodingAgentConfig({ cwd }),
+    );
+    const model = registry.getModel('venus/deepseek');
+
+    expect(model.limit).toEqual({ context: 128000, output: 16000 });
+    expect(model.pricing?.input).toBe(0);
+    expect(model.capabilities.input).toEqual(['text']);
+    expect(model.capabilities.output).toEqual(['text']);
+    expect(model.capabilities.reasoning).toBe(false);
+    expect(model.capabilities.toolCall).toBe(true);
+  });
+
   async function writeProjectConfig(value: Record<string, unknown>) {
     await mkdir(path.dirname(projectConfigPath(cwd)), { recursive: true });
     await writeFile(projectConfigPath(cwd), stringifyYamlConfig(value), 'utf8');
@@ -433,7 +478,7 @@ function customProfile(model: string) {
     models: {
       primary: model,
       small: model,
-      summary: model,
+      compact: model,
       title: model,
       review: model,
     },

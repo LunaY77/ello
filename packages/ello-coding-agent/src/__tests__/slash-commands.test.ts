@@ -32,16 +32,20 @@ describe('slash commands', () => {
     });
   });
 
-  it('opens implemented TUI overlays for settings and session tree', async () => {
+  it('opens implemented TUI overlays for settings and removes tree/session commands', async () => {
     const config = await loadCodingAgentConfig();
 
     expect(handleSlashCommand('/settings', config).command).toEqual({
       type: 'open-overlay',
       overlay: 'settings',
     });
-    expect(handleSlashCommand('/tree', config).command).toEqual({
-      type: 'open-overlay',
-      overlay: 'session-tree',
+    expect(handleSlashCommand('/tree', config)).toMatchObject({
+      handled: true,
+      output: 'Unknown command: /tree',
+    });
+    expect(handleSlashCommand('/session', config)).toMatchObject({
+      handled: true,
+      output: 'Unknown command: /session',
     });
   });
 
@@ -51,10 +55,12 @@ describe('slash commands', () => {
       path: '/tmp/session-1.jsonl',
       cwd: '/repo',
       entryCount: 4,
+      title: '查看项目目录',
       lastUserText: '帮我看下当前的目录下的项目',
       lastAssistantText: '可以，我来看看',
     };
 
+    expect(summary.title).toContain('项目');
     expect(summary.lastUserText).toContain('目录');
     expect(summary.lastAssistantText).toContain('看看');
   });

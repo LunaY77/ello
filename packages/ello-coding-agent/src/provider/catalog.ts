@@ -184,14 +184,14 @@ export const builtinProviderCatalog: ProviderCatalog = {
       models: {
         primary: 'openai/gpt-5.5',
         small: 'openai/gpt-5.4',
-        summary: 'openai/gpt-5.4',
+        compact: 'openai/gpt-5.4',
         title: 'openai/gpt-5.4',
         review: 'anthropic/claude-sonnet-4.6',
       },
       settings: {
         primary: { reasoning_effort: 'medium' },
         small: { reasoning_effort: 'low' },
-        summary: { reasoning_effort: 'low' },
+        compact: { reasoning_effort: 'low' },
         title: { reasoning_effort: 'low' },
         review: { reasoning_effort: 'high' },
       },
@@ -202,14 +202,14 @@ export const builtinProviderCatalog: ProviderCatalog = {
       models: {
         primary: 'anthropic/claude-sonnet-4.6',
         small: 'anthropic/claude-haiku-4.5',
-        summary: 'anthropic/claude-haiku-4.5',
+        compact: 'anthropic/claude-haiku-4.5',
         title: 'anthropic/claude-haiku-4.5',
         review: 'anthropic/claude-opus-4.8',
       },
       settings: {
         primary: { reasoning_effort: 'medium' },
         small: { reasoning_effort: 'low' },
-        summary: { reasoning_effort: 'low' },
+        compact: { reasoning_effort: 'low' },
         title: { reasoning_effort: 'low' },
         review: { reasoning_effort: 'high' },
       },

@@ -1,5 +1,10 @@
-import type { AgentRunResult, AgentStreamEvent } from '@ello/agent';
+import type {
+  AgentMessage,
+  AgentRunResult,
+  AgentStreamEvent,
+} from '@ello/agent';
 
+import type { ContextEvent } from '../context/source-registry.js';
 import type { RuleScope } from '../permission/rules-store.js';
 
 /**
@@ -27,12 +32,35 @@ export type CodingSessionState = 'idle' | 'running' | 'awaiting_approval';
  */
 export type CodingSessionEvent =
   | AgentStreamEvent
+  | ContextEvent
   | {
       readonly type: 'session.opened';
       readonly sessionId: string;
       readonly cwd: string;
     }
   | { readonly type: 'session.switched'; readonly sessionId: string }
+  | {
+      readonly type: 'session.history.loaded';
+      readonly sessionId: string;
+      readonly messages: readonly AgentMessage[];
+      readonly entryIds?: readonly string[];
+    }
+  | {
+      readonly type: 'session.rewound';
+      readonly sessionId: string;
+      readonly entryId: string;
+      readonly prompt: string;
+    }
+  | {
+      readonly type: 'session.summary.created';
+      readonly sessionId: string;
+      readonly summary: string;
+    }
+  | {
+      readonly type: 'session.title.updated';
+      readonly sessionId: string;
+      readonly title: string;
+    }
   | { readonly type: 'model.changed'; readonly model: string }
   | { readonly type: 'status'; readonly state: CodingSessionState }
   | { readonly type: 'ui.message'; readonly text: string }

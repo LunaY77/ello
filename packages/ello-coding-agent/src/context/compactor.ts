@@ -1,24 +1,29 @@
 import type {
   AgentMessage,
-  SessionCompactor,
   SessionCompactionReport,
+  SessionCompactor,
   SessionStore,
 } from '@ello/agent';
 
+import type {
+  AppendCompactionInput,
+  CompactionActiveEntry,
+  CompactionRef,
+  CompactionSessionPort,
+} from '../session/repository.js';
+
 /**
- * 长会话上下文压缩器。
+ * 长会话上下文压缩器（投影模型）。
  *
- * 比内核自带的 `createSummarySessionCompactor`（仅 `messages.join` 截断 4000
- * 字符）成熟得多，专为长时间 coding 会话设计：
- * - token 估算：遍历消息 part，按 `ceil(chars/4)` 启发式累加；
- * - 触发判定：`tokens > contextWindow - reserveTokens`；
- * - 选切点：从尾部保留 `keepRecentTokens`，再吸附到合法回合边界，
- *   绝不切在 tool-result 前（避免产生孤儿 result）；
- * - 生成摘要：固定结构化模板（Goal/Constraints/Progress/...），支持迭代更新；
- * - 文件清单：抽取被压缩消息里的 read/write/edit 路径，作为 `<read-files>` /
- *   `<modified-files>` 追加到摘要尾部，跨多次压缩累计携带；
- * - 落盘：摘要作为一条 `role:'user'` 的 `<session-summary>` 消息置顶，
- *   通过 `store.replace` 改写持久化历史（与仅影响当轮的裁剪不同）。
+ * 压缩通过 {@link CompactionSessionPort} 追加一个带 `firstKeptEntryId` 的
+ * compaction 节点，raw JSONL 完整保留，模型视图在 `store.load()` 时投影。
+ * compactor 因此只关心：
+ * - 触发判定：基于端口返回的**投影后** token（`projectedTokens`）；
+ * - 选切点：从尾部保留 `keepRecentTokens`，吸附到合法回合边界，绝不切在 tool result
+ *   （否则产生孤儿 result），单 turn 超预算时按 `splitTurns` 切到 assistant 边界；
+ * - 生成 summary：从上一次 compaction 的 `firstKeptEntryId` 起到切点，喂给迭代模板；
+ * - 累计文件清单：与上一次 compaction 的 `details` 合并，既写 `details`（机器/TUI）
+ *   又以 `<read-files>`/`<modified-files>` 双写进 summary 正文（模型）。
  *
  * 触发时机由内核在回合之间（`run.completed` 后）调用 `maybeCompact` 决定。
  */
@@ -31,6 +36,14 @@ export interface CompactionSettings {
   readonly reserveTokens: number;
   /** 压缩后从尾部保留的“近期消息”token 预算。 */
   readonly keepRecentTokens: number;
+  /** 至少保留最近几个 user turn，避免只按 token 切碎交互语义。 */
+  readonly tailTurns: number;
+  /** 单 turn 自身超预算时，允许切到 turn 内 assistant 边界（split turn）。 */
+  readonly splitTurns: boolean;
+  /** 是否裁剪 tool output 后再喂给 compact 模型。 */
+  readonly pruneToolOutput: boolean;
+  /** tool output 裁剪上限。 */
+  readonly toolOutputMaxChars: number;
 }
 
 /** 默认压缩配置。 */
@@ -38,58 +51,56 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
   enabled: true,
   reserveTokens: 16_384,
   keepRecentTokens: 20_000,
+  tailTurns: 2,
+  splitTurns: true,
+  pruneToolOutput: false,
+  toolOutputMaxChars: 2000,
 };
 
-/** 序列化对话喂给摘要模型时，单条 tool-result 的截断上限。 */
-const TOOL_RESULT_MAX_CHARS = 2000;
-
-/** 摘要模型的系统提示词：强约束“只产出摘要、不要续写对话”。 */
-export const SUMMARIZATION_SYSTEM_PROMPT =
-  'You are a summarization engine for a coding agent. Output ONLY a structured ' +
-  'summary of the conversation so far. Do NOT continue the conversation, answer ' +
-  'questions, or call tools. Preserve every fact needed to resume the work.';
-
-/** 首次压缩的摘要模板。 */
-export const SUMMARIZATION_PROMPT =
-  'Summarize the conversation below into the following sections, preserving all ' +
+/** 首次压缩的 checkpoint 模板。 */
+export const COMPACTION_PROMPT =
+  'Compact the conversation below into the following checkpoint sections, preserving all ' +
   'load-bearing detail:\n' +
   '## Goal\n## Constraints & Preferences\n' +
   '## Progress (Done | In Progress | Blocked)\n' +
   '## Key Decisions\n## Next Steps\n## Critical Context\n';
 
-/** 迭代更新的摘要模板：保留旧信息，推进进度。 */
-export const UPDATE_SUMMARIZATION_PROMPT =
-  'A previous summary is provided in <previous-summary>. Produce an UPDATED ' +
-  'summary using the same section structure: keep all still-relevant information, ' +
+/** 迭代更新的 checkpoint 模板：保留已有信息，推进进度。 */
+export const UPDATE_COMPACTION_PROMPT =
+  'A previous compact checkpoint is provided in <previous-compact>. Produce an UPDATED ' +
+  'compact checkpoint using the same section structure: keep all still-relevant information, ' +
   'move finished "In Progress" items to "Done", and incorporate the new messages.\n';
 
-/** `summarize` 回调的选项。 */
-export interface SummarizeOptions {
-  /** 上一次压缩的摘要正文（存在则走迭代更新模板）。 */
-  readonly previousSummary?: string;
-  /** 本次摘要的 token 上限建议（调用方据此设置 max output）。 */
+/** compact checkpoint 生成回调的选项。 */
+export interface CompactCheckpointOptions {
+  /** 上一次压缩的 checkpoint 正文（存在则走迭代更新模板）。 */
+  readonly previousCheckpoint?: string;
+  /** 本次 checkpoint 的 token 上限建议（调用方据此设置 max output）。 */
   readonly maxTokens?: number;
 }
 
 /**
- * 摘要生成回调：由会话装配处注入，内部走一次性模型补全生成摘要文本。
+ * checkpoint 生成回调：由会话装配处注入，内部走一次性模型补全生成 checkpoint。
  * 压缩器本身不持有模型适配器，以此保持与具体 provider 解耦。
  */
-export type Summarize = (
+export type GenerateCompactCheckpoint = (
   messages: readonly AgentMessage[],
-  opts: SummarizeOptions,
+  opts: CompactCheckpointOptions,
 ) => Promise<string>;
 
 /** {@link createSessionCompactor} 的依赖。 */
 export interface SessionCompactorDeps {
   /** 模型上下文窗口（token），用于触发判定。 */
   readonly contextWindow: number;
-  /** 摘要生成回调。 */
-  readonly summarize: Summarize;
+  /** checkpoint 生成回调。 */
+  readonly generateCheckpoint: GenerateCompactCheckpoint;
+  /**
+   * 会话端口：compactor 闭包持有它，绕开泛型 `store` 直接读 raw active path、
+   * 追加 compaction 节点。投影发生在 `load()`，compactor 不感知磁盘格式。
+   */
+  readonly port: CompactionSessionPort;
   /** 覆盖默认压缩配置。 */
   readonly settings?: Partial<CompactionSettings>;
-  /** 读取上一次摘要（用于迭代更新；缺省视为首次压缩）。 */
-  readonly previousSummary?: () => string | null | Promise<string | null>;
 }
 
 /** 估算单条消息的 token 数（`ceil(chars/4)` 启发式，遍历 part）。 */
@@ -100,18 +111,7 @@ export function estimateTokens(message: AgentMessage): number {
   return Math.ceil(chars / 4);
 }
 
-/** 估算整个历史的 token 总数。 */
-export function estimateContextTokens(messages: readonly AgentMessage[]): {
-  readonly tokens: number;
-} {
-  let tokens = 0;
-  for (const message of messages) {
-    tokens += estimateTokens(message);
-  }
-  return { tokens };
-}
-
-/** 触发判定：已用 token 超过「窗口 - 预留」即需要压缩。 */
+/** 触发判定：投影后 token 超过「窗口 - 预留」即需要压缩。 */
 export function shouldCompact(
   contextTokens: number,
   contextWindow: number,
@@ -123,40 +123,55 @@ export function shouldCompact(
 }
 
 /**
- * 选切点：从尾部累加保留 `keepRecentTokens`，再吸附到合法回合边界。
+ * 选切点：在 `[start, n)` 区间内，从尾部累加保留 `keepRecentTokens`，
+ * 再吸附到合法回合边界，返回 kept 起点下标 `cut`。
  *
- * 返回切点下标 `cut`：`[0, cut)` 进摘要，`[cut, end)` 保留。
- * - 优先吸附到最近的 `user` 消息边界（整回合保留，避免切碎回合）；
- * - 否则退回到最近的非 `tool` 边界（避免孤儿 tool-result）；
- * - 无可压缩内容（cut <= 0）时返回 null。
+ * `[start, cut)` 进 summary，`[cut, n)` 保留；`firstKeptEntryId = entries[cut].id`。
+ * - 优先吸附到 `user` 边界（整回合保留）；
+ * - `splitTurns` 且无 user 边界时退到 `assistant` 边界（切碎超大单 turn）；
+ * - 最后退到非 `tool` 边界，绝不让 kept 以 tool result 起头（避免孤儿 result）；
+ * - 无合法切点（cut <= start）时返回 null。
  */
-export function findCutPoint(
-  messages: readonly AgentMessage[],
-  keepRecentTokens: number,
+export function findCutIndex(
+  entries: readonly CompactionActiveEntry[],
+  start: number,
+  settings: CompactionSettings,
 ): number | null {
-  if (messages.length === 0) {
+  const n = entries.length;
+  if (n - start <= 0) {
     return null;
   }
   // 从尾部往回累加，直到攒够 keepRecentTokens，得到 token 维度的初始切点。
   let acc = 0;
-  let tokenCut = messages.length;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    acc += estimateTokens(messages[i]!);
+  let tokenCut = n;
+  for (let i = n - 1; i >= start; i -= 1) {
+    acc += estimateTokens(entries[i]!.message);
     tokenCut = i;
-    if (acc >= keepRecentTokens) {
+    if (acc >= settings.keepRecentTokens) {
       break;
     }
   }
 
-  // 优先吸附到 <= tokenCut 的最近 user 边界（整回合保留）。
-  for (let i = tokenCut; i > 0; i -= 1) {
-    if (messages[i]!.role === 'user') {
+  const turnCut = findTailTurnCut(entries, settings.tailTurns, start);
+  const initialCut = turnCut === null ? tokenCut : Math.min(tokenCut, turnCut);
+
+  // 优先吸附到 (start, initialCut] 的最近 user 边界（整回合保留）。
+  for (let i = initialCut; i > start; i -= 1) {
+    if (entries[i]!.role === 'user') {
       return i;
     }
   }
-  // 退回到 <= tokenCut 的最近非 tool 边界（避免孤儿 tool-result）。
-  for (let i = tokenCut; i > 0; i -= 1) {
-    if (messages[i]!.role !== 'tool') {
+  // split turn：单 turn 超预算且无 user 边界，退到 assistant 边界。
+  if (settings.splitTurns) {
+    for (let i = initialCut; i > start; i -= 1) {
+      if (entries[i]!.role === 'assistant') {
+        return i;
+      }
+    }
+  }
+  // 退到最近非 tool 边界（避免孤儿 tool result）。
+  for (let i = initialCut; i > start; i -= 1) {
+    if (entries[i]!.role !== 'tool') {
       return i;
     }
   }
@@ -199,12 +214,37 @@ export function extractFileOps(messages: readonly AgentMessage[]): {
   };
 }
 
-/** 把文件清单以 `<read-files>` / `<modified-files>` 标签追加到摘要尾部。 */
+/**
+ * 把本次抽取的文件清单与上一次 compaction 的 `details` 合并累计（去重、排序）。
+ * 跨多次压缩继承，保证早期读/改过的文件路径不因压缩而丢失。
+ */
+export function mergeFileDetails(
+  previous: CompactionRef['details'] | undefined,
+  current: { readonly readFiles: string[]; readonly modifiedFiles: string[] },
+): { readFiles: string[]; modifiedFiles: string[] } {
+  const read = new Set<string>([
+    ...(previous?.readFiles ?? []),
+    ...current.readFiles,
+  ]);
+  const modified = new Set<string>([
+    ...(previous?.modifiedFiles ?? []),
+    ...current.modifiedFiles,
+  ]);
+  return {
+    readFiles: [...read].sort(),
+    modifiedFiles: [...modified].sort(),
+  };
+}
+
+/** 把文件清单以 `<read-files>` / `<modified-files>` 标签追加到 summary 正文尾部。 */
 export function appendFileManifest(
-  summary: string,
-  files: { readonly readFiles: string[]; readonly modifiedFiles: string[] },
+  checkpoint: string,
+  files: {
+    readonly readFiles: readonly string[];
+    readonly modifiedFiles: readonly string[];
+  },
 ): string {
-  const parts = [summary.trim()];
+  const parts = [checkpoint.trim()];
   if (files.readFiles.length > 0) {
     parts.push(`<read-files>\n${files.readFiles.join('\n')}\n</read-files>`);
   }
@@ -216,20 +256,17 @@ export function appendFileManifest(
   return parts.join('\n\n');
 }
 
-/** 把摘要正文包成一条置顶的 `role:'user'` `<session-summary>` 消息。 */
-export function summaryMessage(summary: string): AgentMessage {
-  return {
-    role: 'user',
-    content: `<session-summary>\n${summary}\n</session-summary>`,
-  } as AgentMessage;
-}
-
-/** 序列化历史喂给摘要模型：tool-result 截断到 TOOL_RESULT_MAX_CHARS。 */
-export function serializeForSummary(
+/** 序列化历史喂给 compact 模型：可选把 tool-result 截断到 `toolOutputMaxChars`。 */
+export function serializeForCompact(
   messages: readonly AgentMessage[],
+  options: {
+    readonly pruneToolOutput?: boolean;
+    readonly toolOutputMaxChars?: number;
+  } = {},
 ): AgentMessage[] {
+  const maxChars = options.toolOutputMaxChars ?? 2000;
   return messages.map((message) => {
-    if (message.role !== 'tool') {
+    if (message.role !== 'tool' || options.pruneToolOutput !== true) {
       return message;
     }
     const content = (message as { content?: unknown }).content;
@@ -237,20 +274,21 @@ export function serializeForSummary(
       typeof content === 'string' ? content : JSON.stringify(content);
     return {
       ...message,
-      content: text.slice(0, TOOL_RESULT_MAX_CHARS),
+      content: text.slice(0, maxChars),
     } as unknown as AgentMessage;
   });
 }
 
 /**
- * 构造长会话压缩器 {@link SessionCompactor}，替换内核的简陋默认实现。
+ * 构造长会话压缩器 {@link SessionCompactor}。
  *
  * 触发流程（`maybeCompact`）：
- * 1. `store.load` 取当前主分支线性历史；
- * 2. 估算 token，未超阈值则返回 null（不压缩）；
- * 3. 选切点，无可压缩内容则返回 null；
- * 4. 调 `summarize` 生成结构化摘要，追加文件清单；
- * 5. `store.replace` 用 `[摘要消息, ...保留消息]` 改写历史。
+ * 1. `port.loadActivePath` 取 raw entries + 最近 compaction + 投影后 token；
+ * 2. `projectedTokens` 未超阈值则返回 null（不压缩）；
+ * 3. 从上一次 `firstKeptEntryId`（或起点）到切点选 summarize 区间，处理 split turn；
+ * 4. 调 `generateCheckpoint`（迭代 seed = 上一次 summary）生成 summary，追加累计文件清单；
+ * 5. `port.appendCompaction` 追加 compaction 节点并把 leaf 指向它；
+ *    下一轮 `store.load()` 自动投影成 `[summary, ...kept]`。
  */
 export function createSessionCompactor(
   deps: SessionCompactorDeps,
@@ -264,48 +302,106 @@ export function createSessionCompactor(
     name: 'ello-session-compactor',
     async maybeCompact(
       sessionId: string,
-      store: SessionStore,
+      _store: SessionStore,
     ): Promise<SessionCompactionReport | null> {
-      if (store.replace === undefined) {
-        return null;
-      }
-      const messages = await store.load(sessionId);
-      const { tokens } = estimateContextTokens(messages);
-      if (!shouldCompact(tokens, deps.contextWindow, settings)) {
+      const active = await deps.port.loadActivePath(sessionId);
+      if (
+        !shouldCompact(active.projectedTokens, deps.contextWindow, settings)
+      ) {
         return null;
       }
 
-      const cut = findCutPoint(messages, settings.keepRecentTokens);
+      const { entries, leafEntryId, latestCompaction } = active;
+      // summarize 起点 = 上一次 compaction 的 firstKeptEntryId（无则 session 起点）。
+      const start =
+        latestCompaction === null
+          ? 0
+          : Math.max(
+              0,
+              entries.findIndex(
+                (entry) => entry.id === latestCompaction.firstKeptEntryId,
+              ),
+            );
+
+      const cut = findCutIndex(entries, start, settings);
       if (cut === null) {
         return null;
       }
-      const toSummarize = messages.slice(0, cut);
-      const kept = messages.slice(cut);
+      const toSummarize = entries
+        .slice(start, cut)
+        .map((entry) => entry.message);
       if (toSummarize.length === 0) {
         return null;
       }
+      const firstKeptEntryId = entries[cut]!.id;
 
-      const previousSummary = (await deps.previousSummary?.()) ?? undefined;
-      const raw = await deps.summarize(serializeForSummary(toSummarize), {
-        ...(previousSummary !== undefined ? { previousSummary } : {}),
-        maxTokens: Math.floor(settings.reserveTokens * 0.8),
-      });
-      const summary = appendFileManifest(raw, extractFileOps(toSummarize));
+      const previousSummary = latestCompaction?.summary;
+      const raw = await deps.generateCheckpoint(
+        serializeForCompact(toSummarize, {
+          pruneToolOutput: settings.pruneToolOutput,
+          toolOutputMaxChars: settings.toolOutputMaxChars,
+        }),
+        {
+          ...(previousSummary !== undefined
+            ? { previousCheckpoint: previousSummary }
+            : {}),
+          maxTokens: Math.floor(settings.reserveTokens * 0.8),
+        },
+      );
+      const details = mergeFileDetails(
+        latestCompaction?.details,
+        extractFileOps(toSummarize),
+      );
+      const summary = appendFileManifest(raw, details);
 
-      const next: AgentMessage[] = [summaryMessage(summary), ...kept];
-      await store.replace(sessionId, next, {
-        compactor: 'ello-session-compactor',
+      const input: AppendCompactionInput = {
+        parentId: leafEntryId,
+        firstKeptEntryId,
         summary,
-      });
+        tokensBefore: active.projectedTokens,
+        details,
+      };
+      await deps.port.appendCompaction(sessionId, input);
 
+      const keptMessages = entries.length - cut;
       return {
         compactor: 'ello-session-compactor',
-        beforeMessageCount: messages.length,
-        afterMessageCount: next.length,
-        metadata: { tokensBefore: tokens, cutIndex: cut },
+        beforeMessageCount: entries.length,
+        afterMessageCount: keptMessages + 1,
+        metadata: {
+          tokensBefore: active.projectedTokens,
+          firstKeptEntryId,
+          summarizedMessages: toSummarize.length,
+          keptMessages,
+        },
       };
     },
   };
+}
+
+/**
+ * 找到「保留最近 `tailTurns` 个 user turn」的起点下标（即第 tailTurns 个 user）。
+ * 只在 `>= start` 区间内计数，返回 null 表示不足 tailTurns 个 turn。
+ */
+function findTailTurnCut(
+  entries: readonly CompactionActiveEntry[],
+  tailTurns: number,
+  start: number,
+): number | null {
+  if (tailTurns <= 0) {
+    return null;
+  }
+  let seen = 0;
+  for (let i = entries.length - 1; i >= start; i -= 1) {
+    if (entries[i]!.role !== 'user') {
+      continue;
+    }
+    seen += 1;
+    if (seen >= tailTurns) {
+      return i;
+    }
+  }
+  return null;
 }
 
 /** 累加 part 数组的字符数（用于 token 估算）。 */

@@ -1,12 +1,17 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { loadCodingAgentConfig } from '../config/index.js';
-import { buildSystemSections } from '../context/sections.js';
-import { buildCodingSystemPrompt } from '../system-prompt.js';
+import {
+  loadCodingAgentConfig,
+  type CodingAgentConfig,
+} from '../config/index.js';
+import {
+  buildCodingSystemPrompt,
+  buildContextBundle,
+} from '../context/prompts.js';
 
 const dirs: string[] = [];
 
@@ -23,46 +28,62 @@ async function tempDir(): Promise<string> {
 }
 
 describe('context sections', () => {
-  it('keeps runtime environment compact and structured', async () => {
+  it('keeps base prompt in markdown template and runtime context in sources', async () => {
     const cwd = await tempDir();
     const config = await loadCodingAgentConfig({ cwd });
 
     const prompt = buildCodingSystemPrompt(config, { model: 'test/model' });
+    const text = (await buildContextBundle(config)).system;
 
-    expect(prompt).toContain('<environment-context>');
-    expect(prompt).toContain('<model>test/model</model>');
+    expect(prompt).toContain('You are ello');
+    expect(prompt).not.toContain('<environment-context>');
+    expect(text).toContain('<environment-context');
     expect(prompt).not.toContain('- Working directory:');
     expect(prompt).not.toContain('- Writable roots:');
   });
 
-  it('renders repository context as a compact source block', async () => {
+  it('does not inject repository or git context by default', async () => {
     const cwd = await tempDir();
     await writeFile(
       path.join(cwd, 'package.json'),
-      JSON.stringify({ name: 'demo', version: '1.0.0', scripts: { test: 'vitest' } }),
+      JSON.stringify({
+        name: 'demo',
+        version: '1.0.0',
+        scripts: { test: 'vitest' },
+      }),
       'utf8',
     );
     const config = await loadCodingAgentConfig({ cwd });
-    const sections = buildSystemSections(config);
-    const rendered = await Promise.all(
-      sections.map((section) =>
-        section({
-          runId: 'run',
-          agentName: 'ello',
-          input: '',
-          context: undefined,
-          options: {},
-          environment: {},
-          metadata: {},
-          state: { messages: [], budget: {}, turn: 0, queueDiagnostics: [] },
-          trace: { events: [], metadata: {} },
-        }),
-      ),
-    );
 
-    const text = rendered.filter(Boolean).join('\n\n');
-    expect(text).toContain('<repository-context>');
-    expect(text).toContain('package: demo@1.0.0');
-    expect(text).not.toContain('# Repository overview');
+    const text = (await buildContextBundle(config)).system;
+    expect(text).not.toContain('<repository-context');
+    expect(text).not.toContain('<git-context');
+    expect(text).not.toContain('package: demo@1.0.0');
+  });
+
+  it('loads extra instruction globs as context sources', async () => {
+    const cwd = await tempDir();
+    await mkdir(path.join(cwd, 'docs'), { recursive: true });
+    await writeFile(
+      path.join(cwd, 'docs', 'rules.agent.md'),
+      'Use local rules.',
+      'utf8',
+    );
+    const base = await loadCodingAgentConfig({ cwd });
+    const config: CodingAgentConfig = {
+      ...base,
+      context: {
+        ...base.context,
+        instructions: {
+          ...base.context.instructions,
+          extra: ['docs/**/*.agent.md'],
+        },
+      },
+    };
+
+    const text = (await buildContextBundle(config)).system;
+
+    expect(text).toContain('<instruction-context');
+    expect(text).toContain('Use local rules.');
   });
 });

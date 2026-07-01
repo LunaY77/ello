@@ -17,7 +17,6 @@ export type CommandResult =
         | 'models'
         | 'profiles'
         | 'session-selector'
-        | 'session-tree'
         | 'settings'
         | 'skills'
         | 'tasks'
@@ -29,6 +28,8 @@ export type CommandResult =
       readonly action:
         | 'clear'
         | 'compact'
+        | 'summary'
+        | 'rewind'
         | 'new-session'
         | 'fork'
         | 'export'
@@ -148,27 +149,28 @@ export const slashCommands: readonly SlashCommand[] = [
     run: () => ({ type: 'runtime-action', action: 'new-session' }),
   },
   {
-    name: 'session',
-    description: 'Show current session',
-    run: (ctx) => ({
-      type: 'message',
-      message: `Session: ${ctx.config.sessionId ?? '<new>'}`,
-    }),
-  },
-  {
-    name: 'tree',
-    description: 'Open session tree',
-    run: () => ({ type: 'open-overlay', overlay: 'session-tree' }),
-  },
-  {
     name: 'fork',
-    description: 'Fork active branch',
+    description: 'Fork active branch, optionally from a message entry',
     run: (_ctx, args) => ({ type: 'runtime-action', action: 'fork', args }),
   },
   {
     name: 'compact',
     description: 'Compact current session',
     run: () => ({ type: 'runtime-action', action: 'compact' }),
+  },
+  {
+    name: 'summary',
+    description: 'Generate a human-facing session summary',
+    run: () => ({ type: 'runtime-action', action: 'summary' }),
+  },
+  {
+    name: 'rewind',
+    description: 'Rewind to a user message entry for editing',
+    run: (_ctx, args) => ({
+      type: 'runtime-action',
+      action: 'rewind',
+      args,
+    }),
   },
   {
     name: 'tools',

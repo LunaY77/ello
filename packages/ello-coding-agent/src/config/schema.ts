@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+const ZeroCostSchema = z.object({
+  input: z.number().nonnegative().default(0),
+  output: z.number().nonnegative().default(0),
+  cache_read: z.number().nonnegative().default(0),
+  cache_write: z.number().nonnegative().default(0),
+});
+
 /** 审批模式：与 CLI `--approval`、权限策略和 system prompt 中的说明保持一致。 */
 export const ApprovalModeSchema = z.enum([
   'default',
@@ -40,24 +47,28 @@ export const ModelCatalogEntrySchema = z.object({
   name: z.string().optional(),
   api_id: z.string(),
   endpoint: z.enum(['languageModel', 'chat', 'responses', 'custom']).optional(),
-  status: z.enum(['active', 'beta', 'alpha']),
+  status: z.enum(['active', 'beta', 'alpha']).default('active'),
   release_date: z.string().optional(),
-  context: z.number().int().positive(),
+  context: z.number().int().positive().default(128_000),
   input: z.number().int().nonnegative().optional(),
-  output: z.number().int().positive(),
-  cost: z.object({
-    input: z.number().nonnegative(),
-    output: z.number().nonnegative(),
-    cache_read: z.number().nonnegative(),
-    cache_write: z.number().nonnegative(),
-  }),
-  temperature: z.boolean(),
-  reasoning: z.boolean(),
-  tool_call: z.boolean(),
-  input_modalities: z.array(z.enum(['text', 'audio', 'image', 'video', 'pdf'])),
-  output_modalities: z.array(
-    z.enum(['text', 'audio', 'image', 'video', 'pdf']),
-  ),
+  output: z.number().int().positive().default(16_000),
+  cost: z
+    .union([ZeroCostSchema, z.literal('zeroCost')])
+    .default('zeroCost')
+    .transform((value) =>
+      value === 'zeroCost'
+        ? { input: 0, output: 0, cache_read: 0, cache_write: 0 }
+        : value,
+    ),
+  temperature: z.boolean().default(true),
+  reasoning: z.boolean().default(false),
+  tool_call: z.boolean().default(true),
+  input_modalities: z
+    .array(z.enum(['text', 'audio', 'image', 'video', 'pdf']))
+    .default(['text']),
+  output_modalities: z
+    .array(z.enum(['text', 'audio', 'image', 'video', 'pdf']))
+    .default(['text']),
   interleaved_reasoning_field: z
     .enum(['reasoning', 'reasoning_content', 'reasoning_details'])
     .optional(),
@@ -84,7 +95,7 @@ export const ProfileSuiteSchema = z.object({
   models: z.object({
     primary: z.string(),
     small: z.string(),
-    summary: z.string(),
+    compact: z.string(),
     title: z.string(),
     review: z.string(),
   }),
@@ -92,7 +103,7 @@ export const ProfileSuiteSchema = z.object({
     .object({
       primary: ModelRoleSettingsSchema.optional(),
       small: ModelRoleSettingsSchema.optional(),
-      summary: ModelRoleSettingsSchema.optional(),
+      compact: ModelRoleSettingsSchema.optional(),
       title: ModelRoleSettingsSchema.optional(),
       review: ModelRoleSettingsSchema.optional(),
     })
@@ -110,6 +121,80 @@ export const ToolOutputConfigSchema = z.object({
   max_bytes: z.number().int().positive().default(12_000),
   max_lines: z.number().int().positive().default(400),
   preview_lines: z.number().int().positive().default(120),
+});
+
+/** context pipeline 的指令来源配置。 */
+export const ContextInstructionsConfigSchema = z.object({
+  global: z.array(z.string()).default(['~/.ello/ELLO.md']),
+  project: z
+    .array(z.string())
+    .default(['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md']),
+  extra: z.array(z.string()).default([]),
+  nearby: z.boolean().default(true),
+});
+
+/** context pipeline 的压缩策略配置。 */
+export const ContextCompactionConfigSchema = z.object({
+  auto: z.boolean().default(true),
+  tail_turns: z.number().int().positive().default(2),
+  preserve_recent_tokens: z.number().int().positive().default(20_000),
+  reserved_tokens: z.number().int().positive().default(16_384),
+  prune_tool_output: z.boolean().default(false),
+  tool_output_max_chars: z.number().int().positive().default(2_000),
+  /** 单 turn 超预算时允许切到 turn 内 assistant 边界（split turn，§1.5）。 */
+  split_turns: z.boolean().default(true),
+});
+
+/**
+ * 大 tool 输出预算替换配置（§2）。模型输入前把超限 tool_result 写入 artifact，
+ * 上下文里替换为 preview + stub。默认关闭，避免改变现有 tool 输出测试语义。
+ */
+export const ContextToolResultBudgetConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  max_chars: z.number().int().positive().default(20_000),
+  artifact_dir: z.string().default('~/.ello/artifacts/tool-results'),
+});
+
+/** structured memory（SQLite）配置（§4.3）：显式录入 + 检索 + 访问日志。 */
+export const ContextMemoryConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  structured: z
+    .object({
+      enabled: z.boolean().default(true),
+    })
+    .default({ enabled: true }),
+});
+
+/** context pipeline 总配置。 */
+export const ContextConfigSchema = z.object({
+  max_input_tokens: z.number().int().positive().default(160_000),
+  reserved_output_tokens: z.number().int().positive().default(8_000),
+  show_sources_in_tui: z.boolean().default(true),
+  system_prompt_profile: z.string().default('coding'),
+  instructions: ContextInstructionsConfigSchema.default({
+    global: ['~/.ello/ELLO.md'],
+    project: ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'],
+    extra: [],
+    nearby: true,
+  }),
+  compaction: ContextCompactionConfigSchema.default({
+    auto: true,
+    tail_turns: 2,
+    preserve_recent_tokens: 20_000,
+    reserved_tokens: 16_384,
+    prune_tool_output: false,
+    tool_output_max_chars: 2_000,
+    split_turns: true,
+  }),
+  tool_result_budget: ContextToolResultBudgetConfigSchema.default({
+    enabled: false,
+    max_chars: 20_000,
+    artifact_dir: '~/.ello/artifacts/tool-results',
+  }),
+  memory: ContextMemoryConfigSchema.default({
+    enabled: false,
+    structured: { enabled: true },
+  }),
 });
 
 /** 项目信任配置，按绝对路径做 key。 */
@@ -147,6 +232,33 @@ export const CodingAgentConfigSchema = z.object({
   permissionRules: z.array(PermissionRuleSchema).default([]),
   mcpConfigPath: z.string().nullable().default(null),
   systemPromptProfile: z.string().default('coding'),
+  context: ContextConfigSchema.default({
+    max_input_tokens: 160_000,
+    reserved_output_tokens: 8_000,
+    show_sources_in_tui: true,
+    system_prompt_profile: 'coding',
+    instructions: {
+      global: ['~/.ello/ELLO.md'],
+      project: ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'],
+      extra: [],
+      nearby: true,
+    },
+    compaction: {
+      auto: true,
+      tail_turns: 2,
+      preserve_recent_tokens: 20_000,
+      reserved_tokens: 16_384,
+      prune_tool_output: false,
+      tool_output_max_chars: 2_000,
+      split_turns: true,
+    },
+    tool_result_budget: {
+      enabled: false,
+      max_chars: 20_000,
+      artifact_dir: '~/.ello/artifacts/tool-results',
+    },
+    memory: { enabled: false, structured: { enabled: true } },
+  }),
   tui: z.boolean().default(true),
   json: z.boolean().default(false),
 });
@@ -158,6 +270,14 @@ export type ModelRoleSettingsConfig = z.infer<typeof ModelRoleSettingsSchema>;
 export type ProfileSuiteConfig = z.infer<typeof ProfileSuiteSchema>;
 export type ToolConfig = z.infer<typeof ToolConfigSchema>;
 export type ToolOutputConfig = z.infer<typeof ToolOutputConfigSchema>;
+export type ContextCompactionConfig = z.infer<
+  typeof ContextCompactionConfigSchema
+>;
+export type ContextToolResultBudgetConfig = z.infer<
+  typeof ContextToolResultBudgetConfigSchema
+>;
+export type ContextMemoryConfig = z.infer<typeof ContextMemoryConfigSchema>;
+export type ContextConfig = z.infer<typeof ContextConfigSchema>;
 export type PermissionRule = z.infer<typeof PermissionRuleSchema>;
 export type CodingAgentConfig = z.infer<typeof CodingAgentConfigSchema>;
 export type CodingAgentConfigOverrides = Partial<CodingAgentConfig>;

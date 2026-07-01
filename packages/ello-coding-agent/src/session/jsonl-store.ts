@@ -1,28 +1,26 @@
-import { randomUUID } from 'node:crypto';
+import type { AgentMessage, AgentStreamEvent, SessionStore } from '@ello/agent';
 
-import type {
-  AgentMessage,
-  AgentStreamEvent,
-  SessionCompactionReport,
-  SessionStore,
-} from '@ello/agent';
-
-import { JsonlSessionRepository } from './repository.js';
+import {
+  JsonlSessionRepository,
+  type AppendCompactionInput,
+  type CompactionActiveEntry,
+  type CompactionRef,
+  type CompactionSessionPort,
+} from './repository.js';
 
 /**
- * 基于 JSONL 会话树的 `SessionStore` 实现。
+ * 基于 JSONL 会话树的 `SessionStore` 实现，同时背书 `CompactionSessionPort`。
  *
  * 这是内核 `createAgent({ session })` 的会话后端。内核在合适时机调用：
- * - `load`：恢复某个会话当前分支的消息序列；
+ * - `load`：恢复某个会话当前分支的**模型视图**（投影后的 `modelMessages`）；
  * - `append`：把本轮新增消息追加到当前 leaf 之下；
- * - `appendEvent`：把事件落盘，供回放（可选）；
- * - `compact` / `replace`：压缩边界落盘（具体算法在压缩器里）。
+ * - `appendEvent`：把事件落盘，供回放（可选）。
  *
- * 它与 `JsonlSessionRepository`（fork/checkout/tree/export 等会话树产品能力）
- * 建在**同一份 JSONL** 之上：store 负责内核读写，repository 负责产品操作，
- * 两者通过 `repository` 与共享的 leaf 指针表协作，不再像旧实现那样各拼一套。
+ * 压缩通过 `CompactionSessionPort` 追加一个带 `firstKeptEntryId` 的 compaction
+ * 节点，模型视图在 `load()` 时投影。store 与 `JsonlSessionRepository` 共用同一份
+ * JSONL：store 负责内核读写与 leaf 指针缓存，repository 负责投影与会话树产品操作。
  */
-export class JsonlSessionStore implements SessionStore {
+export class JsonlSessionStore implements SessionStore, CompactionSessionPort {
   /** 底层会话树仓库，store 与 repository 共用同一实例。 */
   readonly repository: JsonlSessionRepository;
 
@@ -33,11 +31,11 @@ export class JsonlSessionStore implements SessionStore {
     this.repository = new JsonlSessionRepository(options);
   }
 
-  /** 读取会话当前分支的消息序列；顺带刷新 leaf 指针缓存。 */
+  /** 读取会话当前分支的**模型视图**（投影后）；顺带刷新 leaf 指针缓存。 */
   async load(sessionId: string): Promise<AgentMessage[]> {
     const opened = await this.repository.open(sessionId);
     this.leaves.set(sessionId, opened.leafEntryId);
-    return opened.messages;
+    return opened.modelMessages;
   }
 
   /** 把本轮新增消息追加到 active leaf 之下。 */
@@ -59,51 +57,31 @@ export class JsonlSessionStore implements SessionStore {
   }
 
   /**
-   * 压缩边界落盘。
-   *
-   * 实际的历史改写由压缩器经 `replace` 完成，这里仅在会话树上补一条
-   * compaction 记录留痕；摘要正文从 metadata.summary 读，缺省给一句兜底描述。
+   * `CompactionSessionPort.loadActivePath`：把 repository 的 raw active path
+   * （含 entry id/role）+ 最近 compaction + 投影 token 暴露给 compactor，
+   * compactor 据此选切点、定位 `firstKeptEntryId`，不必感知磁盘格式。
    */
-  async compact(
-    sessionId: string,
-    report: SessionCompactionReport,
-    metadata?: Record<string, unknown>,
-  ): Promise<void> {
-    await this.repository.compact(sessionId, {
-      id: randomUUID(),
-      ...(await this.boundaryOf(sessionId)),
-      summary:
-        typeof metadata?.summary === 'string'
-          ? metadata.summary
-          : `Auto compacted ${report.beforeMessageCount} messages to ${report.afterMessageCount}.`,
-    });
+  async loadActivePath(sessionId: string): Promise<{
+    readonly entries: readonly CompactionActiveEntry[];
+    readonly leafEntryId: string | null;
+    readonly latestCompaction: CompactionRef | null;
+    readonly projectedTokens: number;
+  }> {
+    const result = await this.repository.loadActivePathForCompaction(sessionId);
+    this.leaves.set(sessionId, result.leafEntryId);
+    return result;
   }
 
   /**
-   * 用压缩后的消息序列替换会话历史。
-   *
-   * 先写一条 compaction 边界留痕，再把替换后的消息作为新分支挂上去：
-   * 旧分支保留，可回放/fork；后续 `load` 取到的就是压缩后的短历史。
+   * `CompactionSessionPort.appendCompaction`：追加 compaction 节点并把 leaf
+   * 指向它。返回的新 leaf（= compaction 节点 id）写回 leaf 缓存，使后续
+   * `append` 挂在 compaction 之下，下一次 `load` 自动投影。
    */
-  async replace(
+  async appendCompaction(
     sessionId: string,
-    messages: AgentMessage[],
-    metadata?: Record<string, unknown>,
+    input: AppendCompactionInput,
   ): Promise<void> {
-    await this.repository.compact(sessionId, {
-      id: randomUUID(),
-      ...(await this.boundaryOf(sessionId)),
-      summary:
-        typeof metadata?.summary === 'string'
-          ? metadata.summary
-          : 'Session history replaced by compactor.',
-    });
-    // 从“无父”重新挂载压缩后的消息，形成一条新的 active 分支。
-    const nextLeaf = await this.repository.appendMessages(
-      sessionId,
-      null,
-      messages,
-    );
+    const nextLeaf = await this.repository.appendCompaction(sessionId, input);
     this.leaves.set(sessionId, nextLeaf);
   }
 
@@ -112,9 +90,19 @@ export class JsonlSessionStore implements SessionStore {
     return this.repository.list();
   }
 
-  /** 读取最近一次压缩摘要，可作为系统 section 注入到下一轮提示。 */
-  latestCompactionSummary(sessionId: string): Promise<string | null> {
-    return this.repository.latestCompactionSummary(sessionId);
+  /** 读取 active path 上最近一次 compaction，供 compact 迭代 seed 与累计文件清单。 */
+  latestCompaction(sessionId: string): Promise<CompactionRef | null> {
+    return this.repository.latestCompaction(sessionId);
+  }
+
+  /** 读取最近一次手动 `/summary` 纪要，仅供 `/summary` 迭代自己的 seed。 */
+  latestSummary(sessionId: string): Promise<{ summary: string } | null> {
+    return this.repository.latestSummary(sessionId);
+  }
+
+  /** 追加一条手动 `/summary` 纪要（旁路记录，不进 active path / modelMessages）。 */
+  appendSummary(sessionId: string, summary: string): Promise<void> {
+    return this.repository.appendSummary(sessionId, summary);
   }
 
   private async leafOf(sessionId: string): Promise<string | null> {
@@ -123,12 +111,5 @@ export class JsonlSessionStore implements SessionStore {
       this.leaves.set(sessionId, opened.leafEntryId);
     }
     return this.leaves.get(sessionId) ?? null;
-  }
-
-  private async boundaryOf(
-    sessionId: string,
-  ): Promise<{ boundaryEntryId?: string }> {
-    const leaf = await this.leafOf(sessionId);
-    return leaf !== null ? { boundaryEntryId: leaf } : {};
   }
 }
