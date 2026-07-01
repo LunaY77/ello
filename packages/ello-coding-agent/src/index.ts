@@ -103,13 +103,36 @@ export {
   type FileChange,
 } from './change/checkpoint.js';
 
-// —— 技能与子代理 ——
+// —— 技能 ——
 export {
   formatSkill,
   formatSkillList,
   loadCodingSkills,
 } from './skills/index.js';
-export { codingSubagents } from './subagents/index.js';
+
+// —— Agent 编排 ——
+export {
+  BackgroundJobStore,
+  builtinAgents,
+  createAgentRegistry,
+  createDelegateTool,
+  createSubagentAgent,
+  deriveSubagentPermission,
+  loadMarkdownAgents,
+  renderSubagentEnvelope,
+  runInternalAgent,
+  runSubagent,
+  type AgentRegistry,
+  type BackgroundJob,
+  type CodingAgentDefinition,
+  type CodingAgentMode,
+  type CodingAgentSource,
+  type CreateDelegateToolOptions,
+  type DelegateToolHooks,
+  type SubagentAgentDeps,
+  type SubagentRun,
+  type SubagentRunDeps,
+} from './agents/index.js';
 
 // —— 持久化任务 ——
 export {

@@ -23,6 +23,7 @@ export {
   type WritableConfigSourceName,
 } from './loader.js';
 export {
+  globalAgentsDir,
   globalCacheDir,
   globalConfigPath,
   globalGitignorePath,
@@ -31,9 +32,9 @@ export {
   globalMcpPath,
   globalSessionsDir,
   globalSkillsDir,
-  globalSubagentsDir,
   globalTasksDir,
   globalWorkspacesDir,
+  projectAgentsDir,
   projectConfigPath,
   projectElloDir,
   projectSkillsDir,
@@ -41,6 +42,9 @@ export {
   projectWorkspacePointerPath,
 } from './paths.js';
 export {
+  AgentConfigSchema,
+  AgentModeSchema,
+  AgentRoleSchema,
   ApprovalModeSchema,
   CodingAgentConfigSchema,
   ModelCatalogEntrySchema,
@@ -49,6 +53,7 @@ export {
   ProfileSuiteSchema,
   ProviderConnectionSchema,
   ToolConfigSchema,
+  type AgentConfigEntry,
   type ApprovalMode,
   type CodingAgentConfig,
   type CodingAgentConfigOverrides,

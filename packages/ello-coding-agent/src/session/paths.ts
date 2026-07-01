@@ -39,6 +39,14 @@ export function sessionFile(
   return path.join(sessionsDir(config), `${sessionId}.jsonl`);
 }
 
+/** subagent sidechain 根目录：`<sessionDir>/<sessionId>/subagents`。 */
+export function subagentRunsDir(
+  config: CodingAgentConfig,
+  sessionId: string,
+): string {
+  return path.join(sessionsDir(config), sessionId, 'subagents');
+}
+
 /** 项目级检查点目录：`<cwd>/.ello/checkpoints`。 */
 export function checkpointsDir(cwd: string): string {
   return path.join(projectDir(cwd), 'checkpoints');
@@ -62,16 +70,6 @@ export function globalSkillsDir(): string {
 /** 项目技能目录：`<cwd>/.ello/skills`。 */
 export function projectSkillsDir(cwd: string): string {
   return path.join(projectDir(cwd), 'skills');
-}
-
-/** 全局子代理目录：`~/.ello/subagents`。 */
-export function globalSubagentsDir(): string {
-  return path.join(globalDir(), 'subagents');
-}
-
-/** 项目子代理目录：`<cwd>/.ello/subagents`。 */
-export function projectSubagentsDir(cwd: string): string {
-  return path.join(projectDir(cwd), 'subagents');
 }
 
 /** 全局日志目录：`~/.ello/logs`。 */

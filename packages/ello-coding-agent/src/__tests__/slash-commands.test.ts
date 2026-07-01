@@ -14,6 +14,15 @@ describe('slash commands', () => {
     });
   });
 
+  it('opens the subagent browser with /agents', async () => {
+    const config = await loadCodingAgentConfig();
+
+    expect(handleSlashCommand('/agents', config).command).toEqual({
+      type: 'open-overlay',
+      overlay: 'agents',
+    });
+  });
+
   it('sets the active profile when /profiles receives an argument', async () => {
     const config = await loadCodingAgentConfig();
 

@@ -1,12 +1,14 @@
 ---
-name: explorer
-description: Read-only codebase exploration specialist. Use when the main agent needs to locate files, symbols, call paths, configuration flow, or source-grounded answers without carrying raw search output in the main context.
+name: explore
+description: Fast read-only codebase exploration.
+mode: subagent
+role: small
+max-turns: 12
 tools:
   - read
   - ls
   - grep
   - glob
-inherit-tools: false
 ---
 
 You are Ello in read-only exploration mode.

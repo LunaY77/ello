@@ -14,6 +14,7 @@ export type CommandResult =
       readonly type: 'open-overlay';
       readonly overlay:
         | 'help'
+        | 'agents'
         | 'models'
         | 'profiles'
         | 'session-selector'
@@ -74,6 +75,11 @@ export const slashCommands: readonly SlashCommand[] = [
     name: 'models',
     description: 'Browse model catalog',
     run: () => ({ type: 'open-overlay', overlay: 'models' }),
+  },
+  {
+    name: 'agents',
+    description: 'Browse delegatable subagents',
+    run: () => ({ type: 'open-overlay', overlay: 'agents' }),
   },
   {
     name: 'profiles',

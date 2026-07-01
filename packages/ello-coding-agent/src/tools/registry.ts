@@ -13,7 +13,7 @@ export const codingToolRegistry = [
     risk: 'readonly',
   },
   { name: 'ls', description: 'list directory', risk: 'readonly' },
-  { name: 'grep', description: 'search text with ripgrep', risk: 'readonly' },
+  { name: 'grep', description: 'search file contents', risk: 'readonly' },
   { name: 'glob', description: 'match file paths', risk: 'readonly' },
   {
     name: 'write',

@@ -271,6 +271,11 @@ function rejectProjectProfileConfig(
       `Project config must not define active_profile: ${filePath}`,
     );
   }
+  if (projectConfig.default_agent !== undefined) {
+    throw new Error(
+      `Project config must not define default_agent: ${filePath}`,
+    );
+  }
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

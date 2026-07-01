@@ -27,6 +27,38 @@ export const PermissionRuleSchema = z.object({
   reason: z.string().optional(),
 });
 
+/** agent 运行形态；与 provider profile suite 的 role 正交。 */
+export const AgentModeSchema = z.enum([
+  'primary',
+  'subagent',
+  'internal',
+  'all',
+]);
+
+/** agent 绑定的 profile role 名；与 provider/types.ts 的 ModelRole 保持一致。 */
+export const AgentRoleSchema = z.enum([
+  'primary',
+  'small',
+  'compact',
+  'title',
+  'review',
+]);
+
+/** config.yaml `agent:` 映射下单个 agent 的声明。 */
+export const AgentConfigSchema = z.object({
+  mode: AgentModeSchema.default('primary'),
+  role: AgentRoleSchema.default('primary'),
+  description: z.string().optional(),
+  hidden: z.boolean().optional(),
+  prompt: z.string().optional(),
+  model: z.string().optional(),
+  tools: z.array(z.string()).optional(),
+  approval_mode: ApprovalModeSchema.optional(),
+  permission: z.array(PermissionRuleSchema).optional(),
+  max_turns: z.number().int().positive().optional(),
+  color: z.string().optional(),
+});
+
 /** provider 只描述模型服务连接方式，不承载模型人格或 agent 行为。 */
 export const ProviderConnectionSchema = z.object({
   name: z.string().optional(),
@@ -212,6 +244,10 @@ export const ProjectTrustSchema = z.object({
  */
 export const CodingAgentConfigSchema = z.object({
   active_profile: z.string().default('main'),
+  /** 默认主 agent；必须解析到一个 mode=primary|all 且非 hidden 的 agent。 */
+  default_agent: z.string().default('build'),
+  /** 用户自定义/覆盖的 agent 声明，与内置 agent 合并。 */
+  agent: z.record(z.string(), AgentConfigSchema).default({}),
   provider: z.record(z.string(), ProviderConnectionSchema).default({}),
   models: z
     .record(z.string(), z.record(z.string(), ModelCatalogEntrySchema))
@@ -264,6 +300,7 @@ export const CodingAgentConfigSchema = z.object({
 });
 
 export type ApprovalMode = z.infer<typeof ApprovalModeSchema>;
+export type AgentConfigEntry = z.infer<typeof AgentConfigSchema>;
 export type ProviderConnectionConfig = z.infer<typeof ProviderConnectionSchema>;
 export type ModelCatalogEntryConfig = z.infer<typeof ModelCatalogEntrySchema>;
 export type ModelRoleSettingsConfig = z.infer<typeof ModelRoleSettingsSchema>;

@@ -2,6 +2,7 @@ import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
 
 import { AppShell } from '../tui/components/AppShell.js';
+import { OverlayHost } from '../tui/overlays/OverlayHost.js';
 import { presenterFor } from '../tui/presenters/index.js';
 
 describe('AppShell', () => {
@@ -14,6 +15,7 @@ describe('AppShell', () => {
         transcript={[]}
         liveAssistantText=""
         runningTools={[]}
+        runningSubagents={[]}
         running={false}
         overlay={null}
         composer={null}
@@ -41,6 +43,7 @@ describe('AppShell', () => {
         ]}
         liveAssistantText=""
         runningTools={[]}
+        runningSubagents={[]}
         running
         workingSeconds={12}
         overlay={null}
@@ -66,6 +69,7 @@ describe('AppShell', () => {
         transcript={[]}
         liveAssistantText=""
         runningTools={[]}
+        runningSubagents={[]}
         running={false}
         interruptNotice="interrupted: user interrupted from TUI"
         overlay={null}
@@ -86,6 +90,7 @@ describe('AppShell', () => {
         transcript={[]}
         liveAssistantText=""
         runningTools={[]}
+        runningSubagents={[]}
         running={false}
         workedFor="1m 2s"
         overlay={null}
@@ -106,6 +111,7 @@ describe('AppShell', () => {
         transcript={[]}
         liveAssistantText=""
         runningTools={[]}
+        runningSubagents={[]}
         running
         pendingSteers={['停止']}
         overlay={null}
@@ -162,6 +168,7 @@ describe('AppShell', () => {
         ]}
         liveAssistantText=""
         runningTools={[]}
+        runningSubagents={[]}
         running={false}
         overlay={null}
         composer={null}
@@ -173,5 +180,126 @@ describe('AppShell', () => {
     expect(output).toContain('tmp.txt');
     expect(output).toContain('- old');
     expect(output).toContain('+ new');
+  });
+
+  it('renders running subagent status with nested tools', () => {
+    const output = renderToString(
+      <AppShell
+        cwd="/tmp/ello-workspace"
+        profile="main"
+        approvalMode="default"
+        transcript={[]}
+        liveAssistantText=""
+        runningTools={[]}
+        runningSubagents={[
+          {
+            runId: 'task-1',
+            agentName: 'explore',
+            description: 'inspect loader',
+            background: false,
+            status: 'running',
+            startedAt: '2026-07-01T00:00:00.000Z',
+            tools: [
+              {
+                id: 'read-1',
+                name: 'read',
+                input: { path: 'src/config.ts' },
+                status: 'running',
+              },
+            ],
+          },
+        ]}
+        running
+        overlay={null}
+        composer={null}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('explore');
+    expect(output).toContain('foreground');
+    expect(output).toContain('inspect loader');
+    expect(output).toContain('Read');
+    expect(output).toContain('src/config.ts');
+  });
+
+  it('limits subagent tool history to the latest four calls', () => {
+    const tools = Array.from({ length: 6 }, (_, index) => ({
+      id: `tool-${index}`,
+      name: 'read',
+      input: { path: `src/file-${index}.ts` },
+      status: 'ok' as const,
+      output: { metadata: { totalLines: index + 1 } },
+    }));
+    const output = renderToString(
+      <AppShell
+        cwd="/tmp/ello-workspace"
+        profile="main"
+        approvalMode="default"
+        transcript={[]}
+        liveAssistantText=""
+        runningTools={[]}
+        runningSubagents={[
+          {
+            runId: 'task-1',
+            agentName: 'explore',
+            description: 'inspect loader',
+            background: false,
+            status: 'running',
+            startedAt: '2026-07-01T00:00:00.000Z',
+            tools,
+          },
+        ]}
+        running
+        overlay={null}
+        composer={null}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('+2 earlier tool calls');
+    expect(output).not.toContain('src/file-0.ts');
+    expect(output).not.toContain('src/file-1.ts');
+    expect(output).toContain('src/file-2.ts');
+    expect(output).toContain('src/file-5.ts');
+  });
+
+  it('renders the subagent browser overlay', () => {
+    const output = renderToString(
+      <OverlayHost
+        overlay={{
+          type: 'agents',
+          agents: [
+            {
+              name: 'explore',
+              description: 'Search and read code',
+              mode: 'subagent',
+              role: 'small',
+              source: 'bundled',
+              tools: ['read', 'grep', 'glob'],
+            },
+          ],
+        }}
+        onApprove={() => {}}
+        onSelectModel={() => {}}
+        onSelectProfile={() => {}}
+        onCreateProfile={() => {}}
+        onRequestDeleteProfile={() => {}}
+        onConfirmDeleteProfile={() => {}}
+        onActivateProfile={() => {}}
+        onSubmitNewProfile={() => {}}
+        onSelectProfileRole={() => {}}
+        onBindProfileRoleModel={() => {}}
+        onOpenProfiles={() => {}}
+        onSaveProfile={() => {}}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('Subagents');
+    expect(output).toContain('explore');
+    expect(output).toContain('bundled');
+    expect(output).toContain('small');
+    expect(output).toContain('read, grep, glob');
   });
 });

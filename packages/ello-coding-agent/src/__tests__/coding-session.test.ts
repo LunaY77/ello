@@ -272,6 +272,183 @@ describe('createCodingSession', () => {
     ).toBe(true);
   });
 
+  it('stores subagent transcript in parent sidechain without polluting session list', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'bypass',
+    });
+
+    let parentTurns = 0;
+    const events: string[] = [];
+    let parentFollowUpContent = '';
+    const adapter: ModelAdapter = {
+      async generate(request) {
+        const isParent = Object.hasOwn(request.tools, 'delegate_to_subagent');
+        if (!isParent) {
+          return {
+            text: 'sub done',
+            messages: [
+              ...request.messages,
+              { role: 'assistant', content: 'sub done' },
+            ],
+            newMessages: [{ role: 'assistant', content: 'sub done' }],
+            usage,
+            finishReason: 'stop',
+            provider: null,
+          };
+        }
+
+        parentTurns += 1;
+        if (parentTurns === 2) {
+          parentFollowUpContent = JSON.stringify(request.messages);
+        }
+        if (parentTurns === 1) {
+          const toolCallMessage = {
+            role: 'assistant' as const,
+            content: [
+              {
+                type: 'tool-call',
+                toolCallId: 'delegate-1',
+                toolName: 'delegate_to_subagent',
+                input: {
+                  name: 'general',
+                  description: 'check sidechain',
+                  prompt: 'return sub done',
+                  run_id: 'run-sidechain',
+                },
+              },
+            ],
+          };
+          return {
+            text: '',
+            messages: [...request.messages, toolCallMessage],
+            newMessages: [toolCallMessage],
+            toolCalls: [
+              {
+                id: 'delegate-1',
+                name: 'delegate_to_subagent',
+                input: {
+                  name: 'general',
+                  description: 'check sidechain',
+                  prompt: 'return sub done',
+                  run_id: 'run-sidechain',
+                },
+              },
+            ],
+            usage,
+            finishReason: 'tool-calls',
+            provider: null,
+          };
+        }
+
+        return {
+          text: 'parent done',
+          messages: [
+            ...request.messages,
+            { role: 'assistant', content: 'parent done' },
+          ],
+          newMessages: [{ role: 'assistant', content: 'parent done' }],
+          usage,
+          finishReason: 'stop',
+          provider: null,
+        };
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+
+    const session = await createCodingSession({ config, modelAdapter: adapter });
+    session.subscribe((event) => events.push(event.type));
+
+    await session.submit('delegate it');
+    const parentId = session.sessionId;
+    const sessions = await session.listSessions();
+    await session.close();
+
+    expect(events).toContain('subagent.started');
+    expect(events).toContain('subagent.completed');
+    expect(parentFollowUpContent).toContain('<subagent_run');
+    expect(parentFollowUpContent).not.toContain('<task ');
+    expect(parentFollowUpContent).not.toContain('task_result');
+    expect(sessions.map((item) => item.sessionId)).toEqual([parentId]);
+    expect(
+      await readFile(
+        path.join(
+          sessionDir,
+          parentId,
+          'subagents',
+          'run-sidechain.jsonl',
+        ),
+        'utf8',
+      ),
+    ).toContain('sub done');
+  });
+
+  it('applies primary agent max_turns to the runtime run options', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const target = path.join(cwd, 'loop.txt');
+    await import('node:fs/promises').then(({ writeFile }) =>
+      writeFile(target, 'loop\n', 'utf8'),
+    );
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'bypass',
+      agent: {
+        main: {
+          mode: 'primary',
+          role: 'primary',
+          max_turns: 2,
+          tools: ['read'],
+        },
+      },
+    });
+    const adapter: ModelAdapter = {
+      async generate(request) {
+        const toolCallMessage = {
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: `read-${request.messages.length}`,
+              toolName: 'read',
+              input: { path: target, limit: 10 },
+            },
+          ],
+        };
+        return {
+          text: '',
+          messages: [...request.messages, toolCallMessage],
+          newMessages: [toolCallMessage],
+          toolCalls: [
+            {
+              id: `read-${request.messages.length}`,
+              name: 'read',
+              input: { path: target, limit: 10 },
+            },
+          ],
+          usage,
+          finishReason: 'tool-calls',
+          provider: null,
+        };
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+
+    const session = await createCodingSession({ config, modelAdapter: adapter });
+    const result = await session.submit('loop');
+    await session.close();
+
+    expect(result.finishReason).toBe('length');
+  });
+
   it('writes oversized tool output to a session artifact and sends preview to the model', async () => {
     const cwd = await tempDir();
     const sessionDir = await tempDir();
@@ -545,7 +722,10 @@ describe('createCodingSession', () => {
     const loaded = await repo.load(session.sessionId);
     const firstEntryId = loaded.messageEntryIds[0]!;
 
-    const forked = await session.fork('targeted fork', firstEntryId.slice(0, 8));
+    const forked = await session.fork(
+      'targeted fork',
+      firstEntryId.slice(0, 8),
+    );
     const forkedSession = await repo.load(forked);
     await session.close();
 

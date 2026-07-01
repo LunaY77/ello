@@ -22,6 +22,19 @@ export interface ToolResultView {
   readonly metadata?: Record<string, unknown>;
 }
 
+export interface SubagentRunView {
+  readonly runId: string;
+  readonly agentName: string;
+  readonly description: string;
+  readonly background: boolean;
+  readonly status: 'running' | 'completed' | 'fail';
+  readonly startedAt: string;
+  readonly completedAt?: string;
+  readonly tools: readonly ToolCallView[];
+  readonly output?: string;
+  readonly error?: string;
+}
+
 /** transcript（历史区）的一行。 */
 export type TranscriptItem =
   | {
@@ -42,6 +55,11 @@ export type TranscriptItem =
       readonly id: string;
       readonly entryId?: string | undefined;
       readonly text: string;
+    }
+  | {
+      readonly kind: 'subagent';
+      readonly id: string;
+      readonly run: SubagentRunView;
     }
   | { readonly kind: 'diagnostic'; readonly id: string; readonly text: string };
 
@@ -67,6 +85,8 @@ export interface ViewState {
   readonly liveAssistantText: string;
   /** 运行中的工具调用，按 toolCallId 索引。 */
   readonly runningTools: ReadonlyMap<string, ToolCallView>;
+  /** 运行中的 subagent run，按 runId 索引。 */
+  readonly runningSubagents: ReadonlyMap<string, SubagentRunView>;
   readonly status: CodingSessionState;
   readonly pendingApproval?: ApprovalView;
   readonly usage?: AgentUsage;
@@ -78,6 +98,7 @@ export const initialViewState: ViewState = {
   transcript: [],
   liveAssistantText: '',
   runningTools: new Map(),
+  runningSubagents: new Map(),
   status: 'idle',
 };
 
@@ -132,11 +153,15 @@ export function reduce(state: ViewState, event: ViewInput): ViewState {
         interruptNotice: `interrupted: ${event.reason}`,
         liveAssistantText: '',
         runningTools: new Map(),
+        runningSubagents: new Map(),
       };
 
     case 'message.started': {
-      const { interruptNotice: _cleared, ...rest } = state;
-      return { ...rest, liveAssistantText: '' };
+      const { interruptNotice: _cleared, ...rest } = flushAssistant(state);
+      return {
+        ...rest,
+        liveAssistantText: '',
+      };
     }
 
     case 'message.delta':
@@ -165,6 +190,44 @@ export function reduce(state: ViewState, event: ViewInput): ViewState {
         error: event.error,
       });
 
+    case 'subagent.started':
+      return upsertSubagent(state, {
+        runId: event.runId,
+        agentName: event.agentName,
+        description: event.description,
+        background: event.background,
+        status: 'running',
+        startedAt: event.startedAt,
+        tools: [],
+      });
+
+    case 'subagent.event':
+      return updateSubagentEvent(state, event.runId, event.event);
+
+    case 'subagent.completed':
+      return sealSubagent(state, event.runId, {
+        status: 'completed',
+        output: event.output,
+        completedAt: event.completedAt,
+      });
+
+    case 'subagent.failed':
+      return sealSubagent(state, event.runId, {
+        status: 'fail',
+        error: event.error,
+        completedAt: event.completedAt,
+      });
+
+    case 'subagent.background.completed':
+      return sealSubagent(state, event.job.id, {
+        status: event.job.status === 'completed' ? 'completed' : 'fail',
+        ...(event.job.output !== undefined ? { output: event.job.output } : {}),
+        ...(event.job.error !== undefined ? { error: event.job.error } : {}),
+        ...(event.job.completedAt !== undefined
+          ? { completedAt: event.job.completedAt }
+          : {}),
+      });
+
     case 'approval.pending':
       return {
         ...state,
@@ -190,8 +253,8 @@ export function reduce(state: ViewState, event: ViewInput): ViewState {
       return { ...state, usage: event.usage };
 
     case 'run.completed':
-      // run 结束：把累积的助手文本结案进 transcript。
-      return flushAssistant(state);
+      // run 结束：优先结案已流出的增量；无增量时用最终结果补齐回答。
+      return flushAssistant(state, event.result);
 
     case 'run.failed':
       return appendTranscript(flushAssistant(state), {
@@ -222,13 +285,16 @@ function messagesToTranscript(
     if (results.length > 0) {
       for (const result of results) {
         const call = toolCalls.get(result.id);
+        if (call === undefined) {
+          continue;
+        }
         items.push({
           kind: 'tool',
           id: `history-tool-${index}-${result.id}`,
           tool: {
             id: result.id,
-            name: call?.name ?? result.name ?? 'tool',
-            input: call?.input ?? {},
+            name: call.name,
+            input: call.input,
             status: result.status,
             ...(result.output !== undefined ? { output: result.output } : {}),
           },
@@ -247,7 +313,9 @@ function messagesToTranscript(
       items.push({
         kind: 'user',
         id: `history-user-${index}`,
-        ...(entryIds?.[index] !== undefined ? { entryId: entryIds[index] } : {}),
+        ...(entryIds?.[index] !== undefined
+          ? { entryId: entryIds[index] }
+          : {}),
         text,
       });
       return;
@@ -256,7 +324,9 @@ function messagesToTranscript(
       items.push({
         kind: 'assistant',
         id: `history-assistant-${index}`,
-        ...(entryIds?.[index] !== undefined ? { entryId: entryIds[index] } : {}),
+        ...(entryIds?.[index] !== undefined
+          ? { entryId: entryIds[index] }
+          : {}),
         text,
       });
       return;
@@ -273,7 +343,13 @@ function messagesToTranscript(
 
 function messageContentText(message: AgentMessage): string {
   const content = (message as { content?: unknown }).content;
-  return typeof content === 'string' ? content : JSON.stringify(content);
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (isToolCallOnlyContent(content)) {
+    return '';
+  }
+  return JSON.stringify(content);
 }
 
 function readToolCalls(message: AgentMessage): Array<{
@@ -297,7 +373,10 @@ function readToolCalls(message: AgentMessage): Array<{
     if (id === undefined || name === undefined) {
       return [];
     }
-    return [{ id, name, input: part.input ?? part.args ?? {} }];
+    if (!Object.hasOwn(part, 'input')) {
+      return [];
+    }
+    return [{ id, name, input: part.input }];
   });
 }
 
@@ -371,18 +450,61 @@ function appendTranscript(state: ViewState, item: TranscriptItem): ViewState {
 }
 
 /** 把当前助手增量文本结案为一条 transcript 行并清空 live。 */
-function flushAssistant(state: ViewState): ViewState {
+function flushAssistant(
+  state: ViewState,
+  result?: Extract<CodingSessionEvent, { type: 'run.completed' }>['result'],
+): ViewState {
+  const text =
+    state.liveAssistantText.trim() !== ''
+      ? state.liveAssistantText
+      : finalAssistantText(result);
   if (state.liveAssistantText.trim() === '') {
-    return state;
+    if (text.trim() === '') {
+      return state;
+    }
+    return appendTranscript(state, {
+      kind: 'assistant',
+      id: `assistant-${state.transcript.length}`,
+      text,
+    });
   }
   return {
     ...appendTranscript(state, {
       kind: 'assistant',
       id: `assistant-${state.transcript.length}`,
-      text: state.liveAssistantText,
+      text,
     }),
     liveAssistantText: '',
   };
+}
+
+function finalAssistantText(
+  result: Extract<CodingSessionEvent, { type: 'run.completed' }>['result'] | undefined,
+): string {
+  if (result === undefined) {
+    return '';
+  }
+  const output = result.output || result.text || '';
+  if (output.trim() !== '') {
+    return output;
+  }
+  const lastAssistant = [...result.messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.role === 'assistant' && messageContentText(message).trim() !== '',
+    );
+  return lastAssistant !== undefined ? messageContentText(lastAssistant) : '';
+}
+
+function isToolCallOnlyContent(content: unknown): boolean {
+  if (Array.isArray(content)) {
+    return (
+      content.length > 0 &&
+      content.every((part) => isRecord(part) && part.type === 'tool-call')
+    );
+  }
+  return isRecord(content) && content.type === 'tool-call';
 }
 
 /** 新增/更新一个运行中工具。 */
@@ -415,4 +537,92 @@ function sealTool(
     { ...state, runningTools: next },
     { kind: 'tool', id, tool: sealed },
   );
+}
+
+function upsertSubagent(state: ViewState, run: SubagentRunView): ViewState {
+  const next = new Map(state.runningSubagents);
+  next.set(run.runId, run);
+  return { ...state, runningSubagents: next };
+}
+
+function updateSubagentEvent(
+  state: ViewState,
+  runId: string,
+  event: Extract<CodingSessionEvent, { type: 'subagent.event' }>['event'],
+): ViewState {
+  const run = state.runningSubagents.get(runId);
+  if (run === undefined) {
+    return state;
+  }
+  if (event.type === 'tool.started') {
+    return upsertSubagent(state, {
+      ...run,
+      tools: upsertToolList(run.tools, {
+        id: event.toolCallId,
+        name: event.name,
+        input: event.input,
+        status: 'running',
+      }),
+    });
+  }
+  if (event.type === 'tool.completed') {
+    return upsertSubagent(state, {
+      ...run,
+      tools: patchToolList(run.tools, event.toolCallId, {
+        status: 'ok',
+        output: event.output,
+      }),
+    });
+  }
+  if (event.type === 'tool.failed') {
+    return upsertSubagent(state, {
+      ...run,
+      tools: patchToolList(run.tools, event.toolCallId, {
+        status: 'fail',
+        error: event.error,
+      }),
+    });
+  }
+  return state;
+}
+
+function sealSubagent(
+  state: ViewState,
+  runId: string,
+  patch: Pick<SubagentRunView, 'status'> & Partial<SubagentRunView>,
+): ViewState {
+  const existing = state.runningSubagents.get(runId);
+  if (existing === undefined) {
+    return state;
+  }
+  const sealed: SubagentRunView = { ...existing, ...patch };
+  const next = new Map(state.runningSubagents);
+  next.delete(runId);
+  return appendTranscript(
+    { ...state, runningSubagents: next },
+    { kind: 'subagent', id: `subagent-${runId}`, run: sealed },
+  );
+}
+
+function upsertToolList(
+  tools: readonly ToolCallView[],
+  tool: ToolCallView,
+): readonly ToolCallView[] {
+  const index = tools.findIndex((item) => item.id === tool.id);
+  if (index === -1) {
+    return [...tools, tool];
+  }
+  return tools.map((item, itemIndex) => (itemIndex === index ? tool : item));
+}
+
+function patchToolList(
+  tools: readonly ToolCallView[],
+  id: string,
+  patch: Pick<ToolCallView, 'status'> & Partial<ToolCallView>,
+): readonly ToolCallView[] {
+  const existing = tools.find((item) => item.id === id);
+  if (existing === undefined) {
+    return tools;
+  }
+  return upsertToolList(tools, { ...existing, ...patch });
 }

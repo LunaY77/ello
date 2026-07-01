@@ -1,7 +1,5 @@
-import { execFile } from 'node:child_process';
-import { readdir } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { z } from 'zod';
 
@@ -13,13 +11,11 @@ import {
 } from './runtime/coding-tool.js';
 import { resolveWorkspacePath, truncate, type ApprovalFor } from './shared.js';
 
-const execFileAsync = promisify(execFile);
-
 /**
- * 搜索工具：grep（ripgrep + 回退）/ glob（目录遍历）。
+ * 搜索工具：grep（内容搜索）/ glob（目录遍历）。
  *
  * 搜索没有现成的环境原语，所以这里保留一份最小的 allowedPaths 解析来确定
- * spawn ripgrep / 遍历的根目录；ripgrep 用 `execFile`（参数数组，注入安全）。
+ * 遍历根目录；实现放在进程内，避免把外部 `rg` 二进制作为运行时依赖。
  */
 export function createSearchTools(
   config: CodingAgentConfig,
@@ -28,8 +24,7 @@ export function createSearchTools(
   return [
     defineCodingTool({
       name: 'grep',
-      description:
-        'Search files with ripgrep when available and a Node fallback otherwise.',
+      description: 'Search file contents inside the workspace.',
       input: z.object({
         pattern: z.string(),
         path: z.string().default('.'),
@@ -42,71 +37,24 @@ export function createSearchTools(
           config.allowedPaths,
           targetPath,
         );
-        try {
-          const args = [
-            '--line-number',
-            '--no-heading',
-            '--color',
-            'never',
-            '--max-count',
-            String(limit),
-          ];
-          if (glob !== undefined) {
-            args.push('--glob', glob);
-          }
-          args.push(pattern, '.');
-          const result = await execFileAsync('rg', args, {
-            cwd,
-            timeout: 15_000,
-            maxBuffer: 2 * 1024 * 1024,
-          });
-          return createCodingToolResult({
-            title: `Search ${pattern}`,
-            output: truncate(result.stdout),
-            metadata: {
-              kind: 'search',
-              summary: `rg ${pattern}`,
-              path: targetPath,
-              pattern,
-              glob,
-              matchCount: countLines(result.stdout),
-            },
-          });
-        } catch (error) {
-          const err = error as {
-            stdout?: string;
-            stderr?: string;
-            code?: number;
-          };
-          if (err.stdout) {
-            return createCodingToolResult({
-              title: `Search ${pattern}`,
-              output: truncate(err.stdout),
-              metadata: {
-                kind: 'search',
-                path: targetPath,
-                pattern,
-                glob,
-                matchCount: countLines(err.stdout),
-              },
-            });
-          }
-          // ripgrep exit code 1 = 无匹配（软失败，返回空而非抛错）。
-          if (err.code === 1) {
-            return createCodingToolResult({
-              title: `Search ${pattern}`,
-              output: '',
-              metadata: {
-                kind: 'search',
-                path: targetPath,
-                pattern,
-                glob,
-                matchCount: 0,
-              },
-            });
-          }
-          throw new Error(err.stderr ?? String(error), { cause: error });
-        }
+        const output = await searchFiles({
+          root: cwd,
+          pattern,
+          ...(glob !== undefined ? { glob } : {}),
+          limit,
+        });
+        return createCodingToolResult({
+          title: `Search ${pattern}`,
+          output: truncate(output),
+          metadata: {
+            kind: 'search',
+            summary: `grep ${pattern}`,
+            path: targetPath,
+            pattern,
+            glob,
+            matchCount: countLines(output),
+          },
+        });
       },
     }),
     defineCodingTool({
@@ -142,6 +90,47 @@ export function createSearchTools(
       },
     }),
   ];
+}
+
+async function searchFiles(input: {
+  readonly root: string;
+  readonly pattern: string;
+  readonly glob?: string;
+  readonly limit: number;
+}): Promise<string> {
+  const files = await walk(input.root, input.limit * 200);
+  const pattern = new RegExp(input.pattern, 'u');
+  const fileMatcher =
+    input.glob !== undefined ? globToRegExp(input.glob) : undefined;
+  const matches: string[] = [];
+  for (const file of files) {
+    const relativePath = path.relative(input.root, file);
+    if (fileMatcher !== undefined && !fileMatcher.test(relativePath)) {
+      continue;
+    }
+    const content = await readSearchableFile(file);
+    if (content === undefined) {
+      continue;
+    }
+    const lines = content.split(/\r?\n/u);
+    for (const [index, line] of lines.entries()) {
+      if (pattern.test(line)) {
+        matches.push(`${relativePath}:${index + 1}:${line}`);
+        if (matches.length >= input.limit) {
+          return matches.join('\n');
+        }
+      }
+    }
+  }
+  return matches.join('\n');
+}
+
+async function readSearchableFile(filePath: string): Promise<string | undefined> {
+  const content = await readFile(filePath);
+  if (content.includes(0)) {
+    return undefined;
+  }
+  return content.toString('utf8');
 }
 
 /** 递归遍历目录，跳过 node_modules/.git/dist，最多收集 limit 个文件。 */

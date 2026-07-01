@@ -127,6 +127,8 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
       case 'open-overlay':
         if (command.overlay === 'profiles') {
           openProfiles();
+        } else if (command.overlay === 'agents') {
+          setOverlay({ type: 'agents', agents: session.listSubagents() });
         } else if (command.overlay === 'models') {
           setOverlay({
             type: 'models',
@@ -624,6 +626,10 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
     () => [...state.runningTools.values()],
     [state.runningTools],
   );
+  const runningSubagents = useMemo(
+    () => [...state.runningSubagents.values()],
+    [state.runningSubagents],
+  );
 
   const suggestions = useMemo(
     () => completeInput(input, profileSelections, fileSuggestions),
@@ -638,6 +644,7 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
       transcript={state.transcript}
       liveAssistantText={state.liveAssistantText}
       runningTools={runningTools}
+      runningSubagents={runningSubagents}
       running={state.status === 'running'}
       workingSeconds={workingSeconds}
       pendingSteers={pendingSteers}

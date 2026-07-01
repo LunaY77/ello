@@ -16,9 +16,9 @@ import {
   globalHomeDir,
   globalLogsDir,
   globalMcpPath,
+  globalAgentsDir,
   globalSessionsDir,
   globalSkillsDir,
-  globalSubagentsDir,
   globalTasksDir,
 } from './paths.js';
 import { globalGitignoreTemplate, templatePath } from './templates.js';
@@ -39,7 +39,7 @@ export async function ensureGlobalConfig(
 ): Promise<void> {
   await ensureElloHome();
   await mkdir(globalSkillsDir(), { recursive: true });
-  await mkdir(globalSubagentsDir(), { recursive: true });
+  await mkdir(globalAgentsDir(), { recursive: true });
   await mkdir(globalTasksDir(), { recursive: true });
   await mkdir(globalSessionsDir(), { recursive: true });
   await mkdir(globalLogsDir(), { recursive: true });
@@ -53,10 +53,10 @@ export async function ensureGlobalConfig(
   }
 }
 
-/** 确保内置 skills/subagents 的目标目录存在，实际资产由构建复制。 */
+/** 确保内置 skills 的目标目录和用户级 agent 目录存在。 */
 export async function ensureBuiltinAssets(): Promise<void> {
   await mkdir(globalSkillsDir(), { recursive: true });
-  await mkdir(globalSubagentsDir(), { recursive: true });
+  await mkdir(globalAgentsDir(), { recursive: true });
 }
 
 /** 创建项目级 `.ello/config.yaml` 空文件。 */

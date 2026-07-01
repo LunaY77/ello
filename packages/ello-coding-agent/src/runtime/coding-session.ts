@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 
 import {
   createAgent,
-  createDelegateTool,
   createLocalShellEnvironment,
   createSkillTools,
   activeSkillsContext,
@@ -15,12 +14,22 @@ import {
   type AgentSkill,
   type AgentStream,
   type AgentStreamEvent,
-  type SubagentDefinition,
+  type AnyAgentTool,
   type DeferredApprovalItem,
   type ModelAdapter,
   type SessionCompactor,
 } from '@ello/agent';
 
+import {
+  BackgroundJobStore,
+  createAgentRegistry,
+  createDelegateTool,
+  renderSubagentEnvelope,
+  runInternalAgent,
+  type AgentRegistry,
+  type BackgroundJob,
+  type CodingAgentDefinition,
+} from '../agents/index.js';
 import { CheckpointStore } from '../change/checkpoint.js';
 import type { CodingAgentConfig, ProfileSuiteConfig } from '../config/index.js';
 import {
@@ -30,10 +39,7 @@ import {
   serializeForCompact,
 } from '../context/compactor.js';
 import { createCodingMemory } from '../context/memory.js';
-import {
-  createCodingSystemPromptSection,
-  renderPromptTemplate,
-} from '../context/prompts.js';
+import { createCodingSystemPromptSection } from '../context/prompts.js';
 import {
   createToolResultBudget,
   type ToolResultBudget,
@@ -55,7 +61,6 @@ import type {
   SessionTreeView,
 } from '../session/repository.js';
 import { loadCodingSkills } from '../skills/index.js';
-import { codingSubagents } from '../subagents/index.js';
 import { createCodingTools } from '../tools/index.js';
 
 import type {
@@ -136,6 +141,11 @@ export interface CodingSession {
     readonly stdout: string;
     readonly stderr: string;
   }>;
+  setAgent(agentName: string): Promise<void>;
+  listAgents(): readonly CodingAgentDefinition[];
+  listSubagents(): readonly CodingAgentDefinition[];
+  listBackgroundJobs(): readonly BackgroundJob[];
+  cancelBackgroundJob(id: string): void;
   sessionTree(): Promise<SessionTreeView>;
   listSessions(): Promise<readonly JsonlSessionSummary[]>;
   loadHistory(): Promise<void>;
@@ -155,7 +165,8 @@ interface SessionDeps {
   readonly rulesStore: RulesStore;
   readonly compactor: SessionCompactor;
   readonly skills: readonly AgentSkill[];
-  readonly subagents: readonly SubagentDefinition[];
+  readonly registry: AgentRegistry;
+  readonly backgroundJobs: BackgroundJobStore;
   readonly modelAdapter?: ModelAdapter;
 }
 
@@ -178,11 +189,14 @@ export async function createCodingSession(
   const rulesStore = new RulesStore(config.cwd);
   await rulesStore.load();
 
+  const registry = await createAgentRegistry(config);
+  const backgroundJobs = new BackgroundJobStore();
   const compactor = createSessionCompactor({
     contextWindow: DEFAULT_CONTEXT_WINDOW,
     port: sessionStore,
     generateCheckpoint: makeCompactCheckpointGenerator(
       config,
+      registry,
       options.modelAdapter,
     ),
     settings: {
@@ -197,14 +211,14 @@ export async function createCodingSession(
   });
 
   const skills = await loadCodingSkills(config);
-  const subagents = await codingSubagents(config);
 
   const session = new CodingSessionImpl(sessionId, config, {
     sessionStore,
     rulesStore,
     compactor,
     skills,
-    subagents,
+    registry,
+    backgroundJobs,
     ...(options.modelAdapter !== undefined
       ? { modelAdapter: options.modelAdapter }
       : {}),
@@ -228,6 +242,7 @@ class CodingSessionImpl implements CodingSession {
   private providerRegistry: ProviderRegistry;
   private primaryRole: RuntimeRoleModel;
   private readonly toolResultBudget: ToolResultBudget;
+  private activeAgentName: string;
 
   constructor(
     public sessionId: string,
@@ -235,6 +250,7 @@ class CodingSessionImpl implements CodingSession {
     private readonly deps: SessionDeps,
   ) {
     this.config = config;
+    this.activeAgentName = config.default_agent;
     this.providerRegistry = createProviderRegistry(config);
     this.checkpoints = new CheckpointStore(checkpointsDir(config.cwd));
     this.primaryRole = this.resolveRuntimeRole('primary');
@@ -244,6 +260,9 @@ class CodingSessionImpl implements CodingSession {
       config: config.context.tool_result_budget,
     });
     this.agent = this.buildAgent();
+    this.deps.backgroundJobs.onSettled((job) =>
+      this.injectBackgroundResult(job),
+    );
   }
 
   get cwd(): string {
@@ -267,6 +286,7 @@ class CodingSessionImpl implements CodingSession {
 
     this.currentStream = this.agent.stream(input, {
       sessionId: this.sessionId,
+      maxTurns: this.activeAgentMaxTurns(),
       ...(meta !== undefined ? { metadata: meta } : {}),
     });
     try {
@@ -335,7 +355,7 @@ class CodingSessionImpl implements CodingSession {
           },
         },
       },
-      { sessionId: this.sessionId },
+      { sessionId: this.sessionId, maxTurns: this.activeAgentMaxTurns() },
     );
     this.currentStream = resumed;
     try {
@@ -502,6 +522,36 @@ class CodingSessionImpl implements CodingSession {
     }
   }
 
+  /** 切换当前 primary agent 并重建运行时。 */
+  async setAgent(agentName: string): Promise<void> {
+    if (this.currentStream !== undefined) {
+      throw new Error('Cannot change agent while running.');
+    }
+    const def = this.deps.registry.get(agentName);
+    if ((def.mode !== 'primary' && def.mode !== 'all') || def.hidden === true) {
+      throw new Error(`Agent is not selectable as primary: ${agentName}`);
+    }
+    this.activeAgentName = agentName;
+    await this.rebuild();
+    this.notify(`Switched to agent: ${agentName}`);
+  }
+
+  listAgents(): readonly CodingAgentDefinition[] {
+    return this.deps.registry.selectablePrimaries();
+  }
+
+  listSubagents(): readonly CodingAgentDefinition[] {
+    return this.deps.registry.delegatable();
+  }
+
+  listBackgroundJobs(): readonly BackgroundJob[] {
+    return this.deps.backgroundJobs.list(this.sessionId);
+  }
+
+  cancelBackgroundJob(id: string): void {
+    this.deps.backgroundJobs.cancel(id);
+  }
+
   /** 当前 session 的完整树视图。 */
   sessionTree(): Promise<SessionTreeView> {
     return this.deps.sessionStore.repository.tree(this.sessionId);
@@ -581,7 +631,9 @@ class CodingSessionImpl implements CodingSession {
           ).id;
     const next = await this.deps.sessionStore.repository.fork(this.sessionId, {
       reason,
-      ...(resolvedTarget !== undefined ? { targetEntryId: resolvedTarget } : {}),
+      ...(resolvedTarget !== undefined
+        ? { targetEntryId: resolvedTarget }
+        : {}),
     });
     this.sessionId = next.sessionId;
     await this.rebuild();
@@ -727,11 +779,47 @@ class CodingSessionImpl implements CodingSession {
     this.agent = this.buildAgent();
   }
 
+  /** 后台 subagent 结束时把结果作为 parent 输入注入。 */
+  private injectBackgroundResult(job: BackgroundJob): void {
+    if (job.parentSessionId !== this.sessionId) {
+      return;
+    }
+    const state = job.status === 'cancelled' ? 'cancelled' : job.status;
+    const content = renderSubagentEnvelope({
+      id: job.id,
+      agent: job.agentName,
+      state,
+      summary: job.title,
+      ...(job.output !== undefined ? { result: job.output } : {}),
+      ...(job.error !== undefined ? { error: job.error } : {}),
+    });
+    if (this.currentStream !== undefined) {
+      this.currentStream.steer({ role: 'user', content });
+    } else {
+      this.steerQueue.push(content);
+    }
+    this.emit({ type: 'subagent.background.completed', job });
+  }
+
   /** 把各模块产物拼进 createAgent，这是整个会话运行时的核心装配。 */
   private buildAgent(): Agent {
-    this.primaryRole = this.resolveRuntimeRole('primary');
+    const agentDef = this.deps.registry.get(this.activeAgentName);
+    if (
+      (agentDef.mode !== 'primary' && agentDef.mode !== 'all') ||
+      agentDef.hidden === true
+    ) {
+      throw new Error(
+        `Agent is not selectable as primary: ${this.activeAgentName}`,
+      );
+    }
+    this.primaryRole = this.resolveRuntimeRole(agentDef.role);
     const primaryRole = this.primaryRole;
-    const config = this.config;
+    const config: CodingAgentConfig = {
+      ...this.config,
+      ...(agentDef.approvalMode !== undefined
+        ? { approvalMode: agentDef.approvalMode }
+        : {}),
+    };
     const agentModel = this.resolveAgentModel(primaryRole);
     const memory = createCodingMemory(config);
     const observer = createCodingObserver(config, { model: primaryRole.ref });
@@ -745,15 +833,27 @@ class CodingSessionImpl implements CodingSession {
       config,
       rules: () => this.deps.rulesStore.rules(),
     });
+    const selectedTools = selectToolsForAgent(tools, agentDef.tools);
     const skillTools = createSkillTools({
       skills: this.deps.skills,
       active: this.activeSkills,
     });
     const delegateTool = createDelegateTool({
-      subagents: this.deps.subagents,
-      model: agentModel,
-      parentTools: tools,
+      registry: this.deps.registry,
+      config,
+      providerRegistry: this.providerRegistry,
       session: this.deps.sessionStore,
+      parentSessionId: () => this.sessionId,
+      rules: () => this.deps.rulesStore.rules(),
+      backgroundJobs: this.deps.backgroundJobs,
+      hooks: {
+        onEvent: (runId, event) =>
+          this.emit({ type: 'subagent.event', runId, event }),
+        onStarted: (info) => this.emit({ type: 'subagent.started', ...info }),
+        onCompleted: (info) =>
+          this.emit({ type: 'subagent.completed', ...info }),
+        onFailed: (info) => this.emit({ type: 'subagent.failed', ...info }),
+      },
       ...(this.deps.modelAdapter !== undefined
         ? { modelAdapter: this.deps.modelAdapter }
         : {}),
@@ -778,11 +878,11 @@ class CodingSessionImpl implements CodingSession {
     ];
 
     return createAgent({
-      name: 'ello-coding-agent',
+      name: `ello-${this.activeAgentName}`,
       model: agentModel,
       modelSettings: modelSettingsFromRole(primaryRole),
       environment: createRuntimeEnvironment(config),
-      tools: [...tools, ...skillTools, delegateTool],
+      tools: [...selectedTools, ...skillTools, delegateTool],
       session: this.deps.sessionStore,
       compactor: this.deps.compactor,
       observers: [observer, memory.observer],
@@ -803,6 +903,10 @@ class CodingSessionImpl implements CodingSession {
         : {}),
       metadata: { sessionId: this.sessionId, cwd: config.cwd },
     });
+  }
+
+  private activeAgentMaxTurns(): number {
+    return this.deps.registry.get(this.activeAgentName).maxTurns ?? 24;
   }
 
   private resolveRuntimeRole(role: RuntimeRoleModel['role']): RuntimeRoleModel {
@@ -874,56 +978,41 @@ class CodingSessionImpl implements CodingSession {
     if (existing !== null) {
       return;
     }
-    const binding = this.resolveRuntimeRole('title');
-    const model = this.resolveAgentModel(binding);
-    const titleAgent = createAgent({
-      name: 'ello-title-generator',
-      model,
-      modelSettings: modelSettingsFromRole(binding),
-      instructions: renderPromptTemplate('title'),
+    const result = await runInternalAgent({
+      definition: this.deps.registry.get('title'),
+      prompt: renderTitleConversation(messages),
+      config: this.config,
+      providerRegistry: this.providerRegistry,
       ...(this.deps.modelAdapter !== undefined
         ? { modelAdapter: this.deps.modelAdapter }
         : {}),
     });
-    try {
-      const result = await titleAgent.run(renderTitleConversation(messages));
-      const title = normalizeGeneratedTitle(result.output || result.text || '');
-      if (!title) {
-        return;
-      }
-      await this.deps.sessionStore.repository.setTitle(sessionId, title);
-      this.emit({ type: 'session.title.updated', sessionId, title });
-    } finally {
-      await titleAgent.close();
+    const title = normalizeGeneratedTitle(result);
+    if (!title) {
+      return;
     }
+    await this.deps.sessionStore.repository.setTitle(sessionId, title);
+    this.emit({ type: 'session.title.updated', sessionId, title });
   }
 
   private async generateSessionSummary(
     messages: readonly AgentMessage[],
     previousSummary?: string,
   ): Promise<string> {
-    const binding = this.resolveRuntimeRole('compact');
-    const model = this.resolveAgentModel(binding);
-    const summaryAgent = createAgent({
-      name: 'ello-session-summary',
-      model,
-      modelSettings: modelSettingsFromRole(binding),
-      instructions: renderPromptTemplate('summary'),
+    const result = await runInternalAgent({
+      definition: this.deps.registry.get('summary'),
+      prompt: renderSummaryInput(messages, previousSummary, this.config),
+      config: this.config,
+      providerRegistry: this.providerRegistry,
       ...(this.deps.modelAdapter !== undefined
         ? { modelAdapter: this.deps.modelAdapter }
         : {}),
     });
-    const prompt = renderSummaryInput(messages, previousSummary, this.config);
-    try {
-      const result = await summaryAgent.run(prompt);
-      const summary = (result.output || result.text || '').trim();
-      if (summary === '') {
-        throw new Error('Session summary model returned empty output.');
-      }
-      return summary;
-    } finally {
-      await summaryAgent.close();
+    const summary = result.trim();
+    if (summary === '') {
+      throw new Error('Session summary model returned empty output.');
     }
+    return summary;
   }
 }
 
@@ -985,14 +1074,31 @@ function normalizeGeneratedTitle(value: string): string {
     .slice(0, 80);
 }
 
+function selectToolsForAgent(
+  tools: readonly AnyAgentTool[],
+  whitelist: readonly string[] | undefined,
+): AnyAgentTool[] {
+  if (whitelist === undefined) {
+    return [...tools];
+  }
+  const available = new Set(tools.map((tool) => tool.name));
+  const missing = whitelist.filter((name) => !available.has(name));
+  if (missing.length > 0) {
+    throw new Error(`Unknown tool in agent definition: ${missing.join(', ')}`);
+  }
+  const selected = new Set(whitelist);
+  return tools.filter((tool) => selected.has(tool.name));
+}
+
 /**
  * 构造压缩器用的一次性 compact checkpoint 生成回调。
  *
- * 临时起一个无工具的小 Agent 跑一次补全，用与主会话相同的 model / adapter，
- * 避免压缩器直接依赖 provider 细节（保持与内核解耦）。
+ * 通过 agent registry 取 internal compact agent，用与主会话相同的 provider
+ * 配置跑一次补全，避免压缩器直接依赖 provider 细节。
  */
 function makeCompactCheckpointGenerator(
   config: CodingAgentConfig,
+  registry: AgentRegistry,
   modelAdapter?: ModelAdapter,
 ) {
   return async (
@@ -1012,26 +1118,13 @@ function makeCompactCheckpointGenerator(
       })
       .join('\n\n');
     const prompt = `${head}\n<conversation>\n${conversation}\n</conversation>`;
-    const registry = createProviderRegistry(config);
-    const binding = registry.resolveRole(config.active_profile, 'compact');
-    const model =
-      modelAdapter !== undefined
-        ? binding.ref
-        : registry.resolveLanguageModel(binding.ref, binding.settings);
-
-    const compactor = createAgent({
-      name: 'ello-compactor',
-      model,
-      modelSettings: modelSettingsFromRole(binding),
-      instructions: renderPromptTemplate('compact'),
+    return runInternalAgent({
+      definition: registry.get('compact'),
+      prompt,
+      config,
+      providerRegistry: createProviderRegistry(config),
       ...(modelAdapter !== undefined ? { modelAdapter } : {}),
     });
-    try {
-      const result = await compactor.run(prompt);
-      return result.output || result.text || '';
-    } finally {
-      await compactor.close();
-    }
   };
 }
 

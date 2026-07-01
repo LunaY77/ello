@@ -4,6 +4,7 @@ import TextInput from 'ink-text-input';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 
+import type { CodingAgentDefinition } from '../../agents/index.js';
 import type { CodingAgentConfig } from '../../config/index.js';
 import type { ModelRole, RuntimeProfileSuite } from '../../provider/index.js';
 import type { ApprovalDecision } from '../../runtime/intents.js';
@@ -55,6 +56,10 @@ export type OverlayState =
     }
   | { readonly type: 'help' }
   | { readonly type: 'settings'; readonly config: CodingAgentConfig }
+  | {
+      readonly type: 'agents';
+      readonly agents: readonly CodingAgentDefinition[];
+    }
   | { readonly type: 'skills'; readonly skills: readonly AgentSkill[] }
   | { readonly type: 'tasks'; readonly tasks: readonly Task[] }
   | {
@@ -292,7 +297,8 @@ export function OverlayHost({
         >
           <Text color={tokyoNight.cyan}>Commands</Text>
           <Text color={tokyoNight.foreground} wrap="wrap">
-            /help /models /profiles /new /tools /permissions /memory /quit
+            /help /agents /models /profiles /new /tools /permissions /memory
+            /quit
           </Text>
           <Text color={tokyoNight.muted}>
             @path attaches files · !cmd runs shell · Esc closes or interrupts
@@ -353,6 +359,33 @@ export function OverlayHost({
                 </Text>
                 <Text>{clip(skill.description, 58)}</Text>
               </Text>
+            ))
+          )}
+        </Panel>
+      ) : null}
+      {overlay.type === 'agents' ? (
+        <Panel title="Subagents" color={tokyoNight.purple}>
+          {overlay.agents.length === 0 ? (
+            <Text color={tokyoNight.muted}>agents &lt;none&gt;</Text>
+          ) : (
+            overlay.agents.slice(0, 12).map((agent) => (
+              <Box key={agent.name} flexDirection="column">
+                <Text color={tokyoNight.foreground}>
+                  <Text color={tokyoNight.muted}>
+                    {agent.name.padEnd(14)}
+                  </Text>
+                  <Text color={tokyoNight.cyan}>
+                    {agent.source.padEnd(9)}
+                  </Text>
+                  <Text color={tokyoNight.yellow}>
+                    {agent.role.padEnd(8)}
+                  </Text>
+                  <Text>{clip(agent.description, 56)}</Text>
+                </Text>
+                <Text color={tokyoNight.muted}>
+                  {`  tools: ${formatAgentTools(agent.tools)}`}
+                </Text>
+              </Box>
             ))
           )}
         </Panel>
@@ -553,6 +586,13 @@ function formatSessionTime(value: string | undefined): string {
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/gu, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+function formatAgentTools(tools: readonly string[] | undefined): string {
+  if (tools === undefined) {
+    return 'all';
+  }
+  return tools.length === 0 ? 'none' : tools.join(', ');
 }
 
 function statusColor(status: Task['status']): string {

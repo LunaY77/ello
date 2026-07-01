@@ -85,7 +85,7 @@ export function createPreviewDiff(
 /**
  * 在 allowedPaths 内解析一个工作区路径（仅供 search 工具用）。
  *
- * 搜索工具需要一个具体目录来 spawn ripgrep / 遍历，而环境未暴露“搜索原语”，
+ * 搜索工具需要一个具体目录来做内容搜索 / 遍历，而环境未暴露“搜索原语”，
  * 所以这里保留一份最小的边界检查；fs / shell 类操作一律走 `ctx.environment`。
  */
 export function resolveWorkspacePath(

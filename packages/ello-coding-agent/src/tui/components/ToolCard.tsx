@@ -42,7 +42,7 @@ export function ToolCard({
       </Box>
       {call.status === 'running' ? (
         <Text color={tokyoNight.yellow}> working</Text>
-      ) : compact ? null : call.output !== undefined ? (
+      ) : compact && call.status !== 'fail' ? null : call.output !== undefined ? (
         presenter.renderResult(call.input, call.output)
       ) : (
         presenter.renderCall(call.input)

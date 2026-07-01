@@ -12,7 +12,7 @@ import path from 'node:path';
 import type { AgentMessage, AgentStreamEvent } from '@ello/agent';
 
 /** JSONL session 文件版本。 */
-export const SESSION_FILE_VERSION = 1;
+export const SESSION_FILE_VERSION = 2;
 
 /** 一个会话文件的元信息。 */
 export interface SessionInfo {
@@ -262,11 +262,14 @@ export class JsonlSessionRepository {
         throw error;
       }
       const createdAt = new Date().toISOString();
-      await writeFile(
-        filePath,
-        `${JSON.stringify({ kind: 'header', sessionId, cwd: this.options.cwd, createdAt, version: SESSION_FILE_VERSION } satisfies SessionRecord)}\n`,
-        'utf8',
-      );
+      const header: SessionRecord = {
+        kind: 'header',
+        sessionId,
+        cwd: this.options.cwd,
+        createdAt,
+        version: SESSION_FILE_VERSION,
+      };
+      await writeFile(filePath, `${JSON.stringify(header)}\n`, 'utf8');
     }
     return this.load(sessionId);
   }
@@ -374,11 +377,19 @@ export class JsonlSessionRepository {
   }
 
   /** 读取 active path 上的 raw message entry，保留 entry id 与 parentId。 */
-  async messageEntries(sessionId: string): Promise<readonly SessionMessageEntry[]> {
+  async messageEntries(
+    sessionId: string,
+  ): Promise<readonly SessionMessageEntry[]> {
     const loaded = await this.load(sessionId);
     return loaded.records.flatMap((record) =>
       record.kind === 'entry' && record.type === 'message'
-        ? [{ id: record.id, parentId: record.parentId, message: record.message }]
+        ? [
+            {
+              id: record.id,
+              parentId: record.parentId,
+              message: record.message,
+            },
+          ]
         : [],
     );
   }

@@ -24,6 +24,11 @@ describe('TUI completion', () => {
           description: 'Browse model catalog',
         },
         {
+          value: '/agents',
+          label: '/agents',
+          description: 'Browse delegatable subagents',
+        },
+        {
           value: '/profiles',
           label: '/profiles',
           description: 'Switch model profile suite',

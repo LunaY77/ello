@@ -31,9 +31,9 @@ export function globalSkillsDir(): string {
   return path.join(elloHomeDir(), 'skills');
 }
 
-/** 用户安装或生成的 subagents 目录。 */
-export function globalSubagentsDir(): string {
-  return path.join(elloHomeDir(), 'subagents');
+/** 用户安装或生成的 Markdown agent 目录。 */
+export function globalAgentsDir(): string {
+  return path.join(elloHomeDir(), 'agents');
 }
 
 /** 全局任务列表目录。 */
@@ -74,6 +74,11 @@ export function projectConfigPath(cwd: string): string {
 /** 项目级 skills 覆盖目录。 */
 export function projectSkillsDir(cwd: string): string {
   return path.join(projectElloDir(cwd), 'skills');
+}
+
+/** 项目级 Markdown agent 覆盖目录。 */
+export function projectAgentsDir(cwd: string): string {
+  return path.join(projectElloDir(cwd), 'agents');
 }
 
 /** 项目级任务列表目录。 */

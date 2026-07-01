@@ -4,6 +4,7 @@ import type {
   AgentStreamEvent,
 } from '@ello/agent';
 
+import type { BackgroundJob } from '../agents/background-jobs.js';
 import type { ContextEvent } from '../context/source-registry.js';
 import type { RuleScope } from '../permission/rules-store.js';
 
@@ -73,7 +74,36 @@ export type CodingSessionEvent =
       readonly input: unknown;
       readonly metadata?: Record<string, unknown>;
     }
-  | { readonly type: 'usage'; readonly usage: AgentRunResult['usage'] };
+  | { readonly type: 'usage'; readonly usage: AgentRunResult['usage'] }
+  | {
+      readonly type: 'subagent.started';
+      readonly runId: string;
+      readonly agentName: string;
+      readonly description: string;
+      readonly background: boolean;
+      readonly startedAt: string;
+    }
+  | {
+      readonly type: 'subagent.event';
+      readonly runId: string;
+      readonly event: AgentStreamEvent;
+    }
+  | {
+      readonly type: 'subagent.completed';
+      readonly runId: string;
+      readonly output: string;
+      readonly completedAt: string;
+    }
+  | {
+      readonly type: 'subagent.failed';
+      readonly runId: string;
+      readonly error: string;
+      readonly completedAt: string;
+    }
+  | {
+      readonly type: 'subagent.background.completed';
+      readonly job: BackgroundJob;
+    };
 
 /** 前端订阅运行时事件的监听器。 */
 export type CodingEventListener = (event: CodingSessionEvent) => void;

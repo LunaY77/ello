@@ -34,6 +34,85 @@ describe('view-reducer', () => {
     });
   });
 
+  it('uses run.completed output when no assistant delta was streamed', () => {
+    const state = reduce(initialViewState, {
+      type: 'run.completed',
+      result: {
+        output: 'final answer from provider',
+        text: 'final answer from provider',
+        messages: [{ role: 'assistant', content: 'final answer from provider' }],
+      } as never,
+    });
+
+    expect(state.transcript.at(-1)).toMatchObject({
+      kind: 'assistant',
+      text: 'final answer from provider',
+    });
+  });
+
+  it('does not duplicate run.completed output after streaming deltas', () => {
+    let state = reduce(initialViewState, {
+      type: 'message.delta',
+      messageId: 'm1',
+      text: 'streamed answer',
+    });
+    state = reduce(state, {
+      type: 'run.completed',
+      result: {
+        output: 'streamed answer',
+        text: 'streamed answer',
+        messages: [{ role: 'assistant', content: 'streamed answer' }],
+      } as never,
+    });
+
+    expect(state.transcript).toHaveLength(1);
+    expect(state.transcript.at(-1)).toMatchObject({
+      kind: 'assistant',
+      text: 'streamed answer',
+    });
+  });
+
+  it('flushes a live assistant segment when the next assistant message starts', () => {
+    let state = reduce(initialViewState, {
+      type: 'message.delta',
+      messageId: 'm1',
+      text: 'intermediate note',
+    });
+
+    state = reduce(state, {
+      type: 'message.started',
+      messageId: 'm2',
+      role: 'assistant',
+    });
+
+    expect(state.liveAssistantText).toBe('');
+    expect(state.transcript.at(-1)).toMatchObject({
+      kind: 'assistant',
+      text: 'intermediate note',
+    });
+  });
+
+  it('does not replay historical assistant tool-call messages as raw json', () => {
+    const state = reduce(initialViewState, {
+      type: 'session.history.loaded',
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool-call',
+              toolCallId: 'call-1',
+              toolName: 'read',
+              input: { path: 'src/index.ts' },
+            },
+          ],
+        },
+      ] as never,
+    });
+
+    expect(state.transcript).toHaveLength(0);
+  });
+
   it('moves a tool from running to a sealed transcript card', () => {
     let state = initialViewState;
     state = reduce(state, {
@@ -51,6 +130,60 @@ describe('view-reducer', () => {
     });
     expect(state.runningTools.has('t1')).toBe(false);
     expect(state.transcript.at(-1)).toMatchObject({ kind: 'tool' });
+  });
+
+  it('renders subagent runtime and nested tool activity', () => {
+    let state = initialViewState;
+    state = reduce(state, {
+      type: 'subagent.started',
+      runId: 'task-1',
+      agentName: 'explore',
+      description: 'inspect config loader',
+      background: false,
+      startedAt: '2026-07-01T00:00:00.000Z',
+    });
+    state = reduce(state, {
+      type: 'subagent.event',
+      runId: 'task-1',
+      event: {
+        type: 'tool.started',
+        toolCallId: 'read-1',
+        name: 'read',
+        input: { path: 'src/config.ts' },
+      },
+    });
+    state = reduce(state, {
+      type: 'subagent.event',
+      runId: 'task-1',
+      event: {
+        type: 'tool.completed',
+        toolCallId: 'read-1',
+        output: 'ok',
+      },
+    });
+
+    expect(state.runningSubagents.get('task-1')).toMatchObject({
+      agentName: 'explore',
+      tools: [{ id: 'read-1', status: 'ok' }],
+    });
+
+    state = reduce(state, {
+      type: 'subagent.completed',
+      runId: 'task-1',
+      output: 'config loader summary',
+      completedAt: '2026-07-01T00:00:02.000Z',
+    });
+
+    expect(state.runningSubagents.has('task-1')).toBe(false);
+    expect(state.transcript.at(-1)).toMatchObject({
+      kind: 'subagent',
+      run: {
+        runId: 'task-1',
+        status: 'completed',
+        output: 'config loader summary',
+        tools: [{ id: 'read-1', status: 'ok' }],
+      },
+    });
   });
 
   it('tracks pending approval and clears it on status change', () => {
@@ -177,6 +310,7 @@ describe('view-reducer', () => {
     expect(state.status).toBe('idle');
     expect(state.liveAssistantText).toBe('');
     expect(state.runningTools.size).toBe(0);
+    expect(state.runningSubagents.size).toBe(0);
     expect(state.interruptNotice).toContain('user interrupted');
   });
 });

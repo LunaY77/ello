@@ -223,6 +223,14 @@ describe('loadCodingAgentConfig', () => {
     );
   });
 
+  it('项目级 default_agent 配置直接报错', async () => {
+    await writeProjectConfig({ default_agent: 'plan' });
+
+    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
+      'Project config must not define default_agent',
+    );
+  });
+
   it('解析并应用 tools 与顶层运行配置', async () => {
     await writeGlobalConfig({
       active_profile: 'main',

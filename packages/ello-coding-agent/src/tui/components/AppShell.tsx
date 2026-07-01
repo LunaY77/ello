@@ -2,11 +2,17 @@ import type { AgentUsage } from '@ello/agent';
 import { Box, Static, Text } from 'ink';
 import type { ReactNode } from 'react';
 
-import type { TranscriptItem, ToolCallView } from '../state/view-reducer.js';
+import type {
+  SubagentRunView,
+  TranscriptItem,
+  ToolCallView,
+} from '../state/view-reducer.js';
 import { tokyoNight } from '../tokyo-night.js';
 
 import { Footer } from './Footer.js';
 import { ToolCard } from './ToolCard.js';
+
+const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
 
 export interface AppShellProps {
   readonly cwd: string;
@@ -15,6 +21,7 @@ export interface AppShellProps {
   readonly transcript: readonly TranscriptItem[];
   readonly liveAssistantText: string;
   readonly runningTools: readonly ToolCallView[];
+  readonly runningSubagents: readonly SubagentRunView[];
   readonly running: boolean;
   readonly workingSeconds?: number;
   readonly workedFor?: string;
@@ -39,7 +46,8 @@ export function AppShell(props: AppShellProps) {
   const hasTranscript =
     props.transcript.length > 0 ||
     props.liveAssistantText !== '' ||
-    props.runningTools.length > 0;
+    props.runningTools.length > 0 ||
+    props.runningSubagents.length > 0;
   const hero = {
     id: 'hero',
     cwd: props.cwd,
@@ -67,7 +75,7 @@ export function AppShell(props: AppShellProps) {
       {hasTranscript ? (
         <Box marginTop={1} flexDirection="column">
           {props.transcript.map((item) => (
-              <TranscriptLine key={item.id} item={item} />
+            <TranscriptLine key={item.id} item={item} />
           ))}
 
           {props.liveAssistantText !== '' ? (
@@ -80,6 +88,10 @@ export function AppShell(props: AppShellProps) {
 
           {props.runningTools.map((tool) => (
             <ToolCard key={tool.id} call={tool} />
+          ))}
+
+          {props.runningSubagents.map((run) => (
+            <SubagentCard key={run.runId} run={run} />
           ))}
         </Box>
       ) : null}
@@ -199,6 +211,13 @@ function TranscriptLine({ item }: { readonly item: TranscriptItem }) {
       </Box>
     );
   }
+  if (item.kind === 'subagent') {
+    return (
+      <Box marginBottom={1} flexDirection="column">
+        <SubagentCard run={item.run} />
+      </Box>
+    );
+  }
   if (item.kind === 'system') {
     return (
       <Box flexDirection="column" marginBottom={1}>
@@ -226,6 +245,79 @@ function TranscriptLine({ item }: { readonly item: TranscriptItem }) {
       </Text>
     </Box>
   );
+}
+
+function SubagentCard({ run }: { readonly run: SubagentRunView }) {
+  const color =
+    run.status === 'running'
+      ? tokyoNight.yellow
+      : run.status === 'completed'
+        ? tokyoNight.blue
+        : tokyoNight.red;
+  return (
+    <Box flexDirection="column" marginTop={1} marginLeft={2}>
+      <Box gap={1}>
+        <Text color={color}>{run.status === 'fail' ? '×' : '↳'}</Text>
+        <Text color={color}>{run.agentName}</Text>
+        <Text color={tokyoNight.muted}>
+          {run.background ? 'background' : 'foreground'}
+        </Text>
+        <Text color={tokyoNight.muted}>{formatRunDuration(run)}</Text>
+      </Box>
+      <Text color={tokyoNight.foreground} wrap="wrap">
+        {run.description}
+      </Text>
+      {hiddenToolCount(run.tools) > 0 ? (
+        <Text color={tokyoNight.muted}>
+          {`  +${hiddenToolCount(run.tools)} earlier tool calls`}
+        </Text>
+      ) : null}
+      {visibleSubagentTools(run.tools).map((tool) => (
+        <Box key={tool.id} marginLeft={2}>
+          <ToolCard call={tool} compact />
+        </Box>
+      ))}
+      {run.status === 'running' ? (
+        <Text color={tokyoNight.yellow}> running</Text>
+      ) : run.status === 'fail' ? (
+        <Text color={tokyoNight.red} wrap="wrap">
+          {run.error}
+        </Text>
+      ) : run.output !== undefined && run.output.trim() !== '' ? (
+        <Text color={tokyoNight.muted} wrap="wrap">
+          {compactText(run.output)}
+        </Text>
+      ) : null}
+    </Box>
+  );
+}
+
+function visibleSubagentTools(
+  tools: readonly ToolCallView[],
+): readonly ToolCallView[] {
+  return tools.slice(-SUBAGENT_VISIBLE_TOOL_LIMIT);
+}
+
+function hiddenToolCount(tools: readonly ToolCallView[]): number {
+  return Math.max(0, tools.length - SUBAGENT_VISIBLE_TOOL_LIMIT);
+}
+
+function formatRunDuration(run: SubagentRunView): string {
+  const start = Date.parse(run.startedAt);
+  const end =
+    run.completedAt !== undefined ? Date.parse(run.completedAt) : Date.now();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return '';
+  }
+  const seconds = Math.max(0, Math.round((end - start) / 1000));
+  return `${seconds}s`;
+}
+
+function compactText(text: string): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  return normalized.length <= 240
+    ? normalized
+    : `${normalized.slice(0, 239)}…`;
 }
 
 function shortEntryId(entryId: string): string {
