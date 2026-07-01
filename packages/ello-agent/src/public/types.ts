@@ -646,8 +646,6 @@ export interface AgentRunDiagnostics {
   readonly resumeSource?: 'options.resume';
   /** 本次运行发生的压缩报告。 */
   readonly compactions?: SessionCompactionReport[];
-  /** 本次运行涉及的子代理摘要。 */
-  readonly subagents?: SubagentRunSummary[];
 }
 
 /** 单个回合的诊断。 */
@@ -706,34 +704,6 @@ export interface AgentSkill {
   readonly tools?: readonly AnyAgentTool[];
   /** 技能元数据。 */
   readonly metadata?: Record<string, unknown>;
-}
-
-/** 子代理定义：可被主代理委派任务的独立 Agent 配置。 */
-export interface SubagentDefinition {
-  /** 子代理名。 */
-  readonly name: string;
-  /** 子代理描述（供主代理选择委派对象）。 */
-  readonly description: string;
-  /** 子代理系统指令。 */
-  readonly instructions: string;
-  /** 是否继承父代理工具。 */
-  readonly inheritTools?: boolean;
-  /** 子代理专属工具。 */
-  readonly tools?: readonly AnyAgentTool[];
-  /** 子代理元数据。 */
-  readonly metadata?: Record<string, unknown>;
-}
-
-/** 一次子代理运行的摘要，回填到父运行诊断。 */
-export interface SubagentRunSummary {
-  /** 子代理名。 */
-  readonly name: string;
-  /** 子代理运行 ID。 */
-  readonly runId: string;
-  /** 子代理用量。 */
-  readonly usage: AgentUsage;
-  /** 子代理结束原因。 */
-  readonly finishReason: AgentFinishReason;
 }
 
 /** 文件系统能力抽象：供环境与工具读写文件。 */

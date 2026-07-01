@@ -22,8 +22,6 @@ export {
   loadSkillsFromDir,
   skillIndexContext,
 } from './core/skills.js';
-export { createDelegateTool, defineSubagent } from './core/subagent.js';
-export type { CreateDelegateToolOptions } from './core/subagent.js';
 export {
   createLocalEnvironment,
   createLocalShellEnvironment,
@@ -80,8 +78,6 @@ export type {
   SessionCompactionReport,
   SessionCompactor,
   SessionStore,
-  SubagentDefinition,
-  SubagentRunSummary,
   SystemSection,
   MessageTransform,
   UserMessage,

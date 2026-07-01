@@ -142,19 +142,28 @@ export class AiSdkModelAdapter implements ModelAdapter {
       ...(request.modelSettings as object),
     });
     let text = '';
+    const pendingMirrorText: string[] = [];
+    let bufferingPotentialMirror = true;
     let usage = coerceUsage(undefined);
     let finishReason: AgentFinishReason = 'unknown';
     const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
     for await (const part of result.fullStream) {
       if (part.type === 'text-delta') {
         text += part.text;
-        yield { type: 'text-delta', text: part.text };
+        if (bufferingPotentialMirror) {
+          pendingMirrorText.push(part.text);
+          bufferingPotentialMirror = canBecomeToolCallMirror(text);
+          if (!bufferingPotentialMirror) {
+            for (const delta of pendingMirrorText) {
+              yield { type: 'text-delta', text: delta };
+            }
+            pendingMirrorText.length = 0;
+          }
+        } else {
+          yield { type: 'text-delta', text: part.text };
+        }
       } else if (part.type === 'tool-call') {
-        toolCalls.push({
-          id: part.toolCallId,
-          name: part.toolName,
-          input: part.input,
-        });
+        toolCalls.push(readToolCall(part));
       } else if (part.type === 'finish') {
         usage = coerceUsage(part.totalUsage);
         finishReason = normalizeFinishReason(part.finishReason);
@@ -166,10 +175,16 @@ export class AiSdkModelAdapter implements ModelAdapter {
       toolCalls.length > 0
         ? [createToolCallMessageGroup(toolCalls) as ModelMessage]
         : normalizeResponseMessages([], text);
+    const textIsToolCallMirror = isToolCallMirrorText(text, toolCalls);
+    if (!textIsToolCallMirror && pendingMirrorText.length > 0) {
+      for (const delta of pendingMirrorText) {
+        yield { type: 'text-delta', text: delta };
+      }
+    }
     yield {
       type: 'final',
       response: {
-        text,
+        text: textIsToolCallMirror ? '' : text,
         messages: [...request.messages, ...newMessages],
         newMessages,
         toolCalls,
@@ -200,29 +215,17 @@ export class AiSdkModelAdapter implements ModelAdapter {
  */
 function normalizeResponseMessages(
   messages: readonly unknown[],
-  fallbackText: string,
+  text: string,
 ): ModelMessage[] {
   if (messages.length > 0) {
     return messages as ModelMessage[];
   }
-  return fallbackText ? [{ role: 'assistant', content: fallbackText }] : [];
+  return text ? [{ role: 'assistant', content: text }] : [];
 }
 
-/**
- * 把 AI SDK 形态各异的 tool call 归一化为框架标准 `{ id, name, input }`。
- *
- * 兼容不同字段命名（`toolCallId`/`id`、`toolName`/`name`、`input`/`args`），
- * 缺失 id 时回退为按序号生成的占位标识，缺失名时回退 `'unknown'`。
- */
+/** 把 AI SDK tool call 归一化为框架标准 `{ id, name, input }`。 */
 function normalizeToolCalls(value: readonly unknown[]) {
-  return value.map((item, index) => {
-    const record = item as Record<string, unknown>;
-    return {
-      id: String(record.toolCallId ?? record.id ?? `tool_${index}`),
-      name: String(record.toolName ?? record.name ?? 'unknown'),
-      input: record.input ?? record.args ?? {},
-    };
-  });
+  return value.map((item) => readToolCall(item));
 }
 
 /**
@@ -276,6 +279,117 @@ function createToolCallMessageGroup(
     return Array.isArray(message.content) ? message.content : [];
   });
   return { role: 'assistant', content: parts } as ModelMessage;
+}
+
+function readToolCall(value: unknown): {
+  readonly id: string;
+  readonly name: string;
+  readonly input: unknown;
+} {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('AI SDK tool-call part must be an object.');
+  }
+  const record = value as Record<string, unknown>;
+  if (record.type !== 'tool-call') {
+    throw new Error('AI SDK tool-call part must have type "tool-call".');
+  }
+  if (typeof record.toolCallId !== 'string' || record.toolCallId === '') {
+    throw new Error('AI SDK tool-call part is missing toolCallId.');
+  }
+  if (typeof record.toolName !== 'string' || record.toolName === '') {
+    throw new Error('AI SDK tool-call part is missing toolName.');
+  }
+  if (!Object.hasOwn(record, 'input')) {
+    throw new Error('AI SDK tool-call part is missing input.');
+  }
+  return {
+    id: record.toolCallId,
+    name: record.toolName,
+    input: record.input,
+  };
+}
+
+function isToolCallMirrorText(
+  text: string,
+  toolCalls: readonly { readonly id: string; readonly name: string }[],
+): boolean {
+  if (toolCalls.length === 0 || text.trim() === '') {
+    return false;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  const items = Array.isArray(parsed) ? parsed : [parsed];
+  if (
+    items.length !== toolCalls.length ||
+    items.some((item) => !isToolCallPart(item))
+  ) {
+    return false;
+  }
+  return items.every((item, index) => {
+    const record = item as Record<string, unknown>;
+    const expected = toolCalls[index];
+    if (expected === undefined) {
+      return false;
+    }
+    return (
+      record.toolCallId === expected.id && record.toolName === expected.name
+    );
+  });
+}
+
+function canBecomeToolCallMirror(text: string): boolean {
+  let rest = text.trimStart();
+  if (rest === '') {
+    return true;
+  }
+  if (rest.startsWith('[')) {
+    rest = rest.slice(1).trimStart();
+    if (rest === '') {
+      return true;
+    }
+  }
+  if (!rest.startsWith('{')) {
+    return false;
+  }
+  rest = rest.slice(1).trimStart();
+  if (rest === '') {
+    return true;
+  }
+  const typeKey = '"type"';
+  if (typeKey.startsWith(rest)) {
+    return true;
+  }
+  if (!rest.startsWith(typeKey)) {
+    return false;
+  }
+  rest = rest.slice(typeKey.length).trimStart();
+  if (rest === '') {
+    return true;
+  }
+  if (':'.startsWith(rest)) {
+    return true;
+  }
+  if (!rest.startsWith(':')) {
+    return false;
+  }
+  rest = rest.slice(1).trimStart();
+  if (rest === '') {
+    return true;
+  }
+  const toolCallValue = '"tool-call"';
+  return toolCallValue.startsWith(rest) || rest.startsWith(toolCallValue);
+}
+
+function isToolCallPart(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { type?: unknown }).type === 'tool-call'
+  );
 }
 
 /** 把 provider 返回的结束原因收敛到框架已知枚举，未识别值归为 `'unknown'`。 */
