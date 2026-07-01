@@ -1,5 +1,11 @@
-import { access, mkdtemp, rm, utimes } from 'node:fs/promises';
-import { readFile } from 'node:fs/promises';
+import {
+  access,
+  mkdtemp,
+  readFile,
+  rm,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -250,10 +256,17 @@ describe('createCodingSession', () => {
     expect(pending).toHaveLength(1);
     expect(pending[0]?.toolName).toBe('write');
     expect(pending[0]?.metadata).toMatchObject({
-      kind: 'edit',
-      path: target,
+      permission: 'edit',
+      request: {
+        kind: 'edit',
+        path: target,
+      },
     });
-    expect(String(pending[0]?.metadata?.diff)).toContain('+++');
+    expect(
+      String(
+        (pending[0]?.metadata?.request as { diff?: unknown } | undefined)?.diff,
+      ),
+    ).toContain('+++');
 
     await session.approve(pending[0]!.requestId, { action: 'approve_once' });
     await session.close();
@@ -270,6 +283,194 @@ describe('createCodingSession', () => {
           ),
       ),
     ).toBe(true);
+  });
+
+  it('reads an external file after approve_once grants external_directory', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const externalDir = await tempDir();
+    const externalFile = path.join(externalDir, 'outside.txt');
+    await writeFile(externalFile, 'outside\n', 'utf8');
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+
+    let turn = 0;
+    let followUpMessages = '';
+    const adapter: ModelAdapter = {
+      async generate(request) {
+        turn += 1;
+        if (turn === 1) {
+          const toolCallMessage = {
+            role: 'assistant' as const,
+            content: [
+              {
+                type: 'tool-call',
+                toolCallId: 'read_external',
+                toolName: 'read',
+                input: { path: externalFile, limit: 100 },
+              },
+            ],
+          };
+          return {
+            text: '',
+            messages: [...request.messages, toolCallMessage],
+            newMessages: [toolCallMessage],
+            toolCalls: [
+              {
+                id: 'read_external',
+                name: 'read',
+                input: { path: externalFile, limit: 100 },
+              },
+            ],
+            usage,
+            finishReason: 'tool-calls',
+            provider: null,
+          };
+        }
+        followUpMessages = JSON.stringify(request.messages);
+        return {
+          text: 'read it',
+          messages: [
+            ...request.messages,
+            { role: 'assistant', content: 'read it' },
+          ],
+          newMessages: [{ role: 'assistant', content: 'read it' }],
+          usage,
+          finishReason: 'stop',
+          provider: null,
+        };
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
+    const pending: {
+      requestId: string;
+      metadata?: Record<string, unknown>;
+    }[] = [];
+    session.subscribe((event) => {
+      if (event.type === 'approval.pending') {
+        pending.push({
+          requestId: event.requestId,
+          ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
+        });
+      }
+    });
+
+    await session.submit('read external');
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.metadata).toMatchObject({
+      permission: 'read',
+      externalDirs: [externalFile],
+    });
+
+    await session.approve(pending[0]!.requestId, { action: 'approve_once' });
+    await session.close();
+
+    expect(followUpMessages).toContain('outside');
+    expect(followUpMessages).not.toContain('Path not allowed');
+  });
+
+  it('searches an external directory after approve_once grants external_directory', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const externalDir = await tempDir();
+    const externalFile = path.join(externalDir, 'outside.txt');
+    await writeFile(externalFile, 'external needle\n', 'utf8');
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+
+    let turn = 0;
+    let followUpMessages = '';
+    const adapter: ModelAdapter = {
+      async generate(request) {
+        turn += 1;
+        if (turn === 1) {
+          const toolCallMessage = {
+            role: 'assistant' as const,
+            content: [
+              {
+                type: 'tool-call',
+                toolCallId: 'grep_external',
+                toolName: 'grep',
+                input: { pattern: 'needle', path: externalDir, limit: 10 },
+              },
+            ],
+          };
+          return {
+            text: '',
+            messages: [...request.messages, toolCallMessage],
+            newMessages: [toolCallMessage],
+            toolCalls: [
+              {
+                id: 'grep_external',
+                name: 'grep',
+                input: { pattern: 'needle', path: externalDir, limit: 10 },
+              },
+            ],
+            usage,
+            finishReason: 'tool-calls',
+            provider: null,
+          };
+        }
+        followUpMessages = JSON.stringify(request.messages);
+        return {
+          text: 'searched it',
+          messages: [
+            ...request.messages,
+            { role: 'assistant', content: 'searched it' },
+          ],
+          newMessages: [{ role: 'assistant', content: 'searched it' }],
+          usage,
+          finishReason: 'stop',
+          provider: null,
+        };
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
+    const pending: {
+      requestId: string;
+      metadata?: Record<string, unknown>;
+    }[] = [];
+    session.subscribe((event) => {
+      if (event.type === 'approval.pending') {
+        pending.push({
+          requestId: event.requestId,
+          ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
+        });
+      }
+    });
+
+    await session.submit('search external');
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.metadata).toMatchObject({
+      permission: 'search',
+      externalDirs: [externalDir],
+    });
+
+    await session.approve(pending[0]!.requestId, { action: 'approve_once' });
+    await session.close();
+
+    expect(followUpMessages).toContain('outside.txt:1:external needle');
+    expect(followUpMessages).not.toContain('Path not allowed');
   });
 
   it('stores subagent transcript in parent sidechain without polluting session list', async () => {
@@ -314,7 +515,7 @@ describe('createCodingSession', () => {
                 toolCallId: 'delegate-1',
                 toolName: 'delegate_to_subagent',
                 input: {
-                  name: 'general',
+                  name: 'explore',
                   description: 'check sidechain',
                   prompt: 'return sub done',
                   run_id: 'run-sidechain',
@@ -331,7 +532,7 @@ describe('createCodingSession', () => {
                 id: 'delegate-1',
                 name: 'delegate_to_subagent',
                 input: {
-                  name: 'general',
+                  name: 'explore',
                   description: 'check sidechain',
                   prompt: 'return sub done',
                   run_id: 'run-sidechain',
@@ -361,7 +562,10 @@ describe('createCodingSession', () => {
       },
     };
 
-    const session = await createCodingSession({ config, modelAdapter: adapter });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
     session.subscribe((event) => events.push(event.type));
 
     await session.submit('delegate it');
@@ -377,12 +581,7 @@ describe('createCodingSession', () => {
     expect(sessions.map((item) => item.sessionId)).toEqual([parentId]);
     expect(
       await readFile(
-        path.join(
-          sessionDir,
-          parentId,
-          'subagents',
-          'run-sidechain.jsonl',
-        ),
+        path.join(sessionDir, parentId, 'subagents', 'run-sidechain.jsonl'),
         'utf8',
       ),
     ).toContain('sub done');
@@ -442,7 +641,10 @@ describe('createCodingSession', () => {
       },
     };
 
-    const session = await createCodingSession({ config, modelAdapter: adapter });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
     const result = await session.submit('loop');
     await session.close();
 

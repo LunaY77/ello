@@ -1,13 +1,14 @@
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
+import type { DecideApproval } from '../permission/policy.js';
+import type { PermissionMetadata } from '../permission/types.js';
 
 import {
   createCodingToolResult,
   defineCodingTool,
-  type ToolMetadata,
 } from './runtime/coding-tool.js';
-import { requireShell, truncate, type ApprovalFor } from './shared.js';
+import { requireShell, truncate } from './shared.js';
 
 /**
  * Shell 工具：bash。
@@ -17,7 +18,7 @@ import { requireShell, truncate, type ApprovalFor } from './shared.js';
  */
 export function createShellTools(
   config: CodingAgentConfig,
-  approval: ApprovalFor,
+  decide: DecideApproval,
 ) {
   return [
     defineCodingTool({
@@ -31,9 +32,15 @@ export function createShellTools(
         reason: z.string().optional(),
       }),
       approval: async (input, ctx) =>
-        withShellApprovalMetadata(
-          await approval('bash')(input as never, ctx.agent),
-          shellMetadata(input, config),
+        decide(
+          {
+            permission: 'bash',
+            patterns: [input.command],
+            always: [input.command],
+            paths: [input.cwd ?? config.cwd],
+            metadata: shellMetadata(input, config),
+          },
+          ctx.agent,
         ),
       execute: async ({ command, timeoutMs, cwd }, ctx) => {
         const started = Date.now();
@@ -74,12 +81,11 @@ function shellMetadata(
     readonly reason?: string | undefined;
   },
   config: CodingAgentConfig,
-): ToolMetadata {
+): Extract<PermissionMetadata, { kind: 'shell' }> {
   return {
     kind: 'shell',
     command: input.command,
     cwd: input.cwd ?? config.cwd,
-    reason: input.reason ?? 'run shell command',
     risk: analyzeCommandRisk(input.command),
   };
 }
@@ -88,17 +94,4 @@ function analyzeCommandRisk(command: string): 'normal' | 'dangerous' {
   return /\b(rm\s+-rf|sudo|chmod\s+-R|chown\s+-R|mkfs|dd\s+if=)/u.test(command)
     ? 'dangerous'
     : 'normal';
-}
-
-function withShellApprovalMetadata(
-  decision: Awaited<ReturnType<ReturnType<ApprovalFor>>>,
-  metadata: ToolMetadata,
-): typeof decision {
-  if (typeof decision === 'string') {
-    return { action: decision, metadata };
-  }
-  return {
-    ...decision,
-    metadata: { ...metadata, ...(decision.metadata ?? {}) },
-  };
 }

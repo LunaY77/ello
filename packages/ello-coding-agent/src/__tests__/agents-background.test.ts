@@ -69,8 +69,19 @@ describe('BackgroundJobStore', () => {
 
 describe('deriveSubagentPermission', () => {
   const parentRules: PermissionRule[] = [
-    { action: 'allow', tool: 'read', scope: 'session' },
-    { action: 'deny', tool: 'bash', scope: 'session', reason: 'no shell' },
+    {
+      permission: 'read',
+      pattern: '**',
+      action: 'allow',
+      scope: 'session',
+    },
+    {
+      permission: 'bash',
+      pattern: '**',
+      action: 'deny',
+      scope: 'session',
+      reason: 'no shell',
+    },
   ];
 
   const baseDef: CodingAgentDefinition = {
@@ -83,18 +94,18 @@ describe('deriveSubagentPermission', () => {
 
   it('only inherits deny from parent', () => {
     const rules = deriveSubagentPermission(parentRules, baseDef);
-    expect(rules.some((r) => r.action === 'allow' && r.tool === 'read')).toBe(
-      false,
-    );
-    expect(rules.some((r) => r.action === 'deny' && r.tool === 'bash')).toBe(
-      true,
-    );
+    expect(
+      rules.some((r) => r.action === 'allow' && r.permission === 'read'),
+    ).toBe(false);
+    expect(
+      rules.some((r) => r.action === 'deny' && r.permission === 'bash'),
+    ).toBe(true);
   });
 
   it('default-denies delegate_to_subagent and task tools', () => {
     const rules = deriveSubagentPermission([], baseDef);
-    expect(rules.some((r) => r.tool === 'delegate_to_subagent')).toBe(true);
-    expect(rules.some((r) => r.tool === 'task_create')).toBe(true);
+    expect(rules.some((r) => r.pattern === 'delegate_to_subagent')).toBe(true);
+    expect(rules.some((r) => r.pattern === 'task_create')).toBe(true);
   });
 
   it('allows delegate if tools whitelist includes it', () => {
@@ -103,14 +114,14 @@ describe('deriveSubagentPermission', () => {
       tools: ['delegate_to_subagent', 'read'] as const,
     };
     const rules = deriveSubagentPermission([], def);
-    expect(rules.some((r) => r.tool === 'delegate_to_subagent')).toBe(false);
+    expect(rules.some((r) => r.pattern === 'delegate_to_subagent')).toBe(false);
   });
 
   it('allows task tools if tools whitelist starts with task_', () => {
     const def = { ...baseDef, tools: ['task_create', 'task_list'] as const };
     const rules = deriveSubagentPermission([], def);
     expect(
-      rules.some((r) => r.tool === 'task_create' && r.action === 'deny'),
+      rules.some((r) => r.pattern === 'task_create' && r.action === 'deny'),
     ).toBe(false);
   });
 });

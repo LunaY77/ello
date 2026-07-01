@@ -1,13 +1,14 @@
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
+import type { DecideApproval } from '../permission/policy.js';
+import type { PermissionMetadata } from '../permission/types.js';
 
 import {
   createCodingToolResult,
   defineCodingTool,
-  type ToolMetadata,
 } from './runtime/coding-tool.js';
-import { truncate, type ApprovalFor } from './shared.js';
+import { truncate } from './shared.js';
 
 /**
  * 网络工具：web_fetch。
@@ -17,16 +18,21 @@ import { truncate, type ApprovalFor } from './shared.js';
  */
 export function webFetchTool(
   _config: CodingAgentConfig,
-  approval: ApprovalFor,
+  decide: DecideApproval,
 ) {
   return defineCodingTool({
     name: 'web_fetch',
     description: 'Fetch a URL. Network access requires approval by default.',
     input: z.object({ url: z.string().url() }),
     approval: async (input, ctx) =>
-      withNetworkApprovalMetadata(
-        await approval('web_fetch')(input as never, ctx.agent),
-        networkMetadata(input.url),
+      decide(
+        {
+          permission: 'web_fetch',
+          patterns: [new URL(input.url).hostname],
+          always: [new URL(input.url).hostname],
+          metadata: networkMetadata(input.url),
+        },
+        ctx.agent,
       ),
     execute: async ({ url }) => {
       const response = await fetch(url);
@@ -48,31 +54,19 @@ export function webFetchTool(
 /**
  * 是否允许注册网络工具。
  *
- * v1 默认允许 `web_fetch`（运行时有全局 `fetch`）。预留 config 钩子，
- * 后续可按策略/离线模式关闭。
+ * `web_fetch` 依赖运行时全局 `fetch`；缺少该能力时不注册工具。
  */
 export function canFetch(_config: CodingAgentConfig): boolean {
   return typeof fetch === 'function';
 }
 
-function networkMetadata(url: string): ToolMetadata {
+function networkMetadata(
+  url: string,
+): Extract<PermissionMetadata, { kind: 'network' }> {
   const parsed = new URL(url);
   return {
     kind: 'network',
     url,
     domain: parsed.hostname,
-  };
-}
-
-function withNetworkApprovalMetadata(
-  decision: Awaited<ReturnType<ReturnType<ApprovalFor>>>,
-  metadata: ToolMetadata,
-): typeof decision {
-  if (typeof decision === 'string') {
-    return { action: decision, metadata };
-  }
-  return {
-    ...decision,
-    metadata: { ...metadata, ...(decision.metadata ?? {}) },
   };
 }

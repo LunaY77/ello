@@ -1,4 +1,8 @@
+import { exec } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { promisify } from 'node:util';
 
 import {
   createAgent,
@@ -8,9 +12,11 @@ import {
   skillIndexContext,
   type Agent,
   type AgentEnvironment,
+  type AgentFileSystem,
   type AgentMessage,
   type AgentModel,
   type AgentRunResult,
+  type AgentShell,
   type AgentSkill,
   type AgentStream,
   type AgentStreamEvent,
@@ -45,6 +51,7 @@ import {
   type ToolResultBudget,
 } from '../context/tool-result-budget.js';
 import { createCodingObserver } from '../observability/observer.js';
+import { isPathInside, resolveAbsolute } from '../permission/engine.js';
 import { RulesStore } from '../permission/rules-store.js';
 import {
   createProviderRegistry,
@@ -71,8 +78,158 @@ import type {
 
 /** 模型上下文窗口默认值，用于压缩触发判定。 */
 const DEFAULT_CONTEXT_WINDOW = 160_000;
+const execAsync = promisify(exec);
 
-function createRuntimeEnvironment(config: CodingAgentConfig): AgentEnvironment {
+type PolicyFileSystem = AgentFileSystem & {
+  resolvePath(targetPath: string): string;
+  stat(targetPath: string): ReturnType<typeof stat>;
+};
+
+/**
+ * 模型工具运行时环境。
+ *
+ * 文件系统和 shell 不使用静态 allowedPaths，而是在每次调用时读取 RulesStore 与
+ * 本次 approve_once 产生的 sessionExternalPaths，确保 external_directory 审批
+ * 与真实执行边界一致。
+ */
+function createRuntimeEnvironment(
+  config: CodingAgentConfig,
+  rules: () => readonly {
+    permission: string;
+    pattern: string;
+    action: string;
+  }[],
+  sessionExternalPaths: () => readonly string[],
+): AgentEnvironment {
+  const environment = createLocalShellEnvironment({
+    cwd: config.cwd,
+    allowedPaths: [config.cwd],
+  });
+  const resolveAllowedPaths = () =>
+    runtimeAllowedPaths(config.cwd, rules(), sessionExternalPaths());
+  const fileSystem = createPolicyFileSystem(config.cwd, resolveAllowedPaths);
+  const shell = createPolicyShell(config.cwd, resolveAllowedPaths);
+  const resources = environment.resources;
+  const wrapped: AgentEnvironment = {
+    ...environment,
+    ...(fileSystem !== undefined ? { fileSystem, files: fileSystem } : {}),
+    ...(shell !== undefined ? { shell } : {}),
+    ...(resources !== undefined ? { resources } : {}),
+    getContextInstructions: () => null,
+    getInstructions: () => null,
+  };
+  environment.resources?.bind?.(wrapped);
+  return wrapped;
+}
+
+/** 当前 run 可访问的路径根：workspace + 本 session 临时授权 + 持久化 external_directory。 */
+function runtimeAllowedPaths(
+  cwd: string,
+  rules: readonly { permission: string; pattern: string; action: string }[],
+  sessionExternalPaths: readonly string[],
+): readonly string[] {
+  const roots = [cwd, ...sessionExternalPaths];
+  for (const rule of rules) {
+    if (rule.permission === 'external_directory' && rule.action === 'allow') {
+      roots.push(resolveAbsolute(cwd, rule.pattern));
+    }
+  }
+  return [...new Set(roots.map((root) => path.resolve(root)))];
+}
+
+/** 文件系统边界由 resolveAllowedTarget 统一校验，读写列目录共享同一判断。 */
+function createPolicyFileSystem(
+  cwd: string,
+  allowedPaths: () => readonly string[],
+): PolicyFileSystem {
+  return {
+    resolvePath(targetPath): string {
+      return resolveAllowedTarget(cwd, targetPath, allowedPaths());
+    },
+    readText(targetPath): Promise<string> {
+      return readFile(
+        resolveAllowedTarget(cwd, targetPath, allowedPaths()),
+        'utf8',
+      );
+    },
+    async writeText(targetPath, content): Promise<void> {
+      const resolved = resolveAllowedTarget(cwd, targetPath, allowedPaths());
+      await mkdir(path.dirname(resolved), { recursive: true });
+      await writeFile(resolved, content, 'utf8');
+    },
+    async listDir(targetPath): Promise<string[]> {
+      return (
+        await readdir(resolveAllowedTarget(cwd, targetPath, allowedPaths()))
+      ).sort();
+    },
+    async stat(targetPath) {
+      return stat(resolveAllowedTarget(cwd, targetPath, allowedPaths()));
+    },
+  };
+}
+
+/** shell 只允许在已授权 cwd 内执行，命令文本本身由 bash permission 判定。 */
+function createPolicyShell(
+  cwd: string,
+  allowedPaths: () => readonly string[],
+): AgentShell {
+  return {
+    async run(command, options = {}) {
+      const resolvedCwd = resolveAllowedTarget(
+        cwd,
+        options.cwd ?? cwd,
+        allowedPaths(),
+      );
+      try {
+        const result = await execAsync(command, {
+          cwd: resolvedCwd,
+          timeout: options.timeout,
+          env:
+            options.env === undefined
+              ? process.env
+              : { ...process.env, ...options.env },
+        });
+        return { exitCode: 0, stdout: result.stdout, stderr: result.stderr };
+      } catch (error) {
+        const err = error as NodeJS.ErrnoException & {
+          readonly stdout?: string;
+          readonly stderr?: string;
+          readonly code?: number | string;
+          readonly killed?: boolean;
+        };
+        return {
+          exitCode: err.killed
+            ? -1
+            : typeof err.code === 'number'
+              ? err.code
+              : 1,
+          stdout: err.stdout ?? '',
+          stderr: err.killed ? 'timeout' : (err.stderr ?? err.message),
+        };
+      }
+    },
+  };
+}
+
+/** 相对路径基于 workspace cwd 解析；越界直接抛错，交给工具结果回灌模型。 */
+function resolveAllowedTarget(
+  cwd: string,
+  target: string,
+  allowedPaths: readonly string[],
+): string {
+  const resolved = resolveAbsolute(cwd, target);
+  if (
+    !allowedPaths.some((allowedPath) => isPathInside(allowedPath, resolved))
+  ) {
+    throw new Error(`Path not allowed: ${resolved}`);
+  }
+  return resolved;
+}
+
+/** TUI `!cmd` 是用户直接操作，仍使用显式配置的 allowedPaths。 */
+function createSlashRuntimeEnvironment(
+  config: CodingAgentConfig,
+): AgentEnvironment {
   const environment = createLocalShellEnvironment({
     cwd: config.cwd,
     allowedPaths: config.allowedPaths,
@@ -236,6 +393,7 @@ class CodingSessionImpl implements CodingSession {
   private readonly activeSkills = new Set<string>();
   private readonly listeners = new Set<CodingEventListener>();
   private readonly pendingApprovals = new Map<string, DeferredApprovalItem>();
+  private readonly sessionExternalPaths = new Set<string>();
   private readonly steerQueue: string[] = [];
   private currentStream: AgentStream | undefined;
   private config: CodingAgentConfig;
@@ -339,6 +497,9 @@ class CodingSessionImpl implements CodingSession {
         item,
         decision.scope ?? 'session',
       );
+      this.addSessionExternalPaths(item);
+    } else if (decision.action === 'approve_once') {
+      this.addSessionExternalPaths(item);
     } else if (decision.action === 'deny') {
       await this.deps.rulesStore.addDenyRule(item, decision.scope ?? 'session');
     }
@@ -504,10 +665,7 @@ class CodingSessionImpl implements CodingSession {
     readonly stdout: string;
     readonly stderr: string;
   }> {
-    const environment = createLocalShellEnvironment({
-      cwd: this.config.cwd,
-      allowedPaths: this.config.allowedPaths,
-    });
+    const environment = createSlashRuntimeEnvironment(this.config);
     try {
       const result = await environment.shell?.run(command, {
         cwd: this.config.cwd,
@@ -881,7 +1039,11 @@ class CodingSessionImpl implements CodingSession {
       name: `ello-${this.activeAgentName}`,
       model: agentModel,
       modelSettings: modelSettingsFromRole(primaryRole),
-      environment: createRuntimeEnvironment(config),
+      environment: createRuntimeEnvironment(
+        config,
+        () => this.deps.rulesStore.rules(),
+        () => [...this.sessionExternalPaths],
+      ),
       tools: [...selectedTools, ...skillTools, delegateTool],
       session: this.deps.sessionStore,
       compactor: this.deps.compactor,
@@ -903,6 +1065,12 @@ class CodingSessionImpl implements CodingSession {
         : {}),
       metadata: { sessionId: this.sessionId, cwd: config.cwd },
     });
+  }
+
+  private addSessionExternalPaths(item: DeferredApprovalItem): void {
+    for (const target of readApprovalExternalDirs(item)) {
+      this.sessionExternalPaths.add(resolveAbsolute(this.config.cwd, target));
+    }
   }
 
   private activeAgentMaxTurns(): number {
@@ -1014,6 +1182,25 @@ class CodingSessionImpl implements CodingSession {
     }
     return summary;
   }
+}
+
+function readApprovalExternalDirs(
+  item: DeferredApprovalItem,
+): readonly string[] {
+  const metadata = item.metadata;
+  // approve_once 不落盘，只把审批事件携带的外部目录加入当前会话运行边界。
+  if (metadata === undefined || metadata.externalDirs === undefined) {
+    return [];
+  }
+  if (
+    !Array.isArray(metadata.externalDirs) ||
+    metadata.externalDirs.some((entry) => typeof entry !== 'string')
+  ) {
+    throw new Error(
+      `Approval item for ${item.toolName} has invalid externalDirs metadata.`,
+    );
+  }
+  return metadata.externalDirs;
 }
 
 function messageText(message: AgentMessage): string {

@@ -13,7 +13,7 @@ import type { RuleScope } from '../permission/rules-store.js';
  *
  * 前端把用户在审批浮层的选择翻译成这个意图，交给 {@link CodingSession.approve}：
  * - `approve_once`：仅本次放行；
- * - `always_allow`：放行并按 `scope` 落一条 allow 规则（session/project）；
+ * - `always_allow`：放行并按 `scope` 落一条 allow 规则（session/project/user）；
  * - `deny`：拒绝本次工具调用。
  */
 export interface ApprovalDecision {

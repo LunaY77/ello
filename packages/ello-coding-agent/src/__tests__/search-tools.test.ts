@@ -1,7 +1,15 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import type { AgentFileSystem } from '@ello/agent';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadCodingAgentConfig } from '../config/index.js';
@@ -102,6 +110,7 @@ describe('search tools', () => {
 });
 
 function searchContext(cwd: string): CodingToolContext {
+  const fileSystem = testFileSystem(cwd);
   return {
     cwd,
     allowedPaths: [cwd],
@@ -112,8 +121,33 @@ function searchContext(cwd: string): CodingToolContext {
       runId: 'run',
       toolCallId: 'call',
       toolName: 'grep',
-      environment: {},
+      environment: { fileSystem, files: fileSystem },
       metadata: {},
+    },
+  };
+}
+
+function testFileSystem(cwd: string): AgentFileSystem & {
+  resolvePath(targetPath: string): string;
+  stat(targetPath: string): ReturnType<typeof stat>;
+} {
+  return {
+    resolvePath(targetPath): string {
+      return path.isAbsolute(targetPath)
+        ? path.resolve(targetPath)
+        : path.resolve(cwd, targetPath);
+    },
+    async readText(targetPath): Promise<string> {
+      return readFile(this.resolvePath(targetPath), 'utf8');
+    },
+    async writeText(): Promise<void> {
+      throw new Error('search test file system does not support writes.');
+    },
+    async listDir(targetPath): Promise<string[]> {
+      return readdir(this.resolvePath(targetPath));
+    },
+    stat(targetPath) {
+      return stat(this.resolvePath(targetPath));
     },
   };
 }

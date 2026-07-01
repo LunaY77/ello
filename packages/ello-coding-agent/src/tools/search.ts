@@ -1,25 +1,31 @@
-import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
+import type { AgentFileSystem } from '@ello/agent';
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
+import type { DecideApproval } from '../permission/policy.js';
 
 import {
   createCodingToolResult,
   defineCodingTool,
 } from './runtime/coding-tool.js';
-import { resolveWorkspacePath, truncate, type ApprovalFor } from './shared.js';
+import {
+  requireFs,
+  resolveRuntimePath,
+  statRuntimePath,
+  truncate,
+} from './shared.js';
 
 /**
  * 搜索工具：grep（内容搜索）/ glob（目录遍历）。
  *
- * 搜索没有现成的环境原语，所以这里保留一份最小的 allowedPaths 解析来确定
- * 遍历根目录；实现放在进程内，避免把外部 `rg` 二进制作为运行时依赖。
+ * 遍历和读取通过 runtime fileSystem 完成，确保 external_directory 审批后的
+ * 执行边界与 read/write 工具一致。
  */
 export function createSearchTools(
-  config: CodingAgentConfig,
-  _approval: ApprovalFor,
+  _config: CodingAgentConfig,
+  decide: DecideApproval,
 ) {
   return [
     defineCodingTool({
@@ -31,14 +37,27 @@ export function createSearchTools(
         glob: z.string().optional(),
         limit: z.number().int().min(1).max(500).default(100),
       }),
-      execute: async ({ pattern, path: targetPath, glob, limit }) => {
-        const cwd = resolveWorkspacePath(
-          config.cwd,
-          config.allowedPaths,
-          targetPath,
-        );
+      approval: (input, ctx) =>
+        decide(
+          {
+            permission: 'search',
+            patterns: [input.pattern],
+            always: [input.pattern],
+            paths: [input.path],
+            metadata: {
+              kind: 'search',
+              pattern: input.pattern,
+              path: input.path,
+            },
+          },
+          ctx.agent,
+        ),
+      execute: async ({ pattern, path: targetPath, glob, limit }, ctx) => {
+        const fs = requireFs(ctx.agent);
+        const root = resolveRuntimePath(fs, targetPath);
         const output = await searchFiles({
-          root: cwd,
+          fs,
+          root,
           pattern,
           ...(glob !== undefined ? { glob } : {}),
           limit,
@@ -65,25 +84,37 @@ export function createSearchTools(
         path: z.string().default('.'),
         limit: z.number().int().min(1).max(1000).default(200),
       }),
-      execute: async ({ pattern, path: targetPath, limit }) => {
-        const cwd = resolveWorkspacePath(
-          config.cwd,
-          config.allowedPaths,
-          targetPath,
-        );
-        const files = await walk(cwd, limit * 5);
+      approval: (input, ctx) =>
+        decide(
+          {
+            permission: 'search',
+            patterns: [input.pattern],
+            always: [input.pattern],
+            paths: [input.path],
+            metadata: {
+              kind: 'search',
+              pattern: input.pattern,
+              path: input.path,
+            },
+          },
+          ctx.agent,
+        ),
+      execute: async ({ pattern, path: targetPath, limit }, ctx) => {
+        const fs = requireFs(ctx.agent);
+        const root = resolveRuntimePath(fs, targetPath);
+        const files = await walk(fs, root, limit * 5);
         const matcher = globToRegExp(pattern);
         const matches = files
-          .filter((file) => matcher.test(path.relative(cwd, file)))
+          .filter((file) => matcher.test(path.relative(root, file)))
           .slice(0, limit);
         return createCodingToolResult({
           title: `Glob ${pattern}`,
-          output: matches.map((file) => path.relative(cwd, file)).join('\n'),
+          output: matches.map((file) => path.relative(root, file)).join('\n'),
           metadata: {
             kind: 'search',
             path: targetPath,
             pattern,
-            paths: matches.map((file) => path.relative(cwd, file)),
+            paths: matches.map((file) => path.relative(root, file)),
             matchCount: matches.length,
           },
         });
@@ -93,12 +124,13 @@ export function createSearchTools(
 }
 
 async function searchFiles(input: {
+  readonly fs: AgentFileSystem;
   readonly root: string;
   readonly pattern: string;
   readonly glob?: string;
   readonly limit: number;
 }): Promise<string> {
-  const files = await walk(input.root, input.limit * 200);
+  const files = await walk(input.fs, input.root, input.limit * 200);
   const pattern = new RegExp(input.pattern, 'u');
   const fileMatcher =
     input.glob !== undefined ? globToRegExp(input.glob) : undefined;
@@ -108,7 +140,7 @@ async function searchFiles(input: {
     if (fileMatcher !== undefined && !fileMatcher.test(relativePath)) {
       continue;
     }
-    const content = await readSearchableFile(file);
+    const content = await readSearchableFile(input.fs, file);
     if (content === undefined) {
       continue;
     }
@@ -125,31 +157,39 @@ async function searchFiles(input: {
   return matches.join('\n');
 }
 
-async function readSearchableFile(filePath: string): Promise<string | undefined> {
-  const content = await readFile(filePath);
-  if (content.includes(0)) {
+async function readSearchableFile(
+  fs: AgentFileSystem,
+  filePath: string,
+): Promise<string | undefined> {
+  const content = await fs.readText(filePath);
+  if (content.includes('\u0000') || content.includes('\uFFFD')) {
     return undefined;
   }
-  return content.toString('utf8');
+  return content;
 }
 
 /** 递归遍历目录，跳过 node_modules/.git/dist，最多收集 limit 个文件。 */
-async function walk(root: string, limit: number): Promise<string[]> {
+async function walk(
+  fs: AgentFileSystem,
+  root: string,
+  limit: number,
+): Promise<string[]> {
   const result: string[] = [];
   async function visit(dir: string): Promise<void> {
     if (result.length >= limit) {
       return;
     }
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
+    for (const entry of await fs.listDir(dir)) {
       if (
-        entry.name === 'node_modules' ||
-        entry.name === '.git' ||
-        entry.name === 'dist'
+        entry === 'node_modules' ||
+        entry === '.git' ||
+        entry === 'dist'
       ) {
         continue;
       }
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
+      const fullPath = path.join(dir, entry);
+      const info = await statRuntimePath(fs, fullPath);
+      if (info.isDirectory()) {
         await visit(fullPath);
       } else {
         result.push(fullPath);

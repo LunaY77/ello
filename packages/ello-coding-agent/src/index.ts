@@ -47,18 +47,21 @@ export {
 export { makeApprovalPolicy } from './permission/policy.js';
 export { RulesStore, type RuleScope } from './permission/rules-store.js';
 export {
-  applyPermissionPolicy,
-  denialKey,
-  evaluateToolPermission,
+  defaultRulesetForMode,
+  evaluatePermission,
   formatPermissionRules,
+  isExternalPath,
+  isPathInside,
   parsePermissionRules,
-  PermissionModeSchema,
+  resolveAbsolute,
   PermissionRuleSchema,
+  wildcardMatch,
   type PermissionAction,
-  type PermissionContext,
-  type PermissionDecision,
-  type PermissionMode,
+  type PermissionDescriptor,
+  type PermissionMetadata,
+  type PermissionRequest,
   type PermissionRule,
+  type PermissionScope,
 } from './permissions.js';
 
 // —— 工具集 ——

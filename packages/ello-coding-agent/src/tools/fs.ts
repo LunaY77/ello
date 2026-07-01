@@ -1,20 +1,21 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
+import type { DecideApproval } from '../permission/policy.js';
+import type { PermissionMetadata } from '../permission/types.js';
 
 import {
   createCodingToolResult,
   defineCodingTool,
-  type ToolMetadata,
 } from './runtime/coding-tool.js';
 import {
   createPreviewDiff,
   requireFs,
-  resolveWorkspacePath,
+  resolveRuntimePath,
+  statRuntimePath,
   truncate,
-  type ApprovalFor,
 } from './shared.js';
 
 /**
@@ -25,7 +26,7 @@ import {
  */
 export function createFsTools(
   config: CodingAgentConfig,
-  approval: ApprovalFor,
+  decide: DecideApproval,
 ) {
   return [
     defineCodingTool({
@@ -37,15 +38,23 @@ export function createFsTools(
         offset: z.number().int().min(1).optional(),
         limit: z.number().int().min(1).max(2000).optional(),
       }),
+      approval: (input, ctx) =>
+        decide(
+          {
+            permission: 'read',
+            patterns: [input.path],
+            always: [input.path],
+            paths: [input.path],
+            metadata: { kind: 'read', path: input.path },
+          },
+          ctx.agent,
+        ),
       execute: async ({ path: targetPath, offset = 1, limit = 400 }, ctx) => {
-        const absolutePath = resolveWorkspacePath(
-          config.cwd,
-          config.allowedPaths,
-          targetPath,
-        );
-        const info = await stat(absolutePath);
+        const fs = requireFs(ctx.agent);
+        const absolutePath = resolveRuntimePath(fs, targetPath);
+        const info = await statRuntimePath(fs, targetPath);
         if (info.isDirectory()) {
-          const entries = await requireFs(ctx.agent).listDir(targetPath);
+          const entries = await fs.listDir(targetPath);
           return createCodingToolResult({
             title: `Directory ${targetPath}`,
             output: entries.join('\n'),
@@ -111,6 +120,17 @@ export function createFsTools(
       name: 'ls',
       description: 'List directory entries inside the workspace.',
       input: z.object({ path: z.string().default('.') }),
+      approval: (input, ctx) =>
+        decide(
+          {
+            permission: 'read',
+            patterns: [input.path],
+            always: [input.path],
+            paths: [input.path],
+            metadata: { kind: 'read', path: input.path },
+          },
+          ctx.agent,
+        ),
       execute: async ({ path: targetPath }, ctx) => {
         const entries = await requireFs(ctx.agent).listDir(targetPath);
         return createCodingToolResult({
@@ -134,9 +154,15 @@ export function createFsTools(
         reason: z.string().optional(),
       }),
       approval: async (input, ctx) =>
-        withApprovalMetadata(
-          await approval('write')(input as never, ctx.agent),
-          await writeMetadata(input, ctx.agent),
+        decide(
+          {
+            permission: 'edit',
+            patterns: [input.path],
+            always: [input.path],
+            paths: [input.path],
+            metadata: await writeMetadata(input, ctx.agent),
+          },
+          ctx.agent,
         ),
       execute: async ({ path: targetPath, content, reason }, ctx) => {
         const fs = requireFs(ctx.agent);
@@ -169,9 +195,15 @@ export function createFsTools(
         reason: z.string().optional(),
       }),
       approval: async (input, ctx) =>
-        withApprovalMetadata(
-          await approval('edit')(input as never, ctx.agent),
-          await editMetadata(input, ctx.agent),
+        decide(
+          {
+            permission: 'edit',
+            patterns: [input.path],
+            always: [input.path],
+            paths: [input.path],
+            metadata: await editMetadata(input, ctx.agent),
+          },
+          ctx.agent,
         ),
       execute: async ({ path: targetPath, oldText, newText, reason }, ctx) => {
         const fs = requireFs(ctx.agent);
@@ -228,32 +260,18 @@ function isBinary(buffer: Buffer): boolean {
   return buffer.toString('utf8').includes('\uFFFD');
 }
 
-function withApprovalMetadata(
-  decision: Awaited<ReturnType<ReturnType<ApprovalFor>>>,
-  metadata: ToolMetadata,
-): typeof decision {
-  if (typeof decision === 'string') {
-    return { action: decision, metadata };
-  }
-  return {
-    ...decision,
-    metadata: { ...metadata, ...(decision.metadata ?? {}) },
-  };
-}
-
 async function writeMetadata(
   input: {
     readonly path: string;
     readonly content: string;
     readonly reason?: string | undefined;
   },
-  ctx: Parameters<ReturnType<ApprovalFor>>[1],
-): Promise<ToolMetadata> {
+  ctx: Parameters<DecideApproval>[1],
+): Promise<Extract<PermissionMetadata, { kind: 'edit' }>> {
   const previous = await readOptional(requireFs(ctx), input.path);
   return {
     kind: 'edit',
     path: input.path,
-    reason: input.reason ?? 'write file',
     diff: createPreviewDiff(input.path, previous, input.content),
   };
 }
@@ -265,14 +283,13 @@ async function editMetadata(
     readonly newText: string;
     readonly reason?: string | undefined;
   },
-  ctx: Parameters<ReturnType<ApprovalFor>>[1],
-): Promise<ToolMetadata> {
+  ctx: Parameters<DecideApproval>[1],
+): Promise<Extract<PermissionMetadata, { kind: 'edit' }>> {
   const current = await requireFs(ctx).readText(input.path);
   const next = current.replace(input.oldText, input.newText);
   return {
     kind: 'edit',
     path: input.path,
-    reason: input.reason ?? 'edit file',
     diff: createPreviewDiff(input.path, current, next),
   };
 }

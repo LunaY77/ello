@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { PermissionRuleSchema } from '../permission/types.js';
+
 const ZeroCostSchema = z.object({
   input: z.number().nonnegative().default(0),
   output: z.number().nonnegative().default(0),
@@ -16,16 +18,7 @@ export const ApprovalModeSchema = z.enum([
   'bypass',
 ]);
 
-/** 可持久化的细粒度权限规则，来源包括 config.yaml 和运行时审批写入。 */
-export const PermissionRuleSchema = z.object({
-  action: z.enum(['allow', 'ask', 'deny']),
-  tool: z.string().optional(),
-  pathGlob: z.string().optional(),
-  commandPattern: z.string().optional(),
-  domain: z.string().optional(),
-  scope: z.enum(['session', 'project', 'user', 'default']).default('session'),
-  reason: z.string().optional(),
-});
+export { PermissionRuleSchema };
 
 /** agent 运行形态；与 provider profile suite 的 role 正交。 */
 export const AgentModeSchema = z.enum([

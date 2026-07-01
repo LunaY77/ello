@@ -4,8 +4,6 @@ import type { CodingAgentDefinition } from './schema.js';
 
 /**
  * subagent 默认收紧的工具名集合。
- *
- * matchRule 不支持通配符，所以 `task_*` 必须展开成显式工具名逐条 deny。
  */
 const TASK_TOOL_NAMES: readonly string[] = [
   'task_claim',
@@ -17,10 +15,11 @@ const TASK_TOOL_NAMES: readonly string[] = [
   'task_update',
 ];
 
-function denyRule(tool: string): PermissionRule {
+function denyToolRule(tool: string): PermissionRule {
   return {
+    permission: tool.startsWith('task_') ? 'task' : tool,
+    pattern: tool,
     action: 'deny',
-    tool,
     scope: 'default',
     reason: 'subagent default-deny',
   };
@@ -34,8 +33,7 @@ function denyRule(tool: string): PermissionRule {
  * permission，并默认禁止递归委派与任务清单写入——除非该 subagent 的 `tools`
  * 白名单显式包含对应工具。
  *
- * 注：当前 PermissionRule 没有 `external_directory` 维度（见 permissions.ts），
- * 因此只继承 `action: 'deny'`，不再继承 opencode 里的 external_directory 规则。
+ * external_directory 规则描述 workspace 外路径授权边界，需要随 parent 一起继承。
  */
 export function deriveSubagentPermission(
   parentRules: readonly PermissionRule[],
@@ -45,9 +43,12 @@ export function deriveSubagentPermission(
   const canDelegate = tools.includes('delegate_to_subagent');
   const canTask = tools.some((tool) => tool.startsWith('task_'));
   return [
-    ...parentRules.filter((rule) => rule.action === 'deny'),
+    ...parentRules.filter(
+      (rule) =>
+        rule.action === 'deny' || rule.permission === 'external_directory',
+    ),
     ...(def.permission ?? []),
-    ...(canDelegate ? [] : [denyRule('delegate_to_subagent')]),
-    ...(canTask ? [] : TASK_TOOL_NAMES.map(denyRule)),
+    ...(canDelegate ? [] : [denyToolRule('delegate_to_subagent')]),
+    ...(canTask ? [] : TASK_TOOL_NAMES.map(denyToolRule)),
   ];
 }

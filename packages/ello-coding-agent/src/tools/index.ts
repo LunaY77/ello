@@ -1,8 +1,12 @@
 import type { AnyAgentTool } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
-import { makeApprovalPolicy } from '../permission/policy.js';
-import type { PermissionRule } from '../permissions.js';
+import {
+  genericApprovalFor,
+  makeApprovalPolicy,
+  type DecideApproval,
+} from '../permission/policy.js';
+import type { PermissionRule } from '../permission/types.js';
 
 import { createFsTools } from './fs.js';
 import { formatToolRegistry } from './registry.js';
@@ -26,8 +30,7 @@ export interface CreateCodingToolsOptions {
   readonly config: CodingAgentConfig;
   /** 动态权限规则读取器。 */
   readonly rules?: () => readonly PermissionRule[];
-  /** 重复拒绝计数表，命中阈值后直接 denied。 */
-  readonly denied?: ReadonlyMap<string, number>;
+  readonly decide?: DecideApproval;
 }
 
 /**
@@ -39,19 +42,17 @@ export function createCodingTools(
   options: CreateCodingToolsOptions,
 ): AnyAgentTool[] {
   const { config } = options;
-  const approval: ApprovalFor = makeApprovalPolicy(
-    config,
-    options.rules ?? (() => []),
-    options.denied,
-  );
+  const decide =
+    options.decide ?? makeApprovalPolicy(config, options.rules ?? (() => []));
+  const approval: ApprovalFor = genericApprovalFor(decide);
   const disabled = new Set(config.tools.disabled);
   const outputStore = new SessionToolOutputStore(config.sessionDir);
 
   const codingTools = [
-    ...createFsTools(config, approval),
-    ...createSearchTools(config, approval),
-    ...createShellTools(config, approval),
-    ...(canFetch(config) ? [webFetchTool(config, approval)] : []),
+    ...createFsTools(config, decide),
+    ...createSearchTools(config, decide),
+    ...createShellTools(config, decide),
+    ...(canFetch(config) ? [webFetchTool(config, decide)] : []),
   ];
 
   return [
@@ -67,3 +68,4 @@ export function describeCodingTools(): string {
 }
 
 export type { ApprovalFor } from './shared.js';
+export type { DecideApproval } from '../permission/policy.js';

@@ -8,7 +8,11 @@ import {
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
-import { applyPermissionPolicy, type PermissionRule } from '../permissions.js';
+import {
+  makeApprovalPolicy,
+  type DecideApproval,
+} from '../permission/policy.js';
+import type { PermissionRule } from '../permissions.js';
 import type { ProviderRegistry } from '../provider/index.js';
 import type { JsonlSessionStore } from '../session/jsonl-store.js';
 
@@ -20,10 +24,7 @@ import { runSubagent } from './subagent-run.js';
 /** delegate 工具上抛给会话运行时的产品事件回调。 */
 export interface DelegateToolHooks {
   /** subagent 内核事件透传（带 runId），TUI 据此显示子代理状态。 */
-  readonly onEvent: (
-    runId: string,
-    event: AgentStreamEvent,
-  ) => void;
+  readonly onEvent: (runId: string, event: AgentStreamEvent) => void;
   readonly onStarted: (info: {
     readonly runId: string;
     readonly agentName: string;
@@ -79,6 +80,10 @@ export function createDelegateTool(
   options: CreateDelegateToolOptions,
 ): AgentTool<DelegateInput, string> {
   const delegatable = options.registry.delegatable();
+  const decide: DecideApproval = makeApprovalPolicy(
+    options.config,
+    options.rules,
+  );
   const description = [
     'Delegate a self-contained task to a named subagent running in a parent-scoped sidechain.',
     'Available subagents:',
@@ -90,22 +95,21 @@ export function createDelegateTool(
     name: 'delegate_to_subagent',
     description,
     input: DelegateInputSchema,
-    approval: (input: DelegateInput) => ({
-      action: applyPermissionPolicy({
-        toolName: 'delegate_to_subagent',
-        input,
-        cwd: options.config.cwd,
-        allowedPaths: options.config.allowedPaths,
-        mode: options.config.approvalMode,
-        rules: [...options.config.permissionRules, ...options.rules()],
-      }),
-      metadata: {
-        kind: 'subagent',
-        agentName: input.name,
-        description: input.description,
-        background: input.background ?? false,
-      },
-    }),
+    approval: (input: DelegateInput, ctx) =>
+      decide(
+        {
+          permission: 'task',
+          patterns: [input.name],
+          always: [input.name],
+          metadata: {
+            kind: 'task',
+            agentName: input.name,
+            description: input.description,
+            background: input.background ?? false,
+          },
+        },
+        ctx,
+      ),
     execute: async (input: DelegateInput, ctx) => {
       const definition = options.registry.get(input.name);
       if (!delegatable.some((def) => def.name === input.name)) {

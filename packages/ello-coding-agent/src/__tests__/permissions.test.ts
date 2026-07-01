@@ -6,7 +6,8 @@ import type { DeferredApprovalItem } from '@ello/agent';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { RulesStore } from '../permission/rules-store.js';
-import { evaluateToolPermission, type PermissionRule } from '../permissions.js';
+import type { PermissionRule } from '../permission/types.js';
+import { evaluatePermission } from '../permissions.js';
 import { projectPermissionsFile } from '../session/paths.js';
 
 const dirs: string[] = [];
@@ -24,23 +25,22 @@ async function tempDir(): Promise<string> {
 }
 
 describe('permission policy', () => {
-  it('uses the last matching rule', async () => {
-    const cwd = await tempDir();
+  it('uses the last matching rule', () => {
     const rules: PermissionRule[] = [
-      { action: 'allow', tool: 'bash', scope: 'project' },
-      { action: 'deny', tool: 'bash', scope: 'project' },
+      { permission: 'bash', pattern: '**', action: 'allow', scope: 'project' },
+      {
+        permission: 'bash',
+        pattern: 'rm **',
+        action: 'deny',
+        scope: 'project',
+      },
     ];
 
-    expect(
-      evaluateToolPermission({
-        toolName: 'bash',
-        input: { command: 'echo hi' },
-        cwd,
-        allowedPaths: [cwd],
-        mode: 'default',
-        rules,
-      }),
-    ).toMatchObject({ action: 'deny' });
+    expect(evaluatePermission(rules, 'bash', 'rm -rf /tmp/x')).toBe('deny');
+  });
+
+  it('falls back to ask when nothing matches', () => {
+    expect(evaluatePermission([], 'web_fetch', 'example.com')).toBe('ask');
   });
 
   it('persists project approval rules as YAML using typed metadata', async () => {
@@ -52,9 +52,14 @@ describe('permission policy', () => {
       toolName: 'web_fetch',
       input: { url: 'https://example.com/a' },
       metadata: {
-        kind: 'network',
-        url: 'https://example.com/a',
-        domain: 'example.com',
+        permission: 'web_fetch',
+        patterns: ['example.com'],
+        always: ['example.com'],
+        request: {
+          kind: 'network',
+          url: 'https://example.com/a',
+          domain: 'example.com',
+        },
       },
     };
 
@@ -62,7 +67,8 @@ describe('permission policy', () => {
 
     const text = await readFile(projectPermissionsFile(cwd), 'utf8');
     expect(text).toContain('rules:');
-    expect(text).toContain('domain: example.com');
+    expect(text).toContain('permission: web_fetch');
+    expect(text).toContain('pattern: example.com');
     expect(text).not.toContain('[');
 
     const reloaded = new RulesStore(cwd);
@@ -70,8 +76,8 @@ describe('permission policy', () => {
     expect(reloaded.rules()).toEqual([
       expect.objectContaining({
         action: 'allow',
-        tool: 'web_fetch',
-        domain: 'example.com',
+        permission: 'web_fetch',
+        pattern: 'example.com',
       }),
     ]);
   });

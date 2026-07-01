@@ -1,47 +1,172 @@
 import type { AgentApprovalDecision, AgentToolContext } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
-import { applyPermissionPolicy, type PermissionRule } from '../permissions.js';
+
+import {
+  defaultRulesetForMode,
+  evaluatePermission,
+  isExternalPath,
+} from './engine.js';
+import type {
+  PermissionDescriptor,
+  PermissionMetadata,
+  PermissionRule,
+} from './types.js';
+
+export type DecideApproval = (
+  descriptor: PermissionDescriptor,
+  ctx: AgentToolContext,
+) => AgentApprovalDecision;
 
 /**
- * 审批策略工厂。
+ * 把工具声明的 PermissionDescriptor 判定成 @ello/agent 的审批动作。
  *
- * 审批的“暂停/恢复机制”由 `@ello/agent` 的 `approval` hook + deferred/resume
- * 负责，本模块只产出**判定函数**：给定工具名 + 配置 + 当前规则集，返回内核
- * 期望的 `'auto' | 'required' | 'denied'`。
- *
- * 判定逻辑复用 `permissions.ts` 里成熟的 `applyPermissionPolicy`（包含模式短路、
- * 显式规则命中、只读工具放行、accept-edits 放行编辑、重复拒绝降级等分支），
- * 这里只做“按工具名 + 动态规则”的薄封装，方便每个工具在 `defineTool` 里挂上。
- *
- * @param config 当前运行时配置（提供 cwd / allowedPaths / approvalMode）。
- * @param rules  动态规则读取器；通常来自 {@link RulesStore}，每次判定实时取。
- * @param denied 可选的“重复拒绝计数”表，命中阈值后直接 denied（防止模型反复试同一操作）。
- * @returns 一个按工具名生成 approval 函数的高阶函数。
+ * 判定顺序是：先看工具自身 permission/pattern，再看 paths 派生出的
+ * external_directory；任一 deny 直接拒绝，存在 ask 则进入人工审批。
  */
 export function makeApprovalPolicy(
   config: CodingAgentConfig,
-  rules: () => readonly PermissionRule[],
-  denied?: ReadonlyMap<string, number>,
-) {
+  dynamicRules: () => readonly PermissionRule[],
+): DecideApproval {
+  return (descriptor: PermissionDescriptor): AgentApprovalDecision => {
+    assertDescriptor(descriptor);
+    const rules: PermissionRule[] = [
+      ...defaultRulesetForMode(config.approvalMode),
+      ...config.tools.needApproval.map(toolNeedApprovalRule),
+      ...config.permissionRules,
+      ...dynamicRules(),
+    ];
+
+    let needsApproval = false;
+    for (const pattern of descriptor.patterns) {
+      const action = evaluatePermission(rules, descriptor.permission, pattern);
+      if (action === 'deny') {
+        return buildDecision('denied', descriptor);
+      }
+      if (action === 'ask') {
+        needsApproval = true;
+      }
+    }
+
+    const externalDirs = externalPaths(config.cwd, descriptor.paths ?? []);
+    for (const externalDir of externalDirs) {
+      const action = evaluatePermission(
+        rules,
+        'external_directory',
+        externalDir,
+      );
+      if (action === 'deny') {
+        return buildDecision('denied', descriptor, externalDirs);
+      }
+      if (action === 'ask') {
+        needsApproval = true;
+      }
+    }
+
+    if (needsApproval) {
+      return buildDecision('required', descriptor, externalDirs);
+    }
+    return 'auto';
+  };
+}
+
+/** 给通用工具提供最小 descriptor，使它们进入同一套权限引擎。 */
+export function genericApprovalFor(
+  decide: DecideApproval,
+): (
+  toolName: string,
+) => (input: never, ctx: AgentToolContext) => AgentApprovalDecision {
   return (toolName: string) =>
-    (input: unknown, _ctx: AgentToolContext): AgentApprovalDecision =>
-      applyPermissionPolicy({
-        toolName,
-        input,
-        cwd: config.cwd,
-        allowedPaths: config.allowedPaths,
-        mode: config.approvalMode,
-        rules: [
-          ...config.tools.needApproval.map((tool) => ({
-            action: 'ask' as const,
-            tool,
-            scope: 'user' as const,
-            reason: 'configured in tools.needApproval',
-          })),
-          ...config.permissionRules,
-          ...rules(),
-        ],
-        ...(denied !== undefined ? { repeatedDenials: denied } : {}),
-      });
+    (input: never, ctx: AgentToolContext): AgentApprovalDecision =>
+      decide(
+        {
+          permission: derivePermission(toolName),
+          patterns: [toolName],
+          always: [toolName],
+          metadata: {
+            kind: 'generic',
+            inputPreview: previewInput(input),
+          },
+        },
+        ctx,
+      );
+}
+
+export interface ApprovalPolicyMetadata {
+  readonly permission: string;
+  readonly patterns: readonly string[];
+  readonly always: readonly string[];
+  readonly externalDirs?: readonly string[];
+  readonly request: PermissionMetadata;
+}
+
+/** required/denied 的 metadata 是后续 TUI 展示和 RulesStore 落盘的协议。 */
+function buildDecision(
+  action: 'required' | 'denied',
+  descriptor: PermissionDescriptor,
+  externalDirs: readonly string[] = [],
+): AgentApprovalDecision {
+  return {
+    action,
+    metadata: {
+      permission: descriptor.permission,
+      patterns: descriptor.patterns,
+      always: descriptor.always,
+      ...(externalDirs.length > 0 ? { externalDirs } : {}),
+      request: descriptor.metadata,
+    } satisfies ApprovalPolicyMetadata as unknown as Record<string, unknown>,
+  };
+}
+
+/** 工具没有声明完整 descriptor 属于编程错误，直接 fail fast。 */
+function assertDescriptor(descriptor: PermissionDescriptor): void {
+  if (descriptor.permission.length === 0) {
+    throw new Error('Permission descriptor has empty permission.');
+  }
+  if (descriptor.patterns.length === 0) {
+    throw new Error(
+      `Permission descriptor for ${descriptor.permission} has no patterns.`,
+    );
+  }
+  if (descriptor.always.length === 0) {
+    throw new Error(
+      `Permission descriptor for ${descriptor.permission} has no always patterns.`,
+    );
+  }
+}
+
+/** tools.needApproval 作为显式 ask 规则进入同一套 last-match 引擎。 */
+function toolNeedApprovalRule(toolName: string): PermissionRule {
+  return {
+    permission: derivePermission(toolName),
+    pattern: toolName,
+    action: 'ask',
+    scope: 'user',
+    source: 'tools.needApproval',
+  };
+}
+
+/** 工具名到权限类别的产品层映射。 */
+function derivePermission(toolName: string): string {
+  if (toolName === 'read' || toolName === 'ls') return 'read';
+  if (toolName === 'grep' || toolName === 'glob') return 'search';
+  if (toolName === 'write' || toolName === 'edit') return 'edit';
+  if (toolName === 'bash') return 'bash';
+  if (toolName === 'web_fetch') return 'web_fetch';
+  if (toolName.startsWith('task_')) return 'task';
+  if (toolName.startsWith('workspace_')) return 'edit';
+  return toolName;
+}
+
+/** 只返回 workspace 外路径，具体是否允许交给 external_directory 规则判定。 */
+function externalPaths(cwd: string, targets: readonly string[]): string[] {
+  return [...new Set(targets.filter((target) => isExternalPath(cwd, target)))];
+}
+
+function previewInput(input: unknown): string {
+  if (input === undefined || input === null) {
+    return '-';
+  }
+  const text = typeof input === 'string' ? input : JSON.stringify(input);
+  return text.length > 200 ? `${text.slice(0, 200)}...` : text;
 }

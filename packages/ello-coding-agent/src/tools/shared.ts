@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 import type {
   AgentApprovalDecision,
   AgentFileSystem,
@@ -34,13 +32,7 @@ export function truncate(value: string): string {
     : value;
 }
 
-/**
- * 取出环境的文件系统能力。
- *
- * 优先用 `ctx.environment.fileSystem`（`createLocalShellEnvironment` 已内置
- * allowedPaths 边界检查），缺省回退到 `files`；都没有则抛出清晰错误，
- * 避免每个工具各自再实现一套路径解析，消除与内核能力的重复。
- */
+/** 取出环境的文件系统能力；所有路径边界检查都应委托给运行时环境。 */
 export function requireFs(ctx: AgentToolContext): AgentFileSystem {
   const fs = ctx.environment.fileSystem ?? ctx.environment.files;
   if (fs === undefined) {
@@ -82,29 +74,26 @@ export function createPreviewDiff(
   );
 }
 
-/**
- * 在 allowedPaths 内解析一个工作区路径（仅供 search 工具用）。
- *
- * 搜索工具需要一个具体目录来做内容搜索 / 遍历，而环境未暴露“搜索原语”，
- * 所以这里保留一份最小的边界检查；fs / shell 类操作一律走 `ctx.environment`。
- */
-export function resolveWorkspacePath(
-  cwd: string,
-  allowedPaths: readonly string[],
+/** 将运行时路径解析成绝对路径；缺少能力说明环境装配错误。 */
+export function resolveRuntimePath(
+  fs: AgentFileSystem,
   targetPath: string,
 ): string {
-  const resolved = path.isAbsolute(targetPath)
-    ? path.resolve(targetPath)
-    : path.resolve(cwd, targetPath);
-  const allowed = allowedPaths.some((root) => {
-    const relative = path.relative(root, resolved);
-    return (
-      relative === '' ||
-      (!relative.startsWith('..') && !path.isAbsolute(relative))
-    );
-  });
-  if (!allowed) {
-    throw new Error(`Path not allowed: ${resolved}`);
+  const resolver = (fs as { resolvePath?: unknown }).resolvePath;
+  if (typeof resolver !== 'function') {
+    throw new Error('Runtime file system does not expose resolvePath.');
   }
-  return resolved;
+  return resolver.call(fs, targetPath) as string;
+}
+
+/** 读取运行时路径状态；搜索和 read 需要用它区分目录与文件。 */
+export async function statRuntimePath(
+  fs: AgentFileSystem,
+  targetPath: string,
+): Promise<{ isDirectory(): boolean }> {
+  const statFn = (fs as { stat?: unknown }).stat;
+  if (typeof statFn !== 'function') {
+    throw new Error('Runtime file system does not expose stat.');
+  }
+  return statFn.call(fs, targetPath) as Promise<{ isDirectory(): boolean }>;
 }

@@ -21,8 +21,6 @@ describe('AgentRegistry', () => {
     expect(registry.get('plan').mode).toBe('primary');
     expect(registry.get('explore').mode).toBe('subagent');
     expect(registry.get('explore').source).toBe('bundled');
-    expect(registry.get('general').mode).toBe('subagent');
-    expect(registry.get('general').source).toBe('bundled');
     expect(registry.get('title').mode).toBe('internal');
     expect(registry.get('compact').mode).toBe('internal');
     expect(registry.get('summary').mode).toBe('internal');
@@ -46,7 +44,6 @@ describe('AgentRegistry', () => {
     const registry = await makeRegistry();
     const delegatable = registry.delegatable();
     expect(delegatable.some((d) => d.name === 'explore')).toBe(true);
-    expect(delegatable.some((d) => d.name === 'general')).toBe(true);
     expect(delegatable.some((d) => d.name === 'build')).toBe(false);
     expect(delegatable.some((d) => d.name === 'compact')).toBe(false);
   });

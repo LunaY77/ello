@@ -76,6 +76,7 @@ const APPROVAL_OPTIONS = [
   { label: 'Allow once', value: 'once' },
   { label: 'Always allow (session)', value: 'session' },
   { label: 'Always allow (project)', value: 'project' },
+  { label: 'Always allow (user)', value: 'user' },
   { label: 'Deny', value: 'deny' },
 ];
 
@@ -371,15 +372,9 @@ export function OverlayHost({
             overlay.agents.slice(0, 12).map((agent) => (
               <Box key={agent.name} flexDirection="column">
                 <Text color={tokyoNight.foreground}>
-                  <Text color={tokyoNight.muted}>
-                    {agent.name.padEnd(14)}
-                  </Text>
-                  <Text color={tokyoNight.cyan}>
-                    {agent.source.padEnd(9)}
-                  </Text>
-                  <Text color={tokyoNight.yellow}>
-                    {agent.role.padEnd(8)}
-                  </Text>
+                  <Text color={tokyoNight.muted}>{agent.name.padEnd(14)}</Text>
+                  <Text color={tokyoNight.cyan}>{agent.source.padEnd(9)}</Text>
+                  <Text color={tokyoNight.yellow}>{agent.role.padEnd(8)}</Text>
                   <Text>{clip(agent.description, 56)}</Text>
                 </Text>
                 <Text color={tokyoNight.muted}>
@@ -512,6 +507,8 @@ function toDecision(value: string): ApprovalDecision {
       return { action: 'always_allow', scope: 'session' };
     case 'project':
       return { action: 'always_allow', scope: 'project' };
+    case 'user':
+      return { action: 'always_allow', scope: 'user' };
     case 'deny':
       return { action: 'deny' };
     default:
@@ -525,17 +522,67 @@ function ApprovalRequestPreview({
   readonly request: ApprovalView;
 }) {
   const metadata = request.metadata ?? {};
-  const path = readMetadataString(metadata, 'path');
-  const command = readMetadataString(metadata, 'command');
-  const url = readMetadataString(metadata, 'url');
-  if (path !== '') {
-    return <Text color={tokyoNight.muted}>{path}</Text>;
+  const kind = readMetadataString(metadata, 'kind');
+  if (kind === 'read' || kind === 'search' || kind === 'edit') {
+    const path = readMetadataString(metadata, 'path');
+    const pattern = readMetadataString(metadata, 'pattern');
+    const diff = readMetadataString(metadata, 'diff');
+    if (kind === 'edit' && diff !== '') {
+      return (
+        <Text color={tokyoNight.muted} wrap="wrap">
+          {diff}
+        </Text>
+      );
+    }
+    if (path !== '') {
+      return <Text color={tokyoNight.muted}>{path}</Text>;
+    }
+    if (pattern !== '') {
+      return <Text color={tokyoNight.muted}>{pattern}</Text>;
+    }
   }
-  if (command !== '') {
-    return <Text color={tokyoNight.muted}>{`$ ${command}`}</Text>;
+  if (kind === 'shell') {
+    const command = readMetadataString(metadata, 'command');
+    const cwd = readMetadataString(metadata, 'cwd');
+    const risk = readMetadataString(metadata, 'risk');
+    if (command !== '') {
+      return (
+        <Text color={tokyoNight.muted} wrap="wrap">
+          {`${risk === 'dangerous' ? '[danger] ' : ''}$ ${command} @ ${cwd}`}
+        </Text>
+      );
+    }
   }
-  if (url !== '') {
-    return <Text color={tokyoNight.muted}>{url}</Text>;
+  if (kind === 'network') {
+    const url = readMetadataString(metadata, 'url');
+    const domain = readMetadataString(metadata, 'domain');
+    if (url !== '' || domain !== '') {
+      return (
+        <Text
+          color={tokyoNight.muted}
+        >{`${domain !== '' ? domain : url}`}</Text>
+      );
+    }
+  }
+  if (kind === 'task') {
+    const agentName = readMetadataString(metadata, 'agentName');
+    const description = readMetadataString(metadata, 'description');
+    if (agentName !== '' || description !== '') {
+      return (
+        <Text color={tokyoNight.muted} wrap="wrap">
+          {`${agentName}: ${description}`}
+        </Text>
+      );
+    }
+  }
+  if (kind === 'external_directory') {
+    const paths = readMetadataList(metadata, 'paths');
+    if (paths.length > 0) {
+      return <Text color={tokyoNight.muted}>{paths.join(', ')}</Text>;
+    }
+  }
+  if (kind !== '') {
+    return <Text color={tokyoNight.muted}>{kind}</Text>;
   }
   return (
     <Text color={tokyoNight.muted} wrap="wrap">
@@ -550,6 +597,16 @@ function readMetadataString(
 ): string {
   const value = metadata[key];
   return typeof value === 'string' ? value : '';
+}
+
+function readMetadataList(
+  metadata: Record<string, unknown>,
+  key: string,
+): string[] {
+  const value = metadata[key];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 /** 入参预览（截断）。 */

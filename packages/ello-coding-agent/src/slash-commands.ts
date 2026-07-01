@@ -1,5 +1,4 @@
-import type { CodingAgentConfig } from './config/index.js';
-import type { PermissionMode } from './permissions.js';
+import type { ApprovalMode, CodingAgentConfig } from './config/index.js';
 import { describeCodingTools } from './tools/index.js';
 
 /** slash command 的运行上下文。 */
@@ -38,7 +37,7 @@ export type CommandResult =
       readonly args?: string[];
     }
   | { readonly type: 'set-profile'; readonly profile: string }
-  | { readonly type: 'set-permission-mode'; readonly mode: PermissionMode }
+  | { readonly type: 'set-permission-mode'; readonly mode: ApprovalMode }
   | { readonly type: 'submit'; readonly prompt: string };
 
 /** slash command 定义。 */
