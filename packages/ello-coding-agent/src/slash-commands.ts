@@ -20,6 +20,7 @@ export type CommandResult =
         | 'settings'
         | 'skills'
         | 'tasks'
+        | 'theme'
         | 'workspace'
         | 'permission-rules';
     }
@@ -199,6 +200,11 @@ export const slashCommands: readonly SlashCommand[] = [
     name: 'export',
     description: 'Export session',
     run: (_ctx, args) => ({ type: 'runtime-action', action: 'export', args }),
+  },
+  {
+    name: 'theme',
+    description: 'Switch UI theme',
+    run: () => ({ type: 'open-overlay', overlay: 'theme' }),
   },
   {
     name: 'quit',

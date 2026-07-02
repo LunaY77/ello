@@ -17,17 +17,37 @@ import {
   type RuntimeProfileSuite,
 } from '../provider/index.js';
 import type { CodingSession, ApprovalDecision } from '../runtime/index.js';
-import { loadCodingSkills } from '../skills/index.js';
 import { handleSlashCommand, type CommandResult } from '../slash-commands.js';
-import { createTaskService } from '../tasks/index.js';
-import { WorkspaceStore } from '../workspace/index.js';
 
 import { completeInput } from './completion.js';
-import { AppShell } from './components/AppShell.js';
-import { Composer } from './components/Composer.js';
-import type { SelectOption } from './components/InlineSelect.js';
+import { AppShell } from './component/AppShell.js';
+import { Composer } from './component/Composer.js';
+import {
+  OverlayHost,
+  type OverlayState,
+  type RewindTarget,
+} from './component/OverlayHost.js';
+import { TerminalHistoryOutput } from './component/TerminalHistoryOutput.js';
 import { useRuntimeEvents } from './hooks/use-runtime-events.js';
-import { OverlayHost, type OverlayState } from './overlays/OverlayHost.js';
+import {
+  loadSkillsOverlay,
+  loadTasksOverlay,
+  loadWorkspaceOverlay,
+} from './overlay-loaders.js';
+import { detectTrigger, rankCandidates } from './store/autocomplete.js';
+import type { HistoryEntry } from './store/history-entry.js';
+import {
+  hasFileParts,
+  parsePromptParts,
+  serializeForModel,
+} from './store/prompt-parts.js';
+import {
+  defaultThemeName,
+  resolveTheme,
+  ThemeProvider,
+  type ThemeName,
+} from './theme/index.js';
+import type { SelectOption } from './ui/List.js';
 
 export interface CodingAgentAppProps {
   readonly session: CodingSession;
@@ -42,20 +62,23 @@ export interface CodingAgentAppProps {
  */
 export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   const { exit } = useApp();
-  const { state, pushUser } = useRuntimeEvents(session);
+  const { state, clearCount, historyResetKey, pushUser } =
+    useRuntimeEvents(session);
   const [runtimeConfig, setRuntimeConfig] = useState(config);
   const [overlay, setOverlay] = useState<OverlayState>({ type: 'none' });
   const [input, setInput] = useState('');
+  const [themeName, setThemeName] = useState<ThemeName>(defaultThemeName);
   const [profile, setProfile] = useState(runtimeConfig.active_profile);
   const [primaryModel, setPrimaryModel] = useState(() =>
     currentPrimaryModel(runtimeConfig),
   );
   const [fileSuggestions, setFileSuggestions] = useState<readonly string[]>([]);
   const [workingSeconds, setWorkingSeconds] = useState(0);
-  const [lastWorkedFor, setLastWorkedFor] = useState<string | undefined>();
   const [inputHistory, setInputHistory] = useState<readonly string[]>([]);
   const [pendingSteers, setPendingSteers] = useState<readonly string[]>([]);
-  const shouldCompleteFiles = input.trimStart().startsWith('@');
+  const activeTrigger = detectTrigger(currentLineBeforeCursor(input));
+  const fileQuery =
+    activeTrigger?.kind === 'file' ? activeTrigger.query : undefined;
   const profileOptions = useMemo(
     () => buildProfileSelectorOptions(runtimeConfig),
     [runtimeConfig],
@@ -89,19 +112,38 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   }, [session]);
 
   useEffect(() => {
-    if (!shouldCompleteFiles) {
+    if (clearCount === 0) {
+      return;
+    }
+    queueMicrotask(() => {
+      setOverlay({ type: 'none' });
+      setInput('');
+      setFileSuggestions([]);
+      setWorkingSeconds(0);
+      setPendingSteers([]);
+    });
+  }, [clearCount]);
+
+  useEffect(() => {
+    if (fileQuery === undefined) {
       return;
     }
     let active = true;
-    void completeFiles(input, config.cwd).then((items) => {
-      if (active) {
-        setFileSuggestions(items);
-      }
-    });
+    void completeFiles(fileQuery, config.cwd)
+      .then((items) => {
+        if (active) {
+          setFileSuggestions(items);
+        }
+      })
+      .catch((error) => {
+        session.notify(
+          `File completion failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
     return () => {
       active = false;
     };
-  }, [config.cwd, input, shouldCompleteFiles]);
+  }, [config.cwd, fileQuery, session]);
 
   useEffect(() => {
     if (state.status !== 'running') {
@@ -114,9 +156,6 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
     }, 250);
     return () => {
       clearInterval(timer);
-      setLastWorkedFor(
-        formatDuration(Math.max(0, Math.floor((Date.now() - started) / 1000))),
-      );
       setPendingSteers([]);
     };
   }, [state.status]);
@@ -139,20 +178,14 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
           setOverlay({ type: 'help' });
         } else if (command.overlay === 'settings') {
           setOverlay({ type: 'settings', config: runtimeConfig });
+        } else if (command.overlay === 'theme') {
+          setOverlay({ type: 'theme', active: themeName });
         } else if (command.overlay === 'tasks') {
-          void createTaskService()
-            .list()
-            .then((tasks) => setOverlay({ type: 'tasks', tasks }));
+          void loadTasksOverlay().then(setOverlay);
         } else if (command.overlay === 'skills') {
-          void loadCodingSkills(runtimeConfig).then((skills) =>
-            setOverlay({ type: 'skills', skills }),
-          );
+          void loadSkillsOverlay(runtimeConfig).then(setOverlay);
         } else if (command.overlay === 'workspace') {
-          void new WorkspaceStore()
-            .list()
-            .then((workspaces) =>
-              setOverlay({ type: 'workspace', workspaces }),
-            );
+          void loadWorkspaceOverlay().then(setOverlay);
         } else if (command.overlay === 'session-selector') {
           void session
             .listSessions()
@@ -190,7 +223,10 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         } else if (command.action === 'rewind') {
           const entryId = command.args?.[0];
           if (entryId === undefined) {
-            session.notify('Usage: /rewind <user-entry-id>');
+            setOverlay({
+              type: 'rewind-selector',
+              targets: buildRewindTargets(state.history),
+            });
             return;
           }
           void session
@@ -229,20 +265,16 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
 
   /** 处理 Composer 的一次提交。 */
   const onSubmit = (value: string): void => {
-    const prompt = value.trim();
-    if (prompt === '') {
+    const commandInput = value.trim();
+    if (commandInput === '') {
       return;
     }
-    rememberInput(prompt);
-    if (prompt.startsWith('!')) {
-      void runShellEscape(prompt.slice(1).trim());
+    rememberInput(value);
+    if (commandInput.startsWith('!')) {
+      void runShellEscape(commandInput.slice(1).trim());
       return;
     }
-    if (prompt.startsWith('@')) {
-      void submitFileReference(prompt);
-      return;
-    }
-    const slash = handleSlashCommand(prompt, runtimeConfig);
+    const slash = handleSlashCommand(commandInput, runtimeConfig);
     if (slash.handled) {
       if (slash.command !== undefined) {
         runCommand(slash.command);
@@ -253,12 +285,11 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
     }
     if (state.status === 'running') {
       // 运行中提交 = steer（缓冲到下一轮）。
-      setPendingSteers((current) => [...current, prompt]);
-      session.steer(prompt);
+      setPendingSteers((current) => [...current, value]);
+      session.steer(value);
       return;
     }
-    pushUser(prompt);
-    void session.submit(prompt);
+    void submitPrompt(value);
   };
 
   const runShellEscape = async (command: string): Promise<void> => {
@@ -272,9 +303,16 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
     session.notify(output);
   };
 
-  async function submitFileReference(prompt: string): Promise<void> {
+  async function submitPrompt(prompt: string): Promise<void> {
     try {
-      const expanded = await expandFileReference(prompt, runtimeConfig.cwd);
+      const parts = parsePromptParts(prompt);
+      const expanded = hasFileParts(parts)
+        ? await serializeForModel(parts, {
+            cwd: runtimeConfig.cwd,
+            readFile: (absolutePath) => readFile(absolutePath, 'utf8'),
+            resolvePath: (cwd, relative) => resolvePromptPath(cwd, relative),
+          })
+        : prompt;
       pushUser(prompt);
       void session.submit(expanded);
     } catch (error) {
@@ -357,6 +395,24 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         `Resume failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     });
+  };
+
+  const onSelectRewind = (entryId: string): void => {
+    setOverlay({ type: 'none' });
+    void session
+      .rewind(entryId)
+      .then((prompt) => setInput(prompt))
+      .catch((error) => {
+        session.notify(
+          `Rewind failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  };
+
+  const selectTheme = (nextTheme: ThemeName): void => {
+    resolveTheme(nextTheme);
+    setThemeName(nextTheme);
+    setOverlay({ type: 'none' });
   };
 
   async function exportCurrentSession(formatArg: string | undefined) {
@@ -623,70 +679,65 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   }
 
   const runningTools = useMemo(
-    () => [...state.runningTools.values()],
-    [state.runningTools],
+    () => [...state.live.runningTools.values()],
+    [state.live.runningTools],
   );
   const runningSubagents = useMemo(
-    () => [...state.runningSubagents.values()],
-    [state.runningSubagents],
+    () => [...state.live.runningSubagents.values()],
+    [state.live.runningSubagents],
   );
 
   const suggestions = useMemo(
     () => completeInput(input, profileSelections, fileSuggestions),
     [fileSuggestions, input, profileSelections],
   );
+  const historyEntries = useMemo<readonly HistoryEntry[]>(
+    () => [
+      {
+        kind: 'session_header',
+        id: 'session-header',
+        cwd: runtimeConfig.cwd,
+        profile,
+        model: primaryModel,
+        approvalMode: runtimeConfig.approvalMode,
+      },
+      ...state.history,
+    ],
+    [
+      primaryModel,
+      profile,
+      runtimeConfig.approvalMode,
+      runtimeConfig.cwd,
+      state.history,
+    ],
+  );
 
   return (
-    <AppShell
-      cwd={runtimeConfig.cwd}
-      profile={`${profile} / ${primaryModel}`}
-      approvalMode={runtimeConfig.approvalMode}
-      transcript={state.transcript}
-      liveAssistantText={state.liveAssistantText}
-      runningTools={runningTools}
-      runningSubagents={runningSubagents}
-      running={state.status === 'running'}
-      workingSeconds={workingSeconds}
-      pendingSteers={pendingSteers}
-      {...(state.status !== 'running' && lastWorkedFor !== undefined
-        ? { workedFor: lastWorkedFor }
-        : {})}
-      {...(state.interruptNotice !== undefined
-        ? { interruptNotice: state.interruptNotice }
-        : {})}
-      {...(state.usage !== undefined ? { usage: state.usage } : {})}
-      overlay={
-        <OverlayHost
-          overlay={
-            effectiveOverlay.type === 'approval'
-              ? { type: 'none' }
-              : effectiveOverlay
-          }
-          onApprove={onApprove}
-          onSelectModel={(selected) => {
-            setOverlay({ type: 'none' });
-            applyPrimaryModelSelection(selected);
-          }}
-          onSelectProfile={(selected) => {
-            openProfileDetail(selected);
-          }}
-          onCreateProfile={openCreateProfile}
-          onRequestDeleteProfile={requestDeleteProfile}
-          onConfirmDeleteProfile={deleteProfile}
-          onActivateProfile={activateProfile}
-          onSubmitNewProfile={createProfile}
-          onSelectProfileRole={openRoleModelCatalog}
-          onBindProfileRoleModel={applyProfileRoleModelSelection}
-          onOpenProfiles={openProfiles}
-          onSaveProfile={saveProfile}
-          onSelectSession={onSelectSession}
-        />
-      }
-      composer={
-        effectiveOverlay.type === 'approval' ? (
+    <ThemeProvider theme={resolveTheme(themeName)}>
+      <TerminalHistoryOutput
+        entries={historyEntries}
+        resetKey={historyResetKey}
+      />
+      <AppShell
+        profile={`${profile} / ${primaryModel}`}
+        approvalMode={runtimeConfig.approvalMode}
+        liveAssistantText={state.live.assistantText}
+        runningTools={runningTools}
+        runningSubagents={runningSubagents}
+        running={state.status === 'running'}
+        workingSeconds={workingSeconds}
+        pendingSteers={pendingSteers}
+        {...(state.interruptNotice !== undefined
+          ? { interruptNotice: state.interruptNotice }
+          : {})}
+        {...(state.usage !== undefined ? { usage: state.usage } : {})}
+        overlay={
           <OverlayHost
-            overlay={effectiveOverlay}
-            marginTop={0}
+            overlay={
+              effectiveOverlay.type === 'approval'
+                ? { type: 'none' }
+                : effectiveOverlay
+            }
             onApprove={onApprove}
             onSelectModel={(selected) => {
               setOverlay({ type: 'none' });
@@ -705,34 +756,80 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
             onOpenProfiles={openProfiles}
             onSaveProfile={saveProfile}
             onSelectSession={onSelectSession}
+            onSelectRewind={onSelectRewind}
+            onSelectTheme={selectTheme}
           />
-        ) : (
-          <Composer
-            running={state.status === 'running'}
-            isActive={effectiveOverlay.type === 'none'}
-            history={inputHistory}
-            value={input}
-            {...(suggestions !== undefined ? { suggestions } : {})}
-            onChange={(value) => {
-              setInput(value);
-              if (!value.trimStart().startsWith('@')) {
-                setFileSuggestions([]);
-              }
-            }}
-            onSubmit={onSubmit}
-            onCancel={cancelOrExit}
-            onEscape={escapeOverlayOrAbort}
-          />
-        )
-      }
-    />
+        }
+        composer={
+          effectiveOverlay.type === 'approval' ? (
+            <OverlayHost
+              overlay={effectiveOverlay}
+              marginTop={0}
+              onApprove={onApprove}
+              onSelectModel={(selected) => {
+                setOverlay({ type: 'none' });
+                applyPrimaryModelSelection(selected);
+              }}
+              onSelectProfile={(selected) => {
+                openProfileDetail(selected);
+              }}
+              onCreateProfile={openCreateProfile}
+              onRequestDeleteProfile={requestDeleteProfile}
+              onConfirmDeleteProfile={deleteProfile}
+              onActivateProfile={activateProfile}
+              onSubmitNewProfile={createProfile}
+              onSelectProfileRole={openRoleModelCatalog}
+              onBindProfileRoleModel={applyProfileRoleModelSelection}
+              onOpenProfiles={openProfiles}
+              onSaveProfile={saveProfile}
+              onSelectSession={onSelectSession}
+              onSelectRewind={onSelectRewind}
+              onSelectTheme={selectTheme}
+            />
+          ) : (
+            <Composer
+              running={state.status === 'running'}
+              isActive={effectiveOverlay.type === 'none'}
+              history={inputHistory}
+              value={input}
+              {...(suggestions !== undefined ? { suggestions } : {})}
+              onChange={(value) => {
+                setInput(value);
+                if (
+                  detectTrigger(currentLineBeforeCursor(value))?.kind !== 'file'
+                ) {
+                  setFileSuggestions([]);
+                }
+              }}
+              onSubmit={onSubmit}
+              onCancel={cancelOrExit}
+              onEscape={escapeOverlayOrAbort}
+            />
+          )
+        }
+      />
+    </ThemeProvider>
   );
 }
 
-function formatDuration(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+function buildRewindTargets(
+  history: readonly HistoryEntry[],
+): readonly RewindTarget[] {
+  return history.flatMap((entry, index) => {
+    if (entry.kind !== 'user') {
+      return [];
+    }
+    if (entry.entryId === undefined) {
+      return [];
+    }
+    return [
+      {
+        entryId: entry.entryId,
+        index: index + 1,
+        text: entry.text,
+      },
+    ];
+  });
 }
 
 function currentPrimaryModel(config: CodingAgentConfig): string {
@@ -851,11 +948,10 @@ function modelOption(model: RuntimeModel): SelectOption {
 }
 
 async function completeFiles(
-  input: string,
+  query: string,
   cwd: string,
 ): Promise<readonly string[]> {
-  const raw = input.trimStart().slice(1);
-  const normalized = raw.replace(/^["']/u, '');
+  const normalized = query.replace(/^["']/u, '');
   const partialDir = normalized.endsWith('/')
     ? normalized
     : path.dirname(normalized);
@@ -865,36 +961,31 @@ async function completeFiles(
   if (!isInside(cwd, dir)) {
     return [];
   }
-  try {
-    const entries = await readdir(dir, { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.name.startsWith(base))
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .slice(0, 8)
-      .map((entry) => {
-        const relativePath = path.join(relativeDir, entry.name);
-        return `@${relativePath}${entry.isDirectory() ? '/' : ''}`;
-      });
-  } catch {
-    return [];
-  }
+  const entries = await readdir(dir, { withFileTypes: true });
+  return rankCandidates(
+    base,
+    entries.map((entry) => entry.name),
+    { limit: 8 },
+  ).map((entry) => {
+    const dirent = entries.find((item) => item.name === entry);
+    if (dirent === undefined) {
+      throw new Error(`Missing directory entry: ${entry}`);
+    }
+    const relativePath = path.join(relativeDir, dirent.name);
+    return `@${relativePath}${dirent.isDirectory() ? '/' : ''}`;
+  });
 }
 
-async function expandFileReference(
-  input: string,
-  cwd: string,
-): Promise<string> {
-  const [fileToken = '', ...rest] = input.trim().split(/\s+/u);
-  const target = fileToken.slice(1);
-  const resolved = path.resolve(cwd, target);
+function currentLineBeforeCursor(input: string): string {
+  return input.split('\n').at(-1) ?? '';
+}
+
+function resolvePromptPath(cwd: string, relative: string): string {
+  const resolved = path.resolve(cwd, relative);
   if (!isInside(cwd, resolved)) {
     throw new Error(`Path not allowed: ${resolved}`);
   }
-  const content = await readFile(resolved, 'utf8');
-  const tail = rest.join(' ');
-  const instruction =
-    tail.length > 0 ? tail : 'Use this file as context for the next answer.';
-  return `${instruction}\n\n<attached-file path="${path.relative(cwd, resolved)}">\n${content}\n</attached-file>`;
+  return resolved;
 }
 
 function formatShellResult(

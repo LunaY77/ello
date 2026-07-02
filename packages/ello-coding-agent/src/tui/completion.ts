@@ -1,6 +1,5 @@
-import { slashCommands } from '../slash-commands.js';
-
-import type { ComposerSuggestion } from './components/Composer.js';
+import { buildCommands } from './commands/registry.js';
+import type { ComposerSuggestion } from './component/Composer.js';
 
 export function completeInput(
   input: string,
@@ -16,21 +15,22 @@ export function completeInput(
   }
   if (trimmedLeft.startsWith('/')) {
     const query = trimmedLeft.slice(1).toLowerCase();
-    return slashCommands
+    return buildCommands()
       .filter(
         (command) =>
-          command.name.toLowerCase().startsWith(query) ||
-          command.aliases?.some((alias) =>
-            alias.toLowerCase().startsWith(query),
+          query === '' ||
+          command.slash.toLowerCase().startsWith(query) ||
+          command.keywords.some((keyword) =>
+            keyword.toLowerCase().startsWith(query),
           ),
       )
       .map((command) => ({
-        value: `/${command.name}`,
-        label: `/${command.name}`,
+        value: `/${command.slash}`,
+        label: `/${command.slash}`,
         description: command.description,
       }));
   }
-  if (trimmedLeft.startsWith('@')) {
+  if (files.length > 0) {
     return files;
   }
   return undefined;

@@ -11,9 +11,18 @@ import type { ApprovalDecision } from '../../runtime/intents.js';
 import type { JsonlSessionSummary } from '../../session/repository.js';
 import type { Task } from '../../tasks/index.js';
 import type { WorkspaceManifest } from '../../workspace/index.js';
-import { InlineSelect, type SelectOption } from '../components/InlineSelect.js';
-import type { ApprovalView } from '../state/view-reducer.js';
-import { tokyoNight } from '../tokyo-night.js';
+import type { ApprovalView } from '../store/history-entry.js';
+import {
+  buildPermissionView,
+  PROJECT_RULES_FILE,
+} from '../store/permission-view.js';
+import {
+  listThemes,
+  useTheme,
+  type TuiTheme,
+  type ThemeName,
+} from '../theme/index.js';
+import { InlineSelect, type SelectOption } from '../ui/List.js';
 
 /**
  * 浮层状态。
@@ -56,6 +65,7 @@ export type OverlayState =
     }
   | { readonly type: 'help' }
   | { readonly type: 'settings'; readonly config: CodingAgentConfig }
+  | { readonly type: 'theme'; readonly active: ThemeName }
   | {
       readonly type: 'agents';
       readonly agents: readonly CodingAgentDefinition[];
@@ -69,7 +79,17 @@ export type OverlayState =
   | {
       readonly type: 'session-selector';
       readonly sessions: readonly JsonlSessionSummary[];
+    }
+  | {
+      readonly type: 'rewind-selector';
+      readonly targets: readonly RewindTarget[];
     };
+
+export interface RewindTarget {
+  readonly entryId: string;
+  readonly index: number;
+  readonly text: string;
+}
 
 /** 审批浮层四个选项 → 决定。 */
 const APPROVAL_OPTIONS = [
@@ -104,7 +124,10 @@ export interface OverlayHostProps {
   /** 保存当前 profile suite。 */
   onSaveProfile(profile: string): void;
   /** session 选择回调。 */
-  onSelectSession?(sessionId: string): void;
+  onSelectSession(sessionId: string): void;
+  /** rewind target 选择回调。 */
+  onSelectRewind(entryId: string): void;
+  onSelectTheme(theme: ThemeName): void;
 }
 
 /**
@@ -128,8 +151,11 @@ export function OverlayHost({
   onBindProfileRoleModel,
   onOpenProfiles,
   onSaveProfile,
-  onSelectSession = () => {},
+  onSelectSession,
+  onSelectRewind,
+  onSelectTheme,
 }: OverlayHostProps) {
+  const theme = useTheme();
   useInput(
     (input) => {
       if (overlay.type === 'profile-detail' && input === 's') {
@@ -147,11 +173,11 @@ export function OverlayHost({
         <Box
           flexDirection="column"
           borderStyle="round"
-          borderColor={tokyoNight.yellow}
+          borderColor={theme.warning}
           paddingX={1}
         >
           <Text
-            color={tokyoNight.yellow}
+            color={theme.warning}
           >{`Approve ${overlay.request.toolName}?`}</Text>
           <ApprovalRequestPreview request={overlay.request} />
           <InlineSelect
@@ -166,23 +192,23 @@ export function OverlayHost({
         <Box
           flexDirection="column"
           borderStyle="round"
-          borderColor={tokyoNight.blue}
+          borderColor={theme.info}
           paddingX={1}
         >
-          <Text color={tokyoNight.cyan}>{overlay.title}</Text>
-          <Text color={tokyoNight.muted}>Model catalog</Text>
+          <Text color={theme.accent}>{overlay.title}</Text>
+          <Text color={theme.textMuted}>Model catalog</Text>
           <InlineSelect options={overlay.options} onChange={onSelectModel} />
-          <Text color={tokyoNight.muted}>Enter: select Esc: cancel</Text>
+          <Text color={theme.textMuted}>Enter: select Esc: cancel</Text>
         </Box>
       ) : null}
       {overlay.type === 'profiles' ? (
         <Box
           flexDirection="column"
           borderStyle="round"
-          borderColor={tokyoNight.blue}
+          borderColor={theme.info}
           paddingX={1}
         >
-          <Text color={tokyoNight.cyan}>Settings / Profiles</Text>
+          <Text color={theme.accent}>Settings / Profiles</Text>
           <InlineSelect
             options={overlay.options}
             onChange={onSelectProfile}
@@ -196,7 +222,7 @@ export function OverlayHost({
               }
             }}
           />
-          <Text color={tokyoNight.muted}>
+          <Text color={theme.textMuted}>
             Enter: open profile c: create d: delete f: active Esc: close
           </Text>
         </Box>
@@ -211,13 +237,11 @@ export function OverlayHost({
         <Box
           flexDirection="column"
           borderStyle="round"
-          borderColor={tokyoNight.red}
+          borderColor={theme.error}
           paddingX={1}
         >
-          <Text color={tokyoNight.red}>Delete profile</Text>
-          <Text color={tokyoNight.foreground}>
-            {`Profile: ${overlay.profile}`}
-          </Text>
+          <Text color={theme.error}>Delete profile</Text>
+          <Text color={theme.text}>{`Profile: ${overlay.profile}`}</Text>
           <InlineSelect
             options={[
               { value: 'delete', label: 'Delete' },
@@ -231,28 +255,26 @@ export function OverlayHost({
               }
             }}
           />
-          <Text color={tokyoNight.muted}>Enter: confirm Esc: cancel</Text>
+          <Text color={theme.textMuted}>Enter: confirm Esc: cancel</Text>
         </Box>
       ) : null}
       {overlay.type === 'profile-detail' ? (
         <Box
           flexDirection="column"
           borderStyle="round"
-          borderColor={tokyoNight.blue}
+          borderColor={theme.info}
           paddingX={1}
         >
-          <Text
-            color={tokyoNight.cyan}
-          >{`Profile: ${overlay.profile.name}`}</Text>
-          <Text color={tokyoNight.foreground}>
+          <Text color={theme.accent}>{`Profile: ${overlay.profile.name}`}</Text>
+          <Text color={theme.text}>
             {`Label: ${overlay.profile.label ?? overlay.profile.name}`}
           </Text>
-          <Text color={tokyoNight.foreground} wrap="wrap">
+          <Text color={theme.text} wrap="wrap">
             {`Description: ${overlay.profile.description ?? ''}`}
           </Text>
           <Box marginTop={1} flexDirection="column">
-            <Text color={tokyoNight.muted}>Role bindings</Text>
-            <Text color={tokyoNight.muted}>Role Model Context Output</Text>
+            <Text color={theme.textMuted}>Role bindings</Text>
+            <Text color={theme.textMuted}>Role Model Context Output</Text>
             <InlineSelect
               options={overlay.options}
               onChange={(role) =>
@@ -260,7 +282,7 @@ export function OverlayHost({
               }
             />
           </Box>
-          <Text color={tokyoNight.muted}>
+          <Text color={theme.textMuted}>
             Enter: change model s: save Esc: back
           </Text>
         </Box>
@@ -269,13 +291,13 @@ export function OverlayHost({
         <Box
           flexDirection="column"
           borderStyle="round"
-          borderColor={tokyoNight.blue}
+          borderColor={theme.info}
           paddingX={1}
         >
-          <Text color={tokyoNight.cyan}>
+          <Text color={theme.accent}>
             {`Select model for profile.${overlay.target.profileName}.models.${overlay.target.role}`}
           </Text>
-          <Text color={tokyoNight.muted}>Model catalog</Text>
+          <Text color={theme.textMuted}>Model catalog</Text>
           <InlineSelect
             options={overlay.options}
             onChange={(model) =>
@@ -286,29 +308,40 @@ export function OverlayHost({
               )
             }
           />
-          <Text color={tokyoNight.muted}>Enter: bind Esc: cancel</Text>
+          <Text color={theme.textMuted}>Enter: bind Esc: cancel</Text>
         </Box>
       ) : null}
       {overlay.type === 'help' ? (
         <Box
           flexDirection="column"
           borderStyle="round"
-          borderColor={tokyoNight.surface}
+          borderColor={theme.border}
           paddingX={1}
         >
-          <Text color={tokyoNight.cyan}>Commands</Text>
-          <Text color={tokyoNight.foreground} wrap="wrap">
+          <Text color={theme.accent}>Commands</Text>
+          <Text color={theme.text} wrap="wrap">
             /help /agents /models /profiles /new /tools /permissions /memory
             /quit
           </Text>
-          <Text color={tokyoNight.muted}>
+          <Text color={theme.textMuted}>
             @path attaches files · !cmd runs shell · Esc closes or interrupts
           </Text>
         </Box>
       ) : null}
+      {overlay.type === 'theme' ? (
+        <Panel title="Theme" color={theme.accent}>
+          <InlineSelect
+            options={listThemes().map((item) => ({
+              value: item.name,
+              label: `${item.name}${item.name === overlay.active ? ' [active]' : ''}  ${item.appearance}`,
+            }))}
+            onChange={(value) => onSelectTheme(value as ThemeName)}
+          />
+        </Panel>
+      ) : null}
       {overlay.type === 'settings' ? (
-        <Panel title="Settings" color={tokyoNight.purple}>
-          <Text color={tokyoNight.muted}>
+        <Panel title="Settings" color={theme.markdownHeading}>
+          <Text color={theme.textMuted}>
             General / Profiles / Permissions / Skills / Tasks / Workspace /
             Display
           </Text>
@@ -331,14 +364,14 @@ export function OverlayHost({
         </Panel>
       ) : null}
       {overlay.type === 'tasks' ? (
-        <Panel title="Tasks" color={tokyoNight.green}>
+        <Panel title="Tasks" color={theme.success}>
           {overlay.tasks.length === 0 ? (
-            <Text color={tokyoNight.muted}>tasks &lt;none&gt;</Text>
+            <Text color={theme.textMuted}>tasks &lt;none&gt;</Text>
           ) : (
             overlay.tasks.slice(0, 12).map((task) => (
-              <Text key={task.id} color={tokyoNight.foreground}>
-                <Text color={tokyoNight.muted}>{task.id.padEnd(4)}</Text>
-                <Text color={statusColor(task.status)}>
+              <Text key={task.id} color={theme.text}>
+                <Text color={theme.textMuted}>{task.id.padEnd(4)}</Text>
+                <Text color={statusColor(theme, task.status)}>
                   {task.status.padEnd(12)}
                 </Text>
                 <Text>{clip(task.subject, 64)}</Text>
@@ -348,14 +381,14 @@ export function OverlayHost({
         </Panel>
       ) : null}
       {overlay.type === 'skills' ? (
-        <Panel title="Skills" color={tokyoNight.blue}>
+        <Panel title="Skills" color={theme.info}>
           {overlay.skills.length === 0 ? (
-            <Text color={tokyoNight.muted}>skills &lt;none&gt;</Text>
+            <Text color={theme.textMuted}>skills &lt;none&gt;</Text>
           ) : (
             overlay.skills.slice(0, 12).map((skill) => (
-              <Text key={skill.name} color={tokyoNight.foreground}>
-                <Text color={tokyoNight.muted}>{skill.name.padEnd(16)}</Text>
-                <Text color={tokyoNight.cyan}>
+              <Text key={skill.name} color={theme.text}>
+                <Text color={theme.textMuted}>{skill.name.padEnd(16)}</Text>
+                <Text color={theme.accent}>
                   {(skill.source ?? 'global').padEnd(9)}
                 </Text>
                 <Text>{clip(skill.description, 58)}</Text>
@@ -365,19 +398,19 @@ export function OverlayHost({
         </Panel>
       ) : null}
       {overlay.type === 'agents' ? (
-        <Panel title="Subagents" color={tokyoNight.purple}>
+        <Panel title="Subagents" color={theme.markdownHeading}>
           {overlay.agents.length === 0 ? (
-            <Text color={tokyoNight.muted}>agents &lt;none&gt;</Text>
+            <Text color={theme.textMuted}>agents &lt;none&gt;</Text>
           ) : (
             overlay.agents.slice(0, 12).map((agent) => (
               <Box key={agent.name} flexDirection="column">
-                <Text color={tokyoNight.foreground}>
-                  <Text color={tokyoNight.muted}>{agent.name.padEnd(14)}</Text>
-                  <Text color={tokyoNight.cyan}>{agent.source.padEnd(9)}</Text>
-                  <Text color={tokyoNight.yellow}>{agent.role.padEnd(8)}</Text>
+                <Text color={theme.text}>
+                  <Text color={theme.textMuted}>{agent.name.padEnd(14)}</Text>
+                  <Text color={theme.accent}>{agent.source.padEnd(9)}</Text>
+                  <Text color={theme.warning}>{agent.role.padEnd(8)}</Text>
                   <Text>{clip(agent.description, 56)}</Text>
                 </Text>
-                <Text color={tokyoNight.muted}>
+                <Text color={theme.textMuted}>
                   {`  tools: ${formatAgentTools(agent.tools)}`}
                 </Text>
               </Box>
@@ -386,17 +419,17 @@ export function OverlayHost({
         </Panel>
       ) : null}
       {overlay.type === 'workspace' ? (
-        <Panel title="Workspace" color={tokyoNight.cyan}>
+        <Panel title="Workspace" color={theme.accent}>
           {overlay.workspaces.length === 0 ? (
-            <Text color={tokyoNight.muted}>workspaces &lt;none&gt;</Text>
+            <Text color={theme.textMuted}>workspaces &lt;none&gt;</Text>
           ) : (
             overlay.workspaces.slice(0, 10).map((workspace) => (
               <Text
                 key={`${workspace.kind}/${workspace.name}`}
-                color={tokyoNight.foreground}
+                color={theme.text}
               >
-                <Text color={tokyoNight.muted}>{workspace.kind.padEnd(8)}</Text>
-                <Text color={tokyoNight.cyan}>{workspace.name.padEnd(18)}</Text>
+                <Text color={theme.textMuted}>{workspace.kind.padEnd(8)}</Text>
+                <Text color={theme.accent}>{workspace.name.padEnd(18)}</Text>
                 <Text>{clip(workspace.rootPath, 60)}</Text>
               </Text>
             ))
@@ -404,19 +437,48 @@ export function OverlayHost({
         </Panel>
       ) : null}
       {overlay.type === 'session-selector' ? (
-        <Panel title="Resume Session" color={tokyoNight.blue}>
+        <Panel title="Resume Session" color={theme.info}>
           <InlineSelect
+            label="sessions"
+            visibleRows={6}
             options={
               overlay.sessions.length > 0
                 ? overlay.sessions.map((session) => ({
                     value: session.sessionId,
                     label: renderResumeLabel(session),
                   }))
-                : [{ value: '', label: 'No sessions found' }]
+                : [{ value: '', label: 'No sessions found', disabled: true }]
             }
             onChange={(value) => {
               if (value !== '') {
                 onSelectSession(value);
+              }
+            }}
+          />
+        </Panel>
+      ) : null}
+      {overlay.type === 'rewind-selector' ? (
+        <Panel title="Rewind Target" color={theme.info}>
+          <InlineSelect
+            label="rewind target"
+            visibleRows={6}
+            options={
+              overlay.targets.length > 0
+                ? overlay.targets.map((target) => ({
+                    value: target.entryId,
+                    label: renderRewindLabel(target),
+                  }))
+                : [
+                    {
+                      value: '',
+                      label: 'No rewindable user entries',
+                      disabled: true,
+                    },
+                  ]
+            }
+            onChange={(value) => {
+              if (value !== '') {
+                onSelectRewind(value);
               }
             }}
           />
@@ -433,25 +495,26 @@ function ProfileCreatePanel({
   readonly sourceProfile: string;
   onSubmit(name: string, sourceProfile: string): void;
 }) {
+  const theme = useTheme();
   const [value, setValue] = useState('');
   return (
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor={tokyoNight.blue}
+      borderColor={theme.info}
       paddingX={1}
     >
-      <Text color={tokyoNight.cyan}>Create profile</Text>
-      <Text color={tokyoNight.muted}>{`Source: ${sourceProfile}`}</Text>
+      <Text color={theme.accent}>Create profile</Text>
+      <Text color={theme.textMuted}>{`Source: ${sourceProfile}`}</Text>
       <Box>
-        <Text color={tokyoNight.muted}>Name: </Text>
+        <Text color={theme.textMuted}>Name: </Text>
         <TextInput
           value={value}
           onChange={setValue}
           onSubmit={(name) => onSubmit(name, sourceProfile)}
         />
       </Box>
-      <Text color={tokyoNight.muted}>Enter: create Esc: cancel</Text>
+      <Text color={theme.textMuted}>Enter: create Esc: cancel</Text>
     </Box>
   );
 }
@@ -492,10 +555,11 @@ function SettingLine({
   readonly label: string;
   readonly value: string;
 }) {
+  const theme = useTheme();
   return (
     <Text>
-      <Text color={tokyoNight.muted}>{label.padEnd(10)}</Text>
-      <Text color={tokyoNight.foreground}>{value}</Text>
+      <Text color={theme.textMuted}>{label.padEnd(10)}</Text>
+      <Text color={theme.text}>{value}</Text>
     </Text>
   );
 }
@@ -521,101 +585,33 @@ function ApprovalRequestPreview({
 }: {
   readonly request: ApprovalView;
 }) {
-  const metadata = request.metadata ?? {};
-  const kind = readMetadataString(metadata, 'kind');
-  if (kind === 'read' || kind === 'search' || kind === 'edit') {
-    const path = readMetadataString(metadata, 'path');
-    const pattern = readMetadataString(metadata, 'pattern');
-    const diff = readMetadataString(metadata, 'diff');
-    if (kind === 'edit' && diff !== '') {
-      return (
-        <Text color={tokyoNight.muted} wrap="wrap">
-          {diff}
-        </Text>
-      );
-    }
-    if (path !== '') {
-      return <Text color={tokyoNight.muted}>{path}</Text>;
-    }
-    if (pattern !== '') {
-      return <Text color={tokyoNight.muted}>{pattern}</Text>;
-    }
-  }
-  if (kind === 'shell') {
-    const command = readMetadataString(metadata, 'command');
-    const cwd = readMetadataString(metadata, 'cwd');
-    const risk = readMetadataString(metadata, 'risk');
-    if (command !== '') {
-      return (
-        <Text color={tokyoNight.muted} wrap="wrap">
-          {`${risk === 'dangerous' ? '[danger] ' : ''}$ ${command} @ ${cwd}`}
-        </Text>
-      );
-    }
-  }
-  if (kind === 'network') {
-    const url = readMetadataString(metadata, 'url');
-    const domain = readMetadataString(metadata, 'domain');
-    if (url !== '' || domain !== '') {
-      return (
-        <Text
-          color={tokyoNight.muted}
-        >{`${domain !== '' ? domain : url}`}</Text>
-      );
-    }
-  }
-  if (kind === 'task') {
-    const agentName = readMetadataString(metadata, 'agentName');
-    const description = readMetadataString(metadata, 'description');
-    if (agentName !== '' || description !== '') {
-      return (
-        <Text color={tokyoNight.muted} wrap="wrap">
-          {`${agentName}: ${description}`}
-        </Text>
-      );
-    }
-  }
-  if (kind === 'external_directory') {
-    const paths = readMetadataList(metadata, 'paths');
-    if (paths.length > 0) {
-      return <Text color={tokyoNight.muted}>{paths.join(', ')}</Text>;
-    }
-  }
-  if (kind !== '') {
-    return <Text color={tokyoNight.muted}>{kind}</Text>;
-  }
+  const theme = useTheme();
+  const view = buildPermissionView(request);
   return (
-    <Text color={tokyoNight.muted} wrap="wrap">
-      {preview(request.input)}
-    </Text>
+    <Box flexDirection="column">
+      <Text color={theme.accent}>{view.title}</Text>
+      {view.fields.map((field) => (
+        <Text
+          key={`${field.label}:${field.value}`}
+          color={theme.textMuted}
+          wrap="wrap"
+        >
+          {`${field.label}: ${field.value}`}
+        </Text>
+      ))}
+      {view.diffSummary !== undefined ? (
+        <Text color={theme.textMuted}>
+          {`diff: +${view.diffSummary.added} -${view.diffSummary.removed}`}
+        </Text>
+      ) : null}
+      {view.risk !== undefined ? (
+        <Text color={theme.warning}>{view.risk}</Text>
+      ) : null}
+      <Text color={theme.textMuted}>
+        {`project scope writes ${PROJECT_RULES_FILE}`}
+      </Text>
+    </Box>
   );
-}
-
-function readMetadataString(
-  metadata: Record<string, unknown>,
-  key: string,
-): string {
-  const value = metadata[key];
-  return typeof value === 'string' ? value : '';
-}
-
-function readMetadataList(
-  metadata: Record<string, unknown>,
-  key: string,
-): string[] {
-  const value = metadata[key];
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string')
-    : [];
-}
-
-/** 入参预览（截断）。 */
-function preview(value: unknown): string {
-  if (value === undefined) {
-    return '-';
-  }
-  const text = typeof value === 'string' ? value : JSON.stringify(value);
-  return text.length > 240 ? `${text.slice(0, 240)} …` : text;
 }
 
 function renderResumeLabel(session: JsonlSessionSummary): string {
@@ -626,6 +622,14 @@ function renderResumeLabel(session: JsonlSessionSummary): string {
       ? clip(session.lastUserText, 56)
       : 'Untitled session');
   return `${time}  ${title}`;
+}
+
+function renderRewindLabel(target: RewindTarget): string {
+  return `${shortEntryId(target.entryId).padEnd(8)} ${String(target.index).padStart(2, '0')}  ${clip(target.text, 58)}`;
+}
+
+function shortEntryId(entryId: string): string {
+  return entryId.length <= 8 ? entryId : entryId.slice(0, 8);
 }
 
 function formatSessionTime(value: string | undefined): string {
@@ -652,15 +656,15 @@ function formatAgentTools(tools: readonly string[] | undefined): string {
   return tools.length === 0 ? 'none' : tools.join(', ');
 }
 
-function statusColor(status: Task['status']): string {
+function statusColor(theme: TuiTheme, status: Task['status']): string {
   switch (status) {
     case 'completed':
-      return tokyoNight.green;
+      return theme.success;
     case 'in_progress':
-      return tokyoNight.yellow;
+      return theme.warning;
     case 'cancelled':
-      return tokyoNight.red;
+      return theme.error;
     default:
-      return tokyoNight.blue;
+      return theme.info;
   }
 }

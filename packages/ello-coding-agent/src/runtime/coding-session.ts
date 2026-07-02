@@ -69,6 +69,7 @@ import type {
 } from '../session/repository.js';
 import { loadCodingSkills } from '../skills/index.js';
 import { createCodingTools } from '../tools/index.js';
+import { createBootProfile } from '../utils/boot-profile.js';
 
 import type {
   ApprovalDecision,
@@ -320,11 +321,15 @@ export interface CodingSession {
 interface SessionDeps {
   readonly sessionStore: JsonlSessionStore;
   readonly rulesStore: RulesStore;
-  readonly compactor: SessionCompactor;
-  readonly skills: readonly AgentSkill[];
   readonly registry: AgentRegistry;
   readonly backgroundJobs: BackgroundJobStore;
   readonly modelAdapter?: ModelAdapter;
+}
+
+interface AgentRuntimeDeps {
+  readonly agent: Agent;
+  readonly compactor: SessionCompactor;
+  readonly skills: readonly AgentSkill[];
 }
 
 /**
@@ -337,49 +342,31 @@ export async function createCodingSession(
   options: CreateCodingSessionOptions,
 ): Promise<CodingSession> {
   const { config } = options;
+  const profile = createBootProfile('session');
   const sessionId = config.sessionId ?? randomUUID();
 
+  profile.mark('start');
   const sessionStore = new JsonlSessionStore({
     sessionDir: config.sessionDir,
     cwd: config.cwd,
   });
   const rulesStore = new RulesStore(config.cwd);
-  await rulesStore.load();
+  await profile.measure('rules.load', () => rulesStore.load());
 
-  const registry = await createAgentRegistry(config);
-  const backgroundJobs = new BackgroundJobStore();
-  const compactor = createSessionCompactor({
-    contextWindow: DEFAULT_CONTEXT_WINDOW,
-    port: sessionStore,
-    generateCheckpoint: makeCompactCheckpointGenerator(
-      config,
-      registry,
-      options.modelAdapter,
-    ),
-    settings: {
-      enabled: config.context.compaction.auto,
-      reserveTokens: config.context.compaction.reserved_tokens,
-      keepRecentTokens: config.context.compaction.preserve_recent_tokens,
-      tailTurns: config.context.compaction.tail_turns,
-      splitTurns: config.context.compaction.split_turns,
-      pruneToolOutput: config.context.compaction.prune_tool_output,
-      toolOutputMaxChars: config.context.compaction.tool_output_max_chars,
-    },
-  });
-
-  const skills = await loadCodingSkills(config);
-
+  const registry = await profile.measure('agents.registry', () =>
+    createAgentRegistry(config),
+  );
   const session = new CodingSessionImpl(sessionId, config, {
     sessionStore,
     rulesStore,
-    compactor,
-    skills,
     registry,
-    backgroundJobs,
+    backgroundJobs: new BackgroundJobStore(),
     ...(options.modelAdapter !== undefined
       ? { modelAdapter: options.modelAdapter }
       : {}),
   });
+  profile.mark('ready');
+  profile.flush();
   session.emit({ type: 'session.opened', sessionId, cwd: config.cwd });
   return session;
 }
@@ -388,7 +375,8 @@ export async function createCodingSession(
 class CodingSessionImpl implements CodingSession {
   readonly checkpoints: CheckpointStore;
 
-  private agent: Agent;
+  private runtime: AgentRuntimeDeps | undefined;
+  private runtimeTask: Promise<AgentRuntimeDeps> | undefined;
   /** 当前激活技能名集合，被 skill 工具与 section 共享。 */
   private readonly activeSkills = new Set<string>();
   private readonly listeners = new Set<CodingEventListener>();
@@ -417,7 +405,6 @@ class CodingSessionImpl implements CodingSession {
       sessionId: () => this.sessionId,
       config: config.context.tool_result_budget,
     });
-    this.agent = this.buildAgent();
     this.deps.backgroundJobs.onSettled((job) =>
       this.injectBackgroundResult(job),
     );
@@ -441,8 +428,9 @@ class CodingSessionImpl implements CodingSession {
     const drained = this.steerQueue.splice(0);
     const input =
       drained.length > 0 ? [...drained, prompt].join('\n\n') : prompt;
+    const runtime = await this.ensureAgentRuntime();
 
-    this.currentStream = this.agent.stream(input, {
+    this.currentStream = runtime.agent.stream(input, {
       sessionId: this.sessionId,
       maxTurns: this.activeAgentMaxTurns(),
       ...(meta !== undefined ? { metadata: meta } : {}),
@@ -480,7 +468,6 @@ class CodingSessionImpl implements CodingSession {
       this.abort('clear requested from TUI');
     }
     await this.newSession();
-    this.emit({ type: 'ui.clear' });
   }
 
   /** 审批决定：翻译成 DeferredRunResults 并 `agent.resume()`。 */
@@ -504,7 +491,8 @@ class CodingSessionImpl implements CodingSession {
       await this.deps.rulesStore.addDenyRule(item, decision.scope ?? 'session');
     }
 
-    const resumed = this.agent.resume(
+    const runtime = await this.ensureAgentRuntime();
+    const resumed = runtime.agent.resume(
       {
         deferred: [item],
         approvals: {
@@ -854,7 +842,7 @@ class CodingSessionImpl implements CodingSession {
   }
 
   async close(): Promise<void> {
-    await this.agent.close();
+    await this.closeAgentRuntime();
   }
 
   /** 向所有订阅者广播一个事件。 */
@@ -931,10 +919,68 @@ class CodingSessionImpl implements CodingSession {
 
   /** 关闭当前 Agent，按当前 sessionId 重建。 */
   private async rebuild(): Promise<void> {
-    await this.agent.close();
+    await this.closeAgentRuntime();
     this.pendingApprovals.clear();
     this.steerQueue.length = 0;
-    this.agent = this.buildAgent();
+  }
+
+  private async ensureAgentRuntime(): Promise<AgentRuntimeDeps> {
+    if (this.runtime !== undefined) {
+      return this.runtime;
+    }
+    if (this.runtimeTask !== undefined) {
+      return this.runtimeTask;
+    }
+    this.runtimeTask = this.createAgentRuntime();
+    try {
+      this.runtime = await this.runtimeTask;
+      return this.runtime;
+    } finally {
+      this.runtimeTask = undefined;
+    }
+  }
+
+  private async createAgentRuntime(): Promise<AgentRuntimeDeps> {
+    const profile = createBootProfile('agent-runtime');
+    const skills = await profile.measure('skills.load', () =>
+      loadCodingSkills(this.config),
+    );
+    const compactor = createSessionCompactor({
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+      port: this.deps.sessionStore,
+      generateCheckpoint: makeCompactCheckpointGenerator(
+        this.config,
+        this.deps.registry,
+        this.deps.modelAdapter,
+      ),
+      settings: {
+        enabled: this.config.context.compaction.auto,
+        reserveTokens: this.config.context.compaction.reserved_tokens,
+        keepRecentTokens: this.config.context.compaction.preserve_recent_tokens,
+        tailTurns: this.config.context.compaction.tail_turns,
+        splitTurns: this.config.context.compaction.split_turns,
+        pruneToolOutput: this.config.context.compaction.prune_tool_output,
+        toolOutputMaxChars:
+          this.config.context.compaction.tool_output_max_chars,
+      },
+    });
+    const runtime = {
+      skills,
+      compactor,
+      agent: this.buildAgent({ compactor, skills }),
+    };
+    profile.mark('agent.build');
+    profile.flush();
+    return runtime;
+  }
+
+  private async closeAgentRuntime(): Promise<void> {
+    const runtime = this.runtime;
+    this.runtime = undefined;
+    this.runtimeTask = undefined;
+    if (runtime !== undefined) {
+      await runtime.agent.close();
+    }
   }
 
   /** 后台 subagent 结束时把结果作为 parent 输入注入。 */
@@ -960,7 +1006,10 @@ class CodingSessionImpl implements CodingSession {
   }
 
   /** 把各模块产物拼进 createAgent，这是整个会话运行时的核心装配。 */
-  private buildAgent(): Agent {
+  private buildAgent(runtime: {
+    readonly compactor: SessionCompactor;
+    readonly skills: readonly AgentSkill[];
+  }): Agent {
     const agentDef = this.deps.registry.get(this.activeAgentName);
     if (
       (agentDef.mode !== 'primary' && agentDef.mode !== 'all') ||
@@ -993,7 +1042,7 @@ class CodingSessionImpl implements CodingSession {
     });
     const selectedTools = selectToolsForAgent(tools, agentDef.tools);
     const skillTools = createSkillTools({
-      skills: this.deps.skills,
+      skills: runtime.skills,
       active: this.activeSkills,
     });
     const delegateTool = createDelegateTool({
@@ -1024,12 +1073,12 @@ class CodingSessionImpl implements CodingSession {
         onContextEvent: (event) => this.emit(event),
       }),
       activeSkillsContext({
-        skills: this.deps.skills,
+        skills: runtime.skills,
         active: this.activeSkills,
         activation: 'activated',
       }),
       skillIndexContext({
-        skills: this.deps.skills,
+        skills: runtime.skills,
         contextWindow: DEFAULT_CONTEXT_WINDOW,
       }),
       memory.section,
@@ -1046,7 +1095,7 @@ class CodingSessionImpl implements CodingSession {
       ),
       tools: [...selectedTools, ...skillTools, delegateTool],
       session: this.deps.sessionStore,
-      compactor: this.deps.compactor,
+      compactor: runtime.compactor,
       observers: [observer, memory.observer],
       sessionWindow: { maxMessages: 200 },
       modelInputBudget: {
