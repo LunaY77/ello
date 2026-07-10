@@ -189,7 +189,10 @@ function registerMemoryCommands(
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
       const { loadCodingMemory, summarizeMemory } =
         await import('../../memory.js');
-      const memory = await loadCodingMemory(config.cwd);
+      const { withCodingStorage } = await import('../../storage/index.js');
+      const memory = await withCodingStorage((storage) =>
+        loadCodingMemory(config.cwd, storage.memory),
+      );
       ctx.io.stdout.write(
         `${config.json ? JSON.stringify(memory, null, 2) : summarizeMemory(memory, config.cwd)}\n`,
       );

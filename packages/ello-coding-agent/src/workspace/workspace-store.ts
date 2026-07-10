@@ -29,8 +29,8 @@ import type {
 /** workspace 管理：创建 worktree，并把结构化状态写入全局 SQLite。 */
 export class WorkspaceStore {
   constructor(
+    private readonly repository: WorkspaceRepository,
     private readonly repos = new RepoStore(),
-    private readonly repository = new WorkspaceRepository(),
   ) {}
 
   async create(

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadCodingAgentConfig } from '../config/index.js';
 import { createCodingMemory } from '../context/memory.js';
 import { loadCodingMemory, renderMemoryForPrompt } from '../memory.js';
+import { createCodingStorage } from '../storage/index.js';
 import { MemoryRepository } from '../storage/repositories/memory-repository.js';
 
 describe('MemoryRepository', () => {
@@ -35,31 +36,34 @@ describe('MemoryRepository', () => {
     await mkdir(path.join(cwd, '.ello'), { recursive: true });
     await writeFile(path.join(cwd, '.ello', 'memory.md'), '项目记忆\n', 'utf8');
 
-    const repo = new MemoryRepository();
+    const storage = createCodingStorage();
+    const repo = new MemoryRepository(storage.db);
     const item = await repo.createManual({
       kind: 'preference',
       content: '全局偏好',
       tags: ['ui'],
     });
     await repo.markUsed(item.id, { runId: 'run-1', usedFor: 'prompt' });
-    repo.close();
 
-    const manifest = await loadCodingMemory(cwd);
+    const manifest = await loadCodingMemory(cwd, repo);
     expect(manifest.files).toHaveLength(1);
     expect(manifest.items).toHaveLength(1);
     expect(renderMemoryForPrompt(manifest, cwd)).toContain('项目记忆');
     expect(renderMemoryForPrompt(manifest, cwd)).toContain('全局偏好');
+    storage.close();
   });
 
   it('context memory 默认关闭，不读取或注入 memory section', async () => {
     await mkdir(path.join(cwd, '.ello'), { recursive: true });
     await writeFile(path.join(cwd, '.ello', 'memory.md'), '项目记忆\n', 'utf8');
     const config = await loadCodingAgentConfig({ cwd });
-    const memory = createCodingMemory(config);
+    const storage = createCodingStorage();
+    const memory = createCodingMemory(config, storage.memory);
 
     const section = await memory.section({
       runId: 'run-memory-off',
     } as never);
     expect(section).toBeNull();
+    storage.close();
   });
 });

@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createCodingStorage } from '../storage/index.js';
 import { UsageRepository } from '../storage/repositories/usage-repository.js';
 
 describe('UsageRepository', () => {
@@ -26,7 +27,8 @@ describe('UsageRepository', () => {
   });
 
   it('记录安全 usage 字段并按模型/日期/状态聚合', async () => {
-    const repo = new UsageRepository();
+    const storage = createCodingStorage();
+    const repo = new UsageRepository(storage.db);
     await repo.recordUsage({
       runId: 'run-1',
       invocation: 'run',
@@ -69,6 +71,6 @@ describe('UsageRepository', () => {
         expect.objectContaining({ key: 'failed', runs: 1 }),
       ]),
     );
-    repo.close();
+    storage.close();
   });
 });

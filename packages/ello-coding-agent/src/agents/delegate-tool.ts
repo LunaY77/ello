@@ -15,6 +15,7 @@ import {
 import type { PermissionRule } from '../permissions.js';
 import type { ProviderRegistry } from '../provider/index.js';
 import type { JsonlSessionStore } from '../session/jsonl-store.js';
+import type { CodingStorage } from '../storage/index.js';
 
 import { BackgroundJobStore } from './background-jobs.js';
 import type { AgentRegistry } from './registry.js';
@@ -50,6 +51,7 @@ export interface CreateDelegateToolOptions {
   readonly config: CodingAgentConfig;
   readonly providerRegistry: ProviderRegistry;
   readonly session: JsonlSessionStore;
+  readonly storage: CodingStorage;
   /** 当前 parent sessionId 读取器（会话切换后变化，故用闭包）。 */
   readonly parentSessionId: () => string;
   /** 当前动态权限规则（来自 RulesStore），用于派生 child 规则与审批判定。 */
@@ -141,6 +143,7 @@ export function createDelegateTool(
         ...(input.run_id !== undefined ? { runId: input.run_id } : {}),
         deps: {
           config: options.config,
+          storage: options.storage,
           providerRegistry: options.providerRegistry,
           environment: ctx.environment as AgentEnvironment,
           permissionRules: deriveSubagentPermission(

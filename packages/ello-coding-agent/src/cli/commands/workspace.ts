@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 
+import type { WorkspaceStore } from '../../workspace/index.js';
 import type { CliCommandContext, CliCommandModule } from '../types.js';
 
 export const workspaceCommands: CliCommandModule = {
@@ -136,13 +137,15 @@ function registerWorkspaceCommands(
         cmd: Command,
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { WorkspaceStore, TmuxStore, formatWorkspaceList } =
+        const { TmuxStore, formatWorkspaceList } =
           await import('../../workspace/index.js');
         const session =
           opts.session ?? (opts.tmux === true ? `${kind}-${name}` : undefined);
-        const workspace = await new WorkspaceStore().create(kind, name, repos, {
-          ...(session !== undefined ? { tmuxSession: session } : {}),
-        });
+        const workspace = await withWorkspaceStore((store) =>
+          store.create(kind, name, repos, {
+            ...(session !== undefined ? { tmuxSession: session } : {}),
+          }),
+        );
         if (session !== undefined) {
           await new TmuxStore().newSession(session, workspace.rootPath);
         }
@@ -166,12 +169,10 @@ function registerWorkspaceCommands(
         cmd: Command,
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { WorkspaceStore, formatWorkspaceList } =
+        const { formatWorkspaceList } =
           await import('../../workspace/index.js');
-        const workspace = await new WorkspaceStore().addRepos(
-          kind,
-          name,
-          repos,
+        const workspace = await withWorkspaceStore((store) =>
+          store.addRepos(kind, name, repos),
         );
         ctx.io.stdout.write(
           `${config.json ? JSON.stringify(workspace, null, 2) : formatWorkspaceList([workspace])}\n`,
@@ -194,13 +195,10 @@ function registerWorkspaceCommands(
         cmd: Command,
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { WorkspaceStore, formatWorkspaceList } =
+        const { formatWorkspaceList } =
           await import('../../workspace/index.js');
-        const workspace = await new WorkspaceStore().removeRepos(
-          kind,
-          name,
-          repos,
-          opts.force ?? false,
+        const workspace = await withWorkspaceStore((store) =>
+          store.removeRepos(kind, name, repos, opts.force ?? false),
         );
         ctx.io.stdout.write(
           `${config.json ? JSON.stringify(workspace, null, 2) : formatWorkspaceList([workspace])}\n`,
@@ -222,12 +220,10 @@ function registerWorkspaceCommands(
         cmd: Command,
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { WorkspaceStore, formatWorkspaceList } =
+        const { formatWorkspaceList } =
           await import('../../workspace/index.js');
-        const workspace = await new WorkspaceStore().rename(
-          kind,
-          name,
-          newName,
+        const workspace = await withWorkspaceStore((store) =>
+          store.rename(kind, name, newName),
         );
         ctx.io.stdout.write(
           `${config.json ? JSON.stringify(workspace, null, 2) : formatWorkspaceList([workspace])}\n`,
@@ -248,11 +244,8 @@ function registerWorkspaceCommands(
         cmd: Command,
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { WorkspaceStore } = await import('../../workspace/index.js');
-        const removed = await new WorkspaceStore().remove(
-          kind,
-          name,
-          opts.force ?? false,
+        const removed = await withWorkspaceStore((store) =>
+          store.remove(kind, name, opts.force ?? false),
         );
         ctx.io.stdout.write(
           `${config.json ? JSON.stringify({ kind, name, removed }) : `removed\t${kind}/${name}\t${removed}`}\n`,
@@ -265,9 +258,8 @@ function registerWorkspaceCommands(
     .description('list workspaces')
     .action(async (kind: string | undefined, _opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { WorkspaceStore, formatWorkspaceList } =
-        await import('../../workspace/index.js');
-      const workspaces = await new WorkspaceStore().list(kind);
+      const { formatWorkspaceList } = await import('../../workspace/index.js');
+      const workspaces = await withWorkspaceStore((store) => store.list(kind));
       ctx.io.stdout.write(
         `${config.json ? JSON.stringify(workspaces, null, 2) : formatWorkspaceList(workspaces)}\n`,
       );
@@ -286,9 +278,11 @@ function registerWorkspaceCommands(
         cmd: Command,
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { WorkspaceStore, formatWorkspaceList } =
+        const { formatWorkspaceList } =
           await import('../../workspace/index.js');
-        const workspace = await new WorkspaceStore().open(kind, name);
+        const workspace = await withWorkspaceStore((store) =>
+          store.open(kind, name),
+        );
         const text = opts.printCd
           ? `cd ${workspace.rootPath}`
           : formatWorkspaceList([workspace]);
@@ -305,9 +299,11 @@ function registerWorkspaceCommands(
     .action(
       async (kind: string, name: string, _opts: unknown, cmd: Command) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { WorkspaceStore, formatWorkspaceList } =
+        const { formatWorkspaceList } =
           await import('../../workspace/index.js');
-        const workspace = await new WorkspaceStore().archive(kind, name);
+        const workspace = await withWorkspaceStore((store) =>
+          store.archive(kind, name),
+        );
         ctx.io.stdout.write(
           `${config.json ? JSON.stringify(workspace, null, 2) : formatWorkspaceList([workspace])}\n`,
         );
@@ -318,8 +314,7 @@ function registerWorkspaceCommands(
     .description('show workspace status')
     .action(async (_opts: unknown, cmd: Command) => {
       await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { WorkspaceStore } = await import('../../workspace/index.js');
-      const status = await new WorkspaceStore().status();
+      const status = await withWorkspaceStore((store) => store.status());
       ctx.io.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
     });
   workspaceCmd
@@ -330,11 +325,12 @@ function registerWorkspaceCommands(
     .action(
       async (opts: { fixMissing?: boolean; prune?: boolean }, cmd: Command) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { WorkspaceStore } = await import('../../workspace/index.js');
-        const result = await new WorkspaceStore().sync({
-          fixMissing: opts.fixMissing ?? false,
-          prune: opts.prune ?? false,
-        });
+        const result = await withWorkspaceStore((store) =>
+          store.sync({
+            fixMissing: opts.fixMissing ?? false,
+            prune: opts.prune ?? false,
+          }),
+        );
         ctx.io.stdout.write(
           `${config.json ? JSON.stringify(result, null, 2) : `workspace-sync\t${result.status}\tchecked=${result.checkedCount}\tfixed=${result.fixedCount}`}\n`,
         );
@@ -361,9 +357,10 @@ function registerTmuxCommands(program: Command, ctx: CliCommandContext): void {
         cmd: Command,
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { WorkspaceStore, TmuxStore } =
-          await import('../../workspace/index.js');
-        const workspace = await new WorkspaceStore().open(kind, name);
+        const { TmuxStore } = await import('../../workspace/index.js');
+        const workspace = await withWorkspaceStore((store) =>
+          store.open(kind, name),
+        );
         const result = await new TmuxStore().newSession(
           session ?? `${kind}-${name}`,
           workspace.rootPath,
@@ -384,4 +381,16 @@ function registerTmuxCommands(program: Command, ctx: CliCommandContext): void {
         `${config.json ? JSON.stringify(sessions, null, 2) : sessions.join('\n')}\n`,
       );
     });
+}
+
+async function withWorkspaceStore<T>(
+  fn: (store: WorkspaceStore) => Promise<T>,
+): Promise<T> {
+  const [{ withCodingStorage }, { WorkspaceStore }] = await Promise.all([
+    import('../../storage/index.js'),
+    import('../../workspace/index.js'),
+  ]);
+  return withCodingStorage((storage) =>
+    fn(new WorkspaceStore(storage.workspaces)),
+  );
 }

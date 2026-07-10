@@ -2,10 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { asc, eq, isNull, and } from 'drizzle-orm';
 
-import {
-  closeCodingDatabase,
-  openGlobalCodingDatabaseSync,
-} from '../database.js';
+import type { CodingDatabase } from '../database.js';
 import { memoryAccessLog, memoryItems } from '../schema.js';
 
 export type MemoryKind = 'preference' | 'fact' | 'instruction' | 'summary';
@@ -41,13 +38,9 @@ export interface CreateMemoryInput {
  * `ELLO.md`、`AGENTS.md` 等 Markdown 仍然直接从文件读取，不在 DB 建索引缓存。
  */
 export class MemoryRepository {
-  private readonly ownsDb: boolean;
+  constructor(private readonly db: CodingDatabase) {}
 
-  constructor(private readonly db = openGlobalCodingDatabaseSync()) {
-    this.ownsDb = arguments.length === 0;
-  }
-
-  async listEnabled(): Promise<readonly MemoryItem[]> {
+  listEnabled(): readonly MemoryItem[] {
     const rows = this.db
       .select()
       .from(memoryItems)
@@ -57,19 +50,15 @@ export class MemoryRepository {
     return rows.map(normalizeMemoryItem);
   }
 
-  async createManual(
-    input: Omit<CreateMemoryInput, 'source'>,
-  ): Promise<MemoryItem> {
+  createManual(input: Omit<CreateMemoryInput, 'source'>): MemoryItem {
     return this.create({ ...input, source: 'manual' });
   }
 
-  async recordLearned(
-    input: Omit<CreateMemoryInput, 'source'>,
-  ): Promise<MemoryItem> {
+  recordLearned(input: Omit<CreateMemoryInput, 'source'>): MemoryItem {
     return this.create({ ...input, source: 'learned' });
   }
 
-  async create(input: CreateMemoryInput): Promise<MemoryItem> {
+  create(input: CreateMemoryInput): MemoryItem {
     const now = new Date().toISOString();
     const row = {
       id: randomUUID(),
@@ -88,10 +77,10 @@ export class MemoryRepository {
     return normalizeMemoryItem(row);
   }
 
-  async markUsed(
+  markUsed(
     id: string,
     input: { readonly runId?: string | undefined; readonly usedFor: string },
-  ): Promise<void> {
+  ): void {
     const now = new Date().toISOString();
     this.db
       .update(memoryItems)
@@ -109,18 +98,12 @@ export class MemoryRepository {
       })
       .run();
   }
-
-  close(): void {
-    if (this.ownsDb) {
-      closeCodingDatabase(this.db);
-    }
-  }
 }
 
 function normalizeMemoryItem(
   row: typeof memoryItems.$inferSelect | typeof memoryItems.$inferInsert,
 ): MemoryItem {
-  const tags = safeJsonArray(row.tags ?? '[]');
+  const tags = parseStringArray(row.id, 'tags', row.tags);
   return {
     id: row.id,
     kind: row.kind as MemoryKind,
@@ -142,14 +125,35 @@ function normalizeMemoryItem(
   };
 }
 
-function safeJsonArray(text: string): readonly string[] {
-  const parsed = JSON.parse(text) as unknown;
+function parseStringArray(
+  rowId: string,
+  column: string,
+  text: string | undefined,
+): readonly string[] {
+  if (text === undefined) {
+    throw new Error(
+      `Invalid memory_items row ${rowId}: column ${column} is missing.`,
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(
+      `Invalid memory_items row ${rowId}: column ${column} is not valid JSON.`,
+      { cause: error },
+    );
+  }
   if (!Array.isArray(parsed)) {
-    throw new Error('Invalid memory item tags: expected JSON array');
+    throw new Error(
+      `Invalid memory_items row ${rowId}: column ${column} must be a JSON array.`,
+    );
   }
   for (const item of parsed) {
     if (typeof item !== 'string') {
-      throw new Error('Invalid memory item tags: expected string tags');
+      throw new Error(
+        `Invalid memory_items row ${rowId}: column ${column} must contain only strings.`,
+      );
     }
   }
   return parsed;

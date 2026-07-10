@@ -157,13 +157,13 @@ export {
 
 // —— 全局 SQLite 状态库 ——
 export {
-  closeCodingDatabase,
+  createCodingStorage,
   globalArtifactsDir,
   globalStateDatabasePath,
-  openGlobalCodingDatabase,
-  openGlobalCodingDatabaseSync,
   transaction,
+  withCodingStorage,
   type CodingDatabase,
+  type CodingStorage,
 } from './storage/index.js';
 export { CheckpointRepository } from './storage/repositories/checkpoint-repository.js';
 export { MemoryRepository } from './storage/repositories/memory-repository.js';

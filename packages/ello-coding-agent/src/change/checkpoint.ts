@@ -51,7 +51,7 @@ export class CheckpointStore {
   private pending: FileChange[] = [];
   private readonly repository: CheckpointRepository;
 
-  constructor(_legacyDir?: string, repository = new CheckpointRepository()) {
+  constructor(repository: CheckpointRepository) {
     this.repository = repository;
   }
 

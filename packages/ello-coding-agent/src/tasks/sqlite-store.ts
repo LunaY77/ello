@@ -1,10 +1,6 @@
 import { eq, and, asc } from 'drizzle-orm';
 
-import {
-  openGlobalCodingDatabaseSync,
-  transaction,
-  type CodingDatabase,
-} from '../storage/database.js';
+import { transaction, type CodingDatabase } from '../storage/database.js';
 import { taskCounters, taskLinks, tasks } from '../storage/schema.js';
 
 import type { Task, TaskStore, TaskStatus } from './types.js';
@@ -18,8 +14,8 @@ import type { Task, TaskStore, TaskStatus } from './types.js';
  */
 export class SqliteTaskStore implements TaskStore {
   constructor(
-    private readonly listId = 'default',
-    private readonly db: CodingDatabase = openGlobalCodingDatabaseSync(),
+    private readonly db: CodingDatabase,
+    private readonly listId: string,
   ) {}
 
   async nextId(): Promise<string> {
@@ -171,24 +167,29 @@ export class SqliteTaskStore implements TaskStore {
       blockedBy: links
         .filter((link) => link.relation === 'blocked_by')
         .map((link) => link.targetTaskId),
-      metadata: parseMetadata(row.metadata),
+      metadata: parseMetadata(row.id, row.metadata),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     });
   }
 }
 
-function parseMetadata(text: string): Record<string, unknown> {
+function parseMetadata(rowId: string, text: string): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(text) as unknown;
-    return parsed !== null &&
-      typeof parsed === 'object' &&
-      !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
+    parsed = JSON.parse(text) as unknown;
+  } catch (error) {
+    throw new Error(
+      `Invalid tasks row ${rowId}: column metadata is not valid JSON.`,
+      { cause: error },
+    );
   }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(
+      `Invalid tasks row ${rowId}: column metadata must be a JSON object.`,
+    );
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function stripUndefinedOptionals(task: Task): Task {

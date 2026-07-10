@@ -62,12 +62,12 @@ import {
   type RuntimeRoleModel,
 } from '../provider/index.js';
 import { JsonlSessionStore } from '../session/jsonl-store.js';
-import { checkpointsDir } from '../session/paths.js';
 import type {
   JsonlSessionSummary,
   SessionTreeView,
 } from '../session/repository.js';
 import { loadCodingSkills } from '../skills/index.js';
+import { createCodingStorage, type CodingStorage } from '../storage/index.js';
 import { createCodingTools } from '../tools/index.js';
 import { createBootProfile } from '../utils/boot-profile.js';
 
@@ -320,6 +320,7 @@ export interface CodingSession {
 
 /** 装配完成后注入 {@link CodingSessionImpl} 的依赖。 */
 interface SessionDeps {
+  readonly storage: CodingStorage;
   readonly sessionStore: JsonlSessionStore;
   readonly rulesStore: RulesStore;
   readonly registry: AgentRegistry;
@@ -351,21 +352,28 @@ export async function createCodingSession(
     sessionDir: config.sessionDir,
     cwd: config.cwd,
   });
+  const storage = createCodingStorage();
   const rulesStore = new RulesStore(config.cwd);
-  await profile.measure('rules.load', () => rulesStore.load());
-
-  const registry = await profile.measure('agents.registry', () =>
-    createAgentRegistry(config),
-  );
-  const session = new CodingSessionImpl(sessionId, config, {
-    sessionStore,
-    rulesStore,
-    registry,
-    backgroundJobs: new BackgroundJobStore(),
-    ...(options.modelAdapter !== undefined
-      ? { modelAdapter: options.modelAdapter }
-      : {}),
-  });
+  let session: CodingSessionImpl;
+  try {
+    await profile.measure('rules.load', () => rulesStore.load());
+    const registry = await profile.measure('agents.registry', () =>
+      createAgentRegistry(config),
+    );
+    session = new CodingSessionImpl(sessionId, config, {
+      storage,
+      sessionStore,
+      rulesStore,
+      registry,
+      backgroundJobs: new BackgroundJobStore(),
+      ...(options.modelAdapter !== undefined
+        ? { modelAdapter: options.modelAdapter }
+        : {}),
+    });
+  } catch (error) {
+    storage.close();
+    throw error;
+  }
   profile.mark('ready');
   profile.flush();
   session.emit({ type: 'session.opened', sessionId, cwd: config.cwd });
@@ -399,7 +407,7 @@ class CodingSessionImpl implements CodingSession {
     this.config = config;
     this.activeAgentName = config.default_agent;
     this.providerRegistry = createProviderRegistry(config);
-    this.checkpoints = new CheckpointStore(checkpointsDir(config.cwd));
+    this.checkpoints = new CheckpointStore(this.deps.storage.checkpoints);
     this.primaryRole = this.resolveRuntimeRole('primary');
     this.toolResultBudget = createToolResultBudget({
       sessionStore: this.deps.sessionStore,
@@ -843,7 +851,9 @@ class CodingSessionImpl implements CodingSession {
   }
 
   async close(): Promise<void> {
+    await this.deps.backgroundJobs.stopAll('coding session closed');
     await this.closeAgentRuntime();
+    this.deps.storage.close();
   }
 
   /** 向所有订阅者广播一个事件。 */
@@ -1025,8 +1035,12 @@ class CodingSessionImpl implements CodingSession {
         : {}),
     };
     const agentModel = this.resolveAgentModel(primaryRole);
-    const memory = createCodingMemory(config);
-    const observer = createCodingObserver(config, { model: primaryRole.ref });
+    const memory = createCodingMemory(config, this.deps.storage.memory);
+    const observer = createCodingObserver(
+      config,
+      { model: primaryRole.ref },
+      this.deps.storage.usage,
+    );
     const runtimeObserver: AgentObserver = {
       onToolCompleted: async (call) => {
         this.maybeRecordChange(call.id, call.output);
@@ -1041,6 +1055,7 @@ class CodingSessionImpl implements CodingSession {
 
     const tools = createCodingTools({
       config,
+      storage: this.deps.storage,
       rules: () => this.deps.rulesStore.rules(),
     });
     const selectedTools = selectToolsForAgent(tools, agentDef.tools);
@@ -1053,6 +1068,7 @@ class CodingSessionImpl implements CodingSession {
       config,
       providerRegistry: this.providerRegistry,
       session: this.deps.sessionStore,
+      storage: this.deps.storage,
       parentSessionId: () => this.sessionId,
       rules: () => this.deps.rulesStore.rules(),
       backgroundJobs: this.deps.backgroundJobs,

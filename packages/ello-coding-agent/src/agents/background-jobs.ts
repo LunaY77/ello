@@ -88,6 +88,14 @@ export class BackgroundJobStore {
     this.settle(id, { status: 'cancelled' });
   }
 
+  async stopAll(reason: string): Promise<void> {
+    const handles = [...this.handles.values()];
+    for (const handle of handles) {
+      handle.abort(reason);
+    }
+    await Promise.allSettled(handles.map((handle) => handle.final));
+  }
+
   /** 订阅任务结束（completed/error/cancelled）。 */
   onSettled(listener: (job: BackgroundJob) => void): () => void {
     this.settledListeners.add(listener);

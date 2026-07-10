@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createCodingStorage } from '../storage/index.js';
 import { git } from '../workspace/git.js';
 import {
   formatRepoList,
@@ -99,7 +100,8 @@ describe('workspace helpers', () => {
     });
     expect(await repos.show('demo2')).toMatchObject({ key: 'demo2' });
 
-    const workspaces = new WorkspaceStore(repos);
+    const storage = createCodingStorage();
+    const workspaces = new WorkspaceStore(storage.workspaces, repos);
     const created = await workspaces.create('explore', 'Inspect Demo', [
       'demo2',
     ]);
@@ -133,5 +135,6 @@ describe('workspace helpers', () => {
     await expect(
       workspaces.remove('explore', 'inspect-demo', true),
     ).resolves.toBe(true);
+    storage.close();
   });
 });

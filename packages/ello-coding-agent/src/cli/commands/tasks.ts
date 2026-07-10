@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 
+import type { TaskService } from '../../tasks/index.js';
 import type { CliCommandContext, CliCommandModule } from '../types.js';
 
 export const taskCommands: CliCommandModule = {
@@ -16,9 +17,8 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
     .description('list tasks')
     .action(async (_opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { createTaskService, formatTaskList } =
-        await import('../../tasks/index.js');
-      const tasks = await createTaskService().list();
+      const { formatTaskList } = await import('../../tasks/index.js');
+      const tasks = await withTaskService((service) => service.list());
       ctx.io.stdout.write(
         `${config.json ? JSON.stringify(tasks, null, 2) : formatTaskList(tasks)}\n`,
       );
@@ -29,9 +29,8 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
     .description('show one task')
     .action(async (id: string, _opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { createTaskService, formatTask } =
-        await import('../../tasks/index.js');
-      const task = await createTaskService().get(id);
+      const { formatTask } = await import('../../tasks/index.js');
+      const task = await withTaskService((service) => service.get(id));
       if (task === null) {
         throw new Error(`Unknown task: ${id}`);
       }
@@ -51,15 +50,16 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
         cmd: Command,
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { createTaskService, formatTask } =
-          await import('../../tasks/index.js');
-        const task = await createTaskService().create({
-          subject: opts.subject,
-          ...(opts.description !== undefined
-            ? { description: opts.description }
-            : {}),
-          ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
-        });
+        const { formatTask } = await import('../../tasks/index.js');
+        const task = await withTaskService((service) =>
+          service.create({
+            subject: opts.subject,
+            ...(opts.description !== undefined
+              ? { description: opts.description }
+              : {}),
+            ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
+          }),
+        );
         ctx.io.stdout.write(
           `${config.json ? JSON.stringify(task, null, 2) : formatTask(task)}\n`,
         );
@@ -88,16 +88,17 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
         cmd: Command,
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { createTaskService, formatTask } =
-          await import('../../tasks/index.js');
-        const task = await createTaskService().update(id, {
-          ...(opts.subject !== undefined ? { subject: opts.subject } : {}),
-          ...(opts.description !== undefined
-            ? { description: opts.description }
-            : {}),
-          ...(opts.status !== undefined ? { status: opts.status } : {}),
-          ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
-        });
+        const { formatTask } = await import('../../tasks/index.js');
+        const task = await withTaskService((service) =>
+          service.update(id, {
+            ...(opts.subject !== undefined ? { subject: opts.subject } : {}),
+            ...(opts.description !== undefined
+              ? { description: opts.description }
+              : {}),
+            ...(opts.status !== undefined ? { status: opts.status } : {}),
+            ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
+          }),
+        );
         ctx.io.stdout.write(
           `${config.json ? JSON.stringify(task, null, 2) : formatTask(task)}\n`,
         );
@@ -109,8 +110,7 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
     .description('delete a task')
     .action(async (id: string, _opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { createTaskService } = await import('../../tasks/index.js');
-      const deleted = await createTaskService().delete(id);
+      const deleted = await withTaskService((service) => service.delete(id));
       ctx.io.stdout.write(
         `${config.json ? JSON.stringify({ id, deleted }) : `deleted\t${id}\t${deleted}`}\n`,
       );
@@ -122,9 +122,10 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
     .description('claim a task')
     .action(async (id: string, opts: { owner: string }, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { createTaskService, formatClaimResult } =
-        await import('../../tasks/index.js');
-      const result = await createTaskService().claim(id, opts.owner);
+      const { formatClaimResult } = await import('../../tasks/index.js');
+      const result = await withTaskService((service) =>
+        service.claim(id, opts.owner),
+      );
       ctx.io.stdout.write(
         `${config.json ? JSON.stringify(result, null, 2) : formatClaimResult(result)}\n`,
       );
@@ -134,12 +135,21 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
     .description('reset current task list')
     .action(async (_opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { createTaskService } = await import('../../tasks/index.js');
-      await createTaskService().reset();
+      await withTaskService((service) => service.reset());
       ctx.io.stdout.write(
         `${config.json ? JSON.stringify({ reset: true }) : 'reset\ttrue'}\n`,
       );
     });
+}
+
+async function withTaskService<T>(
+  fn: (service: TaskService) => Promise<T>,
+): Promise<T> {
+  const [{ withCodingStorage }, { createTaskService }] = await Promise.all([
+    import('../../storage/index.js'),
+    import('../../tasks/index.js'),
+  ]);
+  return withCodingStorage((storage) => fn(createTaskService(storage.tasks)));
 }
 
 function registerSkillCommands(program: Command, ctx: CliCommandContext): void {

@@ -7,6 +7,9 @@ import {
   type DecideApproval,
 } from '../permission/policy.js';
 import type { PermissionRule } from '../permission/types.js';
+import type { CodingStorage } from '../storage/index.js';
+import { createTaskService } from '../tasks/index.js';
+import { RepoStore, WorkspaceStore } from '../workspace/index.js';
 
 import { createFsTools } from './fs.js';
 import { formatToolRegistry } from './registry.js';
@@ -28,6 +31,7 @@ import { createWorkspaceTools } from './workspace.js';
  */
 export interface CreateCodingToolsOptions {
   readonly config: CodingAgentConfig;
+  readonly storage: CodingStorage;
   /** 动态权限规则读取器。 */
   readonly rules?: () => readonly PermissionRule[];
   readonly decide?: DecideApproval;
@@ -47,6 +51,9 @@ export function createCodingTools(
   const approval: ApprovalFor = genericApprovalFor(decide);
   const disabled = new Set(config.tools.disabled);
   const outputStore = new SessionToolOutputStore(config.sessionDir);
+  const tasks = createTaskService(options.storage.tasks);
+  const repos = new RepoStore();
+  const workspaces = new WorkspaceStore(options.storage.workspaces, repos);
 
   const codingTools = [
     ...createFsTools(config, decide),
@@ -57,8 +64,8 @@ export function createCodingTools(
 
   return [
     ...adaptCodingTools(codingTools, { config, outputStore }),
-    ...createTaskTools(approval),
-    ...createWorkspaceTools(approval),
+    ...createTaskTools(approval, tasks),
+    ...createWorkspaceTools(approval, repos, workspaces),
   ].filter((tool) => !disabled.has(tool.name));
 }
 

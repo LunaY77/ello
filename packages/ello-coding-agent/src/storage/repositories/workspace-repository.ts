@@ -8,11 +8,7 @@ import type {
   WorkspaceManifest,
   WorkspaceRepo,
 } from '../../workspace/types.js';
-import {
-  openGlobalCodingDatabaseSync,
-  transaction,
-  type CodingDatabase,
-} from '../database.js';
+import { transaction, type CodingDatabase } from '../database.js';
 import {
   repositories,
   workspaceRepositories,
@@ -42,15 +38,12 @@ export interface WorkspaceSyncResult {
 /**
  * workspace 仓储。
  *
- * DB 是 workspace 的唯一事实源。这里可以导入旧 manifest，但导入完成后 list/open
- * 不再扫描 manifest，也不会在 DB 丢失时从 manifest 自动恢复。
+ * DB 是 workspace 的唯一事实源，所有 mutation 在当前连接内同步提交。
  */
 export class WorkspaceRepository {
-  constructor(
-    private readonly db: CodingDatabase = openGlobalCodingDatabaseSync(),
-  ) {}
+  constructor(private readonly db: CodingDatabase) {}
 
-  async upsertRepo(entry: RepoEntry): Promise<string> {
+  upsertRepo(entry: RepoEntry): string {
     const id = stableRepoId(entry.key);
     this.db
       .insert(repositories)
@@ -76,7 +69,7 @@ export class WorkspaceRepository {
     return id;
   }
 
-  async save(manifest: WorkspaceManifest): Promise<WorkspaceManifest> {
+  save(manifest: WorkspaceManifest): WorkspaceManifest {
     transaction(this.db, () => {
       const workspaceId = workspaceKey(manifest.kind, manifest.name);
       this.db
@@ -128,7 +121,7 @@ export class WorkspaceRepository {
     return manifest;
   }
 
-  async list(kind?: WorkspaceKind): Promise<readonly WorkspaceManifest[]> {
+  list(kind?: WorkspaceKind): readonly WorkspaceManifest[] {
     const rows = this.db
       .select()
       .from(workspaces)
@@ -140,10 +133,7 @@ export class WorkspaceRepository {
       .map((row) => this.toManifest(row));
   }
 
-  async open(
-    kind: WorkspaceKind,
-    name: string,
-  ): Promise<WorkspaceManifest | null> {
+  open(kind: WorkspaceKind, name: string): WorkspaceManifest | null {
     const row = this.db
       .select()
       .from(workspaces)
@@ -154,7 +144,7 @@ export class WorkspaceRepository {
       : this.toManifest(row);
   }
 
-  async markDeleted(kind: WorkspaceKind, name: string): Promise<void> {
+  markDeleted(kind: WorkspaceKind, name: string): void {
     const now = new Date().toISOString();
     this.db
       .update(workspaces)
@@ -163,7 +153,7 @@ export class WorkspaceRepository {
       .run();
   }
 
-  async markArchived(manifest: WorkspaceManifest): Promise<WorkspaceManifest> {
+  markArchived(manifest: WorkspaceManifest): WorkspaceManifest {
     const now = new Date().toISOString();
     this.db
       .update(workspaces)
@@ -182,10 +172,10 @@ export class WorkspaceRepository {
     return { ...manifest, updatedAt: now };
   }
 
-  async sync(
+  sync(
     diffs: readonly WorkspaceSyncDiff[],
     options: { readonly fixMissing?: boolean; readonly prune?: boolean } = {},
-  ): Promise<WorkspaceSyncResult> {
+  ): WorkspaceSyncResult {
     const id = randomUUID();
     const now = new Date().toISOString();
     let fixedCount = 0;

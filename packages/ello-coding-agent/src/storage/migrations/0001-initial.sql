@@ -1,8 +1,4 @@
--- coding-agent 全局 SQLite 初始化脚本。
--- 说明：
--- 1. 只使用幂等 DDL，不依赖版本表。
--- 2. 这是全局库 `~/.ello/state.sqlite` 的启动基线，不会在项目目录创建 SQLite。
--- 3. 表结构只覆盖需要查询、聚合或事务保护的结构化状态。
+-- coding-agent 全局 SQLite 初始 schema。
 
 -- 通用元信息表：给后续导入、报表缓存或一次性标记留入口。
 create table if not exists meta (

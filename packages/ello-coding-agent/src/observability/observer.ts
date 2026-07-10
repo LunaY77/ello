@@ -5,7 +5,7 @@ import type { AgentObserver, AgentUsage } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
 import { logsDir } from '../session/paths.js';
-import { UsageRepository } from '../storage/repositories/usage-repository.js';
+import type { UsageRepository } from '../storage/repositories/usage-repository.js';
 
 /**
  * coding-agent 结构化日志 observer。
@@ -18,11 +18,12 @@ import { UsageRepository } from '../storage/repositories/usage-repository.js';
  * token 用量 / finishReason；绝不记录 prompt 正文、工具入参与结果、
  * 文件内容、shell 输出。
  *
- * 被动原则：observer 抛错绝不能影响 agent 执行，所有写日志的失败都被吞掉。
+ * NDJSON 日志失败不影响 run；usage 属于结构化状态，写入失败直接终止 run。
  */
 export function createCodingObserver(
   config: CodingAgentConfig,
   runtime: { readonly model: string },
+  usageRepository: UsageRepository,
 ): AgentObserver {
   const file = path.join(logsDir(), 'coding-agent.ndjson');
   const starts = new Map<string, string>();
@@ -49,28 +50,32 @@ export function createCodingObserver(
     onToolCompleted: (call) => {
       log('tool.completed', { tool: call.name, ok: call.error === undefined });
     },
-    onRunCompleted: (result) => {
+    onRunCompleted: async (result) => {
       log('run.completed', {
         finishReason: result.finishReason,
         usage: summarizeUsage(result.usage),
       });
-      void recordUsageSafe(config, {
+      await usageRepository.recordUsage({
         runId: result.id,
+        invocation: config.tui ? 'tui' : 'run',
         model: runtime.model,
         status: 'completed',
         finishReason: result.finishReason,
         usage: result.usage,
         startedAt: starts.get(result.id),
+        completedAt: new Date().toISOString(),
       });
       starts.delete(result.id);
     },
-    onRunFailed: (event, ctx) => {
+    onRunFailed: async (event, ctx) => {
       log('run.failed', { error: event.error.message });
-      void recordUsageSafe(config, {
+      await usageRepository.recordUsage({
         runId: ctx.runId,
+        invocation: config.tui ? 'tui' : 'run',
         model: runtime.model,
         status: 'failed',
         startedAt: starts.get(ctx.runId),
+        completedAt: new Date().toISOString(),
       });
       starts.delete(ctx.runId);
     },
@@ -99,34 +104,5 @@ async function writeLine(
     await appendFile(file, `${JSON.stringify(payload)}\n`, 'utf8');
   } catch {
     // 日志写入失败被动吞掉，绝不影响 agent 运行。
-  }
-}
-
-async function recordUsageSafe(
-  config: CodingAgentConfig,
-  input: {
-    readonly runId: string;
-    readonly model: string;
-    readonly status: 'completed' | 'failed';
-    readonly finishReason?: string | undefined;
-    readonly usage?: AgentUsage | undefined;
-    readonly startedAt?: string | undefined;
-  },
-): Promise<void> {
-  try {
-    const repository = new UsageRepository();
-    await repository.recordUsage({
-      runId: input.runId,
-      invocation: config.tui ? 'tui' : 'run',
-      model: input.model,
-      status: input.status,
-      finishReason: input.finishReason,
-      usage: input.usage,
-      startedAt: input.startedAt,
-      completedAt: new Date().toISOString(),
-    });
-    repository.close();
-  } catch {
-    // usage 是报表辅助数据，写入失败不能影响 agent 主流程。
   }
 }

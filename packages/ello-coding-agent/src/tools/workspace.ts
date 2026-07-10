@@ -6,9 +6,11 @@ import { RepoStore, WorkspaceStore } from '../workspace/index.js';
 import type { ApprovalFor } from './shared.js';
 
 /** workspace/repo 结构化工具，避免模型手拼 git worktree 命令。 */
-export function createWorkspaceTools(approval: ApprovalFor): AnyAgentTool[] {
-  const repos = new RepoStore();
-  const workspaces = new WorkspaceStore(repos);
+export function createWorkspaceTools(
+  approval: ApprovalFor,
+  repos: RepoStore,
+  workspaces: WorkspaceStore,
+): AnyAgentTool[] {
   return [
     defineTool({
       name: 'workspace_repo_list',

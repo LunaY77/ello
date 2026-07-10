@@ -5,11 +5,7 @@ import path from 'node:path';
 import { asc, eq } from 'drizzle-orm';
 
 import type { Checkpoint, FileChange } from '../../change/checkpoint.js';
-import {
-  openGlobalCodingDatabaseSync,
-  transaction,
-  type CodingDatabase,
-} from '../database.js';
+import { transaction, type CodingDatabase } from '../database.js';
 import { globalArtifactsDir } from '../paths.js';
 import {
   artifacts,
@@ -25,9 +21,7 @@ import {
  * 这样 rollback/list/detail 可以结构化查询，同时避免把代码快照直接塞进 SQLite。
  */
 export class CheckpointRepository {
-  constructor(
-    private readonly db: CodingDatabase = openGlobalCodingDatabaseSync(),
-  ) {}
+  constructor(private readonly db: CodingDatabase) {}
 
   async seal(input: {
     readonly runId: string;
@@ -133,13 +127,13 @@ export class CheckpointRepository {
           row.afterArtifactId === null
             ? null
             : await this.readArtifact(row.afterArtifactId),
-        toolCallId: row.toolCallId ?? '',
-        diff: row.diff ?? '',
+        toolCallId: requireColumn(row.id, 'tool_call_id', row.toolCallId),
+        diff: requireColumn(row.id, 'diff', row.diff),
       })),
     );
     return {
       id: checkpoint.id,
-      runId: checkpoint.runId ?? '',
+      runId: requireColumn(checkpoint.id, 'run_id', checkpoint.runId),
       createdAt: checkpoint.createdAt,
       ...(checkpoint.label !== null ? { label: checkpoint.label } : {}),
       changes,
@@ -188,6 +182,19 @@ export class CheckpointRepository {
     }
     return readFile(row.path, 'utf8');
   }
+}
+
+function requireColumn(
+  rowId: string,
+  column: string,
+  value: string | null,
+): string {
+  if (value === null) {
+    throw new Error(
+      `Invalid checkpoints row ${rowId}: column ${column} is null.`,
+    );
+  }
+  return value;
 }
 
 async function writeArtifact(

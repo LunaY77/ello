@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CheckpointStore } from '../change/checkpoint.js';
 import { globalArtifactsDir } from '../storage/index.js';
+import { createCodingStorage } from '../storage/index.js';
 
 describe('CheckpointStore SQLite backend', () => {
   let oldHome: string | undefined;
@@ -34,7 +35,8 @@ describe('CheckpointStore SQLite backend', () => {
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, 'before\n', 'utf8');
 
-    const store = new CheckpointStore(path.join(cwd, '.ello', 'checkpoints'));
+    const storage = createCodingStorage();
+    const store = new CheckpointStore(storage.checkpoints);
     store.record({
       path: target,
       before: 'before\n',
@@ -51,5 +53,6 @@ describe('CheckpointStore SQLite backend', () => {
 
     await store.rollback(checkpoint!.id);
     expect(await readFile(target, 'utf8')).toBe('before\n');
+    storage.close();
   });
 });

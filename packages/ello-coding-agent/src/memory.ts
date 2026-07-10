@@ -24,7 +24,10 @@ export interface MemoryManifest {
 /**
  * 加载会影响当前会话的项目级和用户级记忆文件。
  */
-export async function loadCodingMemory(cwd: string): Promise<MemoryManifest> {
+export async function loadCodingMemory(
+  cwd: string,
+  repository: MemoryRepository,
+): Promise<MemoryManifest> {
   const home = globalHomeDir();
   const candidates = [
     { scope: 'project' as const, path: path.join(cwd, 'AGENTS.md') },
@@ -63,9 +66,7 @@ export async function loadCodingMemory(cwd: string): Promise<MemoryManifest> {
       }
     }
   }
-  const repository = new MemoryRepository();
   const items = await repository.listEnabled();
-  repository.close();
   return { files, items: [...items] };
 }
 

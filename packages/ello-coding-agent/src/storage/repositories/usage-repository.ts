@@ -3,10 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentFinishReason, AgentUsage } from '@ello/agent';
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 
-import {
-  closeCodingDatabase,
-  openGlobalCodingDatabaseSync,
-} from '../database.js';
+import type { CodingDatabase } from '../database.js';
 import { usagePriceSnapshots, usageRecords } from '../schema.js';
 
 export type UsageInvocation = 'tui' | 'run' | 'tool' | 'test' | 'unknown';
@@ -83,14 +80,15 @@ export interface PriceSnapshotInput {
  * 工具结果和 session 内容都不进入 SQLite。
  */
 export class UsageRepository {
-  private readonly ownsDb: boolean;
+  constructor(private readonly db: CodingDatabase) {}
 
-  constructor(private readonly db = openGlobalCodingDatabaseSync()) {
-    this.ownsDb = arguments.length === 0;
-  }
-
-  async recordUsage(input: RecordUsageInput): Promise<UsageRecord> {
+  recordUsage(input: RecordUsageInput): UsageRecord {
     const now = new Date().toISOString();
+    if (input.status === 'completed' && input.usage === undefined) {
+      throw new Error(
+        `Completed usage record ${input.runId ?? '<unknown>'} is missing usage.`,
+      );
+    }
     const usage = input.usage ?? zeroUsage();
     const row = {
       id: randomUUID(),
@@ -115,7 +113,7 @@ export class UsageRepository {
     return normalizeUsageRecord(row);
   }
 
-  async listRecords(filter: UsageFilter = {}): Promise<readonly UsageRecord[]> {
+  listRecords(filter: UsageFilter = {}): readonly UsageRecord[] {
     const rows = this.db
       .select()
       .from(usageRecords)
@@ -125,10 +123,10 @@ export class UsageRepository {
     return rows.map(normalizeUsageRecord);
   }
 
-  async summarize(
+  summarize(
     filter: UsageFilter = {},
     groupBy: UsageGroupBy = 'model',
-  ): Promise<readonly UsageSummaryRow[]> {
+  ): readonly UsageSummaryRow[] {
     const keyExpr =
       groupBy === 'day'
         ? sql<string>`substr(${usageRecords.startedAt}, 1, 10)`
@@ -165,7 +163,7 @@ export class UsageRepository {
     }));
   }
 
-  async upsertPriceSnapshot(input: PriceSnapshotInput): Promise<string> {
+  upsertPriceSnapshot(input: PriceSnapshotInput): string {
     const now = new Date().toISOString();
     const id = `${input.provider}:${input.model}:${input.effectiveAt ?? now}`;
     this.db
@@ -194,12 +192,6 @@ export class UsageRepository {
       })
       .run();
     return id;
-  }
-
-  close(): void {
-    if (this.ownsDb) {
-      closeCodingDatabase(this.db);
-    }
   }
 }
 

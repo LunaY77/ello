@@ -2,7 +2,7 @@ import type { AgentObserver, SystemSection } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
 import { loadCodingMemory, renderMemoryForPrompt } from '../memory.js';
-import { MemoryRepository } from '../storage/repositories/memory-repository.js';
+import type { MemoryRepository } from '../storage/repositories/memory-repository.js';
 
 /**
  * 记忆 = section（注入）+ observer（回写）。
@@ -16,16 +16,12 @@ import { MemoryRepository } from '../storage/repositories/memory-repository.js';
  * - `observer`：run 结束/失败时清掉该 run 的缓存条目，防止 Map 无限增长。
  *   （v1 暂不做“自动学习并回写记忆”，留作后续；写回入口就在这里。）
  *
- * 典型装配方式：
- * ```ts
- * const memory = createCodingMemory(config);
- * createAgent({
- *   observers: [memory.observer, ...],
- *   modelInput: { systemSections: [createCodingSystemPromptSection(config, deps), memory.section] },
- * });
- * ```
+ * MemoryRepository 由 CodingStorage 注入，多个 turn 和 agent rebuild 复用同一连接。
  */
-export function createCodingMemory(config: CodingAgentConfig): {
+export function createCodingMemory(
+  config: CodingAgentConfig,
+  repository: MemoryRepository,
+): {
   section: SystemSection;
   observer: AgentObserver;
 } {
@@ -42,7 +38,7 @@ export function createCodingMemory(config: CodingAgentConfig): {
   const section: SystemSection = async (run) => {
     let text = cache.get(run.runId);
     if (text === undefined) {
-      const manifest = await loadCodingMemory(config.cwd);
+      const manifest = await loadCodingMemory(config.cwd, repository);
       const rendered = renderMemoryForPrompt(manifest, config.cwd).trim();
       text = rendered ? `# Relevant memory\n${rendered}` : '';
       cache.set(run.runId, text);
@@ -50,14 +46,12 @@ export function createCodingMemory(config: CodingAgentConfig): {
         config.context.memory.structured.enabled &&
         manifest.items.length > 0
       ) {
-        const repo = new MemoryRepository();
         for (const item of manifest.items) {
-          await repo.markUsed(item.id, {
+          await repository.markUsed(item.id, {
             runId: run.runId,
             usedFor: 'context-injection',
           });
         }
-        repo.close();
       }
     }
     return text || null;

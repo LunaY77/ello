@@ -1,7 +1,7 @@
 import { defineTool, type AnyAgentTool } from '@ello/agent';
 import { z } from 'zod';
 
-import { createTaskService } from '../tasks/index.js';
+import type { TaskService } from '../tasks/index.js';
 
 import type { ApprovalFor } from './shared.js';
 
@@ -15,9 +15,10 @@ const Metadata = z.record(z.string(), z.unknown()).default({});
  * 任务状态落到文件存储，CLI/TUI/模型工具共享同一份
  * TaskService，不再依赖单次 tool result 才能看见任务列表。
  */
-export function createTaskTools(approval: ApprovalFor): AnyAgentTool[] {
-  const service = createTaskService();
-
+export function createTaskTools(
+  approval: ApprovalFor,
+  service: TaskService,
+): AnyAgentTool[] {
   return [
     defineTool({
       name: 'task_create',

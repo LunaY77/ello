@@ -5,9 +5,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  closeCodingDatabase,
+  createCodingStorage,
   globalStateDatabasePath,
-  openGlobalCodingDatabase,
 } from '../storage/index.js';
 
 describe('global coding storage', () => {
@@ -30,19 +29,35 @@ describe('global coding storage', () => {
   });
 
   it('只创建全局 state.sqlite，并启用关键 PRAGMA', async () => {
-    const db = await openGlobalCodingDatabase();
+    const storage = createCodingStorage();
     try {
       expect(globalStateDatabasePath()).toBe(path.join(home, 'state.sqlite'));
       await expect(access(globalStateDatabasePath())).resolves.toBeUndefined();
-      expect(db.$client.pragma('foreign_keys', { simple: true })).toBe(1);
-      expect(db.$client.pragma('busy_timeout', { simple: true })).toBe(5000);
+      expect(storage.db.$client.pragma('foreign_keys', { simple: true })).toBe(
+        1,
+      );
+      expect(storage.db.$client.pragma('busy_timeout', { simple: true })).toBe(
+        5000,
+      );
       expect(
         String(
-          db.$client.pragma('journal_mode', { simple: true }),
+          storage.db.$client.pragma('journal_mode', { simple: true }),
         ).toLowerCase(),
       ).toBe('wal');
+      expect(
+        storage.db.$client
+          .prepare('select version, name from schema_migrations')
+          .all(),
+      ).toEqual([{ version: 1, name: 'initial' }]);
     } finally {
-      closeCodingDatabase(db);
+      storage.close();
     }
+  });
+
+  it('close 幂等，关闭后继续查询直接失败', () => {
+    const storage = createCodingStorage();
+    storage.close();
+    storage.close();
+    expect(() => storage.db.$client.prepare('select 1').get()).toThrow();
   });
 });
