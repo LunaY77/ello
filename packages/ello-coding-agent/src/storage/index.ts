@@ -4,6 +4,13 @@ export {
   type CodingStorage,
 } from './coding-storage.js';
 export {
+  ArtifactStore,
+  type ArtifactGcReport,
+  type ArtifactOwner,
+  type ArtifactOwnerKind,
+  type ArtifactRef,
+} from './artifact-store.js';
+export {
   immediateTransaction,
   transaction,
   type CodingDatabase,

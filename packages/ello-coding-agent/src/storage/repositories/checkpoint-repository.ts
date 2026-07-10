@@ -1,14 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 
 import { asc, eq } from 'drizzle-orm';
 
 import type { Checkpoint, FileChange } from '../../change/checkpoint.js';
+import type { ArtifactRef, ArtifactStore } from '../artifact-store.js';
 import { transaction, type CodingDatabase } from '../database.js';
-import { globalArtifactsDir } from '../paths.js';
 import {
-  artifacts,
   checkpointFileChanges,
   checkpointRollbacks,
   checkpoints,
@@ -17,11 +14,14 @@ import {
 /**
  * checkpoint 仓储。
  *
- * DB 只存 checkpoint 和文件变化的元数据；before/after 内容写入全局 artifacts。
+ * DB 只存 checkpoint 和文件变化的元数据；before/after 内容交给 ArtifactStore。
  * 这样 rollback/list/detail 可以结构化查询，同时避免把代码快照直接塞进 SQLite。
  */
 export class CheckpointRepository {
-  constructor(private readonly db: CodingDatabase) {}
+  constructor(
+    private readonly db: CodingDatabase,
+    private readonly artifacts: ArtifactStore,
+  ) {}
 
   async seal(input: {
     readonly runId: string;
@@ -39,54 +39,68 @@ export class CheckpointRepository {
       ...(input.label !== undefined ? { label: input.label } : {}),
       changes: [...input.changes],
     };
-    const artifactRows = await Promise.all(
-      input.changes.flatMap((change) => [
-        writeArtifact('checkpoint_before', change.before),
-        writeArtifact('checkpoint_after', change.after),
-      ]),
-    );
+    const artifactRows: Array<{
+      readonly before: ArtifactRef | null;
+      readonly after: ArtifactRef | null;
+    }> = [];
+    try {
+      for (const [index, change] of input.changes.entries()) {
+        artifactRows.push({
+          before: await this.putArtifact(
+            checkpoint.id,
+            `change:${index}:before`,
+            change.before,
+          ),
+          after: await this.putArtifact(
+            checkpoint.id,
+            `change:${index}:after`,
+            change.after,
+          ),
+        });
+      }
 
-    transaction(this.db, () => {
-      this.db
-        .insert(checkpoints)
-        .values({
-          id: checkpoint.id,
-          runId: input.runId,
-          label: input.label ?? null,
-          status: 'active',
-          createdAt: now,
-          rolledBackAt: null,
-        })
-        .run();
-
-      for (let index = 0; index < input.changes.length; index += 1) {
-        const change = input.changes[index]!;
-        const before = artifactRows[index * 2]!;
-        const after = artifactRows[index * 2 + 1]!;
-        for (const artifact of [before, after]) {
-          if (artifact !== null) {
-            this.db.insert(artifacts).values(artifact).run();
-          }
-        }
+      transaction(this.db, () => {
         this.db
-          .insert(checkpointFileChanges)
+          .insert(checkpoints)
           .values({
-            id: randomUUID(),
-            checkpointId: checkpoint.id,
-            path: change.path,
-            pathHash: sha256(change.path),
-            changeType: changeType(change),
-            beforeArtifactId: before?.id ?? null,
-            afterArtifactId: after?.id ?? null,
-            beforeSha256: before?.sha256 ?? null,
-            afterSha256: after?.sha256 ?? null,
-            diff: change.diff,
-            toolCallId: change.toolCallId,
+            id: checkpoint.id,
+            runId: input.runId,
+            label: input.label ?? null,
+            status: 'active',
             createdAt: now,
+            rolledBackAt: null,
           })
           .run();
-      }
-    });
+
+        for (let index = 0; index < input.changes.length; index += 1) {
+          const change = input.changes[index]!;
+          const artifactRow = artifactRows[index]!;
+          this.db
+            .insert(checkpointFileChanges)
+            .values({
+              id: randomUUID(),
+              checkpointId: checkpoint.id,
+              path: change.path,
+              pathHash: sha256(change.path),
+              changeType: changeType(change),
+              beforeArtifactId: artifactRow.before?.id ?? null,
+              afterArtifactId: artifactRow.after?.id ?? null,
+              beforeSha256: artifactRow.before?.sha256 ?? null,
+              afterSha256: artifactRow.after?.sha256 ?? null,
+              diff: change.diff,
+              toolCallId: change.toolCallId,
+              createdAt: now,
+            })
+            .run();
+        }
+      });
+    } catch (error) {
+      await this.artifacts.releaseOwnerAll({
+        kind: 'checkpoint',
+        id: checkpoint.id,
+      });
+      throw error;
+    }
     return checkpoint;
   }
 
@@ -122,11 +136,13 @@ export class CheckpointRepository {
         before:
           row.beforeArtifactId === null
             ? null
-            : await this.readArtifact(row.beforeArtifactId),
+            : (await this.artifacts.read(row.beforeArtifactId)).toString(
+                'utf8',
+              ),
         after:
           row.afterArtifactId === null
             ? null
-            : await this.readArtifact(row.afterArtifactId),
+            : (await this.artifacts.read(row.afterArtifactId)).toString('utf8'),
         toolCallId: requireColumn(row.id, 'tool_call_id', row.toolCallId),
         diff: requireColumn(row.id, 'diff', row.diff),
       })),
@@ -171,16 +187,20 @@ export class CheckpointRepository {
     });
   }
 
-  private async readArtifact(id: string): Promise<string | null> {
-    const row = this.db
-      .select()
-      .from(artifacts)
-      .where(eq(artifacts.id, id))
-      .get();
-    if (row === undefined) {
+  private async putArtifact(
+    checkpointId: string,
+    relation: string,
+    content: string | null,
+  ): Promise<ArtifactRef | null> {
+    if (content === null) {
       return null;
     }
-    return readFile(row.path, 'utf8');
+    return this.artifacts.put({
+      kind: 'checkpoint',
+      content,
+      contentType: 'text/plain; charset=utf-8',
+      owner: { kind: 'checkpoint', id: checkpointId, relation },
+    });
   }
 }
 
@@ -195,30 +215,6 @@ function requireColumn(
     );
   }
   return value;
-}
-
-async function writeArtifact(
-  kind: string,
-  content: string | null,
-): Promise<typeof artifacts.$inferInsert | null> {
-  if (content === null) {
-    return null;
-  }
-  const hash = sha256(content);
-  const id = randomUUID();
-  const dir = path.join(globalArtifactsDir(), kind, hash.slice(0, 2));
-  await mkdir(dir, { recursive: true });
-  const filePath = path.join(dir, `${id}.txt`);
-  await writeFile(filePath, content, 'utf8');
-  return {
-    id,
-    kind,
-    path: filePath,
-    sha256: hash,
-    byteSize: Buffer.byteLength(content, 'utf8'),
-    contentType: 'text/plain; charset=utf-8',
-    createdAt: new Date().toISOString(),
-  };
 }
 
 function sha256(value: string): string {

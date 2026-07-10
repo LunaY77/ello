@@ -25,15 +25,22 @@ function registerSessionCommands(
   program
     .command('sessions')
     .description('list sessions')
-    .action(async (_opts: unknown, cmd: Command) => {
+    .option('--rebuild-catalog', 'rebuild catalog from v3 session files')
+    .action(async (opts: { rebuildCatalog?: boolean }, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { JsonlSessionStore } =
-        await import('../../session/jsonl-store.js');
-      const store = new JsonlSessionStore({
+      const { JsonlSessionRepository } =
+        await import('../../session/repository.js');
+      const repository = new JsonlSessionRepository({
         sessionDir: config.sessionDir,
         cwd: config.cwd,
       });
-      const sessions = await store.list();
+      if (opts.rebuildCatalog === true) {
+        const rebuilt = await repository.rebuildCatalog();
+        ctx.io.stdout.write(
+          `Rebuilt session catalog with ${rebuilt} sessions.\n`,
+        );
+      }
+      const sessions = await repository.list();
       ctx.io.stdout.write(
         `${
           config.json

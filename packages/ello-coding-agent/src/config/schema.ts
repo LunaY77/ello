@@ -177,7 +177,6 @@ export const ContextCompactionConfigSchema = z.object({
 export const ContextToolResultBudgetConfigSchema = z.object({
   enabled: z.boolean().default(false),
   max_chars: z.number().int().positive().default(20_000),
-  artifact_dir: z.string().default('~/.ello/artifacts/tool-results'),
 });
 
 /** structured memory（SQLite）配置（§4.3）：显式录入 + 检索 + 访问日志。 */
@@ -214,7 +213,6 @@ export const ContextConfigSchema = z.object({
   tool_result_budget: ContextToolResultBudgetConfigSchema.default({
     enabled: false,
     max_chars: 20_000,
-    artifact_dir: '~/.ello/artifacts/tool-results',
   }),
   memory: ContextMemoryConfigSchema.default({
     enabled: false,
@@ -284,7 +282,6 @@ export const CodingAgentConfigSchema = z.object({
     tool_result_budget: {
       enabled: false,
       max_chars: 20_000,
-      artifact_dir: '~/.ello/artifacts/tool-results',
     },
     memory: { enabled: false, structured: { enabled: true } },
   }),

@@ -350,11 +350,12 @@ export async function createCodingSession(
   const sessionId = config.sessionId ?? randomUUID();
 
   profile.mark('start');
+  const storage = createCodingStorage();
   const sessionStore = new JsonlSessionStore({
     sessionDir: config.sessionDir,
     cwd: config.cwd,
+    artifacts: storage.artifacts,
   });
-  const storage = createCodingStorage();
   const rulesStore = new RulesStore(config.cwd);
   let session: CodingSessionImpl;
   try {
@@ -413,6 +414,7 @@ class CodingSessionImpl implements CodingSession {
     this.primaryRole = this.resolveRuntimeRole('primary');
     this.toolResultBudget = createToolResultBudget({
       sessionStore: this.deps.sessionStore,
+      artifacts: this.deps.storage.artifacts,
       sessionId: () => this.sessionId,
       config: config.context.tool_result_budget,
     });
@@ -456,7 +458,7 @@ class CodingSessionImpl implements CodingSession {
         checkpointLabel: prompt.slice(0, 80),
       });
       if ((result.pending?.length ?? 0) === 0) {
-        this.scheduleSessionTitle(result.messages);
+        await this.ensureSessionTitle(this.sessionId, result.messages);
       }
       return result;
     } finally {
@@ -527,7 +529,7 @@ class CodingSessionImpl implements CodingSession {
         checkpoints: this.checkpoints,
       });
       if ((result.pending?.length ?? 0) === 0) {
-        this.scheduleSessionTitle(result.messages);
+        await this.ensureSessionTitle(this.sessionId, result.messages);
       }
     } finally {
       this.currentStream = undefined;
@@ -736,7 +738,7 @@ class CodingSessionImpl implements CodingSession {
     if (this.currentStream !== undefined) {
       this.abort('checkout requested from TUI');
     }
-    await this.deps.sessionStore.repository.checkout(this.sessionId, entryId);
+    await this.deps.sessionStore.checkout(this.sessionId, entryId);
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
     await this.emitHistoryLoaded();
@@ -760,10 +762,7 @@ class CodingSessionImpl implements CodingSession {
       throw new Error(`Cannot rewind non-user entry: ${entryId}`);
     }
     const prompt = messageText(target.message);
-    await this.deps.sessionStore.repository.checkout(
-      this.sessionId,
-      target.parentId,
-    );
+    await this.deps.sessionStore.checkout(this.sessionId, target.parentId);
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
     await this.emitHistoryLoaded();
@@ -800,6 +799,7 @@ class CodingSessionImpl implements CodingSession {
         : {}),
     });
     this.sessionId = next.sessionId;
+    await this.deps.sessionStore.load(this.sessionId);
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
     await this.emitHistoryLoaded();
@@ -854,6 +854,7 @@ class CodingSessionImpl implements CodingSession {
       : idOrPath;
     const loaded = await this.deps.sessionStore.repository.load(id);
     this.sessionId = id;
+    await this.deps.sessionStore.load(id);
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
     this.emitHistoryLoadedFromMessages(loaded.messages, loaded.messageEntryIds);
@@ -1057,10 +1058,7 @@ class CodingSessionImpl implements CodingSession {
       },
     };
     const contentReplacementTransform = (messages: readonly AgentMessage[]) =>
-      this.deps.sessionStore.repository.applyContentReplacements(
-        this.sessionId,
-        messages,
-      );
+      this.deps.sessionStore.applyContentReplacements(this.sessionId, messages);
 
     const tools = createCodingTools({
       config,
@@ -1202,17 +1200,6 @@ class CodingSessionImpl implements CodingSession {
       sessionId: this.sessionId,
       messages,
       ...(entryIds !== undefined ? { entryIds } : {}),
-    });
-  }
-
-  private scheduleSessionTitle(messages: readonly AgentMessage[]): void {
-    const sessionId = this.sessionId;
-    void this.ensureSessionTitle(sessionId, messages).catch((error) => {
-      this.emit({
-        type: 'context.source.failed',
-        origin: 'session-title',
-        error: error instanceof Error ? error.message : String(error),
-      });
     });
   }
 

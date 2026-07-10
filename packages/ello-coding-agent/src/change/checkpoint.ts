@@ -42,9 +42,8 @@ export interface Checkpoint {
 /**
  * 检查点存储：累积改动 → 封存 → 列出 → 回滚。
  *
- * 当前实现：改动收集 + `seal` + `list` + 最近一次 `rollback`。
- * 检查点元数据持久化到全局 `~/.ello/state.sqlite`，before/after 内容写入
- * `~/.ello/artifacts/`。项目 `<repo>/.ello/checkpoints` 不再写入新 JSON。
+ * 改动收集后由 `seal` 封存，元数据写入全局 SQLite，before/after 内容由
+ * ArtifactStore 按内容寻址保存；`rollback` 按相反顺序恢复 before 内容。
  */
 export class CheckpointStore {
   /** 当前 run 累积、尚未封存的改动。 */

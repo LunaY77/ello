@@ -51,6 +51,7 @@ describe('global coding storage', () => {
       ).toEqual([
         { version: 1, name: 'initial' },
         { version: 2, name: 'task-boards' },
+        { version: 3, name: 'artifacts' },
       ]);
     } finally {
       storage.close();

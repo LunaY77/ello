@@ -3,13 +3,14 @@ import path from 'node:path';
 
 import Database from 'better-sqlite3';
 
+import { ArtifactStore } from './artifact-store.js';
 import {
   configureCodingDatabase,
   createCodingDatabase,
   type CodingDatabase,
 } from './database.js';
 import { runCodingStorageMigrations } from './migration-runner.js';
-import { globalStateDatabasePath } from './paths.js';
+import { globalArtifactsDir, globalStateDatabasePath } from './paths.js';
 import { CheckpointRepository } from './repositories/checkpoint-repository.js';
 import { MemoryRepository } from './repositories/memory-repository.js';
 import { TaskBoardRepository } from './repositories/task-board-repository.js';
@@ -18,6 +19,7 @@ import { WorkspaceRepository } from './repositories/workspace-repository.js';
 
 export interface CodingStorage {
   readonly db: CodingDatabase;
+  readonly artifacts: ArtifactStore;
   readonly taskBoards: TaskBoardRepository;
   readonly checkpoints: CheckpointRepository;
   readonly workspaces: WorkspaceRepository;
@@ -27,7 +29,10 @@ export interface CodingStorage {
 }
 
 export function createCodingStorage(
-  options: { readonly databasePath?: string } = {},
+  options: {
+    readonly databasePath?: string;
+    readonly artifactsDir?: string;
+  } = {},
 ): CodingStorage {
   const databasePath = options.databasePath ?? globalStateDatabasePath();
   mkdirSync(path.dirname(databasePath), { recursive: true });
@@ -40,11 +45,16 @@ export function createCodingStorage(
     throw error;
   }
   const db = createCodingDatabase(client);
+  const artifactStore = new ArtifactStore(
+    db,
+    options.artifactsDir ?? globalArtifactsDir(),
+  );
   let closed = false;
   return {
     db,
+    artifacts: artifactStore,
     taskBoards: new TaskBoardRepository(db),
-    checkpoints: new CheckpointRepository(db),
+    checkpoints: new CheckpointRepository(db, artifactStore),
     workspaces: new WorkspaceRepository(db),
     usage: new UsageRepository(db),
     memory: new MemoryRepository(db),

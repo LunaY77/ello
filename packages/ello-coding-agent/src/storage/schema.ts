@@ -25,6 +25,30 @@ export const artifacts = sqliteTable('artifacts', {
   createdAt: text('created_at').notNull(),
 });
 
+/** artifact 与产品实体之间的显式所有权引用。 */
+export const artifactReferences = sqliteTable(
+  'artifact_references',
+  {
+    artifactId: text('artifact_id')
+      .notNull()
+      .references(() => artifacts.id, { onDelete: 'cascade' }),
+    ownerKind: text('owner_kind').notNull(),
+    ownerId: text('owner_id').notNull(),
+    relation: text('relation').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.artifactId,
+        table.ownerKind,
+        table.ownerId,
+        table.relation,
+      ],
+    }),
+  ],
+);
+
 /** 全局 repo registry 的结构化镜像，供 workspace 关联和查询使用。 */
 export const repositories = sqliteTable('repositories', {
   id: text('id').primaryKey(),
@@ -246,6 +270,7 @@ export const memoryAccessLog = sqliteTable('memory_access_log', {
 export const codingStorageSchema = {
   meta,
   artifacts,
+  artifactReferences,
   repositories,
   workspaces,
   workspaceRepositories,

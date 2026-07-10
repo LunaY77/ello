@@ -1,11 +1,15 @@
 import type { AgentMessage, SessionStore } from '@ello/agent';
 
+import type { ArtifactStore } from '../storage/artifact-store.js';
+
 import {
+  applyReplacementMap,
   JsonlSessionRepository,
   type AppendCompactionInput,
   type CompactionActiveEntry,
   type CompactionRef,
   type CompactionSessionPort,
+  type ContentReplacementRecord,
 } from './repository.js';
 
 /**
@@ -25,15 +29,35 @@ export class JsonlSessionStore implements SessionStore, CompactionSessionPort {
 
   /** 每个会话当前的 active leaf entry id，append 时作为父指针。 */
   private readonly leaves = new Map<string, string | null>();
+  /** 每个会话的 tool output replacement latest-wins 快照。 */
+  private readonly replacements = new Map<
+    string,
+    Map<string, ContentReplacementRecord>
+  >();
+  private readonly artifacts: ArtifactStore;
 
-  constructor(options: { readonly sessionDir: string; readonly cwd: string }) {
+  constructor(options: {
+    readonly sessionDir: string;
+    readonly cwd: string;
+    readonly artifacts: ArtifactStore;
+  }) {
     this.repository = new JsonlSessionRepository(options);
+    this.artifacts = options.artifacts;
   }
 
   /** 读取会话当前分支的**模型视图**（投影后）；顺带刷新 leaf 指针缓存。 */
   async load(sessionId: string): Promise<AgentMessage[]> {
     const opened = await this.repository.open(sessionId);
+    for (const replacement of opened.replacements.values()) {
+      if (replacement.artifactId !== replacement.sha256) {
+        throw new Error(
+          `Session ${sessionId} replacement ${replacement.toolCallId} has mismatched artifact id and sha256.`,
+        );
+      }
+      await this.artifacts.verify(replacement.artifactId);
+    }
     this.leaves.set(sessionId, opened.leafEntryId);
+    this.replacements.set(sessionId, new Map(opened.replacements));
     return opened.modelMessages;
   }
 
@@ -97,11 +121,55 @@ export class JsonlSessionStore implements SessionStore, CompactionSessionPort {
     return this.repository.appendSummary(sessionId, summary);
   }
 
+  /** 追加 replacement 后同步更新当前 session 的内存快照。 */
+  async appendContentReplacement(
+    sessionId: string,
+    input: Omit<ContentReplacementRecord, 'kind' | 'createdAt'>,
+  ): Promise<void> {
+    const snapshot = this.replacements.get(sessionId);
+    if (snapshot === undefined) {
+      throw new Error(
+        `Content replacement snapshot is not loaded for session ${sessionId}.`,
+      );
+    }
+    await this.repository.appendContentReplacement(sessionId, input);
+    snapshot.set(input.toolCallId, {
+      kind: 'content-replacement',
+      ...input,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  /** 只读内存快照应用 replacement，不触发 transcript IO。 */
+  applyContentReplacements(
+    sessionId: string,
+    messages: readonly AgentMessage[],
+  ): AgentMessage[] {
+    const snapshot = this.replacements.get(sessionId);
+    if (snapshot === undefined) {
+      throw new Error(
+        `Content replacement snapshot is not loaded for session ${sessionId}.`,
+      );
+    }
+    return snapshot.size === 0
+      ? [...messages]
+      : applyReplacementMap(messages, snapshot);
+  }
+
+  /** 切换 leaf 后重载 leaf 与 replacement 快照。 */
+  async checkout(sessionId: string, entryId: string | null): Promise<void> {
+    await this.repository.checkout(sessionId, entryId);
+    await this.load(sessionId);
+  }
+
   private async leafOf(sessionId: string): Promise<string | null> {
     if (!this.leaves.has(sessionId)) {
-      const opened = await this.repository.open(sessionId);
-      this.leaves.set(sessionId, opened.leafEntryId);
+      await this.load(sessionId);
     }
-    return this.leaves.get(sessionId) ?? null;
+    const leaf = this.leaves.get(sessionId);
+    if (leaf === undefined) {
+      throw new Error(`Session leaf cache is not loaded for ${sessionId}.`);
+    }
+    return leaf;
   }
 }

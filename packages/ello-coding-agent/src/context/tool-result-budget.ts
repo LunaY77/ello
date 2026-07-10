@@ -1,26 +1,22 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-
-import { globalHomeDir } from '../config/index.js';
 import type { JsonlSessionStore } from '../session/jsonl-store.js';
+import type { ArtifactStore } from '../storage/artifact-store.js';
 
 /**
  * 大 tool 输出预算替换（§2）。
  *
  * 当 tool.completed 输出超过 `maxChars` 时：
- * 1. 把完整输出写入 `artifact_dir/<artifactId>.txt`；
+ * 1. 把完整输出写入统一 ArtifactStore；
  * 2. 在 session JSONL 追加 `content-replacement` 记录（toolCallId → artifact）；
- * 3. 下一次 `store.load()` 投影时，模型看到的是 preview + stub。
+ * 3. replacement snapshot 立即更新，后续模型回合看到 preview + stub。
  */
 export interface ToolResultBudgetConfig {
   readonly enabled: boolean;
   readonly max_chars: number;
-  readonly artifact_dir: string;
 }
 
 export interface ToolResultBudgetDeps {
   readonly sessionStore: JsonlSessionStore;
+  readonly artifacts: ArtifactStore;
   readonly sessionId: () => string;
   readonly config: ToolResultBudgetConfig;
 }
@@ -32,8 +28,6 @@ export interface ToolResultBudget {
 export function createToolResultBudget(
   deps: ToolResultBudgetDeps,
 ): ToolResultBudget {
-  const artifactDir = resolveArtifactDir(deps.config.artifact_dir);
-
   return {
     async maybeReplace(toolCallId: string, output: string): Promise<boolean> {
       if (!deps.config.enabled) {
@@ -42,30 +36,32 @@ export function createToolResultBudget(
       if (output.length <= deps.config.max_chars) {
         return false;
       }
-      const artifactId = randomUUID();
-      const artifactPath = path.join(artifactDir, `${artifactId}.txt`);
-      await mkdir(artifactDir, { recursive: true });
-      await writeFile(artifactPath, output, 'utf8');
-
+      const sessionId = deps.sessionId();
+      const owner = {
+        kind: 'tool-result' as const,
+        id: `${sessionId}:${toolCallId}`,
+        relation: 'full-output',
+      };
+      const artifact = await deps.artifacts.put({
+        kind: 'tool-result',
+        content: output,
+        contentType: 'text/plain; charset=utf-8',
+        owner,
+      });
       const preview = output.slice(0, 500);
-      await deps.sessionStore.repository.appendContentReplacement(
-        deps.sessionId(),
-        {
+      try {
+        await deps.sessionStore.appendContentReplacement(sessionId, {
           toolCallId,
-          artifactId,
-          artifactPath,
+          artifactId: artifact.id,
           preview,
-          originalBytes: Buffer.byteLength(output, 'utf8'),
-        },
-      );
+          originalBytes: artifact.byteSize,
+          sha256: artifact.sha256,
+        });
+      } catch (error) {
+        await deps.artifacts.releaseOwner(owner);
+        throw error;
+      }
       return true;
     },
   };
-}
-
-function resolveArtifactDir(configured: string): string {
-  if (configured.startsWith('~/')) {
-    return path.join(globalHomeDir(), configured.slice(2));
-  }
-  return configured;
 }

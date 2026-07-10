@@ -11,8 +11,11 @@ import path from 'node:path';
 
 import type { AgentFinishReason, AgentMessage, AgentUsage } from '@ello/agent';
 
+import { SessionCatalog, type SessionCatalogRecord } from './catalog.js';
+import { parseSessionRecord } from './schema.js';
+
 /** JSONL session 文件版本。 */
-export const SESSION_FILE_VERSION = 2;
+export const SESSION_FILE_VERSION = 3;
 
 /** 一个会话文件的元信息。 */
 export interface SessionInfo {
@@ -31,7 +34,7 @@ export type SessionRecord =
       readonly sessionId: string;
       readonly cwd: string;
       readonly createdAt: string;
-      readonly version: number;
+      readonly version: typeof SESSION_FILE_VERSION;
     }
   | {
       readonly kind: 'entry';
@@ -114,9 +117,9 @@ export type SessionRecord =
       readonly kind: 'content-replacement';
       readonly toolCallId: string;
       readonly artifactId: string;
-      readonly artifactPath: string;
       readonly preview: string;
       readonly originalBytes: number;
+      readonly sha256: string;
       readonly createdAt: string;
     }
   | {
@@ -153,8 +156,14 @@ export interface ActiveSessionPath {
   readonly messageEntryIds: string[];
   /** 模型视图：投影后的 [summary, ...kept, ...after]（store.load 返回它）。 */
   readonly modelMessages: AgentMessage[];
+  readonly replacements: ReadonlyMap<string, ContentReplacementRecord>;
   readonly leafEntryId: string | null;
 }
+
+export type ContentReplacementRecord = Extract<
+  SessionRecord,
+  { kind: 'content-replacement' }
+>;
 
 /** raw active path 上可供 TUI 导航的 message entry。 */
 export interface SessionMessageEntry {
@@ -263,17 +272,22 @@ export function createCompactionSummaryMessage(summary: string): AgentMessage {
  * 上最后一个 compaction 投影出模型视图，raw JSONL 完整保留。
  */
 export class JsonlSessionRepository {
+  private readonly catalog: SessionCatalog;
+
   constructor(
     private readonly options: {
       readonly sessionDir: string;
       readonly cwd: string;
     },
-  ) {}
+  ) {
+    this.catalog = new SessionCatalog(options.sessionDir);
+  }
 
   /** 创建或打开一个 session。 */
   async open(sessionId: string = randomUUID()): Promise<ActiveSessionPath> {
     await mkdir(this.options.sessionDir, { recursive: true });
     const filePath = this.filePath(sessionId);
+    let created = false;
     try {
       await stat(filePath);
     } catch (error) {
@@ -289,8 +303,25 @@ export class JsonlSessionRepository {
         version: SESSION_FILE_VERSION,
       };
       await writeFile(filePath, `${JSON.stringify(header)}\n`, 'utf8');
+      const fileStat = await stat(filePath);
+      await this.catalog.upsert({
+        sessionId,
+        cwd: this.options.cwd,
+        path: filePath,
+        createdAt,
+        messageCount: 0,
+        updatedAt: fileStat.mtime.toISOString(),
+        sourceFileMtime: fileStat.mtime.toISOString(),
+      });
+      created = true;
     }
-    return this.load(sessionId);
+    const loaded = await this.load(sessionId);
+    if (!created && (await this.catalog.get(sessionId)) === null) {
+      throw new Error(
+        `Session ${sessionId} is missing from catalog.jsonl. Run the explicit catalog rebuild command.`,
+      );
+    }
+    return loaded;
   }
 
   /** 读取 active branch 的 raw 视图与投影后的模型视图。 */
@@ -332,6 +363,7 @@ export class JsonlSessionRepository {
       messages,
       messageEntryIds,
       modelMessages,
+      replacements,
       leafEntryId: leaf,
     };
   }
@@ -342,6 +374,7 @@ export class JsonlSessionRepository {
     parentId: string | null,
     messages: readonly AgentMessage[],
   ): Promise<string | null> {
+    const catalog = await this.requireCatalogRecord(sessionId);
     let leaf = parentId;
     const records: SessionRecord[] = [];
     for (const message of messages) {
@@ -363,6 +396,12 @@ export class JsonlSessionRepository {
         createdAt: new Date().toISOString(),
       });
       await this.appendRecords(sessionId, records);
+      const fileStat = await stat(this.filePath(sessionId));
+      await this.catalog.recordMessages(
+        catalog,
+        messages,
+        fileStat.mtime.toISOString(),
+      );
     }
     return leaf;
   }
@@ -483,6 +522,16 @@ export class JsonlSessionRepository {
         (record): record is Extract<SessionRecord, { kind: 'compaction' }> =>
           record.kind === 'compaction',
       ),
+      ...source.replacements.values(),
+      ...(source.info.title !== undefined
+        ? [
+            {
+              kind: 'session-title' as const,
+              title: source.info.title,
+              createdAt,
+            },
+          ]
+        : []),
       { kind: 'leaf', entryId: target, createdAt },
       {
         kind: 'branch',
@@ -497,6 +546,19 @@ export class JsonlSessionRepository {
       records.map((record) => JSON.stringify(record)).join('\n') + '\n',
       'utf8',
     );
+    const fileStat = await stat(this.filePath(nextId));
+    const summary = summarizeRecentMessages(records);
+    await this.catalog.upsert({
+      sessionId: nextId,
+      cwd: source.info.cwd,
+      path: this.filePath(nextId),
+      createdAt,
+      messageCount: records.filter((record) => record.kind === 'entry').length,
+      ...(source.info.title !== undefined ? { title: source.info.title } : {}),
+      ...summary,
+      updatedAt: fileStat.mtime.toISOString(),
+      sourceFileMtime: fileStat.mtime.toISOString(),
+    });
     return (await this.load(nextId)).info;
   }
 
@@ -589,9 +651,9 @@ export class JsonlSessionRepository {
     input: {
       readonly toolCallId: string;
       readonly artifactId: string;
-      readonly artifactPath: string;
       readonly preview: string;
       readonly originalBytes: number;
+      readonly sha256: string;
     },
   ): Promise<void> {
     await this.appendRecords(sessionId, [
@@ -599,9 +661,9 @@ export class JsonlSessionRepository {
         kind: 'content-replacement',
         toolCallId: input.toolCallId,
         artifactId: input.artifactId,
-        artifactPath: input.artifactPath,
         preview: input.preview,
         originalBytes: input.originalBytes,
+        sha256: input.sha256,
         createdAt: new Date().toISOString(),
       },
     ]);
@@ -613,6 +675,7 @@ export class JsonlSessionRepository {
     if (!normalized) {
       return;
     }
+    const catalog = await this.requireCatalogRecord(sessionId);
     await this.appendRecords(sessionId, [
       {
         kind: 'session-title',
@@ -620,6 +683,13 @@ export class JsonlSessionRepository {
         createdAt: new Date().toISOString(),
       },
     ]);
+    const fileStat = await stat(this.filePath(sessionId));
+    await this.catalog.upsert({
+      ...catalog,
+      title: normalized,
+      updatedAt: fileStat.mtime.toISOString(),
+      sourceFileMtime: fileStat.mtime.toISOString(),
+    });
   }
 
   /** 读取最新 session 标题。 */
@@ -721,72 +791,40 @@ export class JsonlSessionRepository {
     };
   }
 
-  /** 对任意模型输入消息应用当前 session 的 content-replacement 决策。 */
-  async applyContentReplacements(
-    sessionId: string,
-    messages: readonly AgentMessage[],
-  ): Promise<AgentMessage[]> {
-    const replacements = collectContentReplacements(
-      await this.readRecords(sessionId),
-    );
-    return replacements.size > 0
-      ? applyReplacementMap(messages, replacements)
-      : [...messages];
+  /** 只读 catalog 列出 session，不打开 transcript 文件。 */
+  async list(): Promise<JsonlSessionSummary[]> {
+    return (await this.catalog.list()).map(catalogToSummary);
   }
 
-  /** 列出 session 文件摘要。 */
-  async list(): Promise<JsonlSessionSummary[]> {
+  /** 显式扫描所有 v3 transcript 并重建 catalog。 */
+  async rebuildCatalog(): Promise<number> {
     await mkdir(this.options.sessionDir, { recursive: true });
-    const files = (await readdir(this.options.sessionDir))
-      .filter((file) => file.endsWith('.jsonl'))
+    const sessionIds = (await readdir(this.options.sessionDir))
+      .filter((file) => file.endsWith('.jsonl') && file !== 'catalog.jsonl')
+      .map((file) => path.basename(file, '.jsonl'))
       .sort();
-    const summaries: JsonlSessionSummary[] = [];
-    for (const file of files) {
-      const fullPath = path.join(this.options.sessionDir, file);
-      try {
-        const records = await this.readRecords(path.basename(file, '.jsonl'));
-        const messageEntryCount = records.filter(
-          (record) => record.kind === 'entry' && record.type === 'message',
-        ).length;
-        if (messageEntryCount === 0) {
-          continue;
-        }
-        const header = records.find(
-          (record): record is Extract<SessionRecord, { kind: 'header' }> =>
-            record.kind === 'header',
-        );
-        const fileStat = await stat(fullPath);
-        const preview = summarizeRecentMessages(records);
-        const title = latestTitle(records);
-        summaries.push({
-          sessionId: header?.sessionId ?? path.basename(file, '.jsonl'),
-          path: fullPath,
-          cwd: header?.cwd ?? this.options.cwd,
-          entryCount: messageEntryCount,
-          ...(title !== undefined ? { title } : {}),
-          ...(preview.lastUserText !== undefined
-            ? { lastUserText: preview.lastUserText }
-            : {}),
-          ...(preview.lastAssistantText !== undefined
-            ? { lastAssistantText: preview.lastAssistantText }
-            : {}),
-          ...(preview.lastToolText !== undefined
-            ? { lastToolText: preview.lastToolText }
-            : {}),
-          ...(header?.createdAt !== undefined
-            ? { createdAt: header.createdAt }
-            : {}),
-          updatedAt: fileStat.mtime.toISOString(),
-        });
-      } catch {
-        continue;
-      }
+    const catalogRecords: SessionCatalogRecord[] = [];
+    for (const sessionId of sessionIds) {
+      const records = await this.readRecords(sessionId);
+      const header = requireHeader(records, sessionId);
+      const fileStat = await stat(this.filePath(sessionId));
+      const preview = summarizeRecentMessages(records);
+      const title = latestTitle(records);
+      catalogRecords.push({
+        sessionId: header.sessionId,
+        cwd: header.cwd,
+        path: this.filePath(sessionId),
+        createdAt: header.createdAt,
+        messageCount: records.filter((record) => record.kind === 'entry')
+          .length,
+        ...(title !== undefined ? { title } : {}),
+        ...preview,
+        updatedAt: fileStat.mtime.toISOString(),
+        sourceFileMtime: fileStat.mtime.toISOString(),
+      });
     }
-    return summaries.sort((left, right) => {
-      const leftTime = sortableTime(left.updatedAt ?? left.createdAt);
-      const rightTime = sortableTime(right.updatedAt ?? right.createdAt);
-      return rightTime - leftTime;
-    });
+    await this.catalog.replace(catalogRecords);
+    return catalogRecords.length;
   }
 
   /** 导出原始 JSONL 内容。 */
@@ -830,22 +868,32 @@ export class JsonlSessionRepository {
       .split(/\n+/)
       .filter(Boolean)
       .map((line, index) => {
-        let record: Record<string, unknown>;
+        let record: unknown;
         try {
-          record = JSON.parse(line) as Record<string, unknown>;
+          record = JSON.parse(line);
         } catch (error) {
           throw new Error(
             `Invalid JSON in ${this.filePath(sessionId)} at line ${index + 1}: ${String(error)}`,
             { cause: error },
           );
         }
-        if (record.kind === 'entry' && record.type !== 'message') {
-          throw new Error(
-            `Unsupported session entry type in ${this.filePath(sessionId)} at line ${index + 1}: ${String(record.type)}`,
-          );
-        }
-        return record as unknown as SessionRecord;
+        return parseSessionRecord(
+          record,
+          `${this.filePath(sessionId)}:${index + 1}`,
+        );
       });
+  }
+
+  private async requireCatalogRecord(
+    sessionId: string,
+  ): Promise<SessionCatalogRecord> {
+    const record = await this.catalog.get(sessionId);
+    if (record === null) {
+      throw new Error(
+        `Session ${sessionId} is missing from catalog.jsonl. Run the explicit catalog rebuild command.`,
+      );
+    }
+    return record;
   }
 }
 
@@ -904,6 +952,20 @@ function latestTitle(records: readonly SessionRecord[]): string | undefined {
   return latest?.title;
 }
 
+function requireHeader(
+  records: readonly SessionRecord[],
+  sessionId: string,
+): Extract<SessionRecord, { kind: 'header' }> {
+  const header = records.find(
+    (record): record is Extract<SessionRecord, { kind: 'header' }> =>
+      record.kind === 'header',
+  );
+  if (header === undefined) {
+    throw new Error(`Invalid session ${sessionId}: missing header`);
+  }
+  return header;
+}
+
 function normalizeTitle(value: string): string {
   return value
     .trim()
@@ -912,12 +974,25 @@ function normalizeTitle(value: string): string {
     .slice(0, 80);
 }
 
-function sortableTime(value: string | undefined): number {
-  if (value === undefined) {
-    return 0;
-  }
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? 0 : parsed;
+function catalogToSummary(record: SessionCatalogRecord): JsonlSessionSummary {
+  return {
+    sessionId: record.sessionId,
+    path: record.path,
+    cwd: record.cwd,
+    entryCount: record.messageCount,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    ...(record.title !== undefined ? { title: record.title } : {}),
+    ...(record.lastUserText !== undefined
+      ? { lastUserText: record.lastUserText }
+      : {}),
+    ...(record.lastAssistantText !== undefined
+      ? { lastAssistantText: record.lastAssistantText }
+      : {}),
+    ...(record.lastToolText !== undefined
+      ? { lastToolText: record.lastToolText }
+      : {}),
+  };
 }
 
 function escapeHtml(value: string): string {
@@ -971,13 +1046,10 @@ function buildActivePath(
 }
 
 /** 收集所有 content-replacement，按 toolCallId latest-wins。 */
-function collectContentReplacements(
+export function collectContentReplacements(
   records: readonly SessionRecord[],
-): Map<string, Extract<SessionRecord, { kind: 'content-replacement' }>> {
-  const map = new Map<
-    string,
-    Extract<SessionRecord, { kind: 'content-replacement' }>
-  >();
+): Map<string, ContentReplacementRecord> {
+  const map = new Map<string, ContentReplacementRecord>();
   for (const record of records) {
     if (record.kind === 'content-replacement') {
       map.set(record.toolCallId, record);
@@ -1037,12 +1109,9 @@ function buildModelMessages(
 }
 
 /** 把投影消息里被替换的 tool result 换成 preview + artifact 指针 stub。 */
-function applyReplacementMap(
+export function applyReplacementMap(
   messages: readonly AgentMessage[],
-  replacements: ReadonlyMap<
-    string,
-    Extract<SessionRecord, { kind: 'content-replacement' }>
-  >,
+  replacements: ReadonlyMap<string, ContentReplacementRecord>,
 ): AgentMessage[] {
   return messages.map((message) => {
     if (message.role !== 'tool') {
@@ -1063,7 +1132,7 @@ function applyReplacementMap(
         return part;
       }
       changed = true;
-      const stub = `${replacement.preview}\n\n<tool-output-truncated artifact="${replacement.artifactPath}" bytes="${replacement.originalBytes}" />`;
+      const stub = `${replacement.preview}\n\n<tool-output-truncated artifact-id="${replacement.artifactId}" sha256="${replacement.sha256}" bytes="${replacement.originalBytes}" />`;
       return {
         ...(part as Record<string, unknown>),
         output: { type: 'text', value: stub },

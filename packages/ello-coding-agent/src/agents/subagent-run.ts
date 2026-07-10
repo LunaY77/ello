@@ -44,6 +44,7 @@ export async function runSubagent(input: {
   const session = new JsonlSessionStore({
     sessionDir: subagentRunsDir(input.deps.config, input.parentSessionId),
     cwd: input.deps.config.cwd,
+    artifacts: input.deps.storage.artifacts,
   });
   await session.repository.open(runId);
 

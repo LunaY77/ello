@@ -170,7 +170,7 @@ describe('createCodingSession', () => {
           sessionId: 'invalid-event',
           cwd,
           createdAt: new Date().toISOString(),
-          version: 2,
+          version: 3,
         }),
         JSON.stringify({
           kind: 'entry',
@@ -186,7 +186,7 @@ describe('createCodingSession', () => {
     const repository = new JsonlSessionRepository({ cwd, sessionDir });
 
     await expect(repository.load('invalid-event')).rejects.toThrow(
-      'Unsupported session entry type',
+      'Invalid session record',
     );
   });
 
@@ -226,7 +226,7 @@ describe('createCodingSession', () => {
     await session.submit('Say OK');
     await session.close();
 
-    expect(seenModels).toEqual(['openai/gpt-5.4']);
+    expect(seenModels).toEqual(['openai/gpt-5.4', 'openai/gpt-5.4']);
   });
 
   it('creates and deletes profile suites in the runtime registry', async () => {
@@ -791,7 +791,9 @@ describe('createCodingSession', () => {
             provider: null,
           };
         }
-        secondTurnMessages = JSON.stringify(request.messages);
+        if (request.messages.some((message) => message.role === 'tool')) {
+          secondTurnMessages = JSON.stringify(request.messages);
+        }
         return {
           text: 'done',
           messages: [
@@ -857,7 +859,6 @@ describe('createCodingSession', () => {
         tool_result_budget: {
           enabled: true,
           max_chars: 20,
-          artifact_dir: path.join(cwd, '.ello', 'tool-results'),
         },
       },
     };
@@ -895,7 +896,9 @@ describe('createCodingSession', () => {
             provider: null,
           };
         }
-        secondTurnMessages = JSON.stringify(request.messages);
+        if (request.messages.some((message) => message.role === 'tool')) {
+          secondTurnMessages = JSON.stringify(request.messages);
+        }
         return {
           text: 'done',
           messages: [
@@ -921,7 +924,7 @@ describe('createCodingSession', () => {
     await session.close();
 
     expect(secondTurnMessages).toContain('tool-output-truncated');
-    expect(secondTurnMessages).toContain('.ello/tool-results');
+    expect(secondTurnMessages).toContain('artifact-id=');
   });
 
   it('supports session tree checkout and fork from the coding runtime', async () => {
