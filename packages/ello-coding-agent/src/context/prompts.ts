@@ -115,7 +115,23 @@ export function buildContextBundle(
 }
 
 function loadPromptTemplate(profile: string): string {
-  const promptPath = path.join(promptDir(), `${profile}.md`);
+  if (profile === 'coding') {
+    return [
+      readPromptFile('core-behavior.md'),
+      readPromptFile('primary-agent.md'),
+    ].join('\n\n');
+  }
+  if (profile === 'subagent') {
+    return [
+      readPromptFile('core-behavior.md'),
+      readPromptFile('subagent.md'),
+    ].join('\n\n');
+  }
+  return readPromptFile(`${profile}.md`);
+}
+
+function readPromptFile(fileName: string): string {
+  const promptPath = path.join(promptDir(), fileName);
   try {
     return readFileSync(promptPath, 'utf8');
   } catch (error) {

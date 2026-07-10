@@ -1,6 +1,10 @@
 import { Box, Text } from 'ink';
 import { createElement, type ReactNode } from 'react';
 
+import {
+  readFileChanges,
+  unifiedDiffFromFileChanges,
+} from '../store/diff.js';
 import type { ToolResultView } from '../store/history-entry.js';
 import { useTheme } from '../theme/index.js';
 
@@ -56,11 +60,13 @@ const readPresenter: ToolPresenter = {
 const diffPresenter: ToolPresenter = {
   summarize: (input) => str(input, 'path'),
   renderCall: (input) => createElement(MutedText, null, str(input, 'path')),
-  renderResult: (_input, output) =>
-    createElement(DiffPreview, {
-      diff: readString(readToolMetadata(output), 'diff'),
-      file: readString(readToolMetadata(output), 'path'),
-    }),
+  renderResult: (_input, output) => {
+    const metadata = readToolMetadata(output);
+    return createElement(DiffPreview, {
+      diff: unifiedDiffFromFileChanges(readFileChanges(metadata.fileChanges)),
+      file: readString(metadata, 'path'),
+    });
+  },
 };
 
 const bashPresenter: ToolPresenter = {
@@ -101,6 +107,7 @@ export const toolPresenters: Record<string, ToolPresenter> = {
   read: readPresenter,
   write: diffPresenter,
   edit: diffPresenter,
+  apply_patch: diffPresenter,
   bash: bashPresenter,
   grep: grepPresenter,
   task_create: taskPresenter,

@@ -39,9 +39,8 @@ import {
 import { CheckpointStore } from '../change/checkpoint.js';
 import type { CodingAgentConfig, ProfileSuiteConfig } from '../config/index.js';
 import {
-  COMPACTION_PROMPT,
-  UPDATE_COMPACTION_PROMPT,
   createSessionCompactor,
+  renderCompactConversation,
   serializeForCompact,
 } from '../context/compactor.js';
 import { createCodingMemory } from '../context/memory.js';
@@ -887,7 +886,7 @@ class CodingSessionImpl implements CodingSession {
     await this.toolResultBudget.maybeReplace(toolCallId, text);
   }
 
-  /** 写类工具（输出带 path + diff）的改动累积到检查点。 */
+  /** 写类工具（输出带 structured file changes）的改动累积到检查点。 */
   private maybeRecordChange(toolCallId: string, output: unknown): void {
     if (typeof output !== 'object' || output === null) {
       return;
@@ -899,22 +898,22 @@ class CodingSessionImpl implements CodingSession {
     if (typeof metadata !== 'object' || metadata === null) {
       return;
     }
-    const record = metadata as {
-      path?: unknown;
-      diff?: unknown;
-      before?: unknown;
-      after?: unknown;
-    };
-    if (typeof record.path !== 'string' || typeof record.diff !== 'string') {
+    const fileChanges = (metadata as { fileChanges?: unknown }).fileChanges;
+    if (!Array.isArray(fileChanges)) {
       return;
     }
-    this.checkpoints.record({
-      path: record.path,
-      diff: record.diff,
-      toolCallId,
-      before: typeof record.before === 'string' ? record.before : null,
-      after: typeof record.after === 'string' ? record.after : null,
-    });
+    for (const change of fileChanges) {
+      if (!isFileChangeRecord(change)) {
+        throw new Error('Invalid file change metadata.');
+      }
+      this.checkpoints.record({
+        path: change.path,
+        diff: change.unifiedDiff,
+        toolCallId,
+        before: 'before' in change ? change.before : null,
+        after: 'after' in change ? change.after : null,
+      });
+    }
   }
 
   /** 关闭当前 Agent，按当前 sessionId 重建。 */
@@ -1271,6 +1270,29 @@ function extractToolOutputText(output: unknown): string | null {
   return JSON.stringify(output);
 }
 
+function isFileChangeRecord(value: unknown): value is {
+  readonly path: string;
+  readonly unifiedDiff: string;
+  readonly before?: string;
+  readonly after?: string;
+} {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const record = value as {
+    path?: unknown;
+    unifiedDiff?: unknown;
+    before?: unknown;
+    after?: unknown;
+  };
+  return (
+    typeof record.path === 'string' &&
+    typeof record.unifiedDiff === 'string' &&
+    (record.before === undefined || typeof record.before === 'string') &&
+    (record.after === undefined || typeof record.after === 'string')
+  );
+}
+
 function renderSummaryInput(
   messages: readonly AgentMessage[],
   previousSummary: string | undefined,
@@ -1280,9 +1302,7 @@ function renderSummaryInput(
     pruneToolOutput: true,
     toolOutputMaxChars: config.context.compaction.tool_output_max_chars,
   });
-  const conversation = compacted
-    .map((message) => `### ${message.role}\n${messageText(message)}`)
-    .join('\n\n');
+  const conversation = renderCompactConversation(compacted);
   const seed =
     previousSummary !== undefined
       ? `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`
@@ -1341,19 +1361,11 @@ function makeCompactCheckpointGenerator(
     messages: readonly AgentMessage[],
     opts: { previousCheckpoint?: string; maxTokens?: number },
   ): Promise<string> => {
-    const head =
+    const previous =
       opts.previousCheckpoint !== undefined
-        ? `${UPDATE_COMPACTION_PROMPT}<previous-compact>\n${opts.previousCheckpoint}\n</previous-compact>\n`
-        : COMPACTION_PROMPT;
-    const conversation = messages
-      .map((message) => {
-        const content = (message as { content?: unknown }).content;
-        const text =
-          typeof content === 'string' ? content : JSON.stringify(content);
-        return `### ${message.role}\n${text}`;
-      })
-      .join('\n\n');
-    const prompt = `${head}\n<conversation>\n${conversation}\n</conversation>`;
+        ? `<previous-compact>\n${opts.previousCheckpoint}\n</previous-compact>\n\n`
+        : '';
+    const prompt = `${previous}<conversation>\n${renderCompactConversation(messages)}\n</conversation>`;
     return runInternalAgent({
       definition: registry.get('compact'),
       prompt,

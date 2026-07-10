@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { createFileChange } from '../tools/file-change.js';
 import {
   buildPermissionView,
   type PermissionRequestLike,
@@ -43,12 +44,12 @@ describe('permission-view kind resolution', () => {
 
 describe('permission-view per-kind content', () => {
   it('edit shows path + diff summary only (no full diff)', () => {
-    const diff = '@@ -1,1 +1,2 @@\n line\n+added\n';
+    const fileChanges = [createFileChange('a.ts', 'line\n', 'line\nadded\n')];
     const view = buildPermissionView(
       request({
         toolName: 'edit',
         input: { path: 'a.ts' },
-        metadata: { kind: 'edit', diff },
+        metadata: { kind: 'edit', fileChanges },
       }),
     );
     expect(view.fields).toContainEqual({ label: 'path', value: 'a.ts' });

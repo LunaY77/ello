@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { createFileChange } from '../tools/file-change.js';
 import type { ToolCallView } from '../tui/store/history-entry.js';
 import {
   buildToolCardModel,
@@ -106,7 +107,7 @@ describe('buildToolCardModel', () => {
           metadata: {
             kind: 'edit',
             path: 'src/a.ts',
-            diff: ['--- src/a.ts', '+++ src/a.ts', '-old', '+new'].join('\n'),
+            fileChanges: [createFileChange('src/a.ts', 'old\n', 'new\n')],
           },
         },
       }),
@@ -137,7 +138,12 @@ describe('buildToolCardModel', () => {
 
     const withDiff = buildToolCardModel(
       call({
-        output: { metadata: { kind: 'edit', diff: '@@ -1 +1 @@\n+x\n' } },
+        output: {
+          metadata: {
+            kind: 'edit',
+            fileChanges: [createFileChange('a.ts', '', 'x\n')],
+          },
+        },
       }),
     );
     expect(withDiff.hasDiff).toBe(true);

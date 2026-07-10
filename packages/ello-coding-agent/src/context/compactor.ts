@@ -57,20 +57,6 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
   toolOutputMaxChars: 2000,
 };
 
-/** 首次压缩的 checkpoint 模板。 */
-export const COMPACTION_PROMPT =
-  'Compact the conversation below into the following checkpoint sections, preserving all ' +
-  'load-bearing detail:\n' +
-  '## Goal\n## Constraints & Preferences\n' +
-  '## Progress (Done | In Progress | Blocked)\n' +
-  '## Key Decisions\n## Next Steps\n## Critical Context\n';
-
-/** 迭代更新的 checkpoint 模板：保留已有信息，推进进度。 */
-export const UPDATE_COMPACTION_PROMPT =
-  'A previous compact checkpoint is provided in <previous-compact>. Produce an UPDATED ' +
-  'compact checkpoint using the same section structure: keep all still-relevant information, ' +
-  'move finished "In Progress" items to "Done", and incorporate the new messages.\n';
-
 /** compact checkpoint 生成回调的选项。 */
 export interface CompactCheckpointOptions {
   /** 上一次压缩的 checkpoint 正文（存在则走迭代更新模板）。 */
@@ -191,6 +177,7 @@ export function extractFileOps(messages: readonly AgentMessage[]): {
       continue;
     }
     for (const part of content) {
+      collectFileChanges(part, modifiedFiles);
       if (!isToolCallPart(part)) {
         continue;
       }
@@ -212,6 +199,34 @@ export function extractFileOps(messages: readonly AgentMessage[]): {
     readFiles: [...readFiles].sort(),
     modifiedFiles: [...modifiedFiles].sort(),
   };
+}
+
+function collectFileChanges(part: unknown, modifiedFiles: Set<string>): void {
+  if (typeof part !== 'object' || part === null) {
+    return;
+  }
+  const output = (part as { output?: unknown; result?: unknown }).output ??
+    (part as { output?: unknown; result?: unknown }).result;
+  if (typeof output !== 'object' || output === null) {
+    return;
+  }
+  const metadata = (output as { metadata?: unknown }).metadata;
+  if (typeof metadata !== 'object' || metadata === null) {
+    return;
+  }
+  const fileChanges = (metadata as { fileChanges?: unknown }).fileChanges;
+  if (!Array.isArray(fileChanges)) {
+    return;
+  }
+  for (const change of fileChanges) {
+    if (
+      typeof change === 'object' &&
+      change !== null &&
+      typeof (change as { path?: unknown }).path === 'string'
+    ) {
+      modifiedFiles.add((change as { path: string }).path);
+    }
+  }
 }
 
 /**
@@ -277,6 +292,12 @@ export function serializeForCompact(
       content: text.slice(0, maxChars),
     } as unknown as AgentMessage;
   });
+}
+
+export function renderCompactConversation(
+  messages: readonly AgentMessage[],
+): string {
+  return messages.map(serializeCompactMessage).join('\n\n');
 }
 
 /**
@@ -422,6 +443,94 @@ function measureParts(content: unknown): number {
     chars += JSON.stringify(part).length;
   }
   return chars;
+}
+
+function serializeCompactMessage(message: AgentMessage): string {
+  const content = (message as { content?: unknown }).content;
+  return [`[${message.role}]`, serializeCompactContent(content)].join('\n');
+}
+
+function serializeCompactContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return String(content ?? '');
+  }
+  return content.map(serializeCompactPart).join('\n');
+}
+
+function serializeCompactPart(part: unknown): string {
+  if (typeof part !== 'object' || part === null) {
+    return String(part ?? '');
+  }
+  const record = part as Record<string, unknown>;
+  const type = typeof record['type'] === 'string' ? record['type'] : 'part';
+  if (type === 'text') {
+    return readPartText(record);
+  }
+  if (type === 'tool-call') {
+    const name = readPartString(record, 'toolName') ?? 'unknown';
+    const input = record['input'] ?? record['args'] ?? {};
+    return `[Assistant tool call: ${name}]\n${JSON.stringify(input)}`;
+  }
+  if (type === 'tool-result') {
+    const name = readPartString(record, 'toolName') ?? 'unknown';
+    return `[Tool result: ${name}]\n${serializeToolResult(record)}`;
+  }
+  if (type === 'image' || type === 'file') {
+    return `[${type} attachment omitted]`;
+  }
+  return `[${type}]\n${JSON.stringify(record)}`;
+}
+
+function serializeToolResult(record: Record<string, unknown>): string {
+  const output = record['output'] ?? record['result'] ?? record['content'];
+  if (typeof output === 'string') {
+    return output;
+  }
+  if (typeof output !== 'object' || output === null) {
+    return String(output ?? '');
+  }
+  const result = output as { output?: unknown; metadata?: unknown };
+  const text = typeof result.output === 'string' ? result.output : '';
+  const metadata =
+    typeof result.metadata === 'object' && result.metadata !== null
+      ? summarizeToolMetadata(result.metadata as Record<string, unknown>)
+      : '';
+  return [text, metadata].filter((part) => part !== '').join('\n');
+}
+
+function summarizeToolMetadata(metadata: Record<string, unknown>): string {
+  const changes = metadata['fileChanges'];
+  if (!Array.isArray(changes)) {
+    return '';
+  }
+  const paths = changes
+    .map((change) =>
+      typeof change === 'object' &&
+      change !== null &&
+      typeof (change as { path?: unknown }).path === 'string'
+        ? (change as { path: string }).path
+        : undefined,
+    )
+    .filter((path): path is string => path !== undefined);
+  return paths.length > 0
+    ? `[modified files]\n${[...new Set(paths)].join('\n')}`
+    : '';
+}
+
+function readPartText(record: Record<string, unknown>): string {
+  const value = record['text'] ?? record['content'];
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+function readPartString(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === 'string' ? value : undefined;
 }
 
 /** 判断一个 part 是否是 tool-call，并归一化出 toolName / 入参字段。 */

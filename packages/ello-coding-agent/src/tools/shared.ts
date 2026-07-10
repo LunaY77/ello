@@ -49,31 +49,6 @@ export function requireShell(ctx: AgentToolContext): AgentShell {
   return ctx.environment.shell;
 }
 
-/**
- * 生成写入/编辑的预览 diff，供 presenter 渲染和检查点提取。
- *
- * 这是“展示用”的轻量 diff（各取前 40 行），不是可应用的 patch。
- */
-export function createPreviewDiff(
-  targetPath: string,
-  previous: string | null,
-  next: string,
-): string {
-  const oldLines = (previous ?? '').split(/\r?\n/u).slice(0, 40);
-  const nextLines = next.split(/\r?\n/u).slice(0, 40);
-  const header =
-    previous === null
-      ? ['--- /dev/null', `+++ ${targetPath}`]
-      : [`--- ${targetPath}`, `+++ ${targetPath}`];
-  return truncate(
-    [
-      ...header,
-      ...oldLines.map((line) => `- ${line}`),
-      ...nextLines.map((line) => `+ ${line}`),
-    ].join('\n'),
-  );
-}
-
 /** 将运行时路径解析成绝对路径；缺少能力说明环境装配错误。 */
 export function resolveRuntimePath(
   fs: AgentFileSystem,

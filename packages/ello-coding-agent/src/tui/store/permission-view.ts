@@ -6,7 +6,7 @@
  * 字段画出来，且这段分类逻辑可单测。审批阶段**只给 diff 摘要**（+N/-M），完整 unified
  * diff 留给对话历史展示——这是文档对 diff 展示的明确分工。
  */
-import { summarizeDiff, type DiffSummary } from './diff.js';
+import { readFileChanges, summarizeDiff, type DiffSummary } from './diff.js';
 
 export type PermissionViewKind =
   | 'edit'
@@ -55,7 +55,8 @@ const KNOWN_KINDS: ReadonlySet<string> = new Set([
 
 /** 解析分类：优先 metadata.kind，否则按工具名推断。 */
 function resolveKind(request: PermissionRequestLike): PermissionViewKind {
-  const raw = request.metadata?.['kind'];
+  const metadata = permissionMetadata(request);
+  const raw = metadata?.['kind'];
   if (typeof raw === 'string' && KNOWN_KINDS.has(raw)) {
     // ToolMetadataKind 用 `workspace` 表示「写入工作区外目录」，审批视图沿用文档
     // 里的 `external_directory` 命名以突出风险。
@@ -103,7 +104,7 @@ function metaString(
   request: PermissionRequestLike,
   key: string,
 ): string | undefined {
-  const value = request.metadata?.[key];
+  const value = permissionMetadata(request)?.[key];
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
@@ -124,7 +125,7 @@ function pick(request: PermissionRequestLike, key: string): string | undefined {
 }
 
 function metaPaths(request: PermissionRequestLike): readonly string[] {
-  const value = request.metadata?.['paths'];
+  const value = permissionMetadata(request)?.['paths'];
   if (Array.isArray(value)) {
     return value.filter((item): item is string => typeof item === 'string');
   }
@@ -168,11 +169,13 @@ export function buildPermissionView(
     if (path !== undefined) {
       fields.push({ label: 'path', value: path });
     }
-    const diff = metaString(request, 'diff');
+    const fileChanges = readFileChanges(permissionMetadata(request)?.['fileChanges']);
     return {
       ...base,
       fields,
-      ...(diff !== undefined ? { diffSummary: summarizeDiff(diff) } : {}),
+      ...(fileChanges.length > 0
+        ? { diffSummary: summarizeDiff(fileChanges) }
+        : {}),
     };
   }
 
@@ -251,4 +254,14 @@ export function buildPermissionView(
     fields.push({ label: 'summary', value: summary });
   }
   return { ...base, fields };
+}
+
+function permissionMetadata(
+  request: PermissionRequestLike,
+): Record<string, unknown> | undefined {
+  const nested = request.metadata?.['request'];
+  if (typeof nested === 'object' && nested !== null) {
+    return nested as Record<string, unknown>;
+  }
+  return request.metadata;
 }

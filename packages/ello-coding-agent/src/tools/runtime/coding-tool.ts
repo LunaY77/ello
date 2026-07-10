@@ -5,6 +5,8 @@ import type {
 } from '@ello/agent';
 import type { z } from 'zod';
 
+import type { FileChange } from '../file-change.js';
+
 export type ToolMetadataKind =
   | 'read'
   | 'search'
@@ -28,7 +30,7 @@ export interface ToolMetadata {
   readonly cwd?: string;
   readonly url?: string;
   readonly domain?: string;
-  readonly diff?: string;
+  readonly fileChanges?: readonly FileChange[];
   readonly exitCode?: number;
   readonly durationMs?: number;
   readonly truncated?: boolean;

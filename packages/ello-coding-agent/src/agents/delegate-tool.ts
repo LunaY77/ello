@@ -85,10 +85,27 @@ export function createDelegateTool(
     options.rules,
   );
   const description = [
-    'Delegate a self-contained task to a named subagent running in a parent-scoped sidechain.',
+    'Delegate a self-contained side task to a named subagent running in a parent-scoped sidechain.',
+    '',
+    'Use this when independent exploration, review, verification, or narrow implementation can proceed without blocking your core reasoning.',
+    'Do not use it to delegate understanding of the user request, to avoid reading the code yourself, or for tiny tasks cheaper to do directly.',
+    'Do not repeat delegated work after the subagent returns unless its result is missing, failed, or contradicted by source evidence.',
+    '',
+    'Prompt requirements:',
+    '- include the exact objective, scope, relevant paths, constraints, and expected report format;',
+    '- state whether writes are allowed;',
+    '- include validation expectations for verify or implement workers;',
+    '- keep secrets and unrelated user context out of the prompt.',
+    '',
+    'Lifecycle:',
+    '- foreground tasks block until the subagent returns;',
+    '- background tasks return immediately and the completed result is injected automatically;',
+    '- do not poll background tasks;',
+    '- use run_id only to continue the same subagent session;',
+    '- subagent results are not shown directly to the user; the parent agent must summarize and integrate them.',
+    '',
     'Available subagents:',
     ...delegatable.map((def) => `- ${def.name}: ${def.description}`),
-    'Set background=true for long tasks; do NOT poll — the result is injected when ready.',
   ].join('\n');
 
   return defineTool({

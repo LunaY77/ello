@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { FileChange } from '../tools/file-change.js';
+
 export const PermissionActionSchema = z.enum(['allow', 'ask', 'deny']);
 export type PermissionAction = z.infer<typeof PermissionActionSchema>;
 
@@ -36,7 +38,11 @@ export type PermissionMetadata =
       readonly pattern: string;
       readonly path?: string;
     }
-  | { readonly kind: 'edit'; readonly path: string; readonly diff: string }
+  | {
+      readonly kind: 'edit';
+      readonly path: string;
+      readonly fileChanges: readonly FileChange[];
+    }
   | {
       readonly kind: 'shell';
       readonly command: string;

@@ -1,6 +1,7 @@
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
 
+import { createFileChange } from '../tools/file-change.js';
 import { AppShell } from '../tui/component/AppShell.js';
 import { OverlayHost } from '../tui/component/OverlayHost.js';
 import { TerminalHistoryOutput } from '../tui/component/TerminalHistoryOutput.js';
@@ -51,9 +52,7 @@ describe('TerminalHistoryOutput', () => {
                 metadata: {
                   kind: 'edit',
                   path: 'tmp.txt',
-                  diff: ['--- tmp.txt', '+++ tmp.txt', '- old', '+ new'].join(
-                    '\n',
-                  ),
+                  fileChanges: [createFileChange('tmp.txt', 'old\n', 'new\n')],
                 },
               },
             },
@@ -93,8 +92,8 @@ describe('TerminalHistoryOutput', () => {
     expect(output).toContain('• Ran pnpm build');
     expect(output).toContain('> @ello/coding-agent build');
     expect(output).toContain('─ Worked for 1m 2s');
-    expect(output).toContain('- old');
-    expect(output).toContain('+ new');
+    expect(output).toContain('-old');
+    expect(output).toContain('+new');
   });
 });
 
@@ -281,14 +280,14 @@ describe('AppShell', () => {
       { path: 'tmp.txt' },
       {
         metadata: {
-          diff: ['--- tmp.txt', '+++ tmp.txt', '- old', '+ new'].join('\n'),
+          fileChanges: [createFileChange('tmp.txt', 'old\n', 'new\n')],
         },
       },
     );
     const output = renderToString(<>{diff}</>, { columns: 100 });
 
-    expect(output).toContain('- old');
-    expect(output).toContain('+ new');
+    expect(output).toContain('-old');
+    expect(output).toContain('+new');
   });
 
   it('renders the subagent browser overlay', () => {

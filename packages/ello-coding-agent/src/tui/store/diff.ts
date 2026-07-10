@@ -5,6 +5,8 @@
  * 增删上色、可折叠。审批弹窗只用 {@link summarizeDiff} 给出 +N/-M 摘要，不塞完整 diff。
  * 解析是纯函数，便于单测。
  */
+import type { FileChange } from '../../tools/file-change.js';
+
 export type DiffLineKind = 'file' | 'hunk' | 'add' | 'del' | 'context' | 'meta';
 
 export interface DiffLine {
@@ -66,7 +68,16 @@ export function parseUnifiedDiff(diff: string): readonly DiffLine[] {
 }
 
 /** 统计增删行数，用于审批摘要。 */
-export function summarizeDiff(diff: string): DiffSummary {
+export function summarizeDiff(diff: string | readonly FileChange[]): DiffSummary {
+  if (typeof diff !== 'string') {
+    return diff.reduce(
+      (acc, change) => ({
+        added: acc.added + change.additions,
+        removed: acc.removed + change.deletions,
+      }),
+      { added: 0, removed: 0 },
+    );
+  }
   let added = 0;
   let removed = 0;
   for (const line of parseUnifiedDiff(diff)) {
@@ -77,4 +88,46 @@ export function summarizeDiff(diff: string): DiffSummary {
     }
   }
   return { added, removed };
+}
+
+export function readFileChanges(value: unknown): readonly FileChange[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((entry) => {
+    if (!isFileChange(entry)) {
+      throw new Error('Invalid file change metadata.');
+    }
+    return entry;
+  });
+}
+
+export function unifiedDiffFromFileChanges(
+  changes: readonly FileChange[],
+): string {
+  return changes.map((change) => change.unifiedDiff).join('\n');
+}
+
+function isFileChange(value: unknown): value is FileChange {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const record = value as {
+    kind?: unknown;
+    path?: unknown;
+    additions?: unknown;
+    deletions?: unknown;
+    hunks?: unknown;
+    unifiedDiff?: unknown;
+  };
+  return (
+    (record.kind === 'added' ||
+      record.kind === 'deleted' ||
+      record.kind === 'modified') &&
+    typeof record.path === 'string' &&
+    typeof record.additions === 'number' &&
+    typeof record.deletions === 'number' &&
+    Array.isArray(record.hunks) &&
+    typeof record.unifiedDiff === 'string'
+  );
 }

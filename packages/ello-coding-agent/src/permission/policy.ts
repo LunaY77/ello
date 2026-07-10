@@ -150,7 +150,8 @@ function toolNeedApprovalRule(toolName: string): PermissionRule {
 function derivePermission(toolName: string): string {
   if (toolName === 'read' || toolName === 'ls') return 'read';
   if (toolName === 'grep' || toolName === 'glob') return 'search';
-  if (toolName === 'write' || toolName === 'edit') return 'edit';
+  if (toolName === 'write' || toolName === 'edit' || toolName === 'apply_patch')
+    return 'edit';
   if (toolName === 'bash') return 'bash';
   if (toolName === 'web_fetch') return 'web_fetch';
   if (toolName.startsWith('task_')) return 'task';

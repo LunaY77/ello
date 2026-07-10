@@ -8,7 +8,11 @@
  */
 import type { ToolMetadata } from '../../tools/runtime/coding-tool.js';
 
-import { summarizeDiff } from './diff.js';
+import {
+  readFileChanges,
+  summarizeDiff,
+  unifiedDiffFromFileChanges,
+} from './diff.js';
 import type { ToolCallView } from './history-entry.js';
 
 export interface ToolCardModel {
@@ -262,7 +266,8 @@ function readOutputText(output: unknown): string {
 /** 构建 ToolCard 视图模型。 */
 export function buildToolCardModel(call: ToolCallView): ToolCardModel {
   const metadata = readToolMetadata(call.output);
-  const diff = text(metadata?.diff);
+  const fileChanges = readFileChanges(metadata?.fileChanges);
+  const diff = unifiedDiffFromFileChanges(fileChanges);
   const hasDiff = diff !== '';
   const truncated = metadata?.truncated === true;
   const outputPath = text(metadata?.outputPath);

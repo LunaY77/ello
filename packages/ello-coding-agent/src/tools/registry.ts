@@ -25,6 +25,11 @@ export const codingToolRegistry = [
     description: 'unique text replacement',
     risk: 'workspace-write',
   },
+  {
+    name: 'apply_patch',
+    description: 'apply unified diff patch',
+    risk: 'workspace-write',
+  },
   { name: 'bash', description: 'run shell command', risk: 'external' },
   {
     name: 'task_create',

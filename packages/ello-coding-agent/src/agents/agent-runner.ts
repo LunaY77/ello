@@ -9,7 +9,7 @@ import {
 } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
-import { buildCodingSystemPrompt } from '../context/prompts.js';
+import { renderPromptTemplate } from '../context/prompts.js';
 import type { PermissionRule } from '../permissions.js';
 import {
   modelSettingsFromRole,
@@ -148,8 +148,8 @@ export function createSubagentAgent(input: {
   );
   const instructions =
     definition.prompt !== undefined
-      ? `${buildCodingSystemPrompt(childConfig, { model: binding.ref })}\n\n${definition.prompt}`
-      : buildCodingSystemPrompt(childConfig, { model: binding.ref });
+      ? `${renderPromptTemplate('subagent', { model: binding.ref })}\n\n${definition.prompt}`
+      : renderPromptTemplate('subagent', { model: binding.ref });
 
   return createAgent({
     name: `ello-${definition.name}`,

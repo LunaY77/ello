@@ -263,9 +263,11 @@ describe('createCodingSession', () => {
       },
     });
     expect(
-      String(
-        (pending[0]?.metadata?.request as { diff?: unknown } | undefined)?.diff,
-      ),
+      (
+        pending[0]?.metadata?.request as
+          | { fileChanges?: Array<{ unifiedDiff?: unknown }> }
+          | undefined
+      )?.fileChanges?.[0]?.unifiedDiff,
     ).toContain('+++');
 
     await session.approve(pending[0]!.requestId, { action: 'approve_once' });

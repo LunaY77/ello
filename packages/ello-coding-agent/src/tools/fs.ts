@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
+import { applyPatch as applyUnifiedPatch } from 'diff';
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
@@ -7,11 +8,17 @@ import type { DecideApproval } from '../permission/policy.js';
 import type { PermissionMetadata } from '../permission/types.js';
 
 import {
+  applyStructuredPatches,
+  createFileChange,
+  parseUnifiedFileChanges,
+  summarizeFileChanges,
+  type FileChange,
+} from './file-change.js';
+import {
   createCodingToolResult,
   defineCodingTool,
 } from './runtime/coding-tool.js';
 import {
-  createPreviewDiff,
   requireFs,
   resolveRuntimePath,
   statRuntimePath,
@@ -151,6 +158,7 @@ export function createFsTools(
       input: z.object({
         path: z.string(),
         content: z.string(),
+        expectedContent: z.string().optional(),
         reason: z.string().optional(),
       }),
       approval: async (input, ctx) =>
@@ -164,20 +172,25 @@ export function createFsTools(
           },
           ctx.agent,
         ),
-      execute: async ({ path: targetPath, content, reason }, ctx) => {
+      execute: async (
+        { path: targetPath, content, expectedContent, reason },
+        ctx,
+      ) => {
         const fs = requireFs(ctx.agent);
         const previous = await readOptional(fs, targetPath);
+        assertWriteExpectedContent(targetPath, previous, expectedContent);
         await fs.writeText(targetPath, content);
-        const diff = createPreviewDiff(targetPath, previous, content);
+        const fileChanges = [createFileChange(targetPath, previous, content)];
+        const summary = summarizeFileChanges(fileChanges);
         return createCodingToolResult({
           title: `Write ${targetPath}`,
-          output: `Wrote ${Buffer.byteLength(content)} bytes to ${targetPath}.`,
+          output: `Wrote ${Buffer.byteLength(content)} bytes to ${targetPath} (+${summary.additions} -${summary.deletions}).`,
           metadata: {
             kind: 'edit',
             path: targetPath,
             bytes: Buffer.byteLength(content),
             reason: reason ?? 'write file',
-            diff,
+            fileChanges,
             before: previous,
             after: content,
           },
@@ -220,17 +233,67 @@ export function createFsTools(
           newText +
           current.slice(first + oldText.length);
         await fs.writeText(targetPath, next);
-        const diff = createPreviewDiff(targetPath, current, next);
+        const fileChanges = [createFileChange(targetPath, current, next)];
+        const summary = summarizeFileChanges(fileChanges);
         return createCodingToolResult({
           title: `Edit ${targetPath}`,
-          output: `Edited ${targetPath}.`,
+          output: `Edited ${targetPath} (+${summary.additions} -${summary.deletions}).`,
           metadata: {
             kind: 'edit',
             path: targetPath,
             reason: reason ?? 'edit file',
-            diff,
+            fileChanges,
             before: current,
             after: next,
+          },
+        });
+      },
+    }),
+    defineCodingTool({
+      name: 'apply_patch',
+      description:
+        'Apply a unified diff patch with exact context matching. The patch must include file headers and apply cleanly.',
+      input: z.object({
+        patch: z.string(),
+        reason: z.string().optional(),
+      }),
+      approval: async (input, ctx) => {
+        const fs = requireFs(ctx.agent);
+        const patches = parseUnifiedFileChanges(input.patch);
+        const fileChanges = await previewPatchChanges(fs, patches);
+        const paths = fileChanges.map((change) => change.path);
+        return decide(
+          {
+            permission: 'edit',
+            patterns: paths,
+            always: paths,
+            paths,
+            metadata: {
+              kind: 'edit',
+              path: paths.join(', '),
+              fileChanges,
+            },
+          },
+          ctx.agent,
+        );
+      },
+      execute: async ({ patch, reason }, ctx) => {
+        const fs = requireFs(ctx.agent);
+        const fileChanges = await applyStructuredPatches(
+          fs,
+          parseUnifiedFileChanges(patch),
+        );
+        const paths = fileChanges.map((change) => change.path);
+        const summary = summarizeFileChanges(fileChanges);
+        return createCodingToolResult({
+          title: `Apply patch ${paths.join(', ')}`,
+          output: `Applied patch to ${paths.length} file(s) (+${summary.additions} -${summary.deletions}).`,
+          metadata: {
+            kind: 'edit',
+            path: paths.join(', '),
+            paths,
+            reason: reason ?? 'apply patch',
+            fileChanges,
           },
         });
       },
@@ -253,6 +316,24 @@ async function readOptional(
   }
 }
 
+function assertWriteExpectedContent(
+  targetPath: string,
+  previous: string | null,
+  expectedContent: string | undefined,
+): void {
+  if (previous === null) {
+    return;
+  }
+  if (expectedContent === undefined) {
+    throw new Error(
+      `Refusing to overwrite existing file without expectedContent: ${targetPath}`,
+    );
+  }
+  if (expectedContent !== previous) {
+    throw new Error(`File changed since last read: ${targetPath}`);
+  }
+}
+
 function isBinary(buffer: Buffer): boolean {
   if (buffer.includes(0)) {
     return true;
@@ -264,15 +345,19 @@ async function writeMetadata(
   input: {
     readonly path: string;
     readonly content: string;
+    readonly expectedContent?: string | undefined;
     readonly reason?: string | undefined;
   },
   ctx: Parameters<DecideApproval>[1],
 ): Promise<Extract<PermissionMetadata, { kind: 'edit' }>> {
   const previous = await readOptional(requireFs(ctx), input.path);
+  if (previous !== null && input.expectedContent !== previous) {
+    throw new Error(`File changed since last read: ${input.path}`);
+  }
   return {
     kind: 'edit',
     path: input.path,
-    diff: createPreviewDiff(input.path, previous, input.content),
+    fileChanges: [createFileChange(input.path, previous, input.content)],
   };
 }
 
@@ -286,10 +371,49 @@ async function editMetadata(
   ctx: Parameters<DecideApproval>[1],
 ): Promise<Extract<PermissionMetadata, { kind: 'edit' }>> {
   const current = await requireFs(ctx).readText(input.path);
-  const next = current.replace(input.oldText, input.newText);
+  const first = current.indexOf(input.oldText);
+  if (first === -1) {
+    throw new Error(`Text not found in ${input.path}`);
+  }
+  if (current.indexOf(input.oldText, first + input.oldText.length) !== -1) {
+    throw new Error(`Text is not unique in ${input.path}`);
+  }
+  const next =
+    current.slice(0, first) +
+    input.newText +
+    current.slice(first + input.oldText.length);
   return {
     kind: 'edit',
     path: input.path,
-    diff: createPreviewDiff(input.path, current, next),
+    fileChanges: [createFileChange(input.path, current, next)],
   };
+}
+
+async function previewPatchChanges(
+  fs: ReturnType<typeof requireFs>,
+  patches: Parameters<typeof applyStructuredPatches>[1],
+): Promise<readonly FileChange[]> {
+  const changes: FileChange[] = [];
+  for (const patch of patches) {
+    const path =
+      patch.isDelete === true ? patch.oldFileName : patch.newFileName;
+    if (path === undefined || path === '/dev/null') {
+      throw new Error('Patch file name is missing.');
+    }
+    const targetPath = path.replace(/^[ab]\//u, '');
+    resolveRuntimePath(fs, targetPath);
+    const before = patch.isCreate === true ? null : await fs.readText(targetPath);
+    const applied = applyUnifiedPatch(before ?? '', patch, { fuzzFactor: 0 });
+    if (applied === false) {
+      throw new Error(`Patch did not apply cleanly: ${targetPath}`);
+    }
+    changes.push(
+      createFileChange(
+        targetPath,
+        before,
+        patch.isDelete === true ? null : applied,
+      ),
+    );
+  }
+  return changes;
 }
