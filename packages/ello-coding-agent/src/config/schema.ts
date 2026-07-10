@@ -179,14 +179,9 @@ export const ContextToolResultBudgetConfigSchema = z.object({
   max_chars: z.number().int().positive().default(20_000),
 });
 
-/** structured memory（SQLite）配置（§4.3）：显式录入 + 检索 + 访问日志。 */
+/** 文件型 memory 注入配置。 */
 export const ContextMemoryConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  structured: z
-    .object({
-      enabled: z.boolean().default(true),
-    })
-    .default({ enabled: true }),
 });
 
 /** context pipeline 总配置。 */
@@ -216,7 +211,6 @@ export const ContextConfigSchema = z.object({
   }),
   memory: ContextMemoryConfigSchema.default({
     enabled: false,
-    structured: { enabled: true },
   }),
 });
 
@@ -283,7 +277,7 @@ export const CodingAgentConfigSchema = z.object({
       enabled: false,
       max_chars: 20_000,
     },
-    memory: { enabled: false, structured: { enabled: true } },
+    memory: { enabled: false },
   }),
   tui: z.boolean().default(true),
   json: z.boolean().default(false),

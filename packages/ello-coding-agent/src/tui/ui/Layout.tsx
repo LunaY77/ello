@@ -11,7 +11,12 @@ export function Column({ children }: { readonly children: ReactNode }) {
 
 export function DockFrame({ children }: { readonly children: ReactNode }) {
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+    <Box
+      flexDirection="column"
+      borderStyle="single"
+      borderColor="gray"
+      paddingX={1}
+    >
       {children}
     </Box>
   );

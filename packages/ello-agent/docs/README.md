@@ -7,12 +7,12 @@
 - `createAgent`
 - `agent.run`
 - `agent.stream`
-- `await stream.final`
 - `defineTool`
 - `environment`
 - `session`
 - `memory`
 - `observers`
+- `eventRecorder`
 - `modelInput`
 
 它不负责产品层 UI，也不负责把你的业务能力预打包成一堆 presets。
@@ -74,8 +74,10 @@ await agent.close();
 - `agent.resume(deferred, options?)`
 - `agent.close()`
 
-`run()` 会消费流并返回最终结果。
-`stream()` 返回可迭代事件流，最终结果通过 `await stream.final` 取得。
+`run()` 会在内部持续消费事件流并返回最终结果。
+`stream()` 的调用方必须持续消费 async iterator，再读取 `stream.final`。未消费事件的数量超过 `CreateAgentOptions.stream.maxBufferedEvents`（默认 1024）时，运行以 `AgentStreamBackpressureError` 失败，不会无限增长内存。
+
+`run.completed` 只包含 `runId`、`finishReason` 与 `usage`。完整 `AgentRunResult` 只从 `stream.final` 返回。
 
 ## Tool
 
@@ -109,7 +111,6 @@ const readNote = defineTool({
 - `resources`
 - `setup(ctx)`
 - `getContextInstructions(ctx)`
-- `onEvent(event, ctx)`
 - `close()`
 
 框架提供的最小本地实现是 `createLocalShellEnvironment()`。
@@ -223,6 +224,24 @@ const agent = createAgent({
 });
 ```
 
+## Event recorder
+
+`eventRecorder` 是产品层持久化出口。core 会把事件交给 recorder，记录范围与批处理策略由产品决定；`flush()` 在 run 收尾时执行。recorder 写入失败会直接使 run 失败。
+
+```ts
+const agent = createAgent({
+  model: 'test:model',
+  eventRecorder: {
+    record: async (event, ctx) => {
+      if (event.type === 'run.completed') {
+        await saveRunSummary(ctx.runId, event);
+      }
+    },
+    flush: async () => flushRunSummaries(),
+  },
+});
+```
+
 ## 推荐用法
 
 - 框架层只放通用能力
@@ -230,7 +249,8 @@ const agent = createAgent({
 - 业务工具放进 `tools`
 - 历史持久化放进 `session`
 - 长期记忆放进 `memory`
-- 事件采集放进 `observers`
+- 生命周期观测放进 `observers`
+- 产品事件持久化放进 `eventRecorder`
 - 输入组装放进 `modelInput`
 
 ## 不推荐

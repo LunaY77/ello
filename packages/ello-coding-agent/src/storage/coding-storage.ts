@@ -12,7 +12,6 @@ import {
 import { runCodingStorageMigrations } from './migration-runner.js';
 import { globalArtifactsDir, globalStateDatabasePath } from './paths.js';
 import { CheckpointRepository } from './repositories/checkpoint-repository.js';
-import { MemoryRepository } from './repositories/memory-repository.js';
 import { TaskBoardRepository } from './repositories/task-board-repository.js';
 import { UsageRepository } from './repositories/usage-repository.js';
 import { WorkspaceRepository } from './repositories/workspace-repository.js';
@@ -24,7 +23,6 @@ export interface CodingStorage {
   readonly checkpoints: CheckpointRepository;
   readonly workspaces: WorkspaceRepository;
   readonly usage: UsageRepository;
-  readonly memory: MemoryRepository;
   close(): void;
 }
 
@@ -57,7 +55,6 @@ export function createCodingStorage(
     checkpoints: new CheckpointRepository(db, artifactStore),
     workspaces: new WorkspaceRepository(db),
     usage: new UsageRepository(db),
-    memory: new MemoryRepository(db),
     close: () => {
       if (closed) {
         return;

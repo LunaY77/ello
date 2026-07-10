@@ -1,8 +1,7 @@
 import type {
   AgentMessage,
   SessionCompactionReport,
-  SessionCompactor,
-  SessionStore,
+  CompactionPort,
 } from '@ello/agent';
 
 import type {
@@ -74,8 +73,8 @@ export type GenerateCompactCheckpoint = (
   opts: CompactCheckpointOptions,
 ) => Promise<string>;
 
-/** {@link createSessionCompactor} 的依赖。 */
-export interface SessionCompactorDeps {
+/** {@link createCompactionPort} 的依赖。 */
+export interface CompactionPortDeps {
   /** 模型上下文窗口（token），用于触发判定。 */
   readonly contextWindow: number;
   /** checkpoint 生成回调。 */
@@ -205,7 +204,8 @@ function collectFileChanges(part: unknown, modifiedFiles: Set<string>): void {
   if (typeof part !== 'object' || part === null) {
     return;
   }
-  const output = (part as { output?: unknown; result?: unknown }).output ??
+  const output =
+    (part as { output?: unknown; result?: unknown }).output ??
     (part as { output?: unknown; result?: unknown }).result;
   if (typeof output !== 'object' || output === null) {
     return;
@@ -301,7 +301,7 @@ export function renderCompactConversation(
 }
 
 /**
- * 构造长会话压缩器 {@link SessionCompactor}。
+ * 构造长会话压缩器 {@link CompactionPort}。
  *
  * 触发流程（`maybeCompact`）：
  * 1. `port.loadActivePath` 取 raw entries + 最近 compaction + 投影后 token；
@@ -311,9 +311,7 @@ export function renderCompactConversation(
  * 5. `port.appendCompaction` 追加 compaction 节点并把 leaf 指向它；
  *    下一轮 `store.load()` 自动投影成 `[summary, ...kept]`。
  */
-export function createSessionCompactor(
-  deps: SessionCompactorDeps,
-): SessionCompactor {
+export function createCompactionPort(deps: CompactionPortDeps): CompactionPort {
   const settings: CompactionSettings = {
     ...DEFAULT_COMPACTION_SETTINGS,
     ...deps.settings,
@@ -323,7 +321,6 @@ export function createSessionCompactor(
     name: 'ello-session-compactor',
     async maybeCompact(
       sessionId: string,
-      _store: SessionStore,
     ): Promise<SessionCompactionReport | null> {
       const active = await deps.port.loadActivePath(sessionId);
       if (

@@ -262,32 +262,6 @@ export const taskDependencies = sqliteTable(
   ],
 );
 
-/** 全局结构化 memory；项目 memory Markdown 不进入本表，也不建索引缓存。 */
-export const memoryItems = sqliteTable('memory_items', {
-  id: text('id').primaryKey(),
-  kind: text('kind').notNull(),
-  content: text('content').notNull(),
-  tags: text('tags').notNull().default('[]'),
-  source: text('source').notNull(),
-  confidence: real('confidence'),
-  enabled: integer('enabled').notNull().default(1),
-  lastUsedAt: text('last_used_at'),
-  createdAt: text('created_at').notNull(),
-  updatedAt: text('updated_at').notNull(),
-  archivedAt: text('archived_at'),
-});
-
-/** memory 使用记录；用于后续清理、排序和“为什么注入了这条记忆”的解释。 */
-export const memoryAccessLog = sqliteTable('memory_access_log', {
-  id: text('id').primaryKey(),
-  memoryItemId: text('memory_item_id')
-    .notNull()
-    .references(() => memoryItems.id),
-  runId: text('run_id'),
-  usedFor: text('used_for').notNull(),
-  createdAt: text('created_at').notNull(),
-});
-
 /** Drizzle 查询使用的 schema 对象。 */
 export const codingStorageSchema = {
   meta,
@@ -307,8 +281,6 @@ export const codingStorageSchema = {
   taskBoards,
   tasks,
   taskDependencies,
-  memoryItems,
-  memoryAccessLog,
 };
 
 /** SQLite 中常用的当前时间表达式，只用于少量原子 upsert。 */

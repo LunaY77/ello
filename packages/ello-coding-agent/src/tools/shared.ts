@@ -34,7 +34,7 @@ export function truncate(value: string): string {
 
 /** 取出环境的文件系统能力；所有路径边界检查都应委托给运行时环境。 */
 export function requireFs(ctx: AgentToolContext): AgentFileSystem {
-  const fs = ctx.environment.fileSystem ?? ctx.environment.files;
+  const fs = ctx.environment.fileSystem;
   if (fs === undefined) {
     throw new Error('Environment has no file system; cannot run file tools.');
   }

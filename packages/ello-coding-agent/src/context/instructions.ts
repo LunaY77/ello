@@ -69,25 +69,6 @@ export async function loadInstructionSources(
   return { sources, diagnostics };
 }
 
-/**
- * 兼容旧 API：只返回项目指令正文。
- *
- * 新 pipeline 以 {@link loadInstructionSources} 为准；这里保留给外部调用方和测试。
- */
-export async function loadProjectInstructions(cwd: string): Promise<string> {
-  const candidates = ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'];
-  const parts = await Promise.all(
-    candidates.map(async (candidate) => {
-      const file = path.resolve(cwd, candidate);
-      const text = await readInstructionFile(file);
-      return text !== null && text.trim()
-        ? `# ${candidate}\n${text.trim()}`
-        : null;
-    }),
-  );
-  return parts.filter((part): part is string => part !== null).join('\n\n');
-}
-
 function instructionSpecs(config: CodingAgentConfig): InstructionSpec[] {
   const instructions = config.context.instructions;
   return [

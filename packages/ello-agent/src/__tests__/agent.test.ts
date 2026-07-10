@@ -4,6 +4,11 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { trimMessages } from '../core/input-transforms.js';
+import {
+  AgentRunControl,
+  DefaultAgentMessageQueue,
+} from '../core/run-control.js';
 import {
   AgentStreamBackpressureError,
   ModelAdapterProtocolError,
@@ -18,11 +23,6 @@ import {
   type AgentStreamEvent,
   type ModelAdapter,
 } from '../index.js';
-import {
-  AgentRunControl,
-  DefaultAgentMessageQueue,
-  trimMessages,
-} from '../internal.js';
 
 class EchoAdapter implements ModelAdapter {
   async generate(request: AgentModelRequest): Promise<AgentModelResponse> {
@@ -173,37 +173,6 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('bounds trace diagnostics without storing text deltas', async () => {
-    let traceTypes: readonly string[] = [];
-    const agent = createAgent({
-      model: 'test:model',
-      modelAdapter: {
-        generate: (request) => new EchoAdapter().generate(request),
-        async *stream(request) {
-          for (let index = 0; index < 100_000; index += 1) {
-            yield { type: 'text-delta', text: 'x' } as const;
-          }
-          yield {
-            type: 'final',
-            response: await new EchoAdapter().generate(request),
-          } as const;
-        },
-      },
-      observers: [
-        {
-          onRunCompleted: (_result, ctx) => {
-            traceTypes = ctx.trace.events.map((event) => event.type);
-          },
-        },
-      ],
-    });
-
-    await agent.run('hi');
-    expect(traceTypes).not.toContain('message.delta');
-    expect(traceTypes.length).toBeLessThanOrEqual(1_024);
-    await agent.close();
-  });
-
   it('fails a stream when an unconsumed event buffer reaches its limit', async () => {
     const agent = createAgent({
       model: 'test:model',
@@ -303,7 +272,7 @@ describe('createAgent', () => {
       model: 'test:model',
       modelAdapter: new EchoAdapter(),
       environment,
-      session: {
+      transcript: {
         async load() {
           return [];
         },
@@ -498,7 +467,7 @@ describe('createAgent', () => {
         },
       },
       instructions: 'Be precise.',
-      session,
+      transcript: session,
       modelInput: {
         systemSections: [() => 'Working directory: /tmp/project'],
         messageTransforms: [trimMessages({ maxMessages: 3 })],
@@ -602,7 +571,7 @@ describe('createAgent', () => {
     const appendedMessages: AgentMessage[] = [];
     const agent = createAgent({
       model: 'test:model',
-      session: {
+      transcript: {
         async load() {
           return [persistedToolCall];
         },
@@ -833,7 +802,7 @@ describe('createAgent', () => {
     let loads = 0;
     const agent = createAgent({
       model: 'test:model',
-      session: {
+      transcript: {
         async load() {
           loads += 1;
           return [{ role: 'user', content: 'history' }];

@@ -39,7 +39,7 @@ export interface CreateLocalEnvironmentOptions {
  * 创建一个基于本地文件系统与 shell 的代理环境。
  *
  * 装配文件系统、shell 与资源注册表，并把允许路径统一解析为绝对路径作为边界。
- * 环境的 `setup` 会绑定并初始化所有资源，`getContextInstructions` 汇总各组件
+ * 环境的 `setup` 会绑定并初始化所有资源，`getInstructions` 汇总各组件
  * 的上下文片段，`close` 逆序释放资源。
  */
 export function createLocalShellEnvironment(
@@ -58,7 +58,6 @@ export function createLocalShellEnvironment(
   const resources = new DefaultAgentResourceRegistry();
   const environment: AgentEnvironment = {
     fileSystem,
-    files: fileSystem,
     shell,
     resources,
     // 初始化：把资源绑定到本环境，再依次跑各资源的 setup。
@@ -67,7 +66,7 @@ export function createLocalShellEnvironment(
       await resources.setupAll();
     },
     // 汇总文件系统、shell、资源三方的上下文片段，包进 <environment-context>。
-    async getContextInstructions() {
+    async getInstructions() {
       const sections = [
         await fileSystem.getContextInstructions?.(),
         await shell.getContextInstructions?.(),

@@ -1,10 +1,7 @@
 import { Box, Text } from 'ink';
 import { createElement, type ReactNode } from 'react';
 
-import {
-  readFileChanges,
-  unifiedDiffFromFileChanges,
-} from '../store/diff.js';
+import { readFileChanges, unifiedDiffFromFileChanges } from '../store/diff.js';
 import type { ToolResultView } from '../store/history-entry.js';
 import { useTheme } from '../theme/index.js';
 

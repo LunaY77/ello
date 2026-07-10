@@ -24,7 +24,7 @@ import {
   type AnyAgentTool,
   type DeferredApprovalItem,
   type ModelAdapter,
-  type SessionCompactor,
+  type CompactionPort,
 } from '@ello/agent';
 
 import {
@@ -40,7 +40,7 @@ import {
 import { CheckpointStore } from '../change/checkpoint.js';
 import type { CodingAgentConfig, ProfileSuiteConfig } from '../config/index.js';
 import {
-  createSessionCompactor,
+  createCompactionPort,
   renderCompactConversation,
   serializeForCompact,
 } from '../context/compactor.js';
@@ -115,10 +115,9 @@ function createRuntimeEnvironment(
   const resources = environment.resources;
   const wrapped: AgentEnvironment = {
     ...environment,
-    ...(fileSystem !== undefined ? { fileSystem, files: fileSystem } : {}),
+    ...(fileSystem !== undefined ? { fileSystem } : {}),
     ...(shell !== undefined ? { shell } : {}),
     ...(resources !== undefined ? { resources } : {}),
-    getContextInstructions: () => null,
     getInstructions: () => null,
   };
   environment.resources?.bind?.(wrapped);
@@ -239,7 +238,6 @@ function createSlashRuntimeEnvironment(
   });
   return {
     ...environment,
-    getContextInstructions: () => null,
     getInstructions: () => null,
   };
 }
@@ -332,7 +330,7 @@ interface SessionDeps {
 
 interface AgentRuntimeDeps {
   readonly agent: Agent;
-  readonly compactor: SessionCompactor;
+  readonly compaction: CompactionPort;
   readonly skills: readonly AgentSkill[];
 }
 
@@ -962,7 +960,7 @@ class CodingSessionImpl implements CodingSession {
     const skills = await profile.measure('skills.load', () =>
       loadCodingSkills(this.config),
     );
-    const compactor = createSessionCompactor({
+    const compaction = createCompactionPort({
       contextWindow: DEFAULT_CONTEXT_WINDOW,
       port: this.deps.sessionStore,
       generateCheckpoint: makeCompactCheckpointGenerator(
@@ -983,8 +981,8 @@ class CodingSessionImpl implements CodingSession {
     });
     const runtime = {
       skills,
-      compactor,
-      agent: this.buildAgent({ compactor, skills }),
+      compaction,
+      agent: this.buildAgent({ compaction, skills }),
     };
     profile.mark('agent.build');
     profile.flush();
@@ -1024,7 +1022,7 @@ class CodingSessionImpl implements CodingSession {
 
   /** 把各模块产物拼进 createAgent，这是整个会话运行时的核心装配。 */
   private buildAgent(runtime: {
-    readonly compactor: SessionCompactor;
+    readonly compaction: CompactionPort;
     readonly skills: readonly AgentSkill[];
   }): Agent {
     const agentDef = this.deps.registry.get(this.activeAgentName);
@@ -1045,7 +1043,7 @@ class CodingSessionImpl implements CodingSession {
         : {}),
     };
     const agentModel = this.resolveAgentModel(primaryRole);
-    const memory = createCodingMemory(config, this.deps.storage.memory);
+    const memorySection = createCodingMemory(config);
     const observer = createCodingObserver(
       config,
       { model: primaryRole.ref },
@@ -1108,7 +1106,7 @@ class CodingSessionImpl implements CodingSession {
         skills: runtime.skills,
         contextWindow: DEFAULT_CONTEXT_WINDOW,
       }),
-      memory.section,
+      memorySection,
     ];
 
     return createAgent({
@@ -1121,12 +1119,12 @@ class CodingSessionImpl implements CodingSession {
         () => [...this.sessionExternalPaths],
       ),
       tools: [...selectedTools, ...skillTools, delegateTool],
-      session: this.deps.sessionStore,
+      transcript: this.deps.sessionStore,
       eventRecorder: createCodingEventRecorder(
         this.deps.sessionStore.repository,
       ),
-      compactor: runtime.compactor,
-      observers: [observer, memory.observer, runtimeObserver],
+      compaction: runtime.compaction,
+      observers: [observer, runtimeObserver],
       sessionWindow: { maxMessages: 200 },
       modelInputBudget: {
         maxInputTokens: config.context.max_input_tokens,

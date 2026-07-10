@@ -17,12 +17,9 @@ import type {
   AgentInput,
   AgentMessage,
   AgentModelResponse,
-  AgentRunContext,
   AgentRunOptions,
   AgentRunResult,
-  AgentRunState,
   AgentToolCall,
-  AgentTrace,
   AgentTurnDiagnostics,
   CreateAgentOptions,
   DeferredRunResults,
@@ -41,6 +38,11 @@ import {
 } from './result.js';
 import { prepareResume } from './resume.js';
 import { AgentRunControl } from './run-control.js';
+import type {
+  AgentRunState,
+  AgentTrace,
+  InternalAgentRunContext,
+} from './runtime-types.js';
 import {
   compactSession,
   loadSessionMessages,
@@ -134,7 +136,7 @@ export class RunSession {
   /** 运行追踪信息。 */
   readonly trace: AgentTrace;
   /** 暴露给工具/环境/观测者的运行上下文。 */
-  readonly ctx: AgentRunContext;
+  readonly ctx: InternalAgentRunContext;
   /** 排队与运行状态控制器。 */
   readonly runControl: AgentRunControl;
   /** 本次运行可用的工具集合。 */

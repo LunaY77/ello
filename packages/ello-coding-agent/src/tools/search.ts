@@ -180,11 +180,7 @@ async function walk(
       return;
     }
     for (const entry of await fs.listDir(dir)) {
-      if (
-        entry === 'node_modules' ||
-        entry === '.git' ||
-        entry === 'dist'
-      ) {
+      if (entry === 'node_modules' || entry === '.git' || entry === 'dist') {
         continue;
       }
       const fullPath = path.join(dir, entry);

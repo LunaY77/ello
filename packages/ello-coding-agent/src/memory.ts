@@ -2,11 +2,6 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { globalHomeDir } from './config/index.js';
-import {
-  MemoryRepository,
-  type MemoryItem,
-} from './storage/repositories/memory-repository.js';
-
 export type MemoryScope = 'project' | 'user';
 
 export interface MemoryFile {
@@ -17,17 +12,12 @@ export interface MemoryFile {
 
 export interface MemoryManifest {
   files: MemoryFile[];
-  /** 全局结构化 memory 来自 SQLite；项目 Markdown 文件不会被索引入库。 */
-  items: MemoryItem[];
 }
 
 /**
  * 加载会影响当前会话的项目级和用户级记忆文件。
  */
-export async function loadCodingMemory(
-  cwd: string,
-  repository: MemoryRepository,
-): Promise<MemoryManifest> {
+export async function loadCodingMemory(cwd: string): Promise<MemoryManifest> {
   const home = globalHomeDir();
   const candidates = [
     { scope: 'project' as const, path: path.join(cwd, 'AGENTS.md') },
@@ -66,8 +56,7 @@ export async function loadCodingMemory(
       }
     }
   }
-  const items = await repository.listEnabled();
-  return { files, items: [...items] };
+  return { files };
 }
 
 /**
@@ -81,25 +70,20 @@ export function renderMemoryForPrompt(
     const displayPath = path.relative(cwd, file.path) || file.path;
     return `# ${displayPath} (${file.scope})\n\n${file.content}`;
   });
-  const dbSections = manifest.items.map(
-    (item) =>
-      `# global memory:${item.kind} (${item.source})\n\n${item.content}`,
-  );
-  return [...fileSections, ...dbSections].join('\n\n');
+  return fileSections.join('\n\n');
 }
 
 /**
  * 汇总已加载的记忆来源，供 CLI 和 TUI 状态输出使用。
  */
 export function summarizeMemory(manifest: MemoryManifest, cwd: string): string {
-  if (manifest.files.length === 0 && manifest.items.length === 0) {
+  if (manifest.files.length === 0) {
     return 'No memory files loaded.';
   }
   return [
     ...manifest.files.map(
       (file) => `${file.scope}\t${path.relative(cwd, file.path) || file.path}`,
     ),
-    ...manifest.items.map((item) => `user-db\t${item.kind}\t${item.id}`),
   ].join('\n');
 }
 

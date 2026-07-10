@@ -3,7 +3,7 @@
  *
  * 这里是 provider 无关 Agent 内核对外的稳定门面：只重导出供产品层使用的工厂
  * 函数（`createAgent`、`defineTool`、技能/子代理/环境构造器）与全部公共类型。
- * 内部实现细节不从此处暴露——需要触达内核内部的高级用法请走 `./internal.js`。
+ * 内部实现细节不从包出口暴露。
  * 同时重导出 `zod` 的 `z`，方便调用方定义工具输入 schema 时无需另装依赖。
  */
 export { createAgent } from './public/create-agent.js';
@@ -23,7 +23,6 @@ export { defineTool } from './public/tool.js';
 export {
   activeSkillsContext,
   createSkillTools,
-  loadSkillsFromDir,
   skillIndexContext,
 } from './core/skills.js';
 export {
@@ -54,13 +53,10 @@ export type {
   AgentRunDiagnostics,
   AgentRunOptions,
   AgentRunResult,
-  AgentSetupContext,
   AgentShell,
   AgentShellResult,
   AgentSkill,
   AgentStream,
-  AgentTrace,
-  AgentTraceEvent,
   AgentTool,
   AgentToolChoice,
   AgentToolCall,
@@ -84,8 +80,8 @@ export type {
   ProviderOptionsResolver,
   QueueDrainDiagnostic,
   SessionCompactionReport,
-  SessionCompactor,
-  SessionStore,
+  CompactionPort,
+  TranscriptStore,
   SystemSection,
   MessageTransform,
   UserMessage,

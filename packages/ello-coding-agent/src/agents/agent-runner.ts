@@ -165,7 +165,7 @@ export function createSubagentAgent(input: {
     instructions,
     environment: sharedEnvironment(deps.environment),
     tools,
-    session: deps.session,
+    transcript: deps.session,
     eventRecorder: createCodingEventRecorder(deps.session.repository),
     sessionWindow: { maxMessages: 200 },
     modelInputBudget: { maxInputTokens: 160_000, reservedOutputTokens: 8_000 },

@@ -13,10 +13,6 @@
     "./environment": {
       "types": "./dist/environment/index.d.ts",
       "import": "./dist/environment/index.js"
-    },
-    "./internal": {
-      "types": "./dist/internal.d.ts",
-      "import": "./dist/internal.js"
     }
   },
   "files": [

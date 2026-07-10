@@ -4,11 +4,14 @@ import type {
   AgentRunContext,
   AgentRunResult,
   AgentToolCall,
-  AgentTraceEvent,
   CreateAgentOptions,
   ModelCallCompletedEvent,
 } from '../public/types.js';
 
+import type {
+  AgentTraceEvent,
+  InternalAgentRunContext,
+} from './runtime-types.js';
 import type { AgentEventStream } from './stream.js';
 
 /**
@@ -24,7 +27,7 @@ export class AgentEventDispatcher {
   constructor(
     private readonly config: CreateAgentOptions,
     private readonly stream: AgentEventStream,
-    private readonly ctx: AgentRunContext,
+    private readonly ctx: InternalAgentRunContext,
   ) {}
 
   /**
@@ -214,23 +217,10 @@ async function emitSingleObserverEvent(
 /**
  * 释放环境持有的资源。
  *
- * 若环境提供了统一的 `close`，则交由它一并清理；否则逐项关闭资源池、
- * 文件系统、文件句柄与 shell。`files` 与 `fileSystem` 指向同一对象时
- * 只关闭一次，避免重复释放。
+ * 环境负责聚合并释放自己持有的资源，内核只调用统一的 `close` 生命周期入口。
  */
 export async function closeAgentResources(
   environment: CreateAgentOptions['environment'],
 ): Promise<void> {
-  // 优先走环境自带的统一清理入口。
-  if (environment?.close !== undefined) {
-    await environment.close();
-    return;
-  }
-  await environment?.resources?.closeAll?.();
-  await environment?.fileSystem?.close?.();
-  // files 与 fileSystem 若是同一对象，避免重复关闭。
-  if (environment?.files !== environment?.fileSystem) {
-    await environment?.files?.close?.();
-  }
-  await environment?.shell?.close?.();
+  await environment?.close?.();
 }

@@ -4,7 +4,11 @@ import { DiffPreview } from '../presenters/index.js';
 import { glyphs } from '../ui/glyphs.js';
 import { tuiTokens } from '../ui/tokens.js';
 
-import type { HistoryEntry, SubagentRunView, ToolCallView } from './history-entry.js';
+import type {
+  HistoryEntry,
+  SubagentRunView,
+  ToolCallView,
+} from './history-entry.js';
 import { buildToolCardModel } from './tool-card.js';
 
 const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
@@ -87,7 +91,9 @@ function SessionHeader({
       </Text>
       <Text>
         <Text color={tuiTokens.color.muted}>permissions: </Text>
-        <Text color={tuiTokens.color.text}>{formatPermission(entry.approvalMode)}</Text>
+        <Text color={tuiTokens.color.text}>
+          {formatPermission(entry.approvalMode)}
+        </Text>
       </Text>
     </Box>
   );
@@ -103,22 +109,32 @@ function HistoryTool({ tool }: { readonly tool: ToolCallView }) {
         {`${prefix}${tool.status === 'fail' ? 'Failed ' : ''}${model.headline}${model.metaRight !== '' ? `  ${model.metaRight}` : ''}`}
       </Text>
       {model.details.length > 0 ? (
-        <Text color={tuiTokens.color.muted}>{`  ${model.details.join(' · ')}`}</Text>
+        <Text
+          color={tuiTokens.color.muted}
+        >{`  ${model.details.join(' · ')}`}</Text>
       ) : null}
       {model.outputPreview.length > 0 ? (
         <Box flexDirection="column">
-          <Text color={tuiTokens.color.muted}>  └</Text>
+          <Text color={tuiTokens.color.muted}> └</Text>
           {model.outputPreview.map((line, index) => (
-            <Text key={`${tool.id}:out:${index}`} color={tuiTokens.color.muted} wrap="truncate">
+            <Text
+              key={`${tool.id}:out:${index}`}
+              color={tuiTokens.color.muted}
+              wrap="truncate"
+            >
               {`    ${line}`}
             </Text>
           ))}
         </Box>
       ) : null}
       {model.truncationNotice !== undefined ? (
-        <Text color={tuiTokens.color.warning}>{`  ${model.truncationNotice}`}</Text>
+        <Text
+          color={tuiTokens.color.warning}
+        >{`  ${model.truncationNotice}`}</Text>
       ) : null}
-      {model.diff !== undefined ? <DiffPreview diff={model.diff} file={model.summary} /> : null}
+      {model.diff !== undefined ? (
+        <DiffPreview diff={model.diff} file={model.summary} />
+      ) : null}
       {tool.status === 'fail' && tool.error !== undefined ? (
         <Text color={tuiTokens.color.danger}>{`  ${tool.error.message}`}</Text>
       ) : null}
@@ -139,9 +155,7 @@ function toolStatusColor(status: ToolCallView['status']): string {
 
 function RunSeparator({ text }: { readonly text: string }) {
   return (
-    <Text color={tuiTokens.color.border}>
-      {`─ ${text} ${'─'.repeat(72)}`}
-    </Text>
+    <Text color={tuiTokens.color.border}>{`─ ${text} ${'─'.repeat(72)}`}</Text>
   );
 }
 
@@ -150,12 +164,20 @@ function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
   const visibleTools = run.tools.slice(-SUBAGENT_VISIBLE_TOOL_LIMIT);
   return (
     <Box flexDirection="column">
-      <Text color={run.status === 'fail' ? tuiTokens.color.danger : tuiTokens.color.warning}>
+      <Text
+        color={
+          run.status === 'fail'
+            ? tuiTokens.color.danger
+            : tuiTokens.color.warning
+        }
+      >
         {`${glyphs.subagent} ${run.agentName} ${run.background ? 'background' : 'foreground'} ${run.status}`}
       </Text>
       <Text color={tuiTokens.color.text}>{`  ${run.description}`}</Text>
       {hidden > 0 ? (
-        <Text color={tuiTokens.color.muted}>{`  +${hidden} earlier tool calls`}</Text>
+        <Text
+          color={tuiTokens.color.muted}
+        >{`  +${hidden} earlier tool calls`}</Text>
       ) : null}
       {visibleTools.map((tool) => (
         <Text key={tool.id} color={tuiTokens.color.muted}>
@@ -163,7 +185,9 @@ function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
         </Text>
       ))}
       {run.output !== undefined && run.output.trim() !== '' ? (
-        <Text color={tuiTokens.color.muted}>{`  ${compactText(run.output)}`}</Text>
+        <Text
+          color={tuiTokens.color.muted}
+        >{`  ${compactText(run.output)}`}</Text>
       ) : null}
       {run.error !== undefined ? (
         <Text color={tuiTokens.color.danger}>{`  ${run.error}`}</Text>
@@ -174,7 +198,9 @@ function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
 
 function compactText(text: string): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
-  return normalized.length <= 240 ? normalized : `${normalized.slice(0, 239)}...`;
+  return normalized.length <= 240
+    ? normalized
+    : `${normalized.slice(0, 239)}...`;
 }
 
 function compactPath(cwd: string): string {

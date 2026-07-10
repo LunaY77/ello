@@ -121,7 +121,7 @@ function searchContext(cwd: string): CodingToolContext {
       runId: 'run',
       toolCallId: 'call',
       toolName: 'grep',
-      environment: { fileSystem, files: fileSystem },
+      environment: { fileSystem },
       metadata: {},
     },
   };

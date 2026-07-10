@@ -8,14 +8,16 @@
  */
 import type {
   AgentMessage,
-  AgentMessageQueue,
-  AgentMessageQueueMode,
-  AgentRunControlStatus,
   DeferredRunItem,
   DeferredRunResults,
   QueueDrainDiagnostic,
 } from '../public/types.js';
 
+import type {
+  AgentMessageQueue,
+  AgentMessageQueueMode,
+  AgentRunControlStatus,
+} from './runtime-types.js';
 import {
   collectToolCallIds,
   createToolCallMessage,

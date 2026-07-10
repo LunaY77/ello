@@ -35,7 +35,10 @@ export function useRuntimeEvents(session: CodingSession): {
           runStartedAt.current = Date.now();
         }
         dispatch(event as TuiEventInput);
-        if (isRunFinishedEvent(event.type) && runStartedAt.current !== undefined) {
+        if (
+          isRunFinishedEvent(event.type) &&
+          runStartedAt.current !== undefined
+        ) {
           const elapsedSeconds = Math.max(
             0,
             Math.floor((Date.now() - runStartedAt.current) / 1000),

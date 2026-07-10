@@ -13,7 +13,12 @@ export function Panel({
   readonly color?: string;
 }) {
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor={color} paddingX={1}>
+    <Box
+      flexDirection="column"
+      borderStyle="single"
+      borderColor={color}
+      paddingX={1}
+    >
       {title !== undefined ? <Text color={color}>{title}</Text> : null}
       {children}
     </Box>

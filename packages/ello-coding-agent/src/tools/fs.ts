@@ -402,7 +402,8 @@ async function previewPatchChanges(
     }
     const targetPath = path.replace(/^[ab]\//u, '');
     resolveRuntimePath(fs, targetPath);
-    const before = patch.isCreate === true ? null : await fs.readText(targetPath);
+    const before =
+      patch.isCreate === true ? null : await fs.readText(targetPath);
     const applied = applyUnifiedPatch(before ?? '', patch, { fuzzFactor: 0 });
     if (applied === false) {
       throw new Error(`Patch did not apply cleanly: ${targetPath}`);

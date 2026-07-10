@@ -1,4 +1,4 @@
-import type { AgentMessage, SessionStore } from '@ello/agent';
+import type { AgentMessage, TranscriptStore } from '@ello/agent';
 
 import type { ArtifactStore } from '../storage/artifact-store.js';
 
@@ -13,7 +13,7 @@ import {
 } from './repository.js';
 
 /**
- * 基于 JSONL 会话树的 `SessionStore` 实现，同时背书 `CompactionSessionPort`。
+ * 基于 JSONL 会话树的 `TranscriptStore` 实现，同时背书 `CompactionSessionPort`。
  *
  * 这是内核 `createAgent({ session })` 的会话后端。内核在合适时机调用：
  * - `load`：恢复某个会话当前分支的**模型视图**（投影后的 `modelMessages`）；
@@ -23,7 +23,9 @@ import {
  * 节点，模型视图在 `load()` 时投影。store 与 `JsonlSessionRepository` 共用同一份
  * JSONL：store 负责内核读写与 leaf 指针缓存，repository 负责投影与会话树产品操作。
  */
-export class JsonlSessionStore implements SessionStore, CompactionSessionPort {
+export class JsonlSessionStore
+  implements TranscriptStore, CompactionSessionPort
+{
   /** 底层会话树仓库，store 与 repository 共用同一实例。 */
   readonly repository: JsonlSessionRepository;
 

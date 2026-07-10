@@ -51,9 +51,13 @@ function ToolCard({
       ) : null}
       {model.outputPreview.length > 0 ? (
         <Box flexDirection="column">
-          <Text color={theme.textMuted}>  └</Text>
+          <Text color={theme.textMuted}> └</Text>
           {model.outputPreview.map((line, index) => (
-            <Text key={`${call.id}:out:${index}`} color={theme.textMuted} wrap="truncate">
+            <Text
+              key={`${call.id}:out:${index}`}
+              color={theme.textMuted}
+              wrap="truncate"
+            >
               {`    ${line}`}
             </Text>
           ))}

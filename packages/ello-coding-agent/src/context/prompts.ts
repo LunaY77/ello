@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import type { AgentRunContext } from '@ello/agent';
 import nunjucks from 'nunjucks';
 
 import type { CodingAgentConfig } from '../config/index.js';
@@ -11,10 +12,7 @@ import {
   ContextSnapshot,
   type ContextSnapshotDeps,
 } from './context-snapshot.js';
-import { loadProjectInstructions } from './instructions.js';
 import type { ContextBundle, ContextEvent } from './source-registry.js';
-
-export { loadProjectInstructions };
 
 /** prompt 模板渲染时需要的动态 context 依赖。 */
 export interface ContextDeps {
@@ -66,9 +64,8 @@ export function createCodingSystemPromptSection(
   config: CodingAgentConfig,
   runtime: CodingSystemPromptRuntime,
 ) {
-  return async (run: {
-    readonly state: { readonly budget: Record<string, unknown> };
-  }) => {
+  const snapshots = new WeakMap<AgentRunContext, ContextSnapshot>();
+  return async (run: AgentRunContext) => {
     const profile = resolvePromptProfile(config, runtime);
     const contextDeps: ContextSnapshotDeps = {
       ...(runtime.activeSkills !== undefined
@@ -78,20 +75,16 @@ export function createCodingSystemPromptSection(
         ? { onContextEvent: runtime.onContextEvent }
         : {}),
     };
-    const snapshotKey = 'coding-agent.context-snapshot';
-    const current = run.state.budget[snapshotKey];
-    const snapshot =
-      current === undefined
-        ? new ContextSnapshot(
-            config,
-            contextDeps,
-            profile,
-            createHash('sha256')
-              .update(loadPromptTemplate(profile))
-              .digest('hex'),
-          )
-        : requireContextSnapshot(current);
-    run.state.budget[snapshotKey] = snapshot;
+    let snapshot = snapshots.get(run);
+    if (snapshot === undefined) {
+      snapshot = new ContextSnapshot(
+        config,
+        contextDeps,
+        profile,
+        createHash('sha256').update(loadPromptTemplate(profile)).digest('hex'),
+      );
+      snapshots.set(run, snapshot);
+    }
     const context = await snapshot.render();
     return renderPromptTemplate(profile, {
       model: runtime.model,
@@ -162,11 +155,4 @@ function resolvePromptProfile(
       : config.systemPromptProfile) ??
     config.systemPromptProfile
   );
-}
-
-function requireContextSnapshot(value: unknown): ContextSnapshot {
-  if (!(value instanceof ContextSnapshot)) {
-    throw new Error('Invalid coding-agent context snapshot state.');
-  }
-  return value;
 }

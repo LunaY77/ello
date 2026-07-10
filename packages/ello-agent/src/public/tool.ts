@@ -1,53 +1,98 @@
-/**
- * 工具定义辅助。
- *
- * 提供 `defineTool` 工厂，把 Zod 输入 schema、执行函数与可选审批策略包装成内核
- * 可消费的 {@link AgentTool}，并让 `TInput` 从 schema 自动推导，省去手写类型。
- */
 import type { z } from 'zod';
 
-import type { AgentTool, AgentToolContext, MaybePromise } from './types.js';
+import type { AgentError } from './agent.js';
+import type { AgentEnvironment } from './environment.js';
+import type { MaybePromise } from './model.js';
 
-/** {@link defineTool} 的入参。 */
-export interface DefineToolOptions<TInput, TOutput> {
-  /** 工具名（模型调用时使用）。 */
+export interface AgentApprovalRequest {
+  readonly id: string;
+  readonly toolCallId: string;
   readonly name: string;
-  /** 工具描述（供模型选择工具）。 */
+  readonly input: unknown;
+  readonly reason?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export type AgentApprovalAction = 'auto' | 'required' | 'denied';
+export type AgentApprovalDecision =
+  | AgentApprovalAction
+  | {
+      readonly action: AgentApprovalAction;
+      readonly reason?: string;
+      readonly metadata?: Record<string, unknown>;
+    };
+export type AgentApprovalPolicy<TInput = unknown> = (
+  input: TInput,
+  ctx: AgentToolContext,
+) => MaybePromise<AgentApprovalDecision>;
+
+export interface AgentTool<TInput = unknown, TOutput = unknown> {
+  readonly name: string;
   readonly description: string;
-  /** 输入 Zod schema，用于校验并推导 `TInput`。 */
   readonly input: z.ZodType<TInput>;
-  /** 实际执行函数。 */
+  execute(input: TInput, ctx: AgentToolContext): MaybePromise<TOutput>;
+  approval?(
+    input: TInput,
+    ctx: AgentToolContext,
+  ): MaybePromise<AgentApprovalDecision>;
+  readonly inherit?: boolean;
+}
+
+export type AnyAgentTool = AgentTool<unknown, unknown>;
+
+export interface AgentToolContext {
+  readonly runId: string;
+  readonly environment: AgentEnvironment;
+  readonly metadata: Record<string, unknown>;
+}
+
+export interface AgentToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly input: unknown;
+  readonly output?: unknown;
+  readonly error?: AgentError;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface AgentSkill {
+  readonly name: string;
+  readonly displayName?: string | undefined;
+  readonly description: string;
+  readonly whenToUse?: string | undefined;
+  readonly argumentHint?: string | undefined;
+  readonly allowedTools?: readonly string[] | undefined;
+  readonly context?: 'inline' | 'fork' | undefined;
+  readonly model?: string | undefined;
+  readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | number | undefined;
+  readonly userInvocable?: boolean | undefined;
+  readonly disableModelInvocation?: boolean | undefined;
+  readonly source?:
+    | 'bundled'
+    | 'global'
+    | 'project'
+    | 'shared'
+    | 'mcp'
+    | undefined;
+  readonly baseDir?: string | undefined;
+  readonly contentHash?: string | undefined;
+  readonly instructions: string;
+  readonly tools?: readonly AnyAgentTool[];
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface DefineToolOptions<TInput, TOutput> {
+  readonly name: string;
+  readonly description: string;
+  readonly input: z.ZodType<TInput>;
   readonly execute: (
     input: TInput,
     ctx: AgentToolContext,
   ) => MaybePromise<TOutput>;
-  /** 可选审批策略。 */
   readonly approval?: AgentTool<TInput, TOutput>['approval'];
 }
 
-/**
- * 定义函数式 Agent 工具，类型从 Zod schema 推导。
- *
- * Args:
- *   options.name: 模型调用时看到的工具名。
- *   options.description: 模型选择工具时使用的描述。
- *   options.input: Zod 输入 schema。
- *   options.execute: 实际执行函数。
- *   options.approval: 可选审批策略。
- *
- * Returns:
- *   可传给 createAgent({ tools }) 的 AgentTool。
- *
- * @example
- * ```ts
- * const shellEcho = defineTool({
- *   name: 'echo',
- *   description: 'Echo a string',
- *   input: z.object({ text: z.string() }),
- *   execute: ({ text }) => text,
- * });
- * ```
- */
+/** 定义类型由 Zod schema 推导的 Agent 工具。 */
 export function defineTool<TInput, TOutput>(
   options: DefineToolOptions<TInput, TOutput>,
 ): AgentTool<TInput, TOutput> {

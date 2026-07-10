@@ -75,8 +75,8 @@ export async function buildModelInput(run: RunSession): Promise<ModelInput> {
  * 拼接 system 提示。
  *
  * 段落顺序为：内核指令 → 环境指令 → 配置注入的动态段落。
- * 环境指令优先取带上下文的 `getContextInstructions`，缺省退回
- * `getInstructions`。所有非空段落以空行分隔拼接，并回报段落计数。
+ * 环境指令通过统一的 `getInstructions(ctx)` 获取。所有非空段落以空行分隔
+ * 拼接，并回报段落计数。
  */
 async function buildSystem(
   run: RunSession,
@@ -85,10 +85,9 @@ async function buildSystem(
   if (run.config.instructions) {
     sections.push(run.config.instructions);
   }
-  // 环境指令：优先带上下文的变体，否则退回无参版本。
-  const environmentInstructions =
-    (await run.environment.getContextInstructions?.(run.ctx)) ??
-    (await run.environment.getInstructions?.());
+  const environmentInstructions = await run.environment.getInstructions?.(
+    run.ctx,
+  );
   if (environmentInstructions) {
     sections.push(environmentInstructions);
   }

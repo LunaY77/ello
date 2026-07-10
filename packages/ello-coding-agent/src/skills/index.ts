@@ -1,10 +1,12 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { loadSkillsFromDir, type AgentSkill } from '@ello/agent';
+import type { AgentSkill } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
 import { globalSkillsDir, projectSkillsDir } from '../session/paths.js';
+
+import { loadSkillsFromDir } from './loader.js';
 
 function bundledSkillsDir(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), 'bundled');
@@ -20,7 +22,7 @@ function bundledSkillsDir(): string {
 export async function loadCodingSkills(
   config: CodingAgentConfig,
 ): Promise<AgentSkill[]> {
-  const bundled = await safeLoad(bundledSkillsDir(), 'bundled');
+  const bundled = await loadSkillsFromDir(bundledSkillsDir(), 'bundled');
   const global = await safeLoad(globalSkillsDir(), 'global');
   const project = await safeLoad(projectSkillsDir(config.cwd), 'project');
   return dedupeByName([...bundled, ...global, ...project]);

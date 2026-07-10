@@ -35,7 +35,9 @@ export function LiveViewport({
       {runningSubagents.map((run) => (
         <SubagentActivity key={run.runId} run={run} />
       ))}
-      {pendingSteers.length > 0 ? <PendingSteers prompts={pendingSteers} /> : null}
+      {pendingSteers.length > 0 ? (
+        <PendingSteers prompts={pendingSteers} />
+      ) : null}
       <RunStatus
         running={running}
         {...(workingSeconds !== undefined ? { workingSeconds } : {})}
@@ -63,7 +65,13 @@ function SubagentActivity({ run }: { readonly run: SubagentRunView }) {
   return (
     <Box flexDirection="column" marginTop={1}>
       <Box gap={1}>
-        <Text color={run.status === 'fail' ? tuiTokens.color.danger : tuiTokens.color.warning}>
+        <Text
+          color={
+            run.status === 'fail'
+              ? tuiTokens.color.danger
+              : tuiTokens.color.warning
+          }
+        >
           {glyphs.subagent}
         </Text>
         <Text color={tuiTokens.color.warning}>{run.agentName}</Text>
@@ -75,7 +83,9 @@ function SubagentActivity({ run }: { readonly run: SubagentRunView }) {
         {run.description}
       </Text>
       {hidden > 0 ? (
-        <Text color={tuiTokens.color.muted}>{`  +${hidden} earlier tool calls`}</Text>
+        <Text
+          color={tuiTokens.color.muted}
+        >{`  +${hidden} earlier tool calls`}</Text>
       ) : null}
       <ToolActivityList tools={visibleTools} indent={2} />
       {run.status === 'fail' && run.error !== undefined ? (

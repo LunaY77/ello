@@ -68,7 +68,9 @@ export function parseUnifiedDiff(diff: string): readonly DiffLine[] {
 }
 
 /** 统计增删行数，用于审批摘要。 */
-export function summarizeDiff(diff: string | readonly FileChange[]): DiffSummary {
+export function summarizeDiff(
+  diff: string | readonly FileChange[],
+): DiffSummary {
   if (typeof diff !== 'string') {
     return diff.reduce(
       (acc, change) => ({

@@ -169,7 +169,9 @@ export function buildPermissionView(
     if (path !== undefined) {
       fields.push({ label: 'path', value: path });
     }
-    const fileChanges = readFileChanges(permissionMetadata(request)?.['fileChanges']);
+    const fileChanges = readFileChanges(
+      permissionMetadata(request)?.['fileChanges'],
+    );
     return {
       ...base,
       fields,

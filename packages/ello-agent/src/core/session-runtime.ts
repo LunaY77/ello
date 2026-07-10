@@ -2,7 +2,7 @@
  * 会话持久化与压缩的运行时胶水层。
  *
  * 把回合循环与可选的「会话存储」「会话压缩器」解耦：仅当配置里同时提供了
- * `session` 存储与 `sessionId` 时才真正读写历史，否则全部静默退化为无操作。
+ * `transcript` 存储与 `sessionId` 时才真正读写历史，否则运行不持久化消息。
  * 因此一次性（无持久化）运行与带持久化的长会话共用同一套循环代码。
  */
 import type {
@@ -23,8 +23,11 @@ export async function loadSessionMessages(options: {
   readonly sessionId?: string;
 }): Promise<AgentMessage[]> {
   const messages: AgentMessage[] = [];
-  if (options.config.session !== undefined && options.sessionId !== undefined) {
-    messages.push(...(await options.config.session.load(options.sessionId)));
+  if (
+    options.config.transcript !== undefined &&
+    options.sessionId !== undefined
+  ) {
+    messages.push(...(await options.config.transcript.load(options.sessionId)));
   }
   return messages;
 }
@@ -44,8 +47,8 @@ export async function saveSessionResult(options: {
     typeof options.result.metadata.sessionId === 'string'
       ? options.result.metadata.sessionId
       : undefined;
-  if (options.config.session !== undefined && sessionId !== undefined) {
-    await options.config.session.append(
+  if (options.config.transcript !== undefined && sessionId !== undefined) {
+    await options.config.transcript.append(
       sessionId,
       options.messagesToAppend,
       options.result.metadata,
@@ -66,14 +69,13 @@ export async function compactSession(options: {
 }): Promise<SessionCompactionReport[]> {
   if (
     options.sessionId === undefined ||
-    options.config.session === undefined ||
-    options.config.compactor === undefined
+    options.config.transcript === undefined ||
+    options.config.compaction === undefined
   ) {
     return [];
   }
-  const report = await options.config.compactor.maybeCompact(
+  const report = await options.config.compaction.maybeCompact(
     options.sessionId,
-    options.config.session,
     options.ctx,
   );
   return report === null ? [] : [report];

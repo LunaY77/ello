@@ -87,12 +87,12 @@ export function InlineSelect({
       {visibleOptions.map((option, offset) => {
         const optionIndex = windowStart + offset;
         return (
-        <Text
-          key={option.value}
-          color={colorForOption(theme, option, optionIndex === selectedIndex)}
-        >
-          {`${optionIndex === selectedIndex && option.disabled !== true ? '›' : ' '} ${option.label}`}
-        </Text>
+          <Text
+            key={option.value}
+            color={colorForOption(theme, option, optionIndex === selectedIndex)}
+          >
+            {`${optionIndex === selectedIndex && option.disabled !== true ? '›' : ' '} ${option.label}`}
+          </Text>
         );
       })}
       {options.length > windowSize ? (
@@ -158,7 +158,11 @@ function enabledIndexAtOrBefore(
   options: readonly SelectOption[],
   current: number,
 ): number {
-  for (let index = Math.min(current, options.length - 1); index >= 0; index -= 1) {
+  for (
+    let index = Math.min(current, options.length - 1);
+    index >= 0;
+    index -= 1
+  ) {
     if (options[index]?.disabled !== true) {
       return index;
     }
@@ -193,10 +197,7 @@ function windowStartFor(
 function scrollbar(start: number, end: number, total: number): string {
   const width = 10;
   const filledStart = Math.floor((start / total) * width);
-  const filledEnd = Math.max(
-    filledStart + 1,
-    Math.ceil((end / total) * width),
-  );
+  const filledEnd = Math.max(filledStart + 1, Math.ceil((end / total) * width));
   return `[${Array.from({ length: width }, (_, index) =>
     index >= filledStart && index < filledEnd ? '#' : '-',
   ).join('')}]`;

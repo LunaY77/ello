@@ -53,7 +53,16 @@ describe('global coding storage', () => {
         { version: 2, name: 'task-boards' },
         { version: 3, name: 'artifacts' },
         { version: 4, name: 'usage-model-calls' },
+        { version: 5, name: 'drop-structured-memory' },
       ]);
+      expect(
+        storage.db.$client
+          .prepare(
+            `select name from sqlite_master
+             where type = 'table' and name in ('memory_items', 'memory_access_log')`,
+          )
+          .all(),
+      ).toEqual([]);
     } finally {
       storage.close();
     }

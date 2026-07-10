@@ -200,7 +200,8 @@ function headline(
     return `Glob${searchTarget(call.input, metadata)}`;
   }
   if (kind === 'shell' || call.name === 'bash') {
-    const command = text(metadata?.command) || inputString(call.input, 'command');
+    const command =
+      text(metadata?.command) || inputString(call.input, 'command');
     return command !== '' ? `Ran ${command}` : `Ran ${formatName(call.name)}`;
   }
   if (kind === 'network' || call.name === 'web_fetch') {
