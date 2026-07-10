@@ -53,7 +53,10 @@ export interface RunWorkedAction {
   readonly duration: string;
 }
 
-export type TuiEventInput = CodingSessionEvent | PushUserAction | RunWorkedAction;
+export type TuiEventInput =
+  | CodingSessionEvent
+  | PushUserAction
+  | RunWorkedAction;
 
 export function reduceTuiEvent(
   state: TuiEventState,
@@ -282,7 +285,7 @@ export function reduceTuiEvent(
       return { ...state, usage: event.usage };
 
     case 'run.completed':
-      return flushAssistant(state, event.result);
+      return flushAssistant(state);
 
     case 'run.failed':
       return appendHistory(flushAssistant(state), {
@@ -302,22 +305,18 @@ function emptyLiveRun(): LiveRunState {
   };
 }
 
-function appendHistory(state: TuiEventState, entry: HistoryEntry): TuiEventState {
+function appendHistory(
+  state: TuiEventState,
+  entry: HistoryEntry,
+): TuiEventState {
   return {
     ...state,
     history: appendCommittedHistory({ entries: state.history }, entry).entries,
   };
 }
 
-function flushAssistant(
-  state: TuiEventState,
-  result?: Extract<CodingSessionEvent, { type: 'run.completed' }>['result'],
-): TuiEventState {
-  const rawText =
-    state.live.assistantText.trim() !== ''
-      ? state.live.assistantText
-      : finalAssistantText(result);
-  const text = rawText.trim();
+function flushAssistant(state: TuiEventState): TuiEventState {
+  const text = state.live.assistantText.trim();
   if (text.trim() === '') {
     return state;
   }
@@ -336,21 +335,6 @@ function flushAssistant(
     }),
     live: { ...state.live, assistantText: '' },
   };
-}
-
-function finalAssistantText(
-  result:
-    | Extract<CodingSessionEvent, { type: 'run.completed' }>['result']
-    | undefined,
-): string {
-  if (result === undefined) {
-    return '';
-  }
-  const output = result.output || result.text || '';
-  if (output.trim() !== '') {
-    return output.trim();
-  }
-  return '';
 }
 
 function upsertTool(

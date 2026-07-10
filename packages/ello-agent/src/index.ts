@@ -7,6 +7,10 @@
  * 同时重导出 `zod` 的 `z`，方便调用方定义工具输入 schema 时无需另装依赖。
  */
 export { createAgent } from './public/create-agent.js';
+export {
+  AgentStreamBackpressureError,
+  ModelAdapterProtocolError,
+} from './public/errors.js';
 export { AiSdkModelAdapter } from './adapters/ai-sdk.js';
 export type { AiSdkModelAdapterOptions } from './adapters/ai-sdk.js';
 export { createAiSdkLanguageModel } from './adapters/ai-sdk-provider.js';
@@ -36,6 +40,7 @@ export type {
   AgentContext,
   AgentEnvironment,
   AgentError,
+  AgentEventRecorder,
   AgentFileSystem,
   AgentResource,
   AgentResourceFactory,
@@ -54,6 +59,8 @@ export type {
   AgentShellResult,
   AgentSkill,
   AgentStream,
+  AgentTrace,
+  AgentTraceEvent,
   AgentTool,
   AgentToolChoice,
   AgentToolCall,
@@ -82,7 +89,7 @@ export type {
   MessageTransform,
   UserMessage,
 } from './public/types.js';
-export type { AgentStreamEvent } from './public/events.js';
+export type { AgentStreamEvent, RunCompletedEvent } from './public/events.js';
 export type {
   CreateLocalEnvironmentOptions,
   DefaultAgentResourceRegistry,

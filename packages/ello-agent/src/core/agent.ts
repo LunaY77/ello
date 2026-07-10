@@ -60,8 +60,8 @@ export class ElloAgent implements Agent {
    * 启动一次运行并返回事件流。
    *
    * 同步返回 {@link AgentStream}，回合循环 `runAgentLoop` 在后台异步推进
-   * （`void` 表示不在此处等待其 Promise）；调用方通过迭代 stream 取实时事件，
-   * 或 `await stream.final` 取最终结果。
+   * （`void` 表示不在此处等待其 Promise）；调用方必须持续迭代 stream 取事件，
+   * 并在迭代结束后读取 `stream.final`。
    */
   stream(input: AgentInput, options: AgentRunOptions = {}): AgentStream {
     const run = createRunSession({

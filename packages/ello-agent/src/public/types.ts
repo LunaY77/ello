@@ -94,7 +94,7 @@ export interface Agent {
  * - `abort`：主动中断本次运行。
  */
 export interface AgentStream extends AsyncIterable<AgentStreamEvent> {
-  /** 解析为最终运行结果；可在迭代结束后 await。 */
+  /** 解析为最终运行结果；调用方仍必须持续消费事件迭代器。 */
   readonly final: Promise<AgentRunResult>;
   /** 向正在运行的下一回合追加用户引导消息。 */
   steer(message: AgentMessage): void;
@@ -410,7 +410,7 @@ export interface AgentRunContext<TContext = unknown> {
   readonly signal?: AbortSignal;
   /** 可变的运行状态（消息、回合数等）。 */
   readonly state: AgentRunState;
-  /** 运行轨迹（已发出的事件与元数据）。 */
+  /** 有界运行诊断与元数据。 */
   readonly trace: AgentTrace;
 }
 
@@ -429,10 +429,55 @@ export interface AgentRunState {
   readonly queueDiagnostics: QueueDrainDiagnostic[];
 }
 
-/** 运行轨迹：累积已发出的事件，便于回放与调试。 */
+export type AgentTraceEvent =
+  | { readonly type: 'run.started'; readonly runId: string }
+  | {
+      readonly type: 'turn.started';
+      readonly runId: string;
+      readonly turnIndex: number;
+    }
+  | { readonly type: 'turn.completed'; readonly turnIndex: number }
+  | {
+      readonly type: 'tool.started';
+      readonly toolCallId: string;
+      readonly name: string;
+    }
+  | {
+      readonly type: 'tool.approval_requested';
+      readonly toolCallId: string;
+      readonly toolName: string;
+    }
+  | {
+      readonly type: 'approval.required';
+      readonly runId: string;
+      readonly toolCallId: string;
+      readonly toolName: string;
+    }
+  | { readonly type: 'tool.completed'; readonly toolCallId: string }
+  | {
+      readonly type: 'tool.failed';
+      readonly toolCallId: string;
+      readonly errorName: string;
+      readonly errorMessage: string;
+    }
+  | { readonly type: 'run.interrupted'; readonly runId: string }
+  | {
+      readonly type: 'run.completed';
+      readonly runId: string;
+      readonly finishReason: AgentFinishReason;
+      readonly usage: AgentUsage;
+    }
+  | {
+      readonly type: 'run.failed';
+      readonly runId: string;
+      readonly errorName: string;
+      readonly errorMessage: string;
+    };
+
+/** 有界运行轨迹，不保存文本增量、工具输入或工具输出正文。 */
 export interface AgentTrace {
-  /** 已发出的事件序列。 */
-  readonly events: AgentStreamEvent[];
+  /** 最近的安全生命周期诊断。 */
+  readonly events: AgentTraceEvent[];
   /** 轨迹元数据。 */
   readonly metadata: Record<string, unknown>;
 }
@@ -444,7 +489,6 @@ export type AgentToolChoice = ToolChoice<ToolSet>;
 
 /**
  * 会话存储：负责按 `sessionId` 持久化与读取消息历史。
- * `load`/`append` 为必需；`appendEvent`/`compact`/`replace` 为可选增强能力。
  */
 export interface SessionStore {
   /** 加载某会话的线性消息历史。 */
@@ -455,8 +499,6 @@ export interface SessionStore {
     messages: AgentMessage[],
     metadata?: Record<string, unknown>,
   ): Promise<void>;
-  /** 可选：持久化单个流事件（用于事件溯源/重放）。 */
-  appendEvent?(sessionId: string, event: AgentStreamEvent): Promise<void>;
   /** 可选：记录一次压缩报告。 */
   compact?(
     sessionId: string,
@@ -511,6 +553,14 @@ export interface AgentObserver<TContext = unknown> {
     event: { readonly error: AgentError },
     ctx: AgentRunContext<TContext>,
   ): MaybePromise<void>;
+}
+
+export interface AgentEventRecorder<TContext = unknown> {
+  record(
+    event: AgentStreamEvent,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  flush?(ctx: AgentRunContext<TContext>): MaybePromise<void>;
 }
 
 /**
@@ -766,8 +816,6 @@ export interface AgentEnvironment {
   getContextInstructions?(ctx: AgentRunContext): MaybePromise<string | null>;
   /** 贡献静态系统提示说明。 */
   getInstructions?(): MaybePromise<string | null>;
-  /** 监听流事件（如据事件做副作用）。 */
-  onEvent?(event: AgentStreamEvent, ctx: AgentRunContext): MaybePromise<void>;
   /** 释放环境资源。 */
   close?(): MaybePromise<void>;
 }
@@ -832,6 +880,10 @@ export interface CreateAgentOptions<TContext = unknown> {
   readonly session?: SessionStore;
   /** 运行观察者列表。 */
   readonly observers?: readonly AgentObserver<TContext>[];
+  /** 产品层事件记录器。记录失败会使本次运行失败。 */
+  readonly eventRecorder?: AgentEventRecorder<TContext>;
+  /** 实时事件流的最大未消费事件数。 */
+  readonly stream?: { readonly maxBufferedEvents: number };
   /** 会话压缩器。 */
   readonly compactor?: SessionCompactor<TContext>;
   /** Agent 元数据。 */

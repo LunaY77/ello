@@ -9,7 +9,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { AgentMessage, AgentStreamEvent } from '@ello/agent';
+import type { AgentFinishReason, AgentMessage, AgentUsage } from '@ello/agent';
 
 /** JSONL session 文件版本。 */
 export const SESSION_FILE_VERSION = 2;
@@ -42,11 +42,24 @@ export type SessionRecord =
       readonly createdAt: string;
     }
   | {
-      readonly kind: 'entry';
-      readonly id: string;
-      readonly parentId: string | null;
-      readonly type: 'event';
-      readonly event: AgentStreamEvent;
+      readonly kind: 'run-marker';
+      readonly runId: string;
+      readonly status: 'started';
+      readonly createdAt: string;
+    }
+  | {
+      readonly kind: 'run-marker';
+      readonly runId: string;
+      readonly status: 'completed';
+      readonly finishReason: AgentFinishReason;
+      readonly usage: AgentUsage;
+      readonly createdAt: string;
+    }
+  | {
+      readonly kind: 'run-marker';
+      readonly runId: string;
+      readonly status: 'failed';
+      readonly error: { readonly name: string; readonly message: string };
       readonly createdAt: string;
     }
   | {
@@ -154,7 +167,7 @@ export interface SessionMessageEntry {
 export interface SessionTreeNode {
   readonly id: string;
   readonly parentId: string | null;
-  readonly type: 'message' | 'event';
+  readonly type: 'message';
   readonly label: string;
   readonly createdAt: string;
   readonly active: boolean;
@@ -354,25 +367,29 @@ export class JsonlSessionRepository {
     return leaf;
   }
 
-  /** 追加内核事件（回放用，可选）。 */
-  async appendEvent(
+  async appendRunMarker(
     sessionId: string,
-    parentId: string | null,
-    event: AgentStreamEvent,
-  ): Promise<string> {
-    const id = randomUUID();
+    marker:
+      | { readonly runId: string; readonly status: 'started' }
+      | {
+          readonly runId: string;
+          readonly status: 'completed';
+          readonly finishReason: AgentFinishReason;
+          readonly usage: AgentUsage;
+        }
+      | {
+          readonly runId: string;
+          readonly status: 'failed';
+          readonly error: { readonly name: string; readonly message: string };
+        },
+  ): Promise<void> {
     await this.appendRecords(sessionId, [
       {
-        kind: 'entry',
-        id,
-        parentId,
-        type: 'event',
-        event,
+        kind: 'run-marker',
+        ...marker,
         createdAt: new Date().toISOString(),
       },
-      { kind: 'leaf', entryId: id, createdAt: new Date().toISOString() },
     ]);
-    return id;
   }
 
   /** 在同一 session 中切换 active leaf。 */
@@ -813,14 +830,21 @@ export class JsonlSessionRepository {
       .split(/\n+/)
       .filter(Boolean)
       .map((line, index) => {
+        let record: Record<string, unknown>;
         try {
-          return JSON.parse(line) as SessionRecord;
+          record = JSON.parse(line) as Record<string, unknown>;
         } catch (error) {
           throw new Error(
             `Invalid JSON in ${this.filePath(sessionId)} at line ${index + 1}: ${String(error)}`,
             { cause: error },
           );
         }
+        if (record.kind === 'entry' && record.type !== 'message') {
+          throw new Error(
+            `Unsupported session entry type in ${this.filePath(sessionId)} at line ${index + 1}: ${String(record.type)}`,
+          );
+        }
+        return record as unknown as SessionRecord;
       });
   }
 }
@@ -835,13 +859,9 @@ function isNode(record: SessionRecord): record is NodeRecord {
 }
 
 function labelEntry(record: Extract<SessionRecord, { kind: 'entry' }>): string {
-  if (record.type === 'message') {
-    const content = (record.message as { content?: unknown }).content;
-    const text =
-      typeof content === 'string' ? content : JSON.stringify(content);
-    return `${record.message.role} ${text.slice(0, 80)}`;
-  }
-  return record.event.type;
+  const content = (record.message as { content?: unknown }).content;
+  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  return `${record.message.role} ${text.slice(0, 80)}`;
 }
 
 function summarizeRecentMessages(records: readonly SessionRecord[]): {

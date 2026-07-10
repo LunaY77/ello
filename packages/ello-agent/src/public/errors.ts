@@ -7,6 +7,18 @@
  */
 import type { AgentError } from './types.js';
 
+export class ModelAdapterProtocolError extends Error {
+  override readonly name = 'ModelAdapterProtocolError';
+}
+
+export class AgentStreamBackpressureError extends Error {
+  override readonly name = 'AgentStreamBackpressureError';
+
+  constructor(readonly capacity: number) {
+    super(`Agent stream buffer exceeded its capacity of ${capacity} events.`);
+  }
+}
+
 /** 将任意异常标准化为可序列化的 {@link AgentError}。 */
 export function normalizeAgentError(error: unknown): AgentError {
   if (error instanceof Error) {

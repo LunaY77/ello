@@ -2,7 +2,9 @@ import type { AgentStreamEvent } from '../public/events.js';
 import type {
   AgentObserver,
   AgentRunContext,
+  AgentRunResult,
   AgentToolCall,
+  AgentTraceEvent,
   CreateAgentOptions,
 } from '../public/types.js';
 
@@ -11,9 +13,8 @@ import type { AgentEventStream } from './stream.js';
 /**
  * 事件分发器。
  *
- * 每条事件产生后经此「一处发出、多处投递」：写入 trace、推入对外事件流、
- * 回调所有 observer、转发给环境钩子，并在有会话时落盘持久化。它把事件的
- * 多路扇出集中在一个地方，避免散落在回合循环各处。
+ * 每条事件产生后经此「一处发出、多处投递」：写入有界 trace、推入对外事件流、
+ * 回调 observer，并交给显式 recorder。
  */
 export class AgentEventDispatcher {
   /** 按 toolCallId 累积工具调用信息，用于在 completed 时补全 name/input。 */
@@ -28,19 +29,53 @@ export class AgentEventDispatcher {
   /**
    * 发出一条事件，扇出到各消费方。
    *
-   * 顺序为：写 trace → 推对外流 → 投递 observer/环境钩子 → 会话落盘。
+   * 实时事件先进入 stream，再执行会影响 run 的 observer 与 recorder。
    */
   async emit(event: AgentStreamEvent): Promise<void> {
-    this.ctx.trace.events.push(event);
+    this.recordTrace(event);
     this.stream.emit(event);
     await this.emitObserverEvent(event);
-    // 存在会话 id 时把事件追加持久化，供回放/恢复。
-    if (this.ctx.sessionId !== undefined) {
-      await this.config.session?.appendEvent?.(this.ctx.sessionId, event);
-    }
+    await this.config.eventRecorder?.record(event, this.ctx);
   }
 
-  /** 把事件投递给所有 observer，再转发给环境的 `onEvent` 钩子。 */
+  async complete(result: AgentRunResult): Promise<void> {
+    const event: AgentStreamEvent = {
+      type: 'run.completed',
+      runId: result.id,
+      finishReason: result.finishReason,
+      usage: result.usage,
+    };
+    this.recordTrace(event);
+    await this.config.eventRecorder?.record(event, this.ctx);
+    await this.config.eventRecorder?.flush?.(this.ctx);
+    for (const observer of this.config.observers ?? []) {
+      await observer.onRunCompleted?.(result, this.ctx);
+    }
+    this.stream.emit(event);
+  }
+
+  async fail(
+    event: Extract<AgentStreamEvent, { type: 'run.failed' }>,
+  ): Promise<void> {
+    this.recordTrace(event);
+    await this.config.eventRecorder?.record(event, this.ctx);
+    await this.config.eventRecorder?.flush?.(this.ctx);
+    await this.emitObserverEvent(event);
+  }
+
+  private recordTrace(event: AgentStreamEvent): void {
+    const diagnostic = toTraceEvent(event, this.ctx.runId);
+    if (diagnostic === null) {
+      return;
+    }
+    const events = this.ctx.trace.events;
+    if (events.length === TRACE_EVENT_CAPACITY) {
+      events.shift();
+    }
+    events.push(diagnostic);
+  }
+
+  /** 把事件投递给所有 observer。 */
   private async emitObserverEvent(event: AgentStreamEvent): Promise<void> {
     for (const observer of this.config.observers ?? []) {
       await emitSingleObserverEvent(
@@ -50,7 +85,63 @@ export class AgentEventDispatcher {
         this.observerToolCalls,
       );
     }
-    await this.ctx.environment.onEvent?.(event, this.ctx);
+  }
+}
+
+const TRACE_EVENT_CAPACITY = 1_024;
+
+function toTraceEvent(
+  event: AgentStreamEvent,
+  runId: string,
+): AgentTraceEvent | null {
+  switch (event.type) {
+    case 'run.started':
+    case 'turn.started':
+    case 'turn.completed':
+      return event;
+    case 'tool.started':
+      return {
+        type: event.type,
+        toolCallId: event.toolCallId,
+        name: event.name,
+      };
+    case 'tool.approval_requested':
+      return {
+        type: event.type,
+        toolCallId: event.request.toolCallId,
+        toolName: event.request.name,
+      };
+    case 'approval.required':
+      return {
+        type: event.type,
+        runId: event.runId,
+        toolCallId: event.item.toolCallId,
+        toolName: event.item.toolName,
+      };
+    case 'tool.completed':
+      return { type: event.type, toolCallId: event.toolCallId };
+    case 'tool.failed':
+      return {
+        type: event.type,
+        toolCallId: event.toolCallId,
+        errorName: event.error.name,
+        errorMessage: event.error.message,
+      };
+    case 'run.interrupted':
+      return { type: event.type, runId: event.runId };
+    case 'run.completed':
+      return event;
+    case 'run.failed':
+      return {
+        type: event.type,
+        runId,
+        errorName: event.error.name,
+        errorMessage: event.error.message,
+      };
+    case 'queue.drained':
+    case 'message.started':
+    case 'message.delta':
+      return null;
   }
 }
 
@@ -94,20 +185,18 @@ async function emitSingleObserverEvent(
     return;
   }
   if (event.type === 'tool.completed') {
-    // 取回 started 阶段的记录补全 name/input；缺失时退化处理。
     const started = toolCalls.get(event.toolCallId);
+    if (started === undefined) {
+      throw new Error(`Tool completed before start: ${event.toolCallId}`);
+    }
     const completed = {
       id: event.toolCallId,
-      name: started?.name ?? event.toolCallId,
-      input: started?.input ?? null,
+      name: started.name,
+      input: started.input,
       output: event.output,
     };
     toolCalls.set(event.toolCallId, completed);
     await observer.onToolCompleted?.(completed, ctx);
-    return;
-  }
-  if (event.type === 'run.completed') {
-    await observer.onRunCompleted?.(event.result, ctx);
     return;
   }
   if (event.type === 'run.failed') {

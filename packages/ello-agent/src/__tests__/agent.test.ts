@@ -5,6 +5,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  AgentStreamBackpressureError,
+  ModelAdapterProtocolError,
   createAgent,
   createLocalEnvironment,
   createLocalShellEnvironment,
@@ -13,6 +15,7 @@ import {
   type AgentModelEvent,
   type AgentModelRequest,
   type AgentModelResponse,
+  type AgentStreamEvent,
   type ModelAdapter,
 } from '../index.js';
 import {
@@ -62,15 +65,194 @@ describe('createAgent', () => {
     });
     const result = await agent.run('hi');
     const stream = agent.stream('hi');
-    const events = [];
+    const events: AgentStreamEvent[] = [];
     for await (const event of stream) {
-      events.push(event.type);
+      events.push(event);
     }
     const final = await stream.final;
 
     expect(result.output).toBe('hello');
     expect(final.output).toBe('hello');
-    expect(events).toContain('message.delta');
+    expect(events.some((event) => event.type === 'message.delta')).toBe(true);
+    const completed = events.find((event) => event.type === 'run.completed');
+    expect(completed).toMatchObject({
+      runId: final.id,
+      finishReason: final.finishReason,
+      usage: final.usage,
+    });
+    expect(completed).not.toHaveProperty('result');
+    await agent.close();
+  });
+
+  it('fails when adapter stream ends without final and does not call generate', async () => {
+    let generateCalls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          generateCalls += 1;
+          return new EchoAdapter().generate(request);
+        },
+        async *stream() {
+          yield { type: 'text-delta', text: 'partial' } as const;
+        },
+      },
+    });
+
+    await expect(agent.run('hi')).rejects.toBeInstanceOf(
+      ModelAdapterProtocolError,
+    );
+    expect(generateCalls).toBe(0);
+    await agent.close();
+  });
+
+  it('fails when adapter emits more than one final', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        generate: (request) => new EchoAdapter().generate(request),
+        async *stream(request) {
+          const response = await new EchoAdapter().generate(request);
+          yield { type: 'final', response } as const;
+          yield { type: 'final', response } as const;
+        },
+      },
+    });
+
+    await expect(agent.run('hi')).rejects.toThrow(
+      'Model adapter emitted more than one final event.',
+    );
+    await agent.close();
+  });
+
+  it('fails when adapter emits a delta after final', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        generate: (request) => new EchoAdapter().generate(request),
+        async *stream(request) {
+          yield {
+            type: 'final',
+            response: await new EchoAdapter().generate(request),
+          } as const;
+          yield { type: 'text-delta', text: 'late' } as const;
+        },
+      },
+    });
+
+    await expect(agent.run('hi')).rejects.toThrow(
+      'Model adapter emitted an event after the final event.',
+    );
+    await agent.close();
+  });
+
+  it('preserves provider errors without generating an empty result', async () => {
+    const providerError = new Error('provider request failed');
+    let generateCalls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          generateCalls += 1;
+          return new EchoAdapter().generate(request);
+        },
+        stream() {
+          return {
+            [Symbol.asyncIterator]() {
+              return {
+                next: () => Promise.reject(providerError),
+              };
+            },
+          };
+        },
+      },
+    });
+
+    await expect(agent.run('hi')).rejects.toBe(providerError);
+    expect(generateCalls).toBe(0);
+    await agent.close();
+  });
+
+  it('bounds trace diagnostics without storing text deltas', async () => {
+    let traceTypes: readonly string[] = [];
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        generate: (request) => new EchoAdapter().generate(request),
+        async *stream(request) {
+          for (let index = 0; index < 100_000; index += 1) {
+            yield { type: 'text-delta', text: 'x' } as const;
+          }
+          yield {
+            type: 'final',
+            response: await new EchoAdapter().generate(request),
+          } as const;
+        },
+      },
+      observers: [
+        {
+          onRunCompleted: (_result, ctx) => {
+            traceTypes = ctx.trace.events.map((event) => event.type);
+          },
+        },
+      ],
+    });
+
+    await agent.run('hi');
+    expect(traceTypes).not.toContain('message.delta');
+    expect(traceTypes.length).toBeLessThanOrEqual(1_024);
+    await agent.close();
+  });
+
+  it('fails a stream when an unconsumed event buffer reaches its limit', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: new EchoAdapter(),
+      stream: { maxBufferedEvents: 2 },
+    });
+
+    const stream = agent.stream('hi');
+    await expect(stream.final).rejects.toBeInstanceOf(
+      AgentStreamBackpressureError,
+    );
+    await agent.close();
+  });
+
+  it('flushes the explicit event recorder before resolving final', async () => {
+    const recorded: string[] = [];
+    let flushed = false;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: new EchoAdapter(),
+      eventRecorder: {
+        record: (event) => recorded.push(event.type),
+        flush: () => {
+          flushed = true;
+        },
+      },
+    });
+
+    await agent.run('hi');
+    expect(recorded).toContain('run.completed');
+    expect(flushed).toBe(true);
+    await agent.close();
+  });
+
+  it('fails the run when the event recorder fails', async () => {
+    const recorderError = new Error('recorder write failed');
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: new EchoAdapter(),
+      eventRecorder: {
+        record: (event) => {
+          if (event.type === 'run.completed') {
+            throw recorderError;
+          }
+        },
+      },
+    });
+
+    await expect(agent.run('hi')).rejects.toBe(recorderError);
     await agent.close();
   });
 
@@ -161,7 +343,6 @@ describe('createAgent', () => {
       events.push(`setup:${ctx.runId.length > 0}`);
       await originalSetup?.(ctx);
     };
-    environment.onEvent = (event) => events.push(event.type);
     environment.close = async () => {
       events.push('close');
       await originalClose?.();
@@ -182,6 +363,12 @@ describe('createAgent', () => {
         },
       },
       environment,
+      observers: [
+        {
+          onRunStarted: () => events.push('run.started'),
+          onRunCompleted: () => events.push('run.completed'),
+        },
+      ],
     });
 
     await agent.run('hi');

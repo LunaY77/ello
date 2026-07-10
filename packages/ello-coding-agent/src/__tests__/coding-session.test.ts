@@ -99,12 +99,95 @@ describe('createCodingSession', () => {
     session.subscribe((event: CodingSessionEvent) => types.push(event.type));
 
     const result = await session.submit('Say OK');
+    const sessionId = session.sessionId;
     await session.close();
+
+    const records = (
+      await readFile(path.join(sessionDir, `${sessionId}.jsonl`), 'utf8')
+    )
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
 
     expect(types).toContain('run.started');
     expect(types).toContain('message.delta');
     expect(types).toContain('run.completed');
     expect(result.output).toBe('OK');
+    expect(
+      records
+        .filter((record) => record.kind === 'run-marker')
+        .map((record) => record.status),
+    ).toEqual(['started', 'completed']);
+    expect(
+      records.some(
+        (record) => record.kind === 'entry' && record.type === 'event',
+      ),
+    ).toBe(false);
+  });
+
+  it('renders a final-only adapter response from stream.final', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+    const adapter: ModelAdapter = {
+      generate: (request) => new TextAdapter('final only').generate(request),
+      async *stream(request) {
+        yield {
+          type: 'final',
+          response: await this.generate(request),
+        };
+      },
+    };
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
+    const events: CodingSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    await session.submit('respond');
+    await session.close();
+
+    expect(
+      events.find((event) => event.type === 'message.delta'),
+    ).toMatchObject({ text: 'final only' });
+    const completed = events.find((event) => event.type === 'run.completed');
+    expect(completed).not.toHaveProperty('result');
+  });
+
+  it('rejects removed session event entries', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    await writeFile(
+      path.join(sessionDir, 'invalid-event.jsonl'),
+      [
+        JSON.stringify({
+          kind: 'header',
+          sessionId: 'invalid-event',
+          cwd,
+          createdAt: new Date().toISOString(),
+          version: 2,
+        }),
+        JSON.stringify({
+          kind: 'entry',
+          id: 'event-1',
+          parentId: null,
+          type: 'event',
+          event: { type: 'run.started', runId: 'run-1' },
+          createdAt: new Date().toISOString(),
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+    const repository = new JsonlSessionRepository({ cwd, sessionDir });
+
+    await expect(repository.load('invalid-event')).rejects.toThrow(
+      'Unsupported session entry type',
+    );
   });
 
   it('switches the active profile primary model for the next run', async () => {

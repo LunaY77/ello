@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentStreamEvent, SessionStore } from '@ello/agent';
+import type { AgentMessage, SessionStore } from '@ello/agent';
 
 import {
   JsonlSessionRepository,
@@ -14,7 +14,6 @@ import {
  * 这是内核 `createAgent({ session })` 的会话后端。内核在合适时机调用：
  * - `load`：恢复某个会话当前分支的**模型视图**（投影后的 `modelMessages`）；
  * - `append`：把本轮新增消息追加到当前 leaf 之下；
- * - `appendEvent`：把事件落盘，供回放（可选）。
  *
  * 压缩通过 `CompactionSessionPort` 追加一个带 `firstKeptEntryId` 的 compaction
  * 节点，模型视图在 `load()` 时投影。store 与 `JsonlSessionRepository` 共用同一份
@@ -47,13 +46,6 @@ export class JsonlSessionStore implements SessionStore, CompactionSessionPort {
       messages,
     );
     this.leaves.set(sessionId, nextLeaf);
-  }
-
-  /** 把内核事件追加为 event entry，供回放/审计（可选能力）。 */
-  async appendEvent(sessionId: string, event: AgentStreamEvent): Promise<void> {
-    const parent = await this.leafOf(sessionId);
-    const id = await this.repository.appendEvent(sessionId, parent, event);
-    this.leaves.set(sessionId, id);
   }
 
   /**

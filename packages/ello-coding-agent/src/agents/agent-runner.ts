@@ -5,7 +5,6 @@ import {
   type AgentModel,
   type ModelAdapter,
   type ModelInput,
-  type SessionStore,
 } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
@@ -18,6 +17,8 @@ import {
   type ProviderRegistry,
   type RuntimeRoleModel,
 } from '../provider/index.js';
+import { createCodingEventRecorder } from '../runtime/event-recorder.js';
+import type { JsonlSessionStore } from '../session/jsonl-store.js';
 import { createCodingTools } from '../tools/index.js';
 
 import type { CodingAgentDefinition } from './schema.js';
@@ -110,7 +111,7 @@ export interface SubagentAgentDeps {
   readonly config: CodingAgentConfig;
   readonly providerRegistry: ProviderRegistry;
   /** child 复用父运行时的 JSONL 会话存储（child 落自己的文件）。 */
-  readonly session: SessionStore;
+  readonly session: JsonlSessionStore;
   /** child 复用父运行的环境（文件系统、shell）。 */
   readonly environment: AgentEnvironment;
   /** 已派生好的 child 权限规则（见 deriveSubagentPermission）。 */
@@ -159,6 +160,7 @@ export function createSubagentAgent(input: {
     environment: sharedEnvironment(deps.environment),
     tools,
     session: deps.session,
+    eventRecorder: createCodingEventRecorder(deps.session.repository),
     sessionWindow: { maxMessages: 200 },
     modelInputBudget: { maxInputTokens: 160_000, reservedOutputTokens: 8_000 },
     ...(deps.modelAdapter === undefined

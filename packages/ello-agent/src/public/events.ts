@@ -2,9 +2,17 @@ import type {
   AgentApprovalRequest,
   DeferredApprovalItem,
   AgentError,
+  AgentFinishReason,
   AgentMessage,
-  AgentRunResult,
+  AgentUsage,
 } from './types.js';
+
+export interface RunCompletedEvent {
+  readonly type: 'run.completed';
+  readonly runId: string;
+  readonly finishReason: AgentFinishReason;
+  readonly usage: AgentUsage;
+}
 
 /**
  * 稳定、可渲染、可持久化的 Agent 事件协议。
@@ -45,8 +53,8 @@ export type AgentStreamEvent =
   | { type: 'turn.completed'; turnIndex: number }
   /** 运行被中断，携带中断时的消息现场。 */
   | { type: 'run.interrupted'; runId: string; messages: AgentMessage[] }
-  /** 运行成功完成，携带最终结果。 */
-  | { type: 'run.completed'; result: AgentRunResult }
+  /** 运行成功完成，只携带终态摘要。 */
+  | RunCompletedEvent
   /** 运行失败，携带错误与已产出的部分消息。 */
   | {
       type: 'run.failed';

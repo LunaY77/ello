@@ -15,6 +15,7 @@ import {
   type AgentFileSystem,
   type AgentMessage,
   type AgentModel,
+  type AgentObserver,
   type AgentRunResult,
   type AgentShell,
   type AgentSkill,
@@ -70,6 +71,7 @@ import { loadCodingSkills } from '../skills/index.js';
 import { createCodingTools } from '../tools/index.js';
 import { createBootProfile } from '../utils/boot-profile.js';
 
+import { createCodingEventRecorder } from './event-recorder.js';
 import type {
   ApprovalDecision,
   CodingEventListener,
@@ -851,7 +853,7 @@ class CodingSessionImpl implements CodingSession {
     }
   }
 
-  /** 原样转发内核事件，并截获 approval/写改动维护内部状态。 */
+  /** 原样转发内核事件，并截获 approval 维护交互状态。 */
   private async forward(event: AgentStreamEvent): Promise<void> {
     if (event.type === 'approval.required') {
       this.pendingApprovals.set(event.item.toolCallId, event.item);
@@ -866,10 +868,6 @@ class CodingSessionImpl implements CodingSession {
           : {}),
       });
       return;
-    }
-    if (event.type === 'tool.completed') {
-      this.maybeRecordChange(event.toolCallId, event.output);
-      await this.maybeBudgetToolResult(event.toolCallId, event.output);
     }
     this.emit(event);
   }
@@ -1029,6 +1027,12 @@ class CodingSessionImpl implements CodingSession {
     const agentModel = this.resolveAgentModel(primaryRole);
     const memory = createCodingMemory(config);
     const observer = createCodingObserver(config, { model: primaryRole.ref });
+    const runtimeObserver: AgentObserver = {
+      onToolCompleted: async (call) => {
+        this.maybeRecordChange(call.id, call.output);
+        await this.maybeBudgetToolResult(call.id, call.output);
+      },
+    };
     const contentReplacementTransform = (messages: readonly AgentMessage[]) =>
       this.deps.sessionStore.repository.applyContentReplacements(
         this.sessionId,
@@ -1094,8 +1098,11 @@ class CodingSessionImpl implements CodingSession {
       ),
       tools: [...selectedTools, ...skillTools, delegateTool],
       session: this.deps.sessionStore,
+      eventRecorder: createCodingEventRecorder(
+        this.deps.sessionStore.repository,
+      ),
       compactor: runtime.compactor,
-      observers: [observer, memory.observer],
+      observers: [observer, memory.observer, runtimeObserver],
       sessionWindow: { maxMessages: 200 },
       modelInputBudget: {
         maxInputTokens: config.context.max_input_tokens,
@@ -1393,10 +1400,42 @@ async function driveRun(options: {
     checkpointLabel,
   } = options;
   emit({ type: 'status', state: 'running' });
+  let completedEvent:
+    | Extract<AgentStreamEvent, { type: 'run.completed' }>
+    | undefined;
+  let activeMessageId: string | undefined;
+  let activeMessageHasDelta = false;
   for await (const event of currentStream) {
+    if (event.type === 'message.started') {
+      activeMessageId = event.messageId;
+      activeMessageHasDelta = false;
+    } else if (
+      event.type === 'message.delta' &&
+      event.messageId === activeMessageId
+    ) {
+      activeMessageHasDelta = true;
+    } else if (event.type === 'run.completed') {
+      completedEvent = event;
+      continue;
+    }
     await onEvent(event);
   }
   const result = await currentStream.final;
+  if (completedEvent === undefined) {
+    throw new Error(`Run ${result.id} completed without run.completed event.`);
+  }
+  if (
+    activeMessageId !== undefined &&
+    !activeMessageHasDelta &&
+    result.output.trim() !== ''
+  ) {
+    await onEvent({
+      type: 'message.delta',
+      messageId: activeMessageId,
+      text: result.output,
+    });
+  }
+  await onEvent(completedEvent);
   emit({ type: 'usage', usage: result.usage });
   await checkpoints.seal(result.id, checkpointLabel);
   emit({

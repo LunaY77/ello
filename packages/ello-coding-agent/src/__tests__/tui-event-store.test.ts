@@ -5,6 +5,20 @@ import {
   reduceTuiEvent,
 } from '../tui/store/tui-event-store.js';
 
+const runCompleted = {
+  type: 'run.completed',
+  runId: 'run-1',
+  finishReason: 'stop',
+  usage: {
+    requests: 1,
+    inputTokens: 1,
+    outputTokens: 1,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    toolCalls: 0,
+  },
+} as const;
+
 describe('tui-event-store', () => {
   it('accumulates assistant deltas and flushes on run.completed', () => {
     let state = initialTuiEventState;
@@ -25,11 +39,7 @@ describe('tui-event-store', () => {
     });
     expect(state.live.assistantText).toBe('Hello');
 
-    state = reduceTuiEvent(state, {
-      type: 'run.completed',
-      // 只取需要的字段，其余在 reducer 里不读。
-      result: { output: 'Hello' } as never,
-    });
+    state = reduceTuiEvent(state, runCompleted);
     expect(state.live.assistantText).toBe('');
     expect(state.history.at(-1)).toMatchObject({
       kind: 'assistant',
@@ -37,33 +47,8 @@ describe('tui-event-store', () => {
     });
   });
 
-  it('uses run.completed output when no assistant delta was streamed', () => {
-    const state = reduceTuiEvent(initialTuiEventState, {
-      type: 'run.completed',
-      result: {
-        output: 'final answer from provider',
-        text: 'final answer from provider',
-        messages: [
-          { role: 'assistant', content: 'final answer from provider' },
-        ],
-      } as never,
-    });
-
-    expect(state.history.at(-1)).toMatchObject({
-      kind: 'assistant',
-      text: 'final answer from provider',
-    });
-  });
-
-  it('does not reuse old assistant messages from completed run history', () => {
-    const state = reduceTuiEvent(initialTuiEventState, {
-      type: 'run.completed',
-      result: {
-        output: '',
-        text: '',
-        messages: [{ role: 'assistant', content: 'old answer' }],
-      } as never,
-    });
+  it('does not fabricate assistant output from the completion summary', () => {
+    const state = reduceTuiEvent(initialTuiEventState, runCompleted);
 
     expect(state.history).toHaveLength(0);
   });
@@ -74,10 +59,7 @@ describe('tui-event-store', () => {
       messageId: 'm1',
       text: '\n\nanswer\n\n',
     });
-    state = reduceTuiEvent(state, {
-      type: 'run.completed',
-      result: { output: '\n\nanswer\n\n' } as never,
-    });
+    state = reduceTuiEvent(state, runCompleted);
 
     expect(state.history.at(-1)).toMatchObject({
       kind: 'assistant',
@@ -114,20 +96,13 @@ describe('tui-event-store', () => {
     });
   });
 
-  it('does not duplicate run.completed output after streaming deltas', () => {
+  it('commits streamed output once at run completion', () => {
     let state = reduceTuiEvent(initialTuiEventState, {
       type: 'message.delta',
       messageId: 'm1',
       text: 'streamed answer',
     });
-    state = reduceTuiEvent(state, {
-      type: 'run.completed',
-      result: {
-        output: 'streamed answer',
-        text: 'streamed answer',
-        messages: [{ role: 'assistant', content: 'streamed answer' }],
-      } as never,
-    });
+    state = reduceTuiEvent(state, runCompleted);
 
     expect(state.history).toHaveLength(1);
     expect(state.history.at(-1)).toMatchObject({
@@ -147,14 +122,7 @@ describe('tui-event-store', () => {
       messageId: 'm2',
       role: 'assistant',
     });
-    state = reduceTuiEvent(state, {
-      type: 'run.completed',
-      result: {
-        output: 'streamed answer',
-        text: 'streamed answer',
-        messages: [{ role: 'assistant', content: 'streamed answer' }],
-      } as never,
-    });
+    state = reduceTuiEvent(state, runCompleted);
 
     expect(state.history).toHaveLength(1);
     expect(state.history.at(-1)).toMatchObject({

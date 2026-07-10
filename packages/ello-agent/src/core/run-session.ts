@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 
 import { AiSdkModelAdapter } from '../adapters/ai-sdk.js';
 import { normalizeAgentError } from '../public/errors.js';
+import type { AgentStreamEvent } from '../public/events.js';
 import type {
   AgentEnvironment,
   AgentInput,
@@ -45,7 +46,10 @@ import {
   loadSessionMessages,
   saveSessionResult,
 } from './session-runtime.js';
-import { AgentEventStream } from './stream.js';
+import {
+  AgentEventStream,
+  DEFAULT_AGENT_STREAM_BUFFER_CAPACITY,
+} from './stream.js';
 import { buildToolSet } from './tool-runner.js';
 import { ToolScheduler } from './tool-scheduler.js';
 import { addUsage, createEmptyUsage } from './usage.js';
@@ -180,9 +184,14 @@ export class RunSession {
     this.abortController = optionsBundle.abortController;
     this.signal = this.abortController.signal;
     this.runControl = new AgentRunControl(this.runId);
-    this.stream = new AgentEventStream(this.abortController, (message) => {
-      this.runControl.pushSteering(message);
-    });
+    this.stream = new AgentEventStream(
+      this.abortController,
+      (message) => {
+        this.runControl.pushSteering(message);
+      },
+      this.config.stream?.maxBufferedEvents ??
+        DEFAULT_AGENT_STREAM_BUFFER_CAPACITY,
+    );
     this.metadata = {
       ...(this.config.metadata ?? {}),
       ...(this.options.metadata ?? {}),
@@ -246,7 +255,6 @@ export class RunSession {
    */
   async start(): Promise<void> {
     await this.environment.setup?.(this.ctx);
-    await this.events.emit({ type: 'run.started', runId: this.runId });
     this.loadedSessionMessages = await loadSessionMessages({
       config: this.config,
       ...(this.options.sessionId !== undefined
@@ -263,6 +271,7 @@ export class RunSession {
       this.runControl.pushInput(message);
     }
     this.resumeForFirstTurn = await prepareResume(this, this.options.resume);
+    await this.events.emit({ type: 'run.started', runId: this.runId });
   }
 
   /** 是否还能开新回合：未达回合上限且未处于错误状态。 */
@@ -449,20 +458,30 @@ export class RunSession {
         messages: [...this.state.messages],
       });
     }
-    await this.events.emit({ type: 'run.completed', result });
+    await this.events.complete(result);
     this.stream.complete(result);
     return result;
   }
 
   /** 运行失败：归一化错误、发布 `run.failed`（附带部分消息）并使事件流失败。 */
   async fail(error: unknown): Promise<void> {
-    const normalized = normalizeAgentError(error);
-    await this.events.emit({
+    let failure = error;
+    let event: Extract<AgentStreamEvent, { type: 'run.failed' }> = {
       type: 'run.failed',
-      error: normalized,
+      error: normalizeAgentError(error),
       partialMessages: [...this.state.messages],
-    });
-    this.stream.fail(error);
+    };
+    try {
+      await this.events.fail(event);
+    } catch (recorderError) {
+      failure = recorderError;
+      event = {
+        type: 'run.failed',
+        error: normalizeAgentError(recorderError),
+        partialMessages: [...this.state.messages],
+      };
+    }
+    this.stream.fail(failure, event);
   }
 
   /**

@@ -1,9 +1,12 @@
+import { AgentStreamBackpressureError } from '../public/errors.js';
 import type { AgentStreamEvent } from '../public/events.js';
 import type {
   AgentMessage,
   AgentRunResult,
   AgentStream,
 } from '../public/types.js';
+
+export const DEFAULT_AGENT_STREAM_BUFFER_CAPACITY = 1_024;
 
 /**
  * 单生产者—单消费者的事件流实现。
@@ -50,11 +53,19 @@ export class AgentEventStream implements AgentStream {
   }> = [];
   /** 流是否已关闭（complete 或 fail 之后置真）。 */
   private closed = false;
+  /** 流失败原因；缓冲事件消费完后由迭代器抛出。 */
+  private failure: unknown | undefined;
 
   constructor(
     private readonly abortController: AbortController,
     private readonly onSteer: (message: AgentMessage) => void = () => {},
+    private readonly capacity = DEFAULT_AGENT_STREAM_BUFFER_CAPACITY,
   ) {
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      throw new RangeError(
+        `Agent stream maxBufferedEvents must be a positive integer: ${capacity}`,
+      );
+    }
     this.final = this.result.promise;
   }
 
@@ -74,6 +85,9 @@ export class AgentEventStream implements AgentStream {
       return Promise.resolve({ done: false, value: queued });
     }
     if (this.closed) {
+      if (this.failure !== undefined) {
+        return Promise.reject(this.failure);
+      }
       return Promise.resolve({ done: true, value: undefined });
     }
     return new Promise((resolve, reject) => {
@@ -89,10 +103,16 @@ export class AgentEventStream implements AgentStream {
    * @param event 待推送的事件。
    */
   emit(event: AgentStreamEvent): void {
+    if (this.closed) {
+      throw new Error('Cannot emit an event after the agent stream closed.');
+    }
     const waiter = this.waiters.shift();
     if (waiter !== undefined) {
       waiter.resolve({ done: false, value: event });
       return;
+    }
+    if (this.queue.length === this.capacity) {
+      throw new AgentStreamBackpressureError(this.capacity);
     }
     this.queue.push(event);
   }
@@ -112,8 +132,20 @@ export class AgentEventStream implements AgentStream {
    *
    * @param error 失败原因，会 reject `final` 并拒绝所有挂起的等待者。
    */
-  fail(error: unknown): void {
+  fail(error: unknown, terminalEvent?: AgentStreamEvent): void {
+    if (this.closed) {
+      return;
+    }
+    if (terminalEvent !== undefined) {
+      const waiter = this.waiters.shift();
+      if (waiter !== undefined) {
+        waiter.resolve({ done: false, value: terminalEvent });
+      } else if (this.queue.length < this.capacity) {
+        this.queue.push(terminalEvent);
+      }
+    }
     this.result.reject(error);
+    this.failure = error;
     this.closed = true;
     while (this.waiters.length > 0) {
       this.waiters.shift()?.reject(error);

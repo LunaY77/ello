@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { ModelAdapterProtocolError } from '../public/errors.js';
 import type {
   AgentModelRequest,
   AgentModelResponse,
@@ -35,7 +36,7 @@ export interface ModelCallResult {
  * 2. 生成消息 id 并发出 `message.started`；
  * 3. 迭代适配器的流式输出：`text-delta` 转为 `message.delta` 推送，
  *    其余事件携带最终响应；
- * 4. 若流未给出最终响应，退回到一次性 `generate` 兜底；
+ * 4. adapter 必须恰好给出一个 final，违反协议直接失败；
  * 5. 捕获 abort 类错误统一收敛为中断结果，其他错误继续上抛。
  */
 export async function callModel(
@@ -60,6 +61,13 @@ export async function callModel(
   let finalResponse: AgentModelResponse | null = null;
   try {
     for await (const event of run.modelAdapter.stream(request)) {
+      if (finalResponse !== null) {
+        throw new ModelAdapterProtocolError(
+          event.type === 'final'
+            ? 'Model adapter emitted more than one final event.'
+            : 'Model adapter emitted an event after the final event.',
+        );
+      }
       if (event.type === 'text-delta') {
         // 文本增量：实时转发为 message.delta，驱动上层增量渲染。
         await run.events.emit({
@@ -68,13 +76,13 @@ export async function callModel(
           text: event.text,
         });
       } else {
-        // 非增量事件携带聚合后的最终响应（取最后一个）。
         finalResponse = event.response;
       }
     }
-    // 适配器未在流中给出最终响应时，退回到一次性 generate 兜底。
     if (finalResponse === null) {
-      finalResponse = await run.modelAdapter.generate(request);
+      throw new ModelAdapterProtocolError(
+        'Model adapter stream ended without a final event.',
+      );
     }
     return { response: finalResponse };
   } catch (error) {
