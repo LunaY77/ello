@@ -128,6 +128,28 @@ export const usageRecords = sqliteTable('usage_records', {
   createdAt: text('created_at').notNull(),
 });
 
+/** 单次模型调用的安全 usage 与 cache fingerprint 诊断。 */
+export const usageModelCalls = sqliteTable('usage_model_calls', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull(),
+  turnIndex: integer('turn_index').notNull(),
+  provider: text('provider').notNull(),
+  model: text('model').notNull(),
+  finishReason: text('finish_reason').notNull(),
+  inputTokens: integer('input_tokens').notNull(),
+  outputTokens: integer('output_tokens').notNull(),
+  cacheReadTokens: integer('cache_read_tokens').notNull(),
+  cacheWriteTokens: integer('cache_write_tokens').notNull(),
+  durationMs: real('duration_ms').notNull(),
+  systemFingerprint: text('system_fingerprint').notNull(),
+  toolsetFingerprint: text('toolset_fingerprint').notNull(),
+  messagePrefixFingerprint: text('message_prefix_fingerprint').notNull(),
+  compactionBoundary: integer('compaction_boundary', {
+    mode: 'boolean',
+  }).notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
 /** 模型价格快照；估算成本只基于快照，不声明为精确账单。 */
 export const usagePriceSnapshots = sqliteTable('usage_price_snapshots', {
   id: text('id').primaryKey(),
@@ -276,6 +298,7 @@ export const codingStorageSchema = {
   workspaceRepositories,
   workspaceSyncRuns,
   usageRecords,
+  usageModelCalls,
   usagePriceSnapshots,
   usageReportCache,
   checkpoints,

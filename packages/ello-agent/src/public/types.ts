@@ -210,6 +210,14 @@ export interface ModelInputDiagnostics {
   readonly hasProviderOptions: boolean;
   /** 实际应用的消息变换名列表。 */
   readonly appliedMessageTransforms: readonly string[];
+  /** 完整 system 文本的安全哈希。 */
+  readonly systemFingerprint: string;
+  /** 工具名、描述、schema 与 provider options 的安全哈希。 */
+  readonly toolsetFingerprint: string;
+  /** 消息稳定前缀的安全哈希。 */
+  readonly messagePrefixFingerprint: string;
+  /** 本轮输入是否跨过 compaction checkpoint。 */
+  readonly compactionBoundary: boolean;
 }
 
 /**
@@ -513,6 +521,21 @@ export interface SessionStore {
   ): Promise<void>;
 }
 
+/** 单次模型调用完成后的安全诊断。 */
+export interface ModelCallCompletedEvent {
+  readonly runId: string;
+  readonly turnIndex: number;
+  readonly provider: string;
+  readonly model: string;
+  readonly finishReason: AgentFinishReason;
+  readonly usage: AgentUsage;
+  readonly durationMs: number;
+  readonly systemFingerprint: string;
+  readonly toolsetFingerprint: string;
+  readonly messagePrefixFingerprint: string;
+  readonly compactionBoundary: boolean;
+}
+
 /**
  * 运行观察者：在运行生命周期各阶段被回调，用于日志、指标、记忆维护等副作用。
  * 所有回调均为可选，按需实现。
@@ -541,6 +564,11 @@ export interface AgentObserver<TContext = unknown> {
   /** 工具执行完成。 */
   onToolCompleted?(
     event: AgentToolCall,
+    ctx: AgentRunContext<TContext>,
+  ): MaybePromise<void>;
+  /** 单次模型调用完成，不携带 prompt 或 provider 原始响应。 */
+  onModelCallCompleted?(
+    event: ModelCallCompletedEvent,
     ctx: AgentRunContext<TContext>,
   ): MaybePromise<void>;
   /** 运行成功完成。 */

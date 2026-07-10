@@ -6,6 +6,12 @@ import type {
 } from '../public/types.js';
 
 import {
+  fingerprintMessagePrefix,
+  fingerprintSystem,
+  fingerprintToolset,
+  hasCompactionBoundary,
+} from './fingerprints.js';
+import {
   defaultMessageTransforms,
   estimateMessagesTokens,
   estimateTextTokens,
@@ -40,12 +46,29 @@ export async function buildModelInput(run: RunSession): Promise<ModelInput> {
         : {}),
       systemSections: systemResult.sectionCount,
       messages: messagesResult.messages,
+      tools,
       ...(providerOptions !== undefined ? { providerOptions } : {}),
       appliedMessageTransforms: messagesResult.appliedTransforms,
     }),
   };
-  // 末步：把成型输入交给用户 prepare 钩子做最终改写（如有）。
-  return applyPrepareModelInput(input, run);
+  // prepare 可能改写 system/messages/tools，指纹必须基于最终输入重算。
+  const prepared = await applyPrepareModelInput(input, run);
+  if (prepared.diagnostics === undefined) {
+    throw new Error('PrepareModelInput must preserve model input diagnostics.');
+  }
+  return {
+    ...prepared,
+    diagnostics: createModelInputDiagnostics({
+      ...(prepared.system !== undefined ? { system: prepared.system } : {}),
+      systemSections: prepared.diagnostics.systemSections,
+      messages: prepared.messages,
+      tools: prepared.tools,
+      ...(prepared.providerOptions !== undefined
+        ? { providerOptions: prepared.providerOptions }
+        : {}),
+      appliedMessageTransforms: prepared.diagnostics.appliedMessageTransforms,
+    }),
+  };
 }
 
 /**
@@ -139,6 +162,7 @@ function createModelInputDiagnostics(options: {
   readonly system?: string;
   readonly systemSections: number;
   readonly messages: readonly AgentMessage[];
+  readonly tools: AgentToolSet;
   readonly providerOptions?: Record<string, unknown>;
   readonly appliedMessageTransforms: readonly string[];
 }): ModelInputDiagnostics {
@@ -150,5 +174,9 @@ function createModelInputDiagnostics(options: {
       estimateTextTokens(options.system ?? ''),
     hasProviderOptions: options.providerOptions !== undefined,
     appliedMessageTransforms: options.appliedMessageTransforms,
+    systemFingerprint: fingerprintSystem(options.system, options.messages),
+    toolsetFingerprint: fingerprintToolset(options.tools),
+    messagePrefixFingerprint: fingerprintMessagePrefix(options.messages),
+    compactionBoundary: hasCompactionBoundary(options.messages),
   };
 }

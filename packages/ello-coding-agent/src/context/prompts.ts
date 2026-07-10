@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,16 +8,11 @@ import nunjucks from 'nunjucks';
 import type { CodingAgentConfig } from '../config/index.js';
 
 import {
-  loadInstructionSources,
-  loadProjectInstructions,
-} from './instructions.js';
-import {
-  estimateTextTokens,
-  loadContextBundle,
-  type ContextBundle,
-  type ContextEvent,
-  type ContextSourceLoadResult,
-} from './source-registry.js';
+  ContextSnapshot,
+  type ContextSnapshotDeps,
+} from './context-snapshot.js';
+import { loadProjectInstructions } from './instructions.js';
+import type { ContextBundle, ContextEvent } from './source-registry.js';
 
 export { loadProjectInstructions };
 
@@ -70,14 +66,11 @@ export function createCodingSystemPromptSection(
   config: CodingAgentConfig,
   runtime: CodingSystemPromptRuntime,
 ) {
-  return async () => {
-    const profile =
-      runtime.profile ??
-      (config.context.system_prompt_profile !== 'coding'
-        ? config.context.system_prompt_profile
-        : config.systemPromptProfile) ??
-      config.systemPromptProfile;
-    const contextDeps: ContextDeps = {
+  return async (run: {
+    readonly state: { readonly budget: Record<string, unknown> };
+  }) => {
+    const profile = resolvePromptProfile(config, runtime);
+    const contextDeps: ContextSnapshotDeps = {
       ...(runtime.activeSkills !== undefined
         ? { activeSkills: runtime.activeSkills }
         : {}),
@@ -85,7 +78,21 @@ export function createCodingSystemPromptSection(
         ? { onContextEvent: runtime.onContextEvent }
         : {}),
     };
-    const context = await buildContextBundle(config, contextDeps);
+    const snapshotKey = 'coding-agent.context-snapshot';
+    const current = run.state.budget[snapshotKey];
+    const snapshot =
+      current === undefined
+        ? new ContextSnapshot(
+            config,
+            contextDeps,
+            profile,
+            createHash('sha256')
+              .update(loadPromptTemplate(profile))
+              .digest('hex'),
+          )
+        : requireContextSnapshot(current);
+    run.state.budget[snapshotKey] = snapshot;
+    const context = await snapshot.render();
     return renderPromptTemplate(profile, {
       model: runtime.model,
       context_bundle: context.system,
@@ -104,14 +111,13 @@ export function buildContextBundle(
   config: CodingAgentConfig,
   deps: ContextDeps = {},
 ): Promise<ContextBundle> {
-  return loadContextBundle(
-    [
-      () => loadEnvironmentSource(config),
-      () => loadInstructionSources(config),
-      () => loadActiveSkillsSource(deps),
-    ],
-    deps.onContextEvent,
-  );
+  const profile = resolvePromptProfile(config, {});
+  return new ContextSnapshot(
+    config,
+    deps,
+    profile,
+    createHash('sha256').update(loadPromptTemplate(profile)).digest('hex'),
+  ).render();
 }
 
 function loadPromptTemplate(profile: string): string {
@@ -145,84 +151,22 @@ function promptDir(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), 'prompts');
 }
 
-async function loadEnvironmentSource(
+function resolvePromptProfile(
   config: CodingAgentConfig,
-): Promise<ContextSourceLoadResult> {
-  const allowed =
-    config.allowedPaths.length > 0
-      ? config.allowedPaths.join('\n')
-      : config.cwd;
-  const approval = approvalGuidance(config.approvalMode);
-  const content = [
-    '<file-system>',
-    `  <working-directory>${config.cwd}</working-directory>`,
-    `  <allowed-paths>\n${indent(allowed)}\n  </allowed-paths>`,
-    '</file-system>',
-    '<shell>',
-    `  <working-directory>${config.cwd}</working-directory>`,
-    `  <allowed-paths>\n${indent(allowed)}\n  </allowed-paths>`,
-    '</shell>',
-    '<approval>',
-    `  <mode>${config.approvalMode}</mode>`,
-    `  <guidance>${approval}</guidance>`,
-    '</approval>',
-    'Stay within the allowed paths unless the user explicitly broadens the scope.',
-  ].join('\n');
-  return {
-    sources: [
-      {
-        id: 'environment:runtime',
-        type: 'environment',
-        title: 'Runtime environment',
-        priority: 60,
-        content,
-        origin: config.cwd,
-        tokensEstimate: estimateTextTokens(content),
-      },
-    ],
-  };
+  runtime: Pick<CodingSystemPromptRuntime, 'profile'>,
+): string {
+  return (
+    runtime.profile ??
+    (config.context.system_prompt_profile !== 'coding'
+      ? config.context.system_prompt_profile
+      : config.systemPromptProfile) ??
+    config.systemPromptProfile
+  );
 }
 
-async function loadActiveSkillsSource(
-  deps: ContextDeps,
-): Promise<ContextSourceLoadResult> {
-  const skills = [...(await (deps.activeSkills?.() ?? []))];
-  const content = skills.map((skill) => `- ${skill}`).join('\n');
-  return {
-    sources:
-      content.length > 0
-        ? [
-            {
-              id: 'skills:active',
-              type: 'skill',
-              title: 'Active skills',
-              priority: 300,
-              content,
-              tokensEstimate: estimateTextTokens(content),
-            },
-          ]
-        : [],
-  };
-}
-
-function approvalGuidance(mode: CodingAgentConfig['approvalMode']): string {
-  const guidance: Record<CodingAgentConfig['approvalMode'], string> = {
-    default:
-      'File edits and command execution require explicit user approval each time.',
-    plan: 'Plan first; file edits and command execution require explicit user approval.',
-    'accept-edits':
-      'File edits are auto-approved; higher-risk actions still need approval.',
-    bypass:
-      'All approvals are bypassed; act carefully because changes apply without a prompt.',
-    'dont-ask':
-      'Approvals are not prompted; actions are decided silently by configured rules.',
-  };
-  return guidance[mode];
-}
-
-function indent(value: string): string {
-  return value
-    .split('\n')
-    .map((line) => `    <path>${line}</path>`)
-    .join('\n');
+function requireContextSnapshot(value: unknown): ContextSnapshot {
+  if (!(value instanceof ContextSnapshot)) {
+    throw new Error('Invalid coding-agent context snapshot state.');
+  }
+  return value;
 }

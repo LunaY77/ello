@@ -73,4 +73,59 @@ describe('UsageRepository', () => {
     );
     storage.close();
   });
+
+  it('按 model-call 聚合 run summary，并保留 cache miss 诊断', () => {
+    const storage = createCodingStorage();
+    const repo = storage.usage;
+    for (const turnIndex of [0, 1]) {
+      repo.recordModelCall({
+        runId: 'run-model-calls',
+        turnIndex,
+        provider: 'openai',
+        model: 'gpt-5.4',
+        finishReason: turnIndex === 0 ? 'tool-calls' : 'stop',
+        usage: {
+          requests: 1,
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadTokens: turnIndex === 0 ? 0 : 80,
+          cacheWriteTokens: turnIndex === 0 ? 50 : 0,
+          toolCalls: turnIndex === 0 ? 1 : 0,
+        },
+        durationMs: 50 + turnIndex,
+        systemFingerprint: 'system',
+        toolsetFingerprint: 'tools',
+        messagePrefixFingerprint: `messages-${turnIndex}`,
+        compactionBoundary: false,
+      });
+    }
+
+    const summary = repo.recordRunSummary({
+      runId: 'run-model-calls',
+      invocation: 'run',
+      model: 'openai/gpt-5.4',
+      status: 'completed',
+      finishReason: 'stop',
+      toolCalls: 1,
+    });
+
+    expect(repo.listModelCalls('run-model-calls')).toHaveLength(2);
+    expect(summary).toMatchObject({
+      requests: 2,
+      inputTokens: 200,
+      outputTokens: 40,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 50,
+      toolCalls: 1,
+    });
+    expect(repo.summarize({}, 'model')).toContainEqual(
+      expect.objectContaining({
+        key: 'openai/gpt-5.4',
+        cacheReadRatio: 0.4,
+        cacheWriteRatio: 0.25,
+        uncachedInputTokens: 120,
+      }),
+    );
+    storage.close();
+  });
 });

@@ -40,7 +40,9 @@ export function createCodingMemory(
     if (text === undefined) {
       const manifest = await loadCodingMemory(config.cwd, repository);
       const rendered = renderMemoryForPrompt(manifest, config.cwd).trim();
-      text = rendered ? `# Relevant memory\n${rendered}` : '';
+      text = rendered
+        ? `<memory-context>\n# Relevant memory\n${rendered}\n</memory-context>`
+        : '';
       cache.set(run.runId, text);
       if (
         config.context.memory.structured.enabled &&

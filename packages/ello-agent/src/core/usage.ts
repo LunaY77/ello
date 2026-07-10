@@ -3,11 +3,9 @@ import type { AgentUsage } from '../public/types.js';
 /**
  * 用量（token / 请求数）记账工具。
  *
- * 屏蔽不同 provider 的字段差异，统一成内核的 {@link AgentUsage} 形状，
- * 并提供初始化与累加原语：
+ * 统一内核与 AI SDK 的用量形状，并提供初始化与累加原语：
  * - `createEmptyUsage`：全零起点；
- * - `coerceUsage`：把 provider 返回的杂形状归一（兼容 AI SDK 的
- *   `promptTokens`/`completionTokens` 别名），非法字段回落默认值；
+ * - `mapAiSdkUsage`：严格读取 AI SDK 7 的 usage 契约；
  * - `addUsage`：逐字段相加，用于跨多次调用累计。
  */
 
@@ -24,32 +22,41 @@ export function createEmptyUsage(): AgentUsage {
 }
 
 /**
- * 把 provider 返回的任意用量形状归一为 {@link AgentUsage}。
- *
- * 非对象输入直接回落空用量；`inputTokens`/`outputTokens` 兼容 AI SDK 的
- * `promptTokens`/`completionTokens` 别名；`requests` 缺省记为 1（一次调用）。
- *
- * @param usage provider 返回的用量对象，字段形状可能各异。
+ * 严格读取 AI SDK 7 usage。token 字段为 undefined 表示 provider 未报告，记为 0；
+ * usage 对象或 `inputTokenDetails` 结构不合法时直接失败。
  */
-export function coerceUsage(usage: unknown): AgentUsage {
+export function mapAiSdkUsage(usage: unknown): AgentUsage {
   if (typeof usage !== 'object' || usage === null) {
-    return createEmptyUsage();
+    throw new Error('AI SDK usage must be an object.');
   }
-  const value = usage as Record<string, unknown>;
+  const value = usage as {
+    readonly inputTokens?: unknown;
+    readonly outputTokens?: unknown;
+    readonly inputTokenDetails?: unknown;
+  };
+  if (
+    typeof value.inputTokenDetails !== 'object' ||
+    value.inputTokenDetails === null
+  ) {
+    throw new Error('AI SDK usage.inputTokenDetails must be an object.');
+  }
+  const inputTokenDetails = value.inputTokenDetails as {
+    readonly cacheReadTokens?: unknown;
+    readonly cacheWriteTokens?: unknown;
+  };
   return {
-    requests: numberValue(value.requests, 1),
-    // 优先取标准字段，否则回落到 AI SDK 的别名。
-    inputTokens: numberValue(
-      value.inputTokens,
-      numberValue(value.promptTokens, 0),
+    requests: 1,
+    inputTokens: optionalTokenCount(value.inputTokens, 'inputTokens'),
+    outputTokens: optionalTokenCount(value.outputTokens, 'outputTokens'),
+    cacheReadTokens: optionalTokenCount(
+      inputTokenDetails.cacheReadTokens,
+      'inputTokenDetails.cacheReadTokens',
     ),
-    outputTokens: numberValue(
-      value.outputTokens,
-      numberValue(value.completionTokens, 0),
+    cacheWriteTokens: optionalTokenCount(
+      inputTokenDetails.cacheWriteTokens,
+      'inputTokenDetails.cacheWriteTokens',
     ),
-    cacheReadTokens: numberValue(value.cacheReadTokens, 0),
-    cacheWriteTokens: numberValue(value.cacheWriteTokens, 0),
-    toolCalls: numberValue(value.toolCalls, 0),
+    toolCalls: 0,
   };
 }
 
@@ -65,7 +72,12 @@ export function addUsage(left: AgentUsage, right: AgentUsage): AgentUsage {
   };
 }
 
-/** 取有限数值，非数字或非有限值时回落到 `fallback`。 */
-function numberValue(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+function optionalTokenCount(value: unknown, field: string): number {
+  if (value === undefined) {
+    return 0;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(`AI SDK usage.${field} must be a non-negative number.`);
+  }
+  return value;
 }

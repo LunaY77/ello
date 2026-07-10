@@ -58,6 +58,7 @@ export async function callModel(
   });
 
   const request = createModelRequest(run, input);
+  const startedAt = performance.now();
   let finalResponse: AgentModelResponse | null = null;
   try {
     for await (const event of run.modelAdapter.stream(request)) {
@@ -84,6 +85,24 @@ export async function callModel(
         'Model adapter stream ended without a final event.',
       );
     }
+    const diagnostics = input.diagnostics;
+    if (diagnostics === undefined) {
+      throw new Error('Model input diagnostics are required for model calls.');
+    }
+    const identity = modelIdentity(run.config.model);
+    await run.events.modelCallCompleted({
+      runId: run.runId,
+      turnIndex: run.state.turn,
+      provider: identity.provider,
+      model: identity.model,
+      finishReason: finalResponse.finishReason,
+      usage: finalResponse.usage,
+      durationMs: performance.now() - startedAt,
+      systemFingerprint: diagnostics.systemFingerprint,
+      toolsetFingerprint: diagnostics.toolsetFingerprint,
+      messagePrefixFingerprint: diagnostics.messagePrefixFingerprint,
+      compactionBoundary: diagnostics.compactionBoundary,
+    });
     return { response: finalResponse };
   } catch (error) {
     // 取消信号或 abort 类错误统一收敛为中断，不向上抛异常。
@@ -93,6 +112,29 @@ export async function callModel(
     }
     throw error;
   }
+}
+
+function modelIdentity(model: AgentModelRequest['model']): {
+  readonly provider: string;
+  readonly model: string;
+} {
+  if (typeof model === 'string') {
+    const separator = model.includes('/') ? '/' : ':';
+    const [provider, ...modelParts] = model.split(separator);
+    if (provider === undefined || provider === '' || modelParts.length === 0) {
+      throw new Error(`Invalid string model identity: ${model}`);
+    }
+    return { provider, model: modelParts.join(separator) };
+  }
+  if (
+    typeof model.provider !== 'string' ||
+    model.provider === '' ||
+    typeof model.modelId !== 'string' ||
+    model.modelId === ''
+  ) {
+    throw new Error('Language model must expose provider and modelId.');
+  }
+  return { provider: model.provider, model: model.modelId };
 }
 
 /**

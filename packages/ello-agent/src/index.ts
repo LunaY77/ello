@@ -77,6 +77,7 @@ export type {
   InterruptedRunItem,
   MaybePromise,
   ModelAdapter,
+  ModelCallCompletedEvent,
   ModelInput,
   ModelInputDiagnostics,
   PrepareModelInput,

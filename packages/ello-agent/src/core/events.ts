@@ -6,6 +6,7 @@ import type {
   AgentToolCall,
   AgentTraceEvent,
   CreateAgentOptions,
+  ModelCallCompletedEvent,
 } from '../public/types.js';
 
 import type { AgentEventStream } from './stream.js';
@@ -61,6 +62,12 @@ export class AgentEventDispatcher {
     await this.config.eventRecorder?.record(event, this.ctx);
     await this.config.eventRecorder?.flush?.(this.ctx);
     await this.emitObserverEvent(event);
+  }
+
+  async modelCallCompleted(event: ModelCallCompletedEvent): Promise<void> {
+    for (const observer of this.config.observers ?? []) {
+      await observer.onModelCallCompleted?.(event, this.ctx);
+    }
   }
 
   private recordTrace(event: AgentStreamEvent): void {

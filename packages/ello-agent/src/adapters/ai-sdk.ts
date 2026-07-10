@@ -17,7 +17,7 @@ import {
 } from 'ai';
 
 import { createToolCallMessage } from '../core/tool-messages.js';
-import { coerceUsage } from '../core/usage.js';
+import { createEmptyUsage, mapAiSdkUsage } from '../core/usage.js';
 import type {
   AgentFinishReason,
   AgentModel,
@@ -101,13 +101,17 @@ export class AiSdkModelAdapter implements ModelAdapter {
       result.responseMessages,
       result.text,
     );
+    const toolCalls = normalizeToolCalls(result.toolCalls);
     return {
       text: result.text,
       messages: [...request.messages, ...newMessages],
       newMessages,
-      toolCalls: normalizeToolCalls(result.toolCalls),
+      toolCalls,
       toolResults: result.toolResults,
-      usage: coerceUsage(result.usage),
+      usage: {
+        ...mapAiSdkUsage(result.usage),
+        toolCalls: toolCalls.length,
+      },
       finishReason: normalizeFinishReason(result.finishReason),
       provider: result,
     };
@@ -144,7 +148,7 @@ export class AiSdkModelAdapter implements ModelAdapter {
     let text = '';
     const pendingMirrorText: string[] = [];
     let bufferingPotentialMirror = true;
-    let usage = coerceUsage(undefined);
+    let usage = createEmptyUsage();
     let finishReason: AgentFinishReason = 'unknown';
     const toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
     for await (const part of result.fullStream) {
@@ -165,7 +169,7 @@ export class AiSdkModelAdapter implements ModelAdapter {
       } else if (part.type === 'tool-call') {
         toolCalls.push(readToolCall(part));
       } else if (part.type === 'finish') {
-        usage = coerceUsage(part.totalUsage);
+        usage = mapAiSdkUsage(part.totalUsage);
         finishReason = normalizeFinishReason(part.finishReason);
       } else if (part.type === 'error') {
         throw part.error;
@@ -189,7 +193,7 @@ export class AiSdkModelAdapter implements ModelAdapter {
         newMessages,
         toolCalls,
         toolResults: [],
-        usage,
+        usage: { ...usage, toolCalls: toolCalls.length },
         finishReason:
           toolCalls.length > 0 && finishReason === 'stop'
             ? 'tool-calls'

@@ -1,7 +1,11 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { AgentObserver, AgentUsage } from '@ello/agent';
+import type {
+  AgentObserver,
+  AgentUsage,
+  ModelCallCompletedEvent,
+} from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
 import { logsDir } from '../session/paths.js';
@@ -18,7 +22,7 @@ import type { UsageRepository } from '../storage/repositories/usage-repository.j
  * token 用量 / finishReason；绝不记录 prompt 正文、工具入参与结果、
  * 文件内容、shell 输出。
  *
- * NDJSON 日志失败不影响 run；usage 属于结构化状态，写入失败直接终止 run。
+ * NDJSON 与 SQLite 都是运行诊断契约，写入失败直接终止 run。
  */
 export function createCodingObserver(
   config: CodingAgentConfig,
@@ -27,8 +31,9 @@ export function createCodingObserver(
 ): AgentObserver {
   const file = path.join(logsDir(), 'coding-agent.ndjson');
   const starts = new Map<string, string>();
-  const log = (event: string, data: Record<string, unknown>): void => {
-    void writeLine(file, {
+  const previousCalls = new Map<string, ModelCallCompletedEvent>();
+  const log = (event: string, data: Record<string, unknown>): Promise<void> => {
+    return writeLine(file, {
       ts: new Date().toISOString(),
       event,
       model: runtime.model,
@@ -37,47 +42,75 @@ export function createCodingObserver(
   };
 
   return {
-    onRunStarted: (event, ctx) => {
+    onRunStarted: async (event, ctx) => {
       starts.set(event.runId, new Date().toISOString());
-      log('run.started', { runId: event.runId, sessionId: ctx.sessionId });
+      await log('run.started', {
+        runId: event.runId,
+        sessionId: ctx.sessionId,
+      });
     },
-    onToolApprovalRequired: (item) => {
+    onToolApprovalRequired: (item) =>
       log('tool.approval_required', {
         tool: item.toolName,
         toolCallId: item.toolCallId,
+      }),
+    onToolCompleted: (call) =>
+      log('tool.completed', {
+        tool: call.name,
+        ok: call.error === undefined,
+      }),
+    onModelCallCompleted: async (event) => {
+      const previous = previousCalls.get(event.runId);
+      const changes = fingerprintChanges(previous, event);
+      await log('model.call.completed', {
+        runId: event.runId,
+        turnIndex: event.turnIndex,
+        provider: event.provider,
+        model: event.model,
+        finishReason: event.finishReason,
+        usage: summarizeUsage(event.usage),
+        durationMs: event.durationMs,
+        systemFingerprint: event.systemFingerprint,
+        toolsetFingerprint: event.toolsetFingerprint,
+        messagePrefixFingerprint: event.messagePrefixFingerprint,
+        compactionBoundary: event.compactionBoundary,
+        fingerprintChanges: changes,
       });
-    },
-    onToolCompleted: (call) => {
-      log('tool.completed', { tool: call.name, ok: call.error === undefined });
+      usageRepository.recordModelCall(event);
+      previousCalls.set(event.runId, event);
     },
     onRunCompleted: async (result) => {
-      log('run.completed', {
+      await log('run.completed', {
         finishReason: result.finishReason,
         usage: summarizeUsage(result.usage),
       });
-      await usageRepository.recordUsage({
+      usageRepository.recordRunSummary({
         runId: result.id,
         invocation: config.tui ? 'tui' : 'run',
         model: runtime.model,
-        status: 'completed',
+        status:
+          result.finishReason === 'interrupted' ? 'interrupted' : 'completed',
         finishReason: result.finishReason,
-        usage: result.usage,
-        startedAt: starts.get(result.id),
+        toolCalls: result.usage.toolCalls,
+        startedAt: requireStart(starts, result.id),
         completedAt: new Date().toISOString(),
       });
       starts.delete(result.id);
+      previousCalls.delete(result.id);
     },
     onRunFailed: async (event, ctx) => {
-      log('run.failed', { error: event.error.message });
-      await usageRepository.recordUsage({
+      await log('run.failed', { error: event.error.message });
+      usageRepository.recordRunSummary({
         runId: ctx.runId,
         invocation: config.tui ? 'tui' : 'run',
         model: runtime.model,
         status: 'failed',
-        startedAt: starts.get(ctx.runId),
+        toolCalls: 0,
+        startedAt: requireStart(starts, ctx.runId),
         completedAt: new Date().toISOString(),
       });
       starts.delete(ctx.runId);
+      previousCalls.delete(ctx.runId);
     },
   };
 }
@@ -94,15 +127,42 @@ export function summarizeUsage(usage: AgentUsage): Record<string, number> {
   };
 }
 
-/** 追加一行 NDJSON；失败静默（可观测性不得影响执行）。 */
 async function writeLine(
   file: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
-  try {
-    await mkdir(path.dirname(file), { recursive: true });
-    await appendFile(file, `${JSON.stringify(payload)}\n`, 'utf8');
-  } catch {
-    // 日志写入失败被动吞掉，绝不影响 agent 运行。
+  await mkdir(path.dirname(file), { recursive: true });
+  await appendFile(file, `${JSON.stringify(payload)}\n`, 'utf8');
+}
+
+function requireStart(starts: Map<string, string>, runId: string): string {
+  const startedAt = starts.get(runId);
+  if (startedAt === undefined) {
+    throw new Error(`Missing run start timestamp: ${runId}`);
   }
+  return startedAt;
+}
+
+function fingerprintChanges(
+  previous: ModelCallCompletedEvent | undefined,
+  current: ModelCallCompletedEvent,
+): readonly string[] {
+  const changes: string[] = [];
+  if (previous !== undefined) {
+    if (previous.systemFingerprint !== current.systemFingerprint) {
+      changes.push('system');
+    }
+    if (previous.toolsetFingerprint !== current.toolsetFingerprint) {
+      changes.push('toolset');
+    }
+    if (
+      previous.messagePrefixFingerprint !== current.messagePrefixFingerprint
+    ) {
+      changes.push('message-prefix');
+    }
+  }
+  if (current.compactionBoundary) {
+    changes.push('compaction-boundary');
+  }
+  return changes;
 }

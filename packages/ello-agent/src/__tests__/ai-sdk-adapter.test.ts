@@ -83,6 +83,44 @@ describe('AiSdkModelAdapter', () => {
     ]);
   });
 
+  it('maps AI SDK cache token details into AgentUsage', async () => {
+    const adapter = new AiSdkModelAdapter();
+    const events = await collectEvents(
+      adapter.stream(
+        createRequest([
+          { type: 'text-start', id: 'text_1' },
+          { type: 'text-delta', id: 'text_1', delta: 'ok' },
+          { type: 'text-end', id: 'text_1' },
+          {
+            type: 'finish',
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: {
+              inputTokens: {
+                total: 100,
+                noCache: 20,
+                cacheRead: 70,
+                cacheWrite: 10,
+              },
+              outputTokens: { total: 25, text: 25, reasoning: 0 },
+            },
+          },
+        ]),
+      ),
+    );
+    const final = events.at(-1);
+    if (final?.type !== 'final') {
+      throw new Error('expected final event');
+    }
+    expect(final.response.usage).toEqual({
+      requests: 1,
+      inputTokens: 100,
+      outputTokens: 25,
+      cacheReadTokens: 70,
+      cacheWriteTokens: 10,
+      toolCalls: 0,
+    });
+  });
+
   it('streams normal JSON text once it cannot be a tool-call mirror', async () => {
     const adapter = new AiSdkModelAdapter();
 

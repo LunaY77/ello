@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { AgentMessage, ModelInput } from '@ello/agent';
 
 import type { ModelModality, RuntimeModel, RuntimeRoleModel } from './types.js';
@@ -24,6 +26,10 @@ export function providerOptionsForRole(
 export function prepareModelInputForRuntimeModel(
   model: RuntimeRoleModel['model'],
   input: ModelInput,
+  cache: {
+    readonly promptProfile: string;
+    readonly workspaceIdentity: string;
+  },
 ): ModelInput {
   const messages = input.messages.map((message) =>
     stripUnsupportedParts(model, message),
@@ -31,16 +37,115 @@ export function prepareModelInputForRuntimeModel(
   const messagesChanged = messages.some(
     (message, index) => message !== input.messages[index],
   );
-  if (model.capabilities.toolCall && !messagesChanged) {
-    return input;
-  }
-  return {
+  const transformed: ModelInput = {
     ...input,
     messages,
     ...(model.capabilities.toolCall
       ? {}
       : { tools: {}, activeTools: [] as readonly string[] }),
   };
+  if (model.providerKind === 'anthropic') {
+    return addAnthropicCacheBreakpoint(transformed);
+  }
+  if (
+    model.providerKind === 'openai' ||
+    model.providerKind === 'openai-compatible'
+  ) {
+    return addOpenAiPromptCacheKey(model, transformed, cache);
+  }
+  return messagesChanged ? transformed : input;
+}
+
+function addOpenAiPromptCacheKey(
+  model: RuntimeModel,
+  input: ModelInput,
+  cache: {
+    readonly promptProfile: string;
+    readonly workspaceIdentity: string;
+  },
+): ModelInput {
+  if (input.diagnostics === undefined) {
+    throw new Error('Model input diagnostics are required for prompt caching.');
+  }
+  const providerOptions = input.providerOptions ?? {};
+  const openai = optionalOptionsRecord(providerOptions.openai, 'openai');
+  const toolsetFingerprint = model.capabilities.toolCall
+    ? input.diagnostics.toolsetFingerprint
+    : hash('[]');
+  const promptCacheKey = hash(
+    [
+      model.providerId,
+      model.id,
+      cache.promptProfile,
+      cache.workspaceIdentity,
+      toolsetFingerprint,
+    ].join('\n'),
+  );
+  return {
+    ...input,
+    providerOptions: {
+      ...providerOptions,
+      openai: { ...openai, promptCacheKey },
+    },
+  };
+}
+
+function addAnthropicCacheBreakpoint(input: ModelInput): ModelInput {
+  if (input.system === undefined) {
+    throw new Error('Anthropic cache breakpoint requires a system prompt.');
+  }
+  const { stable, dynamic } = splitDynamicContext(input.system);
+  const messages: AgentMessage[] = [
+    {
+      role: 'system',
+      content: stable,
+      providerOptions: {
+        anthropic: { cacheControl: { type: 'ephemeral' } },
+      },
+    },
+    ...(dynamic === '' ? [] : [{ role: 'system' as const, content: dynamic }]),
+    ...input.messages,
+  ];
+  const { system: _system, ...withoutSystem } = input;
+  return { ...withoutSystem, messages };
+}
+
+function splitDynamicContext(system: string): {
+  readonly stable: string;
+  readonly dynamic: string;
+} {
+  const dynamicBlocks: string[] = [];
+  const stable = system
+    .replace(
+      /<(skill|memory)-context\b[^>]*>[\s\S]*?<\/\1-context>|<skill\b[^>]*>[\s\S]*?<\/skill>/gu,
+      (block) => {
+        dynamicBlocks.push(block);
+        return '';
+      },
+    )
+    .replace(/\n{3,}/gu, '\n\n')
+    .trim();
+  if (stable === '') {
+    throw new Error('Anthropic stable system prefix is empty.');
+  }
+  return { stable, dynamic: dynamicBlocks.join('\n\n') };
+}
+
+function optionalOptionsRecord(
+  value: unknown,
+  name: string,
+): Record<string, unknown> {
+  if (value === undefined) {
+    return {};
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`Provider options ${name} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function hash(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 function stripUnsupportedParts(

@@ -1,10 +1,18 @@
 import { randomUUID } from 'node:crypto';
 
-import type { AgentFinishReason, AgentUsage } from '@ello/agent';
+import type {
+  AgentFinishReason,
+  AgentUsage,
+  ModelCallCompletedEvent,
+} from '@ello/agent';
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 
 import type { CodingDatabase } from '../database.js';
-import { usagePriceSnapshots, usageRecords } from '../schema.js';
+import {
+  usageModelCalls,
+  usagePriceSnapshots,
+  usageRecords,
+} from '../schema.js';
 
 export type UsageInvocation = 'tui' | 'run' | 'tool' | 'test' | 'unknown';
 export type UsageStatus = 'completed' | 'failed' | 'interrupted';
@@ -60,6 +68,14 @@ export interface UsageSummaryRow {
   readonly toolCalls: number;
   readonly estimatedCostUsd: number;
   readonly runs: number;
+  readonly cacheReadRatio?: number;
+  readonly cacheWriteRatio?: number;
+  readonly uncachedInputTokens: number;
+}
+
+export interface UsageModelCallRecord extends ModelCallCompletedEvent {
+  readonly id: string;
+  readonly createdAt: string;
 }
 
 export interface PriceSnapshotInput {
@@ -81,6 +97,99 @@ export interface PriceSnapshotInput {
  */
 export class UsageRepository {
   constructor(private readonly db: CodingDatabase) {}
+
+  recordModelCall(input: ModelCallCompletedEvent): UsageModelCallRecord {
+    if (!Number.isFinite(input.durationMs) || input.durationMs < 0) {
+      throw new Error('Model call durationMs must be a non-negative number.');
+    }
+    const row = {
+      id: randomUUID(),
+      runId: input.runId,
+      turnIndex: input.turnIndex,
+      provider: input.provider,
+      model: input.model,
+      finishReason: input.finishReason,
+      inputTokens: input.usage.inputTokens,
+      outputTokens: input.usage.outputTokens,
+      cacheReadTokens: input.usage.cacheReadTokens,
+      cacheWriteTokens: input.usage.cacheWriteTokens,
+      durationMs: input.durationMs,
+      systemFingerprint: input.systemFingerprint,
+      toolsetFingerprint: input.toolsetFingerprint,
+      messagePrefixFingerprint: input.messagePrefixFingerprint,
+      compactionBoundary: input.compactionBoundary,
+      createdAt: new Date().toISOString(),
+    };
+    this.db.insert(usageModelCalls).values(row).run();
+    return { ...input, id: row.id, createdAt: row.createdAt };
+  }
+
+  listModelCalls(runId: string): readonly UsageModelCallRecord[] {
+    return this.db
+      .select()
+      .from(usageModelCalls)
+      .where(eq(usageModelCalls.runId, runId))
+      .orderBy(asc(usageModelCalls.turnIndex))
+      .all()
+      .map((row) => ({
+        id: row.id,
+        runId: row.runId,
+        turnIndex: row.turnIndex,
+        provider: row.provider,
+        model: row.model,
+        finishReason: row.finishReason as AgentFinishReason,
+        usage: {
+          requests: 1,
+          inputTokens: row.inputTokens,
+          outputTokens: row.outputTokens,
+          cacheReadTokens: row.cacheReadTokens,
+          cacheWriteTokens: row.cacheWriteTokens,
+          toolCalls: 0,
+        },
+        durationMs: row.durationMs,
+        systemFingerprint: row.systemFingerprint,
+        toolsetFingerprint: row.toolsetFingerprint,
+        messagePrefixFingerprint: row.messagePrefixFingerprint,
+        compactionBoundary: row.compactionBoundary,
+        createdAt: row.createdAt,
+      }));
+  }
+
+  recordRunSummary(
+    input: Omit<RecordUsageInput, 'usage'> & {
+      readonly runId: string;
+      readonly toolCalls: number;
+    },
+  ): UsageRecord {
+    const aggregate = this.db
+      .select({
+        requests: sql<number>`count(*)`,
+        inputTokens: sql<number>`coalesce(sum(${usageModelCalls.inputTokens}), 0)`,
+        outputTokens: sql<number>`coalesce(sum(${usageModelCalls.outputTokens}), 0)`,
+        cacheReadTokens: sql<number>`coalesce(sum(${usageModelCalls.cacheReadTokens}), 0)`,
+        cacheWriteTokens: sql<number>`coalesce(sum(${usageModelCalls.cacheWriteTokens}), 0)`,
+      })
+      .from(usageModelCalls)
+      .where(eq(usageModelCalls.runId, input.runId))
+      .get();
+    if (aggregate === undefined) {
+      throw new Error(
+        `Failed to aggregate model calls for run ${input.runId}.`,
+      );
+    }
+    const { toolCalls, ...record } = input;
+    return this.recordUsage({
+      ...record,
+      usage: {
+        requests: Number(aggregate.requests),
+        inputTokens: Number(aggregate.inputTokens),
+        outputTokens: Number(aggregate.outputTokens),
+        cacheReadTokens: Number(aggregate.cacheReadTokens),
+        cacheWriteTokens: Number(aggregate.cacheWriteTokens),
+        toolCalls,
+      },
+    });
+  }
 
   recordUsage(input: RecordUsageInput): UsageRecord {
     const now = new Date().toISOString();
@@ -150,17 +259,29 @@ export class UsageRepository {
       .groupBy(keyExpr)
       .orderBy(asc(keyExpr))
       .all();
-    return rows.map((row) => ({
-      key: row.key,
-      requests: Number(row.requests),
-      inputTokens: Number(row.inputTokens),
-      outputTokens: Number(row.outputTokens),
-      cacheReadTokens: Number(row.cacheReadTokens),
-      cacheWriteTokens: Number(row.cacheWriteTokens),
-      toolCalls: Number(row.toolCalls),
-      estimatedCostUsd: Number(row.estimatedCostUsd),
-      runs: Number(row.runs),
-    }));
+    return rows.map((row) => {
+      const inputTokens = Number(row.inputTokens);
+      const cacheReadTokens = Number(row.cacheReadTokens);
+      const cacheWriteTokens = Number(row.cacheWriteTokens);
+      return {
+        key: row.key,
+        requests: Number(row.requests),
+        inputTokens,
+        outputTokens: Number(row.outputTokens),
+        cacheReadTokens,
+        cacheWriteTokens,
+        toolCalls: Number(row.toolCalls),
+        estimatedCostUsd: Number(row.estimatedCostUsd),
+        runs: Number(row.runs),
+        ...(inputTokens > 0
+          ? {
+              cacheReadRatio: cacheReadTokens / inputTokens,
+              cacheWriteRatio: cacheWriteTokens / inputTokens,
+            }
+          : {}),
+        uncachedInputTokens: inputTokens - cacheReadTokens,
+      };
+    });
   }
 
   upsertPriceSnapshot(input: PriceSnapshotInput): string {

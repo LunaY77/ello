@@ -52,6 +52,7 @@ describe('global coding storage', () => {
         { version: 1, name: 'initial' },
         { version: 2, name: 'task-boards' },
         { version: 3, name: 'artifacts' },
+        { version: 4, name: 'usage-model-calls' },
       ]);
     } finally {
       storage.close();

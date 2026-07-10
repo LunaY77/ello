@@ -1137,7 +1137,10 @@ class CodingSessionImpl implements CodingSession {
         messageTransforms: [contentReplacementTransform],
         providerOptions: () => providerOptionsForRole(primaryRole),
         prepare: (input) =>
-          prepareModelInputForRuntimeModel(primaryRole.model, input),
+          prepareModelInputForRuntimeModel(primaryRole.model, input, {
+            promptProfile: config.context.system_prompt_profile,
+            workspaceIdentity: config.cwd,
+          }),
       },
       ...(this.deps.modelAdapter !== undefined
         ? { modelAdapter: this.deps.modelAdapter }

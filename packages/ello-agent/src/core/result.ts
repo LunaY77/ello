@@ -7,6 +7,11 @@ import type {
   SessionCompactionReport,
 } from '../public/types.js';
 
+import {
+  fingerprintMessagePrefix,
+  fingerprintSystem,
+  fingerprintToolset,
+} from './fingerprints.js';
 import type { LoopStopReason, RunSession } from './run-session.js';
 
 /**
@@ -139,5 +144,9 @@ function emptyModelInputDiagnostics(): ModelInputDiagnostics {
     messageCount: 0,
     hasProviderOptions: false,
     appliedMessageTransforms: [],
+    systemFingerprint: fingerprintSystem(undefined),
+    toolsetFingerprint: fingerprintToolset({}),
+    messagePrefixFingerprint: fingerprintMessagePrefix([]),
+    compactionBoundary: false,
   };
 }

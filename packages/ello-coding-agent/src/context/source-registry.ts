@@ -23,7 +23,7 @@ export interface ContextSource {
   readonly origin?: string;
   readonly tokensEstimate?: number;
   /**
-   * stale=true 表示内容来自缓存或上一次观测，仍可作为参考，但不能当作当前事实。
+   * stale=true 表示刷新失败后使用了过期缓存，仍可作为参考，但不能当作当前事实。
    * TUI 和诊断层需要显式展示 stale 状态，避免用户误以为它是实时读取结果。
    */
   readonly stale?: boolean;
@@ -93,17 +93,9 @@ export async function loadContextBundle(
   const sources: ContextSource[] = [];
   const diagnostics: ContextDiagnostic[] = [];
   for (const loader of loaders) {
-    try {
-      const result = await loader();
-      sources.push(...result.sources);
-      diagnostics.push(...(result.diagnostics ?? []));
-    } catch (error) {
-      diagnostics.push({
-        level: 'error',
-        origin: 'context-loader',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const result = await loader();
+    sources.push(...result.sources);
+    diagnostics.push(...(result.diagnostics ?? []));
   }
 
   const deduped = dedupeSources(sources).sort(compareSource);

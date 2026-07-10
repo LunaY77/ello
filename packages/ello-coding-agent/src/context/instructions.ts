@@ -43,13 +43,9 @@ export async function loadInstructionSources(
       continue;
     }
 
-    const matches = await resolveInstructionPaths(
-      config.cwd,
-      spec,
-      diagnostics,
-    );
+    const matches = await resolveInstructionPaths(config.cwd, spec);
     for (const file of matches) {
-      const text = await readInstructionFile(file, diagnostics);
+      const text = await readInstructionFile(file);
       if (text === null || !text.trim()) {
         continue;
       }
@@ -79,12 +75,11 @@ export async function loadInstructionSources(
  * 新 pipeline 以 {@link loadInstructionSources} 为准；这里保留给外部调用方和测试。
  */
 export async function loadProjectInstructions(cwd: string): Promise<string> {
-  const diagnostics: ContextDiagnostic[] = [];
   const candidates = ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'];
   const parts = await Promise.all(
     candidates.map(async (candidate) => {
       const file = path.resolve(cwd, candidate);
-      const text = await readInstructionFile(file, diagnostics);
+      const text = await readInstructionFile(file);
       return text !== null && text.trim()
         ? `# ${candidate}\n${text.trim()}`
         : null;
@@ -117,7 +112,6 @@ function instructionSpecs(config: CodingAgentConfig): InstructionSpec[] {
 async function resolveInstructionPaths(
   cwd: string,
   spec: InstructionSpec,
-  diagnostics: ContextDiagnostic[],
 ): Promise<string[]> {
   const expanded = expandHome(spec.value);
   const base = spec.bucket === 'global' ? homedir() : cwd;
@@ -128,31 +122,17 @@ async function resolveInstructionPaths(
     return [resolved];
   }
 
-  try {
-    const pattern = path.isAbsolute(expanded)
-      ? normalizeGlobPath(expanded)
-      : normalizeGlobPath(expanded);
-    const matches = await glob(pattern, {
-      cwd: path.isAbsolute(expanded) ? '/' : base,
-      absolute: true,
-      dot: true,
-      onlyFiles: true,
-    });
-    return matches.map((item: string) => path.resolve(item)).sort();
-  } catch (error) {
-    diagnostics.push({
-      level: 'warn',
-      origin: spec.value,
-      message: `Failed to expand instruction glob: ${errorMessage(error)}`,
-    });
-    return [];
-  }
+  const pattern = normalizeGlobPath(expanded);
+  const matches = await glob(pattern, {
+    cwd: path.isAbsolute(expanded) ? '/' : base,
+    absolute: true,
+    dot: true,
+    onlyFiles: true,
+  });
+  return matches.map((item: string) => path.resolve(item)).sort();
 }
 
-async function readInstructionFile(
-  file: string,
-  diagnostics: ContextDiagnostic[],
-): Promise<string | null> {
+async function readInstructionFile(file: string): Promise<string | null> {
   try {
     return await readFile(file, 'utf8');
   } catch (error) {
@@ -160,12 +140,9 @@ async function readInstructionFile(
     if (code === 'ENOENT') {
       return null;
     }
-    diagnostics.push({
-      level: 'warn',
-      origin: file,
-      message: `Failed to read instruction file: ${errorMessage(error)}`,
+    throw new Error(`Failed to read instruction file: ${file}`, {
+      cause: error,
     });
-    return null;
   }
 }
 
@@ -184,7 +161,6 @@ async function loadUrlInstruction(
           content: cached.text,
           origin: spec.value,
           tokensEstimate: estimateTextTokens(cached.text),
-          stale: true,
         },
       ],
     };
@@ -195,16 +171,11 @@ async function loadUrlInstruction(
       signal: AbortSignal.timeout(URL_TIMEOUT_MS),
     });
     if (!response.ok) {
-      return {
-        sources: [],
-        diagnostics: [
-          {
-            level: 'warn',
-            origin: spec.value,
-            message: `Instruction URL returned HTTP ${response.status}`,
-          },
-        ],
-      };
+      return staleUrlResult(
+        spec,
+        cached,
+        `Instruction URL returned HTTP ${response.status}`,
+      );
     }
     const text = (await response.text()).slice(0, MAX_URL_CHARS).trim();
     URL_CACHE.set(spec.value, { text, at: Date.now() });
@@ -224,17 +195,37 @@ async function loadUrlInstruction(
         : [],
     };
   } catch (error) {
-    return {
-      sources: [],
-      diagnostics: [
-        {
-          level: 'warn',
-          origin: spec.value,
-          message: `Failed to fetch instruction URL: ${errorMessage(error)}`,
-        },
-      ],
-    };
+    return staleUrlResult(
+      spec,
+      cached,
+      `Failed to fetch instruction URL: ${errorMessage(error)}`,
+    );
   }
+}
+
+function staleUrlResult(
+  spec: InstructionSpec,
+  cached: { readonly text: string; readonly at: number } | undefined,
+  message: string,
+): ContextSourceLoadResult {
+  if (cached === undefined) {
+    throw new Error(message);
+  }
+  return {
+    sources: [
+      {
+        id: `instruction:${spec.value}`,
+        type: 'instruction',
+        title: `Instruction URL: ${spec.value}`,
+        priority: spec.priority,
+        content: cached.text,
+        origin: spec.value,
+        tokensEstimate: estimateTextTokens(cached.text),
+        stale: true,
+      },
+    ],
+    diagnostics: [{ level: 'warn', origin: spec.value, message }],
+  };
 }
 
 function dedupeByOrigin(

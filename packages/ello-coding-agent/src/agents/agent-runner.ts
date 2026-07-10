@@ -174,7 +174,10 @@ export function createSubagentAgent(input: {
           modelInput: {
             providerOptions: () => providerOptionsForRole(binding),
             prepare: (input: ModelInput) =>
-              prepareModelInputForRuntimeModel(binding.model, input),
+              prepareModelInputForRuntimeModel(binding.model, input, {
+                promptProfile: 'subagent',
+                workspaceIdentity: deps.config.cwd,
+              }),
           },
         }
       : { modelAdapter: deps.modelAdapter }),
