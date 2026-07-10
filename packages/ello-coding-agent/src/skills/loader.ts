@@ -32,7 +32,9 @@ export async function loadSkillsFromDir(
   dir: string,
   source: SkillSource,
 ): Promise<AgentSkill[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
+  const entries = (await readdir(dir, { withFileTypes: true })).sort(
+    (left, right) => left.name.localeCompare(right.name),
+  );
   const skills: AgentSkill[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) {

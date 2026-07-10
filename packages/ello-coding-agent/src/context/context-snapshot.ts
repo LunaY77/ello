@@ -20,6 +20,8 @@ export interface ContextSnapshotDeps {
 
 export interface ContextSnapshotView extends ContextBundle {
   readonly fingerprint: string;
+  readonly stableSystem: string;
+  readonly dynamicSystem: string;
 }
 
 /**
@@ -40,12 +42,16 @@ export class ContextSnapshot {
     const stable = await this.loadStableBundle();
     const active = await loadActiveSkillsSource(this.deps);
     const sources = [...stable.sources, ...active.sources].sort(compareSource);
+    const stableSystem = renderContextSources(stable.sources);
+    const dynamicSystem = renderContextSources(active.sources);
     const diagnostics = [...stable.diagnostics, ...(active.diagnostics ?? [])];
     this.emitActiveSkillChange(active.sources);
     return {
       sources,
-      system: renderContextSources(sources),
+      system: [stableSystem, dynamicSystem].filter(Boolean).join('\n\n'),
       diagnostics,
+      stableSystem,
+      dynamicSystem,
       fingerprint: snapshotFingerprint({
         promptProfile: this.promptProfile,
         basePromptHash: this.basePromptHash,
@@ -84,7 +90,7 @@ async function loadEnvironmentSource(
 ): Promise<ContextSourceLoadResult> {
   const allowed =
     config.allowedPaths.length > 0
-      ? config.allowedPaths.join('\n')
+      ? [...config.allowedPaths].sort().join('\n')
       : config.cwd;
   const content = [
     '<file-system>',

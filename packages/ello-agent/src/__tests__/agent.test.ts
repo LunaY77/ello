@@ -258,6 +258,42 @@ describe('createAgent', () => {
     await agent.close();
   });
 
+  it('按工具名稳定发送 toolset，并拒绝重复名称', async () => {
+    const seen: string[][] = [];
+    const adapter: ModelAdapter = {
+      generate: (request) => new EchoAdapter().generate(request),
+      async *stream(request) {
+        seen.push(Object.keys(request.tools));
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+    const makeTool = (name: string) =>
+      defineTool({
+        name,
+        description: name,
+        input: z.object({}),
+        execute: () => name,
+      });
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: adapter,
+      tools: [makeTool('zeta'), makeTool('alpha')],
+    });
+
+    await agent.run('hi');
+    expect(seen).toEqual([['alpha', 'zeta']]);
+    await agent.close();
+
+    const duplicate = createAgent({
+      model: 'test:model',
+      modelAdapter: adapter,
+      tools: [makeTool('same'), makeTool('same')],
+    });
+    await expect(duplicate.run('hi')).rejects.toThrow(
+      'Duplicate agent tool name: same',
+    );
+  });
+
   it('uses local environment and session store', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ello-agent-'));
     dirs.push(dir);

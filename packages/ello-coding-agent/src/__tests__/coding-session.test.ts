@@ -159,6 +159,29 @@ describe('createCodingSession', () => {
     expect(completed).not.toHaveProperty('result');
   });
 
+  it('把 primary agent 的专属指令放入稳定 system 前缀', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({ cwd, sessionDir });
+    const systems: string[] = [];
+    const adapter: ModelAdapter = {
+      async generate(request) {
+        systems.push(request.system ?? '');
+        return new TextAdapter('planned').generate(request);
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+    const session = await createCodingSession({ config, modelAdapter: adapter });
+
+    await session.setAgent('plan');
+    await session.submit('inspect only');
+    await session.close();
+
+    expect(systems).toContainEqual(expect.stringContaining('You are in plan mode'));
+  });
+
   it('rejects removed session event entries', async () => {
     const cwd = await tempDir();
     const sessionDir = await tempDir();

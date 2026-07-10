@@ -98,7 +98,16 @@ export async function runInternalAgent(input: {
       : {}),
     ...(input.modelAdapter !== undefined
       ? { modelAdapter: input.modelAdapter }
-      : {}),
+      : {
+          modelInput: {
+            providerOptions: () => providerOptionsForRole(binding),
+            prepare: (modelInput: ModelInput) =>
+              prepareModelInputForRuntimeModel(binding.model, modelInput, {
+                promptProfile: `internal:${input.definition.name}`,
+                workspaceIdentity: input.config.cwd,
+              }),
+          },
+        }),
   });
   try {
     const result = await agent.run(input.prompt);

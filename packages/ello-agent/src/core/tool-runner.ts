@@ -54,7 +54,13 @@ export class AgentApprovalRequiredError extends Error {
  */
 export function buildToolSet(options: BuildToolSetOptions): ToolSet {
   const result: ToolSet = {};
-  for (const agentTool of options.tools) {
+  const tools = [...options.tools].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
+  for (const agentTool of tools) {
+    if (result[agentTool.name] !== undefined) {
+      throw new Error(`Duplicate agent tool name: ${agentTool.name}`);
+    }
     result[agentTool.name] = tool({
       description: agentTool.description,
       inputSchema: agentTool.input,

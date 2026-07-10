@@ -8,6 +8,7 @@ import nunjucks from 'nunjucks';
 
 import type { CodingAgentConfig } from '../config/index.js';
 
+import { wrapDynamicSystemContent } from './cache-layout.js';
 import {
   ContextSnapshot,
   type ContextSnapshotDeps,
@@ -86,19 +87,23 @@ export function createCodingSystemPromptSection(
       snapshots.set(run, snapshot);
     }
     const context = await snapshot.render();
-    return renderPromptTemplate(profile, {
-      model: runtime.model,
-      context_bundle: context.system,
-      context_sources: context.sources,
-    });
+    const stable = [
+      renderPromptTemplate(profile, { model: runtime.model }),
+      context.stableSystem,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    return context.dynamicSystem === ''
+      ? stable
+      : `${stable}\n\n${wrapDynamicSystemContent(context.dynamicSystem)}`;
   };
 }
 
 /**
  * 构造 coding-agent 的动态 context bundle。
  *
- * 这里保留 source registry 的加载、去重、排序和诊断能力；最终注入位置由
- * `coding.md` 的 Nunjucks 模板决定，而不是再额外拼一个 system section。
+ * 这里保留 source registry 的加载、去重、排序和诊断能力；调用方可独立读取
+ * bundle，运行时则由稳定 prompt section 统一装配。
  */
 export function buildContextBundle(
   config: CodingAgentConfig,

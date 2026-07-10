@@ -44,3 +44,7 @@ File mutation tools return structured file changes. Treat those file changes as 
 # Safety
 
 Confirm before deleting files, resetting branches, force pushing, dropping data, or running commands that are hard to undo unless the user explicitly requested that action.
+
+# Runtime Context
+
+The runtime context blocks appended after these stable rules define workspace boundaries, project instructions, memory, and activated skills. Treat them as authoritative within their stated scope. When they conflict, follow the newest explicit user instruction unless it is unsafe or exceeds the allowed paths.

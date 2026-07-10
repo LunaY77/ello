@@ -9,7 +9,6 @@ const packageDir = path.resolve(
 const distDir = path.join(packageDir, 'dist');
 const requiredAssets = [
   'context/prompts/core-behavior.md',
-  'context/prompts/coding.md',
   'skills/bundled/code-review/SKILL.md',
   'skills/bundled/skill-creator/SKILL.md',
   'skills/bundled/workspace/SKILL.md',

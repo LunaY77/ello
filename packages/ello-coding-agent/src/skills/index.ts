@@ -47,7 +47,9 @@ function dedupeByName(skills: readonly AgentSkill[]): AgentSkill[] {
   for (const skill of skills) {
     byName.set(skill.name, skill);
   }
-  return [...byName.values()];
+  return [...byName.values()].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
 }
 
 export function formatSkillList(skills: readonly AgentSkill[]): string {

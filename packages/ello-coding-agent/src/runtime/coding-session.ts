@@ -39,6 +39,7 @@ import {
 } from '../agents/index.js';
 import { CheckpointStore } from '../change/checkpoint.js';
 import type { CodingAgentConfig, ProfileSuiteConfig } from '../config/index.js';
+import { dynamicSystemSection } from '../context/cache-layout.js';
 import {
   createCompactionPort,
   renderCompactConversation,
@@ -1092,26 +1093,31 @@ class CodingSessionImpl implements CodingSession {
     });
 
     const sections = [
+      skillIndexContext({
+        skills: runtime.skills,
+        contextWindow: DEFAULT_CONTEXT_WINDOW,
+      }),
       createCodingSystemPromptSection(config, {
         model: primaryRole.ref,
         activeSkills: () => [...this.activeSkills],
         onContextEvent: (event) => this.emit(event),
       }),
-      activeSkillsContext({
-        skills: runtime.skills,
-        active: this.activeSkills,
-        activation: 'activated',
-      }),
-      skillIndexContext({
-        skills: runtime.skills,
-        contextWindow: DEFAULT_CONTEXT_WINDOW,
-      }),
-      memorySection,
+      dynamicSystemSection(
+        activeSkillsContext({
+          skills: runtime.skills,
+          active: this.activeSkills,
+          activation: 'activated',
+        }),
+      ),
+      dynamicSystemSection(memorySection),
     ];
 
     return createAgent({
       name: `ello-${this.activeAgentName}`,
       model: agentModel,
+      ...(agentDef.prompt !== undefined
+        ? { instructions: agentDef.prompt }
+        : {}),
       modelSettings: modelSettingsFromRole(primaryRole),
       environment: createRuntimeEnvironment(
         config,

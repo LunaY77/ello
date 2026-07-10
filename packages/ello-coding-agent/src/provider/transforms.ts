@@ -2,6 +2,11 @@ import { createHash } from 'node:crypto';
 
 import type { AgentMessage, ModelInput } from '@ello/agent';
 
+import {
+  joinSystemCacheSegments,
+  splitSystemCacheSegments,
+} from '../context/cache-layout.js';
+
 import type { ModelModality, RuntimeModel, RuntimeRoleModel } from './types.js';
 
 /** 根据模型 catalog 能力生成本轮 providerOptions。 */
@@ -34,9 +39,6 @@ export function prepareModelInputForRuntimeModel(
   const messages = input.messages.map((message) =>
     stripUnsupportedParts(model, message),
   );
-  const messagesChanged = messages.some(
-    (message, index) => message !== input.messages[index],
-  );
   const transformed: ModelInput = {
     ...input,
     messages,
@@ -44,16 +46,26 @@ export function prepareModelInputForRuntimeModel(
       ? {}
       : { tools: {}, activeTools: [] as readonly string[] }),
   };
+  const cacheSegments =
+    transformed.system === undefined
+      ? { stable: '', dynamic: '' }
+      : splitSystemCacheSegments(transformed.system);
+  const normalized = {
+    ...transformed,
+    ...(transformed.system !== undefined
+      ? { system: joinSystemCacheSegments(cacheSegments) }
+      : {}),
+  };
   if (model.providerKind === 'anthropic') {
-    return addAnthropicCacheBreakpoint(transformed);
+    return addAnthropicCacheBreakpoints(normalized, cacheSegments);
   }
   if (
     model.providerKind === 'openai' ||
     model.providerKind === 'openai-compatible'
   ) {
-    return addOpenAiPromptCacheKey(model, transformed, cache);
+    return addOpenAiPromptCacheKey(model, normalized, cache, cacheSegments);
   }
-  return messagesChanged ? transformed : input;
+  return normalized;
 }
 
 function addOpenAiPromptCacheKey(
@@ -63,6 +75,7 @@ function addOpenAiPromptCacheKey(
     readonly promptProfile: string;
     readonly workspaceIdentity: string;
   },
+  cacheSegments: { readonly stable: string; readonly dynamic: string },
 ): ModelInput {
   if (input.diagnostics === undefined) {
     throw new Error('Model input diagnostics are required for prompt caching.');
@@ -79,6 +92,7 @@ function addOpenAiPromptCacheKey(
       cache.promptProfile,
       cache.workspaceIdentity,
       toolsetFingerprint,
+      hash(cacheSegments.stable),
     ].join('\n'),
   );
   return {
@@ -90,45 +104,76 @@ function addOpenAiPromptCacheKey(
   };
 }
 
-function addAnthropicCacheBreakpoint(input: ModelInput): ModelInput {
-  if (input.system === undefined) {
+function addAnthropicCacheBreakpoints(
+  input: ModelInput,
+  cacheSegments: { readonly stable: string; readonly dynamic: string },
+): ModelInput {
+  if (input.system === undefined || cacheSegments.stable === '') {
     throw new Error('Anthropic cache breakpoint requires a system prompt.');
   }
-  const { stable, dynamic } = splitDynamicContext(input.system);
+  const conversation = addConversationCacheBreakpoint(input.messages);
   const messages: AgentMessage[] = [
     {
       role: 'system',
-      content: stable,
+      content: cacheSegments.stable,
       providerOptions: {
-        anthropic: { cacheControl: { type: 'ephemeral' } },
+        // 稳定规则和工具契约使用 1h TTL，避免长时间工具执行后基础前缀失效。
+        anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } },
       },
     },
-    ...(dynamic === '' ? [] : [{ role: 'system' as const, content: dynamic }]),
-    ...input.messages,
+    ...(cacheSegments.dynamic === ''
+      ? []
+      : [{ role: 'system' as const, content: cacheSegments.dynamic }]),
+    ...conversation,
   ];
   const { system: _system, ...withoutSystem } = input;
-  return { ...withoutSystem, messages };
+  return {
+    ...withoutSystem,
+    messages,
+  };
 }
 
-function splitDynamicContext(system: string): {
-  readonly stable: string;
-  readonly dynamic: string;
-} {
-  const dynamicBlocks: string[] = [];
-  const stable = system
-    .replace(
-      /<(skill|memory)-context\b[^>]*>[\s\S]*?<\/\1-context>|<skill\b[^>]*>[\s\S]*?<\/skill>/gu,
-      (block) => {
-        dynamicBlocks.push(block);
-        return '';
-      },
-    )
-    .replace(/\n{3,}/gu, '\n\n')
-    .trim();
-  if (stable === '') {
-    throw new Error('Anthropic stable system prefix is empty.');
+function addConversationCacheBreakpoint(
+  messages: readonly AgentMessage[],
+): AgentMessage[] {
+  if (messages.length === 0) {
+    return [];
   }
-  return { stable, dynamic: dynamicBlocks.join('\n\n') };
+  const frontier = messages.length - 1;
+  return messages.map((message, index) =>
+    index === frontier ? addMessageCacheControl(message) : message,
+  );
+}
+
+function addMessageCacheControl(message: AgentMessage): AgentMessage {
+  const record = message as AgentMessage & {
+    readonly providerOptions?: Record<string, unknown>;
+  };
+  const providerOptions = optionalOptionsRecord(
+    record.providerOptions,
+    'message',
+  );
+  const anthropic = optionalOptionsRecord(
+    providerOptions.anthropic,
+    'message.anthropic',
+  );
+  if (
+    anthropic.cacheControl !== undefined ||
+    anthropic.cache_control !== undefined
+  ) {
+    throw new Error('Anthropic message cache policy is owned by coding-agent.');
+  }
+  return {
+    ...message,
+    providerOptions: {
+      ...providerOptions,
+      anthropic: {
+        ...anthropic,
+        // 会话前沿每轮推进，使用 5m TTL 控制高频写入成本。
+        cacheControl: { type: 'ephemeral', ttl: '5m' },
+      },
+    },
+  } as AgentMessage;
 }
 
 function optionalOptionsRecord(

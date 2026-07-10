@@ -1,6 +1,10 @@
 import type { ModelInput } from '@ello/agent';
 import { describe, expect, it } from 'vitest';
 
+import {
+  splitSystemCacheSegments,
+  wrapDynamicSystemContent,
+} from '../context/cache-layout.js';
 import { prepareModelInputForRuntimeModel } from '../provider/transforms.js';
 import type { RuntimeModel } from '../provider/types.js';
 
@@ -16,29 +20,92 @@ const diagnostics = {
 };
 
 describe('provider cache transforms', () => {
-  it('OpenAI promptCacheKey 不包含 runId，并随 toolset fingerprint 变化', () => {
+  it('cache layout 只允许稳定前缀后连续追加动态段', () => {
+    const system = [
+      'stable prefix',
+      wrapDynamicSystemContent('active skill'),
+      wrapDynamicSystemContent('memory'),
+    ].join('\n\n');
+
+    expect(splitSystemCacheSegments(system)).toEqual({
+      stable: 'stable prefix',
+      dynamic: 'active skill\n\nmemory',
+    });
+    expect(() =>
+      splitSystemCacheSegments(
+        `stable prefix\n\n${wrapDynamicSystemContent('active skill')}\n\nstable suffix`,
+      ),
+    ).toThrow('Stable system content must not follow dynamic context.');
+  });
+
+  it('OpenAI key 隔离稳定指令集，但不随动态 skill 变化', () => {
     const model = runtimeModel('openai');
     const first = prepareModelInputForRuntimeModel(
       model,
-      modelInput(diagnostics),
+      modelInput(diagnostics, {
+        system: cacheSystem('stable rule A', 'skill review'),
+      }),
       { promptProfile: 'coding', workspaceIdentity: '/workspace' },
     );
-    const second = prepareModelInputForRuntimeModel(
+    const dynamicChanged = prepareModelInputForRuntimeModel(
       model,
-      modelInput({ ...diagnostics, toolsetFingerprint: 'x'.repeat(64) }),
+      modelInput(diagnostics, {
+        system: cacheSystem('stable rule A', 'skill verify'),
+      }),
+      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+    );
+    const instructionChanged = prepareModelInputForRuntimeModel(
+      model,
+      modelInput(diagnostics, {
+        system: cacheSystem('stable rule B', 'skill verify'),
+      }),
+      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+    );
+    const historyGrew = prepareModelInputForRuntimeModel(
+      model,
+      modelInput(diagnostics, {
+        system: cacheSystem('stable rule A', 'skill review'),
+        messages: Array.from({ length: 40 }, (_, index) => ({
+          role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+          content: `message-${index}`,
+        })),
+      }),
       { promptProfile: 'coding', workspaceIdentity: '/workspace' },
     );
 
     const firstKey = readPromptCacheKey(first);
     expect(firstKey).toHaveLength(64);
     expect(firstKey).not.toContain('run');
-    expect(readPromptCacheKey(second)).not.toBe(firstKey);
+    expect(readPromptCacheKey(dynamicChanged)).toBe(firstKey);
+    expect(readPromptCacheKey(historyGrew)).toBe(firstKey);
+    expect(readPromptCacheKey(instructionChanged)).not.toBe(firstKey);
   });
 
-  it('Anthropic 把稳定 system 放在 cache breakpoint 前，skill 放在后面', () => {
+  it('OpenAI key 随工具契约变化', () => {
+    const model = runtimeModel('openai');
+    const changedTools = prepareModelInputForRuntimeModel(
+      model,
+      modelInput({ ...diagnostics, toolsetFingerprint: 'x'.repeat(64) }),
+      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+    );
+    const baseline = prepareModelInputForRuntimeModel(
+      model,
+      modelInput(diagnostics),
+      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+    );
+    expect(readPromptCacheKey(changedTools)).not.toBe(
+      readPromptCacheKey(baseline),
+    );
+  });
+
+  it('Anthropic 缓存稳定 system/tool 前缀和长会话前沿', () => {
     const input = modelInput(diagnostics, {
-      system:
-        'stable prefix\n\n<skill-context id="skills:active" title="Active skills">\n- review\n</skill-context>\n\nstable suffix',
+      system: cacheSystem('stable prefix', 'skill review'),
+      messages: [
+        { role: 'user', content: 'first instruction' },
+        { role: 'assistant', content: 'first result' },
+        { role: 'user', content: 'next instruction' },
+      ],
     });
     const transformed = prepareModelInputForRuntimeModel(
       runtimeModel('anthropic'),
@@ -50,15 +117,41 @@ describe('provider cache transforms', () => {
     expect(transformed.messages[0]).toMatchObject({
       role: 'system',
       providerOptions: {
-        anthropic: { cacheControl: { type: 'ephemeral' } },
+        anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } },
       },
     });
-    expect(JSON.stringify(transformed.messages[0])).not.toContain(
-      'skill-context',
+    expect(JSON.stringify(transformed.messages[0])).not.toContain('skill review');
+    expect(JSON.stringify(transformed.messages[1])).toContain('skill review');
+    expect(transformed.messages.at(-1)).toMatchObject({
+      providerOptions: {
+        anthropic: { cacheControl: { type: 'ephemeral', ttl: '5m' } },
+      },
+    });
+  });
+
+  it('Anthropic 动态上下文变化不改变稳定 cache 前缀', () => {
+    const first = prepareModelInputForRuntimeModel(
+      runtimeModel('anthropic'),
+      modelInput(diagnostics, {
+        system: cacheSystem('stable rule', 'skill review'),
+      }),
+      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
     );
-    expect(JSON.stringify(transformed.messages[1])).toContain('skill-context');
+    const second = prepareModelInputForRuntimeModel(
+      runtimeModel('anthropic'),
+      modelInput(diagnostics, {
+        system: cacheSystem('stable rule', 'skill verify'),
+      }),
+      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+    );
+
+    expect(first.messages[0]).toEqual(second.messages[0]);
   });
 });
+
+function cacheSystem(stable: string, dynamic: string): string {
+  return `${stable}\n\n${wrapDynamicSystemContent(dynamic)}`;
+}
 
 function modelInput(
   inputDiagnostics: typeof diagnostics,
@@ -73,7 +166,9 @@ function modelInput(
   };
 }
 
-function runtimeModel(kind: 'openai' | 'anthropic'): RuntimeModel {
+function runtimeModel(
+  kind: 'openai' | 'anthropic' | 'openai-compatible',
+): RuntimeModel {
   return {
     ref: `${kind}/model-a`,
     providerId: kind,
