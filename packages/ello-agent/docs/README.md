@@ -10,7 +10,7 @@
 - `defineTool`
 - `environment`
 - `session`
-- `memory`
+- `modelInput.systemSections`
 - `observers`
 - `eventRecorder`
 - `modelInput`
@@ -56,7 +56,7 @@ await agent.close();
 
 1. 创建 `RunSession`
 2. `environment.setup(ctx)`
-3. 读取 session / memory / environment context
+3. 读取 session，并通过 `modelInput` 组装环境与产品上下文
 4. 构建 `ModelInput`
 5. 调用模型
 6. 执行工具
@@ -186,20 +186,13 @@ const agent = createAgent({
 
 ## Memory
 
-`memory` 负责检索长期记忆，并在 run 完成后接收观察事件。
+`@ello/agent` 不内置 memory 内容模型或存储协议。产品层通过现有扩展点组合长期记忆：
 
-```ts
-const agent = createAgent({
-  model: 'test:model',
-  memory: {
-    retrievePolicy: 'once-per-run',
-    retrieve: async () => [{ text: '用户偏好: 中文输出' }],
-    observe: async (event) => {
-      console.log(event.type);
-    },
-  },
-});
-```
+- `modelInput.systemSections` 注入本次 run 的记忆索引；
+- `tools` 提供检索与 revision-safe mutation；
+- `observers` 或产品运行时在 run 完成后排 durable extraction job。
+
+`@ello/coding-agent` 的文件型 memory 就建立在这三个边界上，topic 正文不会默认进入 model context。
 
 ## Observers
 
@@ -248,7 +241,7 @@ const agent = createAgent({
 - 环境能力放进 `environment`
 - 业务工具放进 `tools`
 - 历史持久化放进 `session`
-- 长期记忆放进 `memory`
+- 长期记忆在产品层组合 `modelInput.systemSections`、`tools` 与 durable job
 - 生命周期观测放进 `observers`
 - 产品事件持久化放进 `eventRecorder`
 - 输入组装放进 `modelInput`

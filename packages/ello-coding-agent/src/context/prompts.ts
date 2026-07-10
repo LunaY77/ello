@@ -7,6 +7,9 @@ import type { AgentRunContext } from '@ello/agent';
 import nunjucks from 'nunjucks';
 
 import type { CodingAgentConfig } from '../config/index.js';
+import { shouldIgnoreMemory } from '../memory/index-loader.js';
+import type { MemoryIndexLoader } from '../memory/index-loader.js';
+import { memoryRoots } from '../memory/paths.js';
 
 import { wrapDynamicSystemContent } from './cache-layout.js';
 import {
@@ -21,6 +24,7 @@ export interface ContextDeps {
   readonly activeSkills?: () => Promise<readonly string[]> | readonly string[];
   /** context pipeline 事件接收器，供 JSONL/TUI 观察 source 加载。 */
   readonly onContextEvent?: (event: ContextEvent) => void;
+  readonly memoryIndexLoader?: MemoryIndexLoader;
 }
 
 export interface CodingSystemPromptRuntime {
@@ -28,6 +32,7 @@ export interface CodingSystemPromptRuntime {
   readonly profile?: string;
   readonly activeSkills?: ContextDeps['activeSkills'];
   readonly onContextEvent?: (event: ContextEvent) => void;
+  readonly memoryIndexLoader?: MemoryIndexLoader;
 }
 
 /** 渲染 coding-agent 的 Markdown prompt 模板。 */
@@ -75,7 +80,14 @@ export function createCodingSystemPromptSection(
       ...(runtime.onContextEvent !== undefined
         ? { onContextEvent: runtime.onContextEvent }
         : {}),
+      ...(runtime.memoryIndexLoader !== undefined
+        ? { memoryIndexLoader: runtime.memoryIndexLoader }
+        : {}),
     };
+    const includeMemory =
+      config.context.memory.enabled &&
+      runtime.memoryIndexLoader !== undefined &&
+      !shouldIgnoreMemory(run.input);
     let snapshot = snapshots.get(run);
     if (snapshot === undefined) {
       snapshot = new ContextSnapshot(
@@ -83,12 +95,19 @@ export function createCodingSystemPromptSection(
         contextDeps,
         profile,
         createHash('sha256').update(loadPromptTemplate(profile)).digest('hex'),
+        includeMemory,
       );
       snapshots.set(run, snapshot);
     }
     const context = await snapshot.render();
     const stable = [
       renderPromptTemplate(profile, { model: runtime.model }),
+      includeMemory
+        ? renderPromptTemplate('memory', {
+            private_memory_dir: memoryRoots(config).private,
+            team_memory_dir: memoryRoots(config).team,
+          })
+        : '',
       context.stableSystem,
     ]
       .filter(Boolean)
@@ -115,6 +134,7 @@ export function buildContextBundle(
     deps,
     profile,
     createHash('sha256').update(loadPromptTemplate(profile)).digest('hex'),
+    config.context.memory.enabled && deps.memoryIndexLoader !== undefined,
   ).render();
 }
 

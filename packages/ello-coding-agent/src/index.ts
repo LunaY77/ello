@@ -13,9 +13,11 @@ export {
 
 export {
   createCodingSession,
+  type CodingMemoryStatus,
   type CodingSession,
   type CreateCodingSessionOptions,
 } from './runtime/coding-session.js';
+export type { MemoryJob, MemoryStatus } from './memory/index.js';
 export type {
   ApprovalDecision,
   CodingEventListener,

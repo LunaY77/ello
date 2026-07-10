@@ -168,6 +168,41 @@ export function reduceTuiEvent(
         text: `compaction completed: ${event.summarizedMessages} summarized, ${event.keptMessages} kept`,
       });
 
+    case 'memory.saved':
+      return appendHistory(state, {
+        kind: 'system',
+        id: `memory-saved-${state.history.length}`,
+        text: `memory ${event.operation}: ${event.scope}/${event.file}`,
+      });
+
+    case 'memory.extraction.started':
+    case 'memory.dream.started':
+      return state;
+
+    case 'memory.extraction.completed':
+      return event.changes === 0
+        ? state
+        : appendHistory(state, {
+            kind: 'system',
+            id: `memory-extraction-${state.history.length}`,
+            text: `memory saved: ${event.changes} change${event.changes === 1 ? '' : 's'}`,
+          });
+
+    case 'memory.dream.completed':
+      return appendHistory(state, {
+        kind: 'system',
+        id: `memory-dream-${state.history.length}`,
+        text: `dream completed: ${event.changes} changes\n${event.summary}`,
+      });
+
+    case 'memory.extraction.failed':
+    case 'memory.dream.failed':
+      return appendHistory(state, {
+        kind: 'diagnostic',
+        id: `memory-failed-${state.history.length}`,
+        text: `${event.type}: ${event.error}`,
+      });
+
     case 'ui.interrupted':
       return {
         ...state,

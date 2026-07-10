@@ -182,6 +182,19 @@ export const ContextToolResultBudgetConfigSchema = z.object({
 /** 文件型 memory 注入配置。 */
 export const ContextMemoryConfigSchema = z.object({
   enabled: z.boolean().default(false),
+  private_dir: z.string().default('~/.ello/memory/private'),
+  team_dir: z.string().default('.ello/memory/team'),
+  extraction: z
+    .object({
+      enabled: z.boolean().default(true),
+      recent_messages: z.number().int().positive().default(40),
+      max_attempts: z.number().int().positive().default(2),
+    })
+    .default({
+      enabled: true,
+      recent_messages: 40,
+      max_attempts: 2,
+    }),
 });
 
 /** context pipeline 总配置。 */
@@ -211,6 +224,13 @@ export const ContextConfigSchema = z.object({
   }),
   memory: ContextMemoryConfigSchema.default({
     enabled: false,
+    private_dir: '~/.ello/memory/private',
+    team_dir: '.ello/memory/team',
+    extraction: {
+      enabled: true,
+      recent_messages: 40,
+      max_attempts: 2,
+    },
   }),
 });
 
@@ -277,7 +297,16 @@ export const CodingAgentConfigSchema = z.object({
       enabled: false,
       max_chars: 20_000,
     },
-    memory: { enabled: false },
+    memory: {
+      enabled: false,
+      private_dir: '~/.ello/memory/private',
+      team_dir: '.ello/memory/team',
+      extraction: {
+        enabled: true,
+        recent_messages: 40,
+        max_attempts: 2,
+      },
+    },
   }),
   tui: z.boolean().default(true),
   json: z.boolean().default(false),

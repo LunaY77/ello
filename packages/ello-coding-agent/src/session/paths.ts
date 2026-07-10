@@ -76,8 +76,3 @@ export function projectSkillsDir(cwd: string): string {
 export function logsDir(): string {
   return path.join(globalDir(), 'logs');
 }
-
-/** 全局记忆目录：`~/.ello/memory`。 */
-export function memoryDir(): string {
-  return path.join(globalDir(), 'memory');
-}

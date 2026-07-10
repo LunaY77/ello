@@ -24,10 +24,7 @@ export function wrapDynamicSystemContent(content: string): string {
   if (normalized === '') {
     throw new Error('Dynamic system content must not be empty.');
   }
-  if (
-    normalized.includes(DYNAMIC_OPEN) ||
-    normalized.includes(DYNAMIC_CLOSE)
-  ) {
+  if (normalized.includes(DYNAMIC_OPEN) || normalized.includes(DYNAMIC_CLOSE)) {
     throw new Error('Dynamic system content contains a reserved cache tag.');
   }
   return `${DYNAMIC_OPEN}\n${normalized}\n${DYNAMIC_CLOSE}`;
@@ -66,9 +63,7 @@ export function splitSystemCacheSegments(system: string): SystemCacheSegments {
   return { stable, dynamic: dynamic.join('\n\n') };
 }
 
-export function joinSystemCacheSegments(
-  segments: SystemCacheSegments,
-): string {
+export function joinSystemCacheSegments(segments: SystemCacheSegments): string {
   return segments.dynamic === ''
     ? segments.stable
     : `${segments.stable}\n\n${segments.dynamic}`;

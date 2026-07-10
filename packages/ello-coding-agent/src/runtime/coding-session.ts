@@ -45,12 +45,17 @@ import {
   renderCompactConversation,
   serializeForCompact,
 } from '../context/compactor.js';
-import { createCodingMemory } from '../context/memory.js';
 import { createCodingSystemPromptSection } from '../context/prompts.js';
 import {
   createToolResultBudget,
   type ToolResultBudget,
 } from '../context/tool-result-budget.js';
+import {
+  MemoryJobCoordinator,
+  createMemoryTools,
+  type MemoryJob,
+  type MemoryStatus,
+} from '../memory/index.js';
 import { createCodingObserver } from '../observability/observer.js';
 import { isPathInside, resolveAbsolute } from '../permission/engine.js';
 import { RulesStore } from '../permission/rules-store.js';
@@ -313,11 +318,22 @@ export interface CodingSession {
   rewind(entryId: string): Promise<string>;
   fork(reason?: string, targetEntryId?: string): Promise<string>;
   summarize(): Promise<string>;
+  memoryStatus(): Promise<CodingMemoryStatus>;
+  reloadMemory(): Promise<void>;
+  dream(): Promise<MemoryJob>;
   exportSession(format?: 'jsonl' | 'html'): Promise<string>;
   newSession(): Promise<string>;
   resumeSession(idOrPath: string): Promise<void>;
   close(): Promise<void>;
 }
+
+export type CodingMemoryStatus =
+  | MemoryStatus
+  | {
+      readonly enabled: false;
+      readonly privateRoot: string;
+      readonly teamRoot: string;
+    };
 
 /** 装配完成后注入 {@link CodingSessionImpl} 的依赖。 */
 interface SessionDeps {
@@ -326,6 +342,7 @@ interface SessionDeps {
   readonly rulesStore: RulesStore;
   readonly registry: AgentRegistry;
   readonly backgroundJobs: BackgroundJobStore;
+  readonly memory?: MemoryJobCoordinator;
   readonly modelAdapter?: ModelAdapter;
 }
 
@@ -362,16 +379,32 @@ export async function createCodingSession(
     const registry = await profile.measure('agents.registry', () =>
       createAgentRegistry(config),
     );
+    const memory = config.context.memory.enabled
+      ? new MemoryJobCoordinator({
+          config,
+          storage,
+          sessionRepository: sessionStore.repository,
+          registry,
+          ...(options.modelAdapter !== undefined
+            ? { modelAdapter: options.modelAdapter }
+            : {}),
+          emit: (event) => session.emit(event),
+        })
+      : undefined;
     session = new CodingSessionImpl(sessionId, config, {
       storage,
       sessionStore,
       rulesStore,
       registry,
       backgroundJobs: new BackgroundJobStore(),
+      ...(memory !== undefined ? { memory } : {}),
       ...(options.modelAdapter !== undefined
         ? { modelAdapter: options.modelAdapter }
         : {}),
     });
+    if (memory !== undefined) {
+      await memory.start();
+    }
   } catch (error) {
     storage.close();
     throw error;
@@ -458,6 +491,7 @@ class CodingSessionImpl implements CodingSession {
       });
       if ((result.pending?.length ?? 0) === 0) {
         await this.ensureSessionTitle(this.sessionId, result.messages);
+        await this.maybeEnqueueMemoryExtraction(result, meta);
       }
       return result;
     } finally {
@@ -529,6 +563,7 @@ class CodingSessionImpl implements CodingSession {
       });
       if ((result.pending?.length ?? 0) === 0) {
         await this.ensureSessionTitle(this.sessionId, result.messages);
+        await this.maybeEnqueueMemoryExtraction(result);
       }
     } finally {
       this.currentStream = undefined;
@@ -862,7 +897,30 @@ class CodingSessionImpl implements CodingSession {
   async close(): Promise<void> {
     await this.deps.backgroundJobs.stopAll('coding session closed');
     await this.closeAgentRuntime();
+    if (this.deps.memory !== undefined) {
+      await this.deps.memory.close();
+    }
     this.deps.storage.close();
+  }
+
+  async memoryStatus(): Promise<CodingMemoryStatus> {
+    if (this.deps.memory === undefined) {
+      return {
+        enabled: false,
+        privateRoot: this.config.context.memory.private_dir,
+        teamRoot: this.config.context.memory.team_dir,
+      };
+    }
+    return this.deps.memory.status();
+  }
+
+  async reloadMemory(): Promise<void> {
+    const memory = this.requireMemory();
+    memory.reload();
+  }
+
+  async dream(): Promise<MemoryJob> {
+    return (await this.requireMemory().enqueueDream()).job;
   }
 
   /** 向所有订阅者广播一个事件。 */
@@ -938,6 +996,47 @@ class CodingSessionImpl implements CodingSession {
     await this.closeAgentRuntime();
     this.pendingApprovals.clear();
     this.steerQueue.length = 0;
+  }
+
+  private requireMemory(): MemoryJobCoordinator {
+    const memory = this.deps.memory;
+    if (memory === undefined) {
+      throw new Error(
+        'Memory is disabled. Enable context.memory.enabled in config.yaml.',
+      );
+    }
+    return memory;
+  }
+
+  private async maybeEnqueueMemoryExtraction(
+    result: AgentRunResult,
+    meta?: Record<string, unknown>,
+  ): Promise<void> {
+    const memory = this.deps.memory;
+    if (
+      memory === undefined ||
+      !this.config.context.memory.extraction.enabled ||
+      !isSuccessfulMemorySourceRun(result) ||
+      isExcludedMemorySubmission(meta)
+    ) {
+      return;
+    }
+    const loaded = await this.deps.sessionStore.repository.load(this.sessionId);
+    if (
+      loaded.messages.length <
+      this.config.context.memory.extraction.recent_messages
+    ) {
+      return;
+    }
+    if (loaded.leafEntryId === null) {
+      throw new Error(
+        `Session ${this.sessionId} has messages but no extraction leaf.`,
+      );
+    }
+    await memory.enqueueExtraction({
+      sessionId: this.sessionId,
+      sourceLeafId: loaded.leafEntryId,
+    });
   }
 
   private async ensureAgentRuntime(): Promise<AgentRuntimeDeps> {
@@ -1044,7 +1143,6 @@ class CodingSessionImpl implements CodingSession {
         : {}),
     };
     const agentModel = this.resolveAgentModel(primaryRole);
-    const memorySection = createCodingMemory(config);
     const observer = createCodingObserver(
       config,
       { model: primaryRole.ref },
@@ -1059,12 +1157,31 @@ class CodingSessionImpl implements CodingSession {
     const contentReplacementTransform = (messages: readonly AgentMessage[]) =>
       this.deps.sessionStore.applyContentReplacements(this.sessionId, messages);
 
-    const tools = createCodingTools({
-      config,
-      storage: this.deps.storage,
-      taskBoardScope: { type: 'session', sessionId: this.sessionId },
-      rules: () => this.deps.rulesStore.rules(),
-    });
+    const memory = this.deps.memory;
+    const memoryTools =
+      memory === undefined
+        ? []
+        : createMemoryTools({
+            port: memory,
+            onMutation: (mutation) => {
+              memory.reload();
+              this.emit({
+                type: 'memory.saved',
+                scope: mutation.scope,
+                file: mutation.file,
+                operation: mutation.operation,
+              });
+            },
+          });
+    const tools = [
+      ...createCodingTools({
+        config,
+        storage: this.deps.storage,
+        taskBoardScope: { type: 'session', sessionId: this.sessionId },
+        rules: () => this.deps.rulesStore.rules(),
+      }),
+      ...memoryTools,
+    ];
     const selectedTools = selectToolsForAgent(tools, agentDef.tools);
     const skillTools = createSkillTools({
       skills: runtime.skills,
@@ -1101,6 +1218,9 @@ class CodingSessionImpl implements CodingSession {
         model: primaryRole.ref,
         activeSkills: () => [...this.activeSkills],
         onContextEvent: (event) => this.emit(event),
+        ...(this.deps.memory !== undefined
+          ? { memoryIndexLoader: this.deps.memory.indexLoader }
+          : {}),
       }),
       dynamicSystemSection(
         activeSkillsContext({
@@ -1109,7 +1229,6 @@ class CodingSessionImpl implements CodingSession {
           activation: 'activated',
         }),
       ),
-      dynamicSystemSection(memorySection),
     ];
 
     return createAgent({
@@ -1355,6 +1474,33 @@ function normalizeGeneratedTitle(value: string): string {
     .replace(/^["'`]+|["'`]+$/gu, '')
     .replace(/\s+/gu, ' ')
     .slice(0, 80);
+}
+
+function isSuccessfulMemorySourceRun(result: AgentRunResult): boolean {
+  return ![
+    'approval-required',
+    'interrupted',
+    'content-filter',
+    'error',
+    'unknown',
+  ].includes(result.finishReason);
+}
+
+function isExcludedMemorySubmission(
+  meta: Record<string, unknown> | undefined,
+): boolean {
+  if (meta === undefined) {
+    return false;
+  }
+  return (
+    meta['goalContinuation'] === true ||
+    meta['internal'] === true ||
+    meta['subagent'] === true ||
+    meta['memoryJob'] !== undefined ||
+    meta['source'] === 'goal-continuation' ||
+    meta['source'] === 'internal' ||
+    meta['source'] === 'subagent'
+  );
 }
 
 function selectToolsForAgent(

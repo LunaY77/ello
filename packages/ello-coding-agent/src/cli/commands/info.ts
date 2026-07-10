@@ -194,11 +194,30 @@ function registerMemoryCommands(
     .description('show memory file summary')
     .action(async (_opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { loadCodingMemory, summarizeMemory } =
-        await import('../../memory.js');
-      const memory = await loadCodingMemory(config.cwd);
+      if (!config.context.memory.enabled) {
+        const memory = {
+          enabled: false,
+          privateRoot: config.context.memory.private_dir,
+          teamRoot: config.context.memory.team_dir,
+        };
+        ctx.io.stdout.write(
+          `${config.json ? JSON.stringify(memory, null, 2) : `disabled\nprivate\t${memory.privateRoot}\nteam\t${memory.teamRoot}`}\n`,
+        );
+        return;
+      }
+      const { MemoryRepository, memoryRoots } =
+        await import('../../memory/index.js');
+      const repository = new MemoryRepository(memoryRoots(config));
+      await repository.initialize();
+      const counts = await repository.status();
+      const memory = {
+        enabled: true,
+        privateRoot: repository.roots.private,
+        teamRoot: repository.roots.team,
+        ...counts,
+      };
       ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(memory, null, 2) : summarizeMemory(memory, config.cwd)}\n`,
+        `${config.json ? JSON.stringify(memory, null, 2) : `enabled\nprivate\t${memory.privateRoot}\t${memory.privateEntries}\nteam\t${memory.teamRoot}\t${memory.teamEntries}`}\n`,
       );
     });
 }

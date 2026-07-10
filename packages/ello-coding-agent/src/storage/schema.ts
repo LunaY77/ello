@@ -173,6 +173,21 @@ export const usageReportCache = sqliteTable('usage_report_cache', {
   generatedAt: text('generated_at').notNull(),
 });
 
+/** durable memory worker 队列；正文始终只存在于 Markdown 文件。 */
+export const memoryJobs = sqliteTable('memory_jobs', {
+  id: text('id').primaryKey(),
+  kind: text('kind').notNull(),
+  workspaceCwd: text('workspace_cwd').notNull(),
+  sessionId: text('session_id'),
+  sourceLeafId: text('source_leaf_id'),
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull(),
+  errorMessage: text('error_message'),
+  createdAt: text('created_at').notNull(),
+  startedAt: text('started_at'),
+  completedAt: text('completed_at'),
+});
+
 /** checkpoint 元数据；不挂 session/workspace 外键，runId 只是弱关联字符串。 */
 export const checkpoints = sqliteTable('checkpoints', {
   id: text('id').primaryKey(),
@@ -275,6 +290,7 @@ export const codingStorageSchema = {
   usageModelCalls,
   usagePriceSnapshots,
   usageReportCache,
+  memoryJobs,
   checkpoints,
   checkpointFileChanges,
   checkpointRollbacks,

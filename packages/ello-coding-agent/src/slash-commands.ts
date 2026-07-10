@@ -30,6 +30,8 @@ export type CommandResult =
         | 'clear'
         | 'compact'
         | 'summary'
+        | 'memory'
+        | 'dream'
         | 'rewind'
         | 'new-session'
         | 'fork'
@@ -190,11 +192,18 @@ export const slashCommands: readonly SlashCommand[] = [
   },
   {
     name: 'memory',
-    description: 'Show memory files',
-    run: () => ({
-      type: 'submit',
-      prompt: 'Summarize the active project memory context.',
-    }),
+    description: 'Show or reload file memory status',
+    run: (_ctx, args) => {
+      if (args.length > 1 || (args[0] !== undefined && args[0] !== 'reload')) {
+        return { type: 'message', message: 'Usage: /memory [reload]' };
+      }
+      return { type: 'runtime-action', action: 'memory', args };
+    },
+  },
+  {
+    name: 'dream',
+    description: 'Consolidate memory in a durable background job',
+    run: () => ({ type: 'runtime-action', action: 'dream' }),
   },
   {
     name: 'export',

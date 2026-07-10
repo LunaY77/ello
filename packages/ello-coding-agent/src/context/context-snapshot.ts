@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { CodingAgentConfig } from '../config/index.js';
+import type { MemoryIndexLoader } from '../memory/index-loader.js';
 
 import { loadInstructionSources } from './instructions.js';
 import {
@@ -16,6 +17,7 @@ import {
 export interface ContextSnapshotDeps {
   readonly activeSkills?: () => Promise<readonly string[]> | readonly string[];
   readonly onContextEvent?: (event: ContextEvent) => void;
+  readonly memoryIndexLoader?: MemoryIndexLoader;
 }
 
 export interface ContextSnapshotView extends ContextBundle {
@@ -36,6 +38,7 @@ export class ContextSnapshot {
     private readonly deps: ContextSnapshotDeps,
     private readonly promptProfile: string,
     private readonly basePromptHash: string,
+    private readonly includeMemory = false,
   ) {}
 
   async render(): Promise<ContextSnapshotView> {
@@ -62,13 +65,18 @@ export class ContextSnapshot {
 
   private loadStableBundle(): Promise<ContextBundle> {
     if (this.stableBundle === undefined) {
-      this.stableBundle = loadContextBundle(
-        [
-          () => loadEnvironmentSource(this.config),
-          () => loadInstructionSources(this.config),
-        ],
-        this.deps.onContextEvent,
-      );
+      const loaders = [
+        () => loadEnvironmentSource(this.config),
+        () => loadInstructionSources(this.config),
+      ];
+      if (this.includeMemory) {
+        const memory = this.deps.memoryIndexLoader;
+        if (memory === undefined) {
+          throw new Error('Memory is enabled without a MemoryIndexLoader.');
+        }
+        loaders.push(() => memory.load());
+      }
+      this.stableBundle = loadContextBundle(loaders, this.deps.onContextEvent);
     }
     return this.stableBundle;
   }

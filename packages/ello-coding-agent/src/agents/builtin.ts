@@ -9,7 +9,7 @@ const PLAN_PROMPT = `You are in plan mode. Investigate the codebase and produce 
  * 内置 agent 定义。
  *
  * - build/plan 是 primary（可在 `/agent` 中选）。
- * - title/compact/summary 是 internal：系统专用，不进入用户可选列表。
+ * - title/compact/summary/memory-extractor/dream 是 internal：系统专用。
  */
 export function builtinAgents(): readonly CodingAgentDefinition[] {
   return [
@@ -58,6 +58,42 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
       tools: [],
       description: 'Internal human-facing session summarizer.',
       prompt: renderPromptTemplate('summary'),
+    },
+    {
+      name: 'memory-extractor',
+      mode: 'internal',
+      role: 'small',
+      source: 'builtin',
+      hidden: true,
+      tools: [
+        'memory_list',
+        'memory_read',
+        'memory_search',
+        'memory_write',
+        'memory_delete',
+      ],
+      maxTurns: 8,
+      description: 'Internal automatic memory extractor.',
+    },
+    {
+      name: 'dream',
+      mode: 'internal',
+      role: 'compact',
+      source: 'builtin',
+      hidden: true,
+      tools: [
+        'memory_list',
+        'memory_read',
+        'memory_search',
+        'memory_write',
+        'memory_delete',
+        'session_list_recent',
+        'session_search',
+        'repo_current_read',
+        'repo_current_search',
+      ],
+      maxTurns: 16,
+      description: 'Internal cross-session memory consolidator.',
     },
   ];
 }

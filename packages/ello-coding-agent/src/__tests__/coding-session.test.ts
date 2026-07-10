@@ -173,13 +173,18 @@ describe('createCodingSession', () => {
         yield { type: 'final', response: await this.generate(request) };
       },
     };
-    const session = await createCodingSession({ config, modelAdapter: adapter });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
 
     await session.setAgent('plan');
     await session.submit('inspect only');
     await session.close();
 
-    expect(systems).toContainEqual(expect.stringContaining('You are in plan mode'));
+    expect(systems).toContainEqual(
+      expect.stringContaining('You are in plan mode'),
+    );
   });
 
   it('rejects removed session event entries', async () => {

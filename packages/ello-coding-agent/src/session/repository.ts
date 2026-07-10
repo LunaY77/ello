@@ -368,6 +368,29 @@ export class JsonlSessionRepository {
     };
   }
 
+  /** 读取指定历史 leaf 对应的 raw message path，供 durable memory job 恢复。 */
+  async loadMessagesAt(
+    sessionId: string,
+    leafEntryId: string,
+  ): Promise<readonly AgentMessage[]> {
+    const records = await this.readRecords(sessionId);
+    const entry = records.find(
+      (record): record is Extract<SessionRecord, { kind: 'entry' }> =>
+        record.kind === 'entry' && record.id === leafEntryId,
+    );
+    if (entry === undefined) {
+      throw new Error(
+        `Unknown memory extraction leaf ${leafEntryId} in session ${sessionId}.`,
+      );
+    }
+    return buildActivePath(records, leafEntryId)
+      .filter(
+        (record): record is Extract<SessionRecord, { kind: 'entry' }> =>
+          record.kind === 'entry' && record.type === 'message',
+      )
+      .map((record) => record.message);
+  }
+
   /** 追加消息增量。 */
   async appendMessages(
     sessionId: string,

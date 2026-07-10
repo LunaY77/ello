@@ -120,7 +120,9 @@ describe('provider cache transforms', () => {
         anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } },
       },
     });
-    expect(JSON.stringify(transformed.messages[0])).not.toContain('skill review');
+    expect(JSON.stringify(transformed.messages[0])).not.toContain(
+      'skill review',
+    );
     expect(JSON.stringify(transformed.messages[1])).toContain('skill review');
     expect(transformed.messages.at(-1)).toMatchObject({
       providerOptions: {

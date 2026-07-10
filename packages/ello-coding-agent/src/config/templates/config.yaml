@@ -107,8 +107,12 @@ profile:
 #     tool_output_max_chars: 2000
 #   memory:
 #     enabled: false
-#     structured:
+#     private_dir: ~/.ello/memory/private
+#     team_dir: .ello/memory/team
+#     extraction:
 #       enabled: true
+#       recent_messages: 40
+#       max_attempts: 2
 
 # 默认启用交互式 TUI；命令行 --no-tui 可临时关闭。
 # tui: true

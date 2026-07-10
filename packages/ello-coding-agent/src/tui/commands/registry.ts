@@ -143,8 +143,14 @@ const META: Record<string, CommandMeta> = {
   memory: {
     id: 'context.memory',
     group: 'Context',
-    title: 'Project memory',
+    title: 'Memory status',
     keywords: [],
+  },
+  dream: {
+    id: 'context.dream',
+    group: 'Context',
+    title: 'Consolidate memory',
+    keywords: ['memory'],
   },
   export: {
     id: 'session.export',

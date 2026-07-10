@@ -3,6 +3,7 @@
  */
 export {
   createCodingSession,
+  type CodingMemoryStatus,
   type CodingSession,
   type CreateCodingSessionOptions,
 } from './coding-session.js';

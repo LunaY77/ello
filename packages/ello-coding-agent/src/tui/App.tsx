@@ -16,7 +16,11 @@ import {
   type RuntimeModel,
   type RuntimeProfileSuite,
 } from '../provider/index.js';
-import type { CodingSession, ApprovalDecision } from '../runtime/index.js';
+import type {
+  CodingMemoryStatus,
+  CodingSession,
+  ApprovalDecision,
+} from '../runtime/index.js';
 import { handleSlashCommand, type CommandResult } from '../slash-commands.js';
 
 import { completeInput } from './completion.js';
@@ -235,6 +239,29 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
             .catch((error) => {
               session.notify(
                 `Rewind failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
+        } else if (command.action === 'memory') {
+          const reload = command.args?.[0] === 'reload';
+          void (reload ? session.reloadMemory() : Promise.resolve())
+            .then(() => session.memoryStatus())
+            .then((status) =>
+              session.notify(
+                `${reload ? 'Memory reloaded.\n' : ''}${formatMemoryStatus(status)}`,
+              ),
+            )
+            .catch((error) => {
+              session.notify(
+                `Memory failed: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
+        } else if (command.action === 'dream') {
+          void session
+            .dream()
+            .then((job) => session.notify(`Dream job ${job.id}: ${job.status}`))
+            .catch((error) => {
+              session.notify(
+                `Dream failed: ${error instanceof Error ? error.message : String(error)}`,
               );
             });
         } else if (command.action === 'export') {
@@ -810,6 +837,26 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
       />
     </ThemeProvider>
   );
+}
+
+function formatMemoryStatus(status: CodingMemoryStatus): string {
+  if (!status.enabled) {
+    return [
+      'Memory: disabled',
+      `private: ${status.privateRoot}`,
+      `team: ${status.teamRoot}`,
+      'Enable with context.memory.enabled: true',
+    ].join('\n');
+  }
+  return [
+    'Memory: enabled',
+    `private: ${status.privateRoot} (${status.privateEntries} topics)`,
+    `team: ${status.teamRoot} (${status.teamEntries} topics)`,
+    `jobs: ${status.queuedJobs} queued, ${status.runningJobs} running, ${status.failedJobs} failed`,
+    status.activeDream === null
+      ? 'dream: idle'
+      : `dream: ${status.activeDream.id} ${status.activeDream.status}`,
+  ].join('\n');
 }
 
 function buildRewindTargets(

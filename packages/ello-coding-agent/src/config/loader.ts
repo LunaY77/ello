@@ -12,7 +12,7 @@ import {
 } from '../utils/yaml.js';
 
 import { ensureBuiltinAssets, ensureGlobalConfig } from './initializer.js';
-import { globalConfigPath, projectConfigPath } from './paths.js';
+import { globalConfigPath, globalHomeDir, projectConfigPath } from './paths.js';
 import {
   ApprovalModeSchema,
   CodingAgentConfigSchema,
@@ -77,10 +77,29 @@ export async function loadCodingAgentConfig(
       ),
     },
   );
-  return CodingAgentConfigSchema.parse({
+  const parsed = CodingAgentConfigSchema.parse({
     ...merged,
     approvalMode: normalizeApprovalMode(merged.approvalMode ?? 'default'),
   });
+  return {
+    ...parsed,
+    context: {
+      ...parsed.context,
+      memory: {
+        ...parsed.context.memory,
+        private_dir: resolveMemoryPath(
+          cwd,
+          parsed.context.memory.private_dir,
+          path.join(globalHomeDir(), 'memory', 'private'),
+        ),
+        team_dir: resolveMemoryPath(
+          cwd,
+          parsed.context.memory.team_dir,
+          path.join(cwd, '.ello', 'memory', 'team'),
+        ),
+      },
+    },
+  };
 }
 
 /** 返回配置来源列表，供 `ello config sources` 展示和调试合并顺序。 */
@@ -202,6 +221,25 @@ function resolveAllowedPaths(cwd: string, value: unknown): string[] {
   return (paths.length > 0 ? paths : [cwd]).map((item) =>
     path.isAbsolute(item) ? path.resolve(item) : path.resolve(cwd, item),
   );
+}
+
+function resolveMemoryPath(
+  cwd: string,
+  value: string,
+  defaultPath: string,
+): string {
+  if (value === '~/.ello/memory/private' || value === '.ello/memory/team') {
+    return path.resolve(defaultPath);
+  }
+  if (value === '~') {
+    return homedir();
+  }
+  if (value.startsWith('~/')) {
+    return path.resolve(homedir(), value.slice(2));
+  }
+  return path.isAbsolute(value)
+    ? path.resolve(value)
+    : path.resolve(cwd, value);
 }
 
 async function readConfigText(filePath: string): Promise<string> {

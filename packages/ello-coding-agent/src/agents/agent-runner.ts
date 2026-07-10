@@ -3,6 +3,8 @@ import {
   type Agent,
   type AgentEnvironment,
   type AgentModel,
+  type AgentRunResult,
+  type AnyAgentTool,
   type ModelAdapter,
   type ModelInput,
 } from '@ello/agent';
@@ -112,6 +114,52 @@ export async function runInternalAgent(input: {
   try {
     const result = await agent.run(input.prompt);
     return result.output || result.text || '';
+  } finally {
+    await agent.close();
+  }
+}
+
+/** 运行带严格工具白名单的 hidden internal agent。 */
+export async function runInternalToolAgent(input: {
+  readonly definition: CodingAgentDefinition;
+  readonly instructions: string;
+  readonly prompt: string;
+  readonly tools: readonly AnyAgentTool[];
+  readonly maxTurns: number;
+  readonly config: CodingAgentConfig;
+  readonly providerRegistry: ProviderRegistry;
+  readonly modelAdapter?: ModelAdapter;
+}): Promise<AgentRunResult> {
+  const deps: RunnerModelDeps = {
+    config: input.config,
+    providerRegistry: input.providerRegistry,
+    ...(input.modelAdapter !== undefined
+      ? { modelAdapter: input.modelAdapter }
+      : {}),
+  };
+  const binding = resolveBinding(input.definition, deps);
+  const agent = createAgent({
+    name: `ello-${input.definition.name}`,
+    model: resolveAgentModel(binding, deps),
+    modelSettings: modelSettingsFromRole(binding),
+    instructions: input.instructions,
+    tools: input.tools,
+    ...(input.modelAdapter !== undefined
+      ? { modelAdapter: input.modelAdapter }
+      : {
+          modelInput: {
+            providerOptions: () => providerOptionsForRole(binding),
+            prepare: (modelInput: ModelInput) =>
+              prepareModelInputForRuntimeModel(binding.model, modelInput, {
+                promptProfile: `internal:${input.definition.name}`,
+                workspaceIdentity: input.config.cwd,
+              }),
+          },
+        }),
+    metadata: { internal: true, agentName: input.definition.name },
+  });
+  try {
+    return await agent.run(input.prompt, { maxTurns: input.maxTurns });
   } finally {
     await agent.close();
   }

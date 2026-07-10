@@ -6,6 +6,7 @@ import type {
 
 import type { BackgroundJob } from '../agents/background-jobs.js';
 import type { ContextEvent } from '../context/source-registry.js';
+import type { MemoryEvent } from '../memory/events.js';
 import type { RuleScope } from '../permission/rules-store.js';
 
 /**
@@ -34,6 +35,7 @@ export type CodingSessionState = 'idle' | 'running' | 'awaiting_approval';
 export type CodingSessionEvent =
   | AgentStreamEvent
   | ContextEvent
+  | MemoryEvent
   | {
       readonly type: 'session.opened';
       readonly sessionId: string;
