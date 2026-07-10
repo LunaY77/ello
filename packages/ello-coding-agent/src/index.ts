@@ -140,18 +140,17 @@ export {
 // —— 持久化任务 ——
 export {
   createTaskService,
-  FileTaskStore,
   formatClaimResult,
   formatTask,
   formatTaskList,
-  taskListDir,
   TaskService,
-  SqliteTaskStore,
   type ClaimResult,
   type CreateTaskInput,
   type Task,
+  type TaskBoard,
+  type TaskBoardScope,
+  type TaskRef,
   type TaskStatus,
-  type TaskStore,
   type UpdateTaskInput,
 } from './tasks/index.js';
 
@@ -167,6 +166,7 @@ export {
 } from './storage/index.js';
 export { CheckpointRepository } from './storage/repositories/checkpoint-repository.js';
 export { MemoryRepository } from './storage/repositories/memory-repository.js';
+export { TaskBoardRepository } from './storage/repositories/task-board-repository.js';
 export { UsageRepository } from './storage/repositories/usage-repository.js';
 export { WorkspaceRepository } from './storage/repositories/workspace-repository.js';
 

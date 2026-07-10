@@ -167,52 +167,54 @@ export const checkpointRollbacks = sqliteTable('checkpoint_rollbacks', {
   createdAt: text('created_at').notNull(),
 });
 
-/** 结构化任务主表；任务与 workspace/session 保持正交。 */
+/** 显式 task board；scope 决定任务属于 session、workspace 或命名 global board。 */
+export const taskBoards = sqliteTable('task_boards', {
+  id: text('id').primaryKey(),
+  scopeType: text('scope_type').notNull(),
+  scopeId: text('scope_id').notNull(),
+  nextSequence: integer('next_sequence').notNull(),
+  createdAt: text('created_at').notNull(),
+  archivedAt: text('archived_at'),
+});
+
+/** board 内任务使用 UUID 主键和独立递增 sequence。 */
 export const tasks = sqliteTable('tasks', {
   id: text('id').primaryKey(),
-  listId: text('list_id').notNull(),
+  boardId: text('board_id')
+    .notNull()
+    .references(() => taskBoards.id),
+  sequence: integer('sequence').notNull(),
   subject: text('subject').notNull(),
   description: text('description').notNull(),
   activeForm: text('active_form'),
   status: text('status').notNull(),
   owner: text('owner'),
-  metadata: text('metadata').notNull().default('{}'),
+  metadata: text('metadata').notNull(),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
 
-/** 任务依赖边；blocks/blocked_by 都以单向边保存，读取时组装回 Task。 */
-export const taskLinks = sqliteTable(
-  'task_links',
+/** 单向 dependency：blocker_task_id 阻塞 blocked_task_id。 */
+export const taskDependencies = sqliteTable(
+  'task_dependencies',
   {
-    taskId: text('task_id')
+    boardId: text('board_id')
+      .notNull()
+      .references(() => taskBoards.id),
+    blockerTaskId: text('blocker_task_id')
       .notNull()
       .references(() => tasks.id),
-    relation: text('relation').notNull(),
-    targetTaskId: text('target_task_id')
+    blockedTaskId: text('blocked_task_id')
       .notNull()
       .references(() => tasks.id),
     createdAt: text('created_at').notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.taskId, table.relation, table.targetTaskId] }),
+    primaryKey({
+      columns: [table.boardId, table.blockerTaskId, table.blockedTaskId],
+    }),
   ],
 );
-
-/** 任务事件流，用于后续 UI 刷新/审计；当前业务事件仍由 TaskEventBus 发出。 */
-export const taskEvents = sqliteTable('task_events', {
-  id: text('id').primaryKey(),
-  taskId: text('task_id').references(() => tasks.id),
-  eventType: text('event_type').notNull(),
-  payload: text('payload').notNull().default('{}'),
-  createdAt: text('created_at').notNull(),
-});
-
-/** 每个 list 独立递增的短数字任务 ID。 */
-export const taskCounters = sqliteTable('task_counters', {
-  listId: text('list_id').primaryKey(),
-  nextId: integer('next_id').notNull(),
-});
 
 /** 全局结构化 memory；项目 memory Markdown 不进入本表，也不建索引缓存。 */
 export const memoryItems = sqliteTable('memory_items', {
@@ -254,10 +256,9 @@ export const codingStorageSchema = {
   checkpoints,
   checkpointFileChanges,
   checkpointRollbacks,
+  taskBoards,
   tasks,
-  taskLinks,
-  taskEvents,
-  taskCounters,
+  taskDependencies,
   memoryItems,
   memoryAccessLog,
 };

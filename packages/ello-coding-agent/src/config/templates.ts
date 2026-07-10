@@ -1,13 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const globalGitignoreEntries = [
-  'sessions/',
-  'logs/',
-  'cache/',
-  'tasks/',
-  'workspaces/',
-];
+const globalGitignoreEntries = ['sessions/', 'logs/', 'cache/', 'workspaces/'];
 
 /** 获取构建后可用的模板文件路径；package build 会把 templates 目录复制到 dist。 */
 export function templatePath(name: string): string {

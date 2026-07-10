@@ -11,14 +11,19 @@ export const taskCommands: CliCommandModule = {
 };
 
 function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
-  const taskCmd = program.command('task').description('manage persisted tasks');
+  const taskCmd = program
+    .command('task')
+    .requiredOption('--board <name>', 'explicit global task board name')
+    .description('manage persisted tasks');
   taskCmd
     .command('list')
     .description('list tasks')
     .action(async (_opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
       const { formatTaskList } = await import('../../tasks/index.js');
-      const tasks = await withTaskService((service) => service.list());
+      const tasks = await withTaskService(taskBoardName(cmd), (service) =>
+        service.list(),
+      );
       ctx.io.stdout.write(
         `${config.json ? JSON.stringify(tasks, null, 2) : formatTaskList(tasks)}\n`,
       );
@@ -30,7 +35,9 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
     .action(async (id: string, _opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
       const { formatTask } = await import('../../tasks/index.js');
-      const task = await withTaskService((service) => service.get(id));
+      const task = await withTaskService(taskBoardName(cmd), (service) =>
+        service.get(id),
+      );
       if (task === null) {
         throw new Error(`Unknown task: ${id}`);
       }
@@ -51,7 +58,7 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
         const { formatTask } = await import('../../tasks/index.js');
-        const task = await withTaskService((service) =>
+        const task = await withTaskService(taskBoardName(cmd), (service) =>
           service.create({
             subject: opts.subject,
             ...(opts.description !== undefined
@@ -89,7 +96,7 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
       ) => {
         const config = await ctx.resolveConfig(cmd.optsWithGlobals());
         const { formatTask } = await import('../../tasks/index.js');
-        const task = await withTaskService((service) =>
+        const task = await withTaskService(taskBoardName(cmd), (service) =>
           service.update(id, {
             ...(opts.subject !== undefined ? { subject: opts.subject } : {}),
             ...(opts.description !== undefined
@@ -110,7 +117,9 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
     .description('delete a task')
     .action(async (id: string, _opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const deleted = await withTaskService((service) => service.delete(id));
+      const deleted = await withTaskService(taskBoardName(cmd), (service) =>
+        service.delete(id),
+      );
       ctx.io.stdout.write(
         `${config.json ? JSON.stringify({ id, deleted }) : `deleted\t${id}\t${deleted}`}\n`,
       );
@@ -123,7 +132,7 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
     .action(async (id: string, opts: { owner: string }, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
       const { formatClaimResult } = await import('../../tasks/index.js');
-      const result = await withTaskService((service) =>
+      const result = await withTaskService(taskBoardName(cmd), (service) =>
         service.claim(id, opts.owner),
       );
       ctx.io.stdout.write(
@@ -135,7 +144,7 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
     .description('reset current task list')
     .action(async (_opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      await withTaskService((service) => service.reset());
+      await withTaskService(taskBoardName(cmd), (service) => service.reset());
       ctx.io.stdout.write(
         `${config.json ? JSON.stringify({ reset: true }) : 'reset\ttrue'}\n`,
       );
@@ -143,13 +152,29 @@ function registerTaskCommands(program: Command, ctx: CliCommandContext): void {
 }
 
 async function withTaskService<T>(
-  fn: (service: TaskService) => Promise<T>,
+  boardName: string,
+  fn: (service: TaskService) => T | Promise<T>,
 ): Promise<T> {
   const [{ withCodingStorage }, { createTaskService }] = await Promise.all([
     import('../../storage/index.js'),
     import('../../tasks/index.js'),
   ]);
-  return withCodingStorage((storage) => fn(createTaskService(storage.tasks)));
+  return withCodingStorage((storage) =>
+    fn(
+      createTaskService(storage.taskBoards, {
+        type: 'global',
+        name: boardName,
+      }),
+    ),
+  );
+}
+
+function taskBoardName(cmd: Command): string {
+  const board = cmd.parent?.opts().board as unknown;
+  if (typeof board !== 'string' || board.trim() === '') {
+    throw new Error('Missing required task board name.');
+  }
+  return board;
 }
 
 function registerSkillCommands(program: Command, ctx: CliCommandContext): void {

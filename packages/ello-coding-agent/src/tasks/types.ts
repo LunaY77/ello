@@ -1,22 +1,41 @@
-/** coding-agent 任务状态。 */
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 
-/** 可持久化任务实体。 */
+export type TaskBoardScope =
+  | { readonly type: 'session'; readonly sessionId: string }
+  | { readonly type: 'workspace'; readonly workspaceId: string }
+  | { readonly type: 'global'; readonly name: string };
+
+export interface TaskBoard {
+  readonly id: string;
+  readonly scope: TaskBoardScope;
+  readonly nextSequence: number;
+  readonly createdAt: string;
+  readonly archivedAt?: string | undefined;
+}
+
+export interface TaskRef {
+  readonly id: string;
+  readonly sequence: number;
+  readonly subject: string;
+  readonly status: TaskStatus;
+}
+
 export interface Task {
   readonly id: string;
+  readonly boardId: string;
+  readonly sequence: number;
   readonly subject: string;
   readonly description: string;
   readonly activeForm?: string | undefined;
   readonly status: TaskStatus;
   readonly owner?: string | undefined;
-  readonly blocks: readonly string[];
-  readonly blockedBy: readonly string[];
+  readonly blocks: readonly TaskRef[];
+  readonly blockedBy: readonly TaskRef[];
   readonly metadata: Record<string, unknown>;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
 
-/** 创建任务时允许调用方传入的字段。 */
 export interface CreateTaskInput {
   readonly subject: string;
   readonly description?: string | undefined;
@@ -27,7 +46,6 @@ export interface CreateTaskInput {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
-/** 更新任务时允许调用方传入的字段。 */
 export interface UpdateTaskInput {
   readonly subject?: string | undefined;
   readonly description?: string | undefined;
@@ -39,17 +57,6 @@ export interface UpdateTaskInput {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
-/** claim 的确定性结果，便于 CLI/TUI 展示冲突原因。 */
 export type ClaimResult =
   | { readonly ok: true; readonly task: Task }
   | { readonly ok: false; readonly reason: string; readonly task?: Task };
-
-/** 任务列表存储接口。 */
-export interface TaskStore {
-  nextId(): Promise<string>;
-  list(): Promise<readonly Task[]>;
-  get(id: string): Promise<Task | null>;
-  save(task: Task): Promise<Task>;
-  delete(id: string): Promise<boolean>;
-  reset(): Promise<void>;
-}

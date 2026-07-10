@@ -48,7 +48,10 @@ describe('global coding storage', () => {
         storage.db.$client
           .prepare('select version, name from schema_migrations')
           .all(),
-      ).toEqual([{ version: 1, name: 'initial' }]);
+      ).toEqual([
+        { version: 1, name: 'initial' },
+        { version: 2, name: 'task-boards' },
+      ]);
     } finally {
       storage.close();
     }

@@ -36,11 +36,6 @@ export function globalAgentsDir(): string {
   return path.join(elloHomeDir(), 'agents');
 }
 
-/** 全局任务列表目录。 */
-export function globalTasksDir(): string {
-  return path.join(elloHomeDir(), 'tasks');
-}
-
 /** 会话 JSONL 默认目录。 */
 export function globalSessionsDir(): string {
   return path.join(elloHomeDir(), 'sessions');
@@ -79,11 +74,6 @@ export function projectSkillsDir(cwd: string): string {
 /** 项目级 Markdown agent 覆盖目录。 */
 export function projectAgentsDir(cwd: string): string {
   return path.join(projectElloDir(cwd), 'agents');
-}
-
-/** 项目级任务列表目录。 */
-export function projectTasksDir(cwd: string): string {
-  return path.join(projectElloDir(cwd), 'tasks');
 }
 
 /** workspace 工具写入的项目指针文件。 */

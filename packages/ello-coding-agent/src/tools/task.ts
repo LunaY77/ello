@@ -12,8 +12,7 @@ const Metadata = z.record(z.string(), z.unknown()).default({});
 /**
  * 任务工具集。
  *
- * 任务状态落到文件存储，CLI/TUI/模型工具共享同一份
- * TaskService，不再依赖单次 tool result 才能看见任务列表。
+ * CLI/TUI/模型工具共享绑定当前 board 的 TaskService。
  */
 export function createTaskTools(
   approval: ApprovalFor,

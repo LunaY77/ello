@@ -29,3 +29,10 @@ export function transaction<T>(
 ): T {
   return db.$client.transaction(() => fn(db))();
 }
+
+export function immediateTransaction<T>(
+  db: CodingDatabase,
+  fn: (tx: CodingDatabase) => T,
+): T {
+  return db.$client.transaction(() => fn(db)).immediate();
+}

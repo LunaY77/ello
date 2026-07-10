@@ -370,7 +370,9 @@ export function OverlayHost({
           ) : (
             overlay.tasks.slice(0, 12).map((task) => (
               <Text key={task.id} color={theme.text}>
-                <Text color={theme.textMuted}>{task.id.padEnd(4)}</Text>
+                <Text color={theme.textMuted}>
+                  {String(task.sequence).padEnd(4)}
+                </Text>
                 <Text color={statusColor(theme, task.status)}>
                   {task.status.padEnd(12)}
                 </Text>

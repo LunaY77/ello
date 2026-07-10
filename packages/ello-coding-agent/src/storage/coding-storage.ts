@@ -3,8 +3,6 @@ import path from 'node:path';
 
 import Database from 'better-sqlite3';
 
-import { SqliteTaskStore } from '../tasks/sqlite-store.js';
-
 import {
   configureCodingDatabase,
   createCodingDatabase,
@@ -14,12 +12,13 @@ import { runCodingStorageMigrations } from './migration-runner.js';
 import { globalStateDatabasePath } from './paths.js';
 import { CheckpointRepository } from './repositories/checkpoint-repository.js';
 import { MemoryRepository } from './repositories/memory-repository.js';
+import { TaskBoardRepository } from './repositories/task-board-repository.js';
 import { UsageRepository } from './repositories/usage-repository.js';
 import { WorkspaceRepository } from './repositories/workspace-repository.js';
 
 export interface CodingStorage {
   readonly db: CodingDatabase;
-  readonly tasks: SqliteTaskStore;
+  readonly taskBoards: TaskBoardRepository;
   readonly checkpoints: CheckpointRepository;
   readonly workspaces: WorkspaceRepository;
   readonly usage: UsageRepository;
@@ -44,7 +43,7 @@ export function createCodingStorage(
   let closed = false;
   return {
     db,
-    tasks: new SqliteTaskStore(db, 'default'),
+    taskBoards: new TaskBoardRepository(db),
     checkpoints: new CheckpointRepository(db),
     workspaces: new WorkspaceRepository(db),
     usage: new UsageRepository(db),

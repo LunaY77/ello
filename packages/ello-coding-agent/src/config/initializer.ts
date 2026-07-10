@@ -19,7 +19,6 @@ import {
   globalAgentsDir,
   globalSessionsDir,
   globalSkillsDir,
-  globalTasksDir,
 } from './paths.js';
 import { globalGitignoreTemplate, templatePath } from './templates.js';
 
@@ -40,7 +39,6 @@ export async function ensureGlobalConfig(
   await ensureElloHome();
   await mkdir(globalSkillsDir(), { recursive: true });
   await mkdir(globalAgentsDir(), { recursive: true });
-  await mkdir(globalTasksDir(), { recursive: true });
   await mkdir(globalSessionsDir(), { recursive: true });
   await mkdir(globalLogsDir(), { recursive: true });
   await mkdir(globalCacheDir(), { recursive: true });

@@ -32,13 +32,11 @@ export {
   globalMcpPath,
   globalSessionsDir,
   globalSkillsDir,
-  globalTasksDir,
   globalWorkspacesDir,
   projectAgentsDir,
   projectConfigPath,
   projectElloDir,
   projectSkillsDir,
-  projectTasksDir,
   projectWorkspacePointerPath,
 } from './paths.js';
 export {

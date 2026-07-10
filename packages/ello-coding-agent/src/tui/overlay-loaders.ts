@@ -1,16 +1,12 @@
 import type { CodingAgentConfig } from '../config/index.js';
+import type { CodingSession } from '../runtime/index.js';
 
 import type { OverlayState } from './component/OverlayHost.js';
 
-export async function loadTasksOverlay(): Promise<OverlayState> {
-  const [{ withCodingStorage }, { createTaskService }] = await Promise.all([
-    import('../storage/index.js'),
-    import('../tasks/index.js'),
-  ]);
-  const tasks = await withCodingStorage((storage) =>
-    createTaskService(storage.tasks).list(),
-  );
-  return { type: 'tasks', tasks };
+export async function loadTasksOverlay(
+  session: CodingSession,
+): Promise<OverlayState> {
+  return { type: 'tasks', tasks: session.listTasks() };
 }
 
 export async function loadSkillsOverlay(

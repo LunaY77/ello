@@ -144,6 +144,10 @@ export function createDelegateTool(
         deps: {
           config: options.config,
           storage: options.storage,
+          taskBoardScope: {
+            type: 'session',
+            sessionId: parentSessionId,
+          },
           providerRegistry: options.providerRegistry,
           environment: ctx.environment as AgentEnvironment,
           permissionRules: deriveSubagentPermission(

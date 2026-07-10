@@ -68,6 +68,7 @@ import type {
 } from '../session/repository.js';
 import { loadCodingSkills } from '../skills/index.js';
 import { createCodingStorage, type CodingStorage } from '../storage/index.js';
+import { createTaskService, type Task } from '../tasks/index.js';
 import { createCodingTools } from '../tools/index.js';
 import { createBootProfile } from '../utils/boot-profile.js';
 
@@ -304,6 +305,7 @@ export interface CodingSession {
   listAgents(): readonly CodingAgentDefinition[];
   listSubagents(): readonly CodingAgentDefinition[];
   listBackgroundJobs(): readonly BackgroundJob[];
+  listTasks(): readonly Task[];
   cancelBackgroundJob(id: string): void;
   sessionTree(): Promise<SessionTreeView>;
   listSessions(): Promise<readonly JsonlSessionSummary[]>;
@@ -703,6 +705,13 @@ class CodingSessionImpl implements CodingSession {
     return this.deps.backgroundJobs.list(this.sessionId);
   }
 
+  listTasks(): readonly Task[] {
+    return createTaskService(this.deps.storage.taskBoards, {
+      type: 'session',
+      sessionId: this.sessionId,
+    }).list();
+  }
+
   cancelBackgroundJob(id: string): void {
     this.deps.backgroundJobs.cancel(id);
   }
@@ -1056,6 +1065,7 @@ class CodingSessionImpl implements CodingSession {
     const tools = createCodingTools({
       config,
       storage: this.deps.storage,
+      taskBoardScope: { type: 'session', sessionId: this.sessionId },
       rules: () => this.deps.rulesStore.rules(),
     });
     const selectedTools = selectToolsForAgent(tools, agentDef.tools);

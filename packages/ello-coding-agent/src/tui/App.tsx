@@ -181,7 +181,7 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         } else if (command.overlay === 'theme') {
           setOverlay({ type: 'theme', active: themeName });
         } else if (command.overlay === 'tasks') {
-          void loadTasksOverlay().then(setOverlay);
+          void loadTasksOverlay(session).then(setOverlay);
         } else if (command.overlay === 'skills') {
           void loadSkillsOverlay(runtimeConfig).then(setOverlay);
         } else if (command.overlay === 'workspace') {

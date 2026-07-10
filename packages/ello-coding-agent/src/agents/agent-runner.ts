@@ -20,6 +20,7 @@ import {
 import { createCodingEventRecorder } from '../runtime/event-recorder.js';
 import type { JsonlSessionStore } from '../session/jsonl-store.js';
 import type { CodingStorage } from '../storage/index.js';
+import type { TaskBoardScope } from '../tasks/index.js';
 import { createCodingTools } from '../tools/index.js';
 
 import type { CodingAgentDefinition } from './schema.js';
@@ -114,6 +115,7 @@ export interface SubagentAgentDeps {
   /** child 复用父运行时的 JSONL 会话存储（child 落自己的文件）。 */
   readonly session: JsonlSessionStore;
   readonly storage: CodingStorage;
+  readonly taskBoardScope: TaskBoardScope;
   /** child 复用父运行的环境（文件系统、shell）。 */
   readonly environment: AgentEnvironment;
   /** 已派生好的 child 权限规则（见 deriveSubagentPermission）。 */
@@ -146,6 +148,7 @@ export function createSubagentAgent(input: {
     createCodingTools({
       config: childConfig,
       storage: deps.storage,
+      taskBoardScope: deps.taskBoardScope,
       rules: () => deps.permissionRules,
     }),
     definition.tools,
