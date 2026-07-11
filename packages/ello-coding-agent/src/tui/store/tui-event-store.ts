@@ -1,5 +1,6 @@
 import type { AgentUsage } from '@ello/agent';
 
+import type { GoalState } from '../../goal/types.js';
 import type {
   CodingSessionEvent,
   CodingSessionState,
@@ -30,6 +31,7 @@ export interface TuiEventState {
   readonly status: CodingSessionState;
   readonly pendingApproval?: ApprovalView;
   readonly usage?: AgentUsage;
+  readonly goal?: GoalState;
   readonly interruptNotice?: string;
 }
 
@@ -318,6 +320,29 @@ export function reduceTuiEvent(
 
     case 'usage':
       return { ...state, usage: event.usage };
+
+    case 'goal.created':
+      return {
+        ...appendHistory(state, {
+          kind: 'user',
+          id: `goal-user-${state.history.length}`,
+          text: event.goal.objective,
+        }),
+        goal: event.goal,
+      };
+
+    case 'goal.updated':
+    case 'goal.continuation.started':
+    case 'goal.continuation.completed':
+    case 'goal.paused':
+    case 'goal.completed':
+    case 'goal.blocked':
+      return { ...state, goal: event.goal };
+
+    case 'goal.cleared': {
+      const { goal: _goal, ...withoutGoal } = state;
+      return withoutGoal;
+    }
 
     case 'run.completed':
       return flushAssistant(state);

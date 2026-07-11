@@ -19,6 +19,12 @@ export {
 } from './runtime/coding-session.js';
 export type { MemoryJob, MemoryStatus } from './memory/index.js';
 export type {
+  GoalPauseReason,
+  GoalState,
+  GoalStatus,
+  GoalStatusView,
+} from './goal/types.js';
+export type {
   ApprovalDecision,
   CodingEventListener,
   CodingSessionEvent,

@@ -1,6 +1,11 @@
 import type { AgentMessage } from '@ello/agent';
 import { z } from 'zod';
 
+import {
+  GoalClearedRecordSchema,
+  GoalSessionRecordSchema,
+} from '../goal/schema.js';
+
 import type { SessionRecord } from './repository.js';
 
 const Message = z.custom<AgentMessage>((value) => {
@@ -145,6 +150,8 @@ export const SessionRecordSchema = z.union([
   RunStartedRecordSchema,
   RunCompletedRecordSchema,
   RunFailedRecordSchema,
+  GoalSessionRecordSchema,
+  GoalClearedRecordSchema,
 ]);
 
 export function parseSessionRecord(
@@ -194,6 +201,10 @@ function selectRecordSchema(
       throw new Error(
         `Invalid session record at ${source}: unknown run-marker status ${String(status)}.`,
       );
+    case 'goal-state':
+      return GoalSessionRecordSchema;
+    case 'goal-cleared':
+      return GoalClearedRecordSchema;
     default:
       throw new Error(
         `Invalid session record at ${source}: unknown kind ${String(kind)}.`,

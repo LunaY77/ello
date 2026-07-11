@@ -117,6 +117,10 @@ profile:
 # 默认启用交互式 TUI；命令行 --no-tui 可临时关闭。
 # tui: true
 
+# Goal 自动续跑的 host 上限。达到后目标暂停，不会伪装成完成。
+# goal:
+#   max_continuations: 20
+
 # 工具配置；disabled 表示完全不注册，needApproval 表示无论审批模式如何都要询问。
 # tools:
 #   disabled: []

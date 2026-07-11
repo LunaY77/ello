@@ -6,6 +6,7 @@ import type {
 
 import type { BackgroundJob } from '../agents/background-jobs.js';
 import type { ContextEvent } from '../context/source-registry.js';
+import type { GoalEvent } from '../goal/events.js';
 import type { MemoryEvent } from '../memory/events.js';
 import type { RuleScope } from '../permission/rules-store.js';
 
@@ -36,6 +37,7 @@ export type CodingSessionEvent =
   | AgentStreamEvent
   | ContextEvent
   | MemoryEvent
+  | GoalEvent
   | {
       readonly type: 'session.opened';
       readonly sessionId: string;

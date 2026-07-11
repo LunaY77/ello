@@ -32,6 +32,21 @@ describe('slash commands', () => {
     });
   });
 
+  it('routes /goal arguments to the session runtime', async () => {
+    const config = await loadCodingAgentConfig();
+
+    expect(
+      handleSlashCommand(
+        '/goal finish the implementation --tokens 12000',
+        config,
+      ).command,
+    ).toEqual({
+      type: 'runtime-action',
+      action: 'goal',
+      args: ['finish', 'the', 'implementation', '--tokens', '12000'],
+    });
+  });
+
   it('does not keep the removed /model command', async () => {
     const config = await loadCodingAgentConfig();
 

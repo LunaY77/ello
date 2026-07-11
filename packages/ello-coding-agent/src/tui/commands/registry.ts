@@ -92,6 +92,12 @@ const META: Record<string, CommandMeta> = {
     title: 'Create skill',
     keywords: ['new'],
   },
+  goal: {
+    id: 'session.goal',
+    group: 'Session',
+    title: 'Goal',
+    keywords: ['objective', 'continue'],
+  },
   workspace: {
     id: 'workspace.list',
     group: 'Workspace',

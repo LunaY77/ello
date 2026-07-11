@@ -234,6 +234,10 @@ export const ContextConfigSchema = z.object({
   }),
 });
 
+export const GoalConfigSchema = z.object({
+  max_continuations: z.number().int().positive().default(20),
+});
+
 /** 项目信任配置，按绝对路径做 key。 */
 export const ProjectTrustSchema = z.object({
   trust_level: z.enum(['trusted', 'untrusted']).default('untrusted'),
@@ -308,6 +312,7 @@ export const CodingAgentConfigSchema = z.object({
       },
     },
   }),
+  goal: GoalConfigSchema.default({ max_continuations: 20 }),
   tui: z.boolean().default(true),
   json: z.boolean().default(false),
 });
@@ -328,6 +333,7 @@ export type ContextToolResultBudgetConfig = z.infer<
 >;
 export type ContextMemoryConfig = z.infer<typeof ContextMemoryConfigSchema>;
 export type ContextConfig = z.infer<typeof ContextConfigSchema>;
+export type GoalConfig = z.infer<typeof GoalConfigSchema>;
 export type PermissionRule = z.infer<typeof PermissionRuleSchema>;
 export type CodingAgentConfig = z.infer<typeof CodingAgentConfigSchema>;
 export type CodingAgentConfigOverrides = Partial<CodingAgentConfig>;

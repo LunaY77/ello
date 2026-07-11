@@ -13,3 +13,9 @@ export type {
   CodingSessionEvent,
   CodingEventListener,
 } from './intents.js';
+export type {
+  GoalPauseReason,
+  GoalState,
+  GoalStatus,
+  GoalStatusView,
+} from '../goal/types.js';

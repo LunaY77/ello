@@ -29,6 +29,19 @@ function fakeIo(): { io: CliIo; out: () => string; err: () => string } {
 }
 
 describe('cli buildProgram', () => {
+  it('registers the commander goal command with session and token options', () => {
+    const { io } = fakeIo();
+    const goal = buildProgram(io).commands.find(
+      (command) => command.name() === 'goal',
+    );
+
+    expect(goal).toBeDefined();
+    expect(goal?.options.map((option) => option.long)).toEqual([
+      '--tokens',
+      '--session',
+    ]);
+  });
+
   it('lists tools', async () => {
     const { io, out } = fakeIo();
     await buildProgram(io).parseAsync(['tools'], { from: 'user' });

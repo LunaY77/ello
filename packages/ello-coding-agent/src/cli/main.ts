@@ -49,7 +49,7 @@ export async function resolveConfig(
  *
  * CLI 是 {@link createCodingSession} 的薄前端：解析命令 → 装配配置 →
  * 创建/驱动会话 → 渲染事件。命令树覆盖 run/resume/sessions/tools/
- * permissions/memory/config，由 commander 表达。
+ * permissions/memory/goal/config，由 commander 表达。
  */
 export function buildProgram(io: CliIo = defaultIo): Command {
   const program = new Command();

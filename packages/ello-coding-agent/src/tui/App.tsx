@@ -11,6 +11,11 @@ import {
   type ProfileSuiteConfig,
 } from '../config/index.js';
 import {
+  formatGoalStatus,
+  parseGoalSlashCommand,
+  type GoalCommand,
+} from '../goal/index.js';
+import {
   createProviderRegistry,
   type ModelRole,
   type RuntimeModel,
@@ -264,6 +269,12 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
                 `Dream failed: ${error instanceof Error ? error.message : String(error)}`,
               );
             });
+        } else if (command.action === 'goal') {
+          void runGoalArgs(command.args ?? []).catch((error) => {
+            session.notify(
+              `Goal failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
         } else if (command.action === 'export') {
           void exportCurrentSession(command.args?.[0]);
         } else if (command.action === 'quit') {
@@ -286,6 +297,29 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         return;
       default:
         session.notify('Command is not implemented in TUI yet.');
+        return;
+    }
+  };
+
+  const runGoalArgs = async (args: readonly string[]): Promise<void> =>
+    runGoalCommand(parseGoalSlashCommand(args));
+
+  const runGoalCommand = async (command: GoalCommand): Promise<void> => {
+    switch (command.action) {
+      case 'create':
+        await session.createGoal(command.objective, command.tokens);
+        return;
+      case 'status':
+        session.notify(formatGoalStatus(session.goalStatus()));
+        return;
+      case 'pause':
+        await session.pauseGoal();
+        return;
+      case 'resume':
+        await session.resumeGoal();
+        return;
+      case 'clear':
+        await session.clearGoal();
         return;
     }
   };
@@ -758,6 +792,7 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
           ? { interruptNotice: state.interruptNotice }
           : {})}
         {...(state.usage !== undefined ? { usage: state.usage } : {})}
+        {...(state.goal !== undefined ? { goal: state.goal } : {})}
         overlay={
           <OverlayHost
             overlay={

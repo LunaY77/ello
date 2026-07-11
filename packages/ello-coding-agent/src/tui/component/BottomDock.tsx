@@ -2,18 +2,21 @@ import type { AgentUsage } from '@ello/agent';
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 
+import type { GoalState } from '../../goal/types.js';
 import { tuiTokens } from '../ui/tokens.js';
 
 export function BottomDock({
   profile,
   approvalMode,
   usage,
+  goal,
   overlay,
   composer,
 }: {
   readonly profile: string;
   readonly approvalMode: string;
   readonly usage?: AgentUsage;
+  readonly goal?: GoalState;
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
 }) {
@@ -37,6 +40,9 @@ export function BottomDock({
         <Box gap={1}>
           <Text color={tuiTokens.color.muted}>{profile}</Text>
           <Text color={approvalColor(approvalMode)}>{approvalMode}</Text>
+          {goal !== undefined ? (
+            <Text color={tuiTokens.color.accent}>{formatGoal(goal)}</Text>
+          ) : null}
         </Box>
         <Box gap={1}>
           <Text color={tuiTokens.color.muted}>{cacheLabel}</Text>
@@ -47,6 +53,14 @@ export function BottomDock({
       </Box>
     </Box>
   );
+}
+
+function formatGoal(goal: GoalState): string {
+  const usage =
+    goal.tokenBudget === undefined
+      ? formatTokens(goal.tokensUsed)
+      : `${formatTokens(goal.tokensUsed)}/${formatTokens(goal.tokenBudget)}`;
+  return `goal ${goal.status} · turn ${goal.continuationTurns} · ${usage}`;
 }
 
 function approvalColor(mode: string): string {

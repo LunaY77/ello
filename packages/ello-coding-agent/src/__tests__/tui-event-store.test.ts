@@ -20,6 +20,32 @@ const runCompleted = {
 } as const;
 
 describe('tui-event-store', () => {
+  it('shows a validated goal objective as the real user submission', () => {
+    const goal = {
+      id: 'goal-1',
+      objective: 'finish the implementation',
+      status: 'active',
+      createdAt: '2026-07-10T00:00:00.000Z',
+      updatedAt: '2026-07-10T00:00:00.000Z',
+      continuationTurns: 0,
+      tokensUsed: 0,
+      activeMs: 0,
+      activeSince: '2026-07-10T00:00:00.000Z',
+      blockerStreak: 0,
+    } as const;
+
+    const state = reduceTuiEvent(initialTuiEventState, {
+      type: 'goal.created',
+      goal,
+    });
+
+    expect(state.goal).toEqual(goal);
+    expect(state.history.at(-1)).toMatchObject({
+      kind: 'user',
+      text: 'finish the implementation',
+    });
+  });
+
   it('accumulates assistant deltas and flushes on run.completed', () => {
     let state = initialTuiEventState;
     state = reduceTuiEvent(state, {

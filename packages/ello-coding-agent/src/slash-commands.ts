@@ -32,6 +32,7 @@ export type CommandResult =
         | 'summary'
         | 'memory'
         | 'dream'
+        | 'goal'
         | 'rewind'
         | 'new-session'
         | 'fork'
@@ -145,6 +146,11 @@ export const slashCommands: readonly SlashCommand[] = [
       type: 'submit',
       prompt: `Invoke skill \`skill-creator\` to create: ${args.join(' ')}`,
     }),
+  },
+  {
+    name: 'goal',
+    description: 'Create or manage the session goal',
+    run: (_ctx, args) => ({ type: 'runtime-action', action: 'goal', args }),
   },
   {
     name: 'workspace',

@@ -1,10 +1,12 @@
 import type { Command } from 'commander';
 
+import type { CodingAgentConfig } from '../../config/index.js';
 import type {
   ProviderRegistry,
   RuntimeModel,
   RuntimeProvider,
 } from '../../provider/index.js';
+import type { CodingSession, CodingSessionEvent } from '../../runtime/index.js';
 import type { CliCommandContext, CliCommandModule } from '../types.js';
 
 export const infoCommands: CliCommandModule = {
@@ -15,6 +17,7 @@ export const infoCommands: CliCommandModule = {
     registerModelCommands(program, ctx);
     registerPermissionCommands(program, ctx);
     registerMemoryCommands(program, ctx);
+    registerDreamCommand(program, ctx);
   },
 };
 
@@ -191,9 +194,20 @@ function registerMemoryCommands(
 ): void {
   program
     .command('memory')
-    .description('show memory file summary')
-    .action(async (_opts: unknown, cmd: Command) => {
+    .description('show or reload file memory')
+    .argument('[action]', 'status or reload', 'status')
+    .action(async (action: string, _opts: unknown, cmd: Command) => {
       const config = await ctx.resolveConfig(cmd.optsWithGlobals());
+      if (action !== 'status' && action !== 'reload') {
+        throw new Error(`Unknown memory action: ${action}`);
+      }
+      if (action === 'reload') {
+        const status = await reloadMemory(config);
+        ctx.io.stdout.write(
+          `${config.json ? JSON.stringify(status, null, 2) : formatMemoryStatus(status)}\n`,
+        );
+        return;
+      }
       if (!config.context.memory.enabled) {
         const memory = {
           enabled: false,
@@ -220,6 +234,155 @@ function registerMemoryCommands(
         `${config.json ? JSON.stringify(memory, null, 2) : `enabled\nprivate\t${memory.privateRoot}\t${memory.privateEntries}\nteam\t${memory.teamRoot}\t${memory.teamEntries}`}\n`,
       );
     });
+}
+
+function registerDreamCommand(program: Command, ctx: CliCommandContext): void {
+  program
+    .command('dream')
+    .description('consolidate memory and wait for the durable job')
+    .action(async (_opts: unknown, cmd: Command) => {
+      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
+      if (!config.context.memory.enabled) {
+        throw new Error(
+          'Memory is disabled. Enable context.memory.enabled in config.yaml.',
+        );
+      }
+      const result = await runDream(config);
+      ctx.io.stdout.write(
+        `${config.json ? JSON.stringify(result, null, 2) : `Dream job ${result.jobId} completed.\n${result.summary}`}\n`,
+      );
+    });
+}
+
+async function reloadMemory(config: CodingAgentConfig) {
+  if (!config.context.memory.enabled) {
+    throw new Error(
+      'Memory is disabled. Enable context.memory.enabled in config.yaml.',
+    );
+  }
+  const { MemoryIndexLoader, MemoryRepository, memoryRoots } =
+    await import('../../memory/index.js');
+  const repository = new MemoryRepository(memoryRoots(config));
+  await repository.initialize();
+  const loader = new MemoryIndexLoader(repository);
+  loader.invalidate();
+  await loader.load();
+  const counts = await repository.status();
+  return {
+    enabled: true as const,
+    privateRoot: repository.roots.private,
+    teamRoot: repository.roots.team,
+    ...counts,
+  };
+}
+
+async function runDream(config: CodingAgentConfig): Promise<DreamResult> {
+  const { createCodingSession } = await import('../../runtime/index.js');
+  const session = await createCodingSession({ config });
+  const completion = waitForDream(session);
+  try {
+    const job = await session.dream();
+    return await completion.forJob(job.id);
+  } finally {
+    completion.unsubscribe();
+    await session.close();
+  }
+}
+
+interface DreamResult {
+  readonly jobId: string;
+  readonly status: 'completed';
+  readonly changes: number;
+  readonly summary: string;
+}
+
+type DreamCompletedEvent = Extract<
+  CodingSessionEvent,
+  { readonly type: 'memory.dream.completed' }
+>;
+type DreamFailedEvent = Extract<
+  CodingSessionEvent,
+  { readonly type: 'memory.dream.failed' }
+>;
+type DreamTerminalEvent = DreamCompletedEvent | DreamFailedEvent;
+
+function waitForDream(session: CodingSession): {
+  forJob(jobId: string): Promise<DreamResult>;
+  unsubscribe(): void;
+} {
+  const terminalEvents = new Map<string, DreamTerminalEvent>();
+  const waiters = new Map<
+    string,
+    {
+      resolve(event: DreamCompletedEvent): void;
+      reject(error: Error): void;
+    }
+  >();
+  const unsubscribe = session.subscribe((event) => {
+    if (
+      event.type !== 'memory.dream.completed' &&
+      event.type !== 'memory.dream.failed'
+    ) {
+      return;
+    }
+    terminalEvents.set(event.jobId, event);
+    const waiter = waiters.get(event.jobId);
+    if (waiter !== undefined) {
+      waiters.delete(event.jobId);
+      settleDreamWaiter(event, waiter);
+    }
+  });
+  return {
+    async forJob(jobId) {
+      const terminal = terminalEvents.get(jobId);
+      if (terminal !== undefined) {
+        return dreamResult(terminal);
+      }
+      const event = await new Promise<DreamCompletedEvent>(
+        (resolve, reject) => {
+          waiters.set(jobId, { resolve, reject });
+        },
+      );
+      return dreamResult(event);
+    },
+    unsubscribe,
+  };
+}
+
+function settleDreamWaiter(
+  event: DreamTerminalEvent,
+  waiter: {
+    resolve(event: DreamCompletedEvent): void;
+    reject(error: Error): void;
+  },
+): void {
+  if (event.type === 'memory.dream.failed') {
+    waiter.reject(new Error(`Dream job ${event.jobId} failed: ${event.error}`));
+    return;
+  }
+  waiter.resolve(event);
+}
+
+function dreamResult(event: DreamTerminalEvent): DreamResult {
+  if (event.type === 'memory.dream.failed') {
+    throw new Error(`Dream job ${event.jobId} failed: ${event.error}`);
+  }
+  return {
+    jobId: event.jobId,
+    status: 'completed',
+    changes: event.changes,
+    summary: event.summary,
+  };
+}
+
+function formatMemoryStatus(
+  status: Awaited<ReturnType<typeof reloadMemory>>,
+): string {
+  return [
+    'Memory index reloaded.',
+    `private\t${status.privateRoot}\t${status.privateEntries}`,
+    `team\t${status.teamRoot}\t${status.teamEntries}`,
+  ].join('\n');
 }
 
 function providerForOutput(provider: RuntimeProvider): Record<string, unknown> {

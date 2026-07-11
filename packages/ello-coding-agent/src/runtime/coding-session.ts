@@ -14,6 +14,7 @@ import {
   type AgentEnvironment,
   type AgentFileSystem,
   type AgentMessage,
+  type AgentInput,
   type AgentModel,
   type AgentObserver,
   type AgentRunResult,
@@ -50,6 +51,14 @@ import {
   createToolResultBudget,
   type ToolResultBudget,
 } from '../context/tool-result-budget.js';
+import {
+  createGoalSessionPort,
+  createGoalSystemSection,
+  createGoalTools,
+  GoalService,
+  type GoalState,
+  type GoalStatusView,
+} from '../goal/index.js';
 import {
   MemoryJobCoordinator,
   createMemoryTools,
@@ -290,6 +299,12 @@ export interface CodingSession {
   clear(): Promise<void>;
   approve(requestId: string, decision: ApprovalDecision): Promise<void>;
   abort(reason?: string): void;
+  createGoal(objective: string, tokenBudget?: number): Promise<GoalState>;
+  pauseGoal(): Promise<GoalState>;
+  resumeGoal(): Promise<GoalState>;
+  clearGoal(): Promise<string>;
+  goalStatus(): GoalStatusView | null;
+  waitForGoalContinuation(): Promise<void>;
   notify(text: string): void;
   setProfile(profileName: string): Promise<string>;
   createProfile(profileName: string, sourceProfileName: string): Promise<void>;
@@ -410,6 +425,7 @@ export async function createCodingSession(
     throw error;
   }
   profile.mark('ready');
+  await session.initialize();
   profile.flush();
   session.emit({ type: 'session.opened', sessionId, cwd: config.cwd });
   return session;
@@ -429,6 +445,10 @@ class CodingSessionImpl implements CodingSession {
   private readonly sessionExternalPaths = new Set<string>();
   private readonly steerQueue: string[] = [];
   private currentStream: AgentStream | undefined;
+  private pendingRunMetadata: Record<string, unknown> | undefined;
+  private continuationTask: Promise<void> | undefined;
+  private closing = false;
+  private readonly goalService: GoalService;
   private config: CodingAgentConfig;
   private providerRegistry: ProviderRegistry;
   private primaryRole: RuntimeRoleModel;
@@ -451,6 +471,15 @@ class CodingSessionImpl implements CodingSession {
       sessionId: () => this.sessionId,
       config: config.context.tool_result_budget,
     });
+    this.goalService = new GoalService({
+      port: createGoalSessionPort({
+        repository: this.deps.sessionStore.repository,
+        sessionId: () => this.sessionId,
+      }),
+      maxContinuations: config.goal.max_continuations,
+      onChanged: (goal, previous) => this.emitGoalChanged(goal, previous),
+      onCleared: (goalId) => this.emit({ type: 'goal.cleared', goalId }),
+    });
     this.deps.backgroundJobs.onSettled((job) =>
       this.injectBackgroundResult(job),
     );
@@ -458,6 +487,10 @@ class CodingSessionImpl implements CodingSession {
 
   get cwd(): string {
     return this.config.cwd;
+  }
+
+  async initialize(): Promise<void> {
+    await this.goalService.load();
   }
 
   subscribe(listener: CodingEventListener): () => void {
@@ -474,30 +507,14 @@ class CodingSessionImpl implements CodingSession {
     const drained = this.steerQueue.splice(0);
     const input =
       drained.length > 0 ? [...drained, prompt].join('\n\n') : prompt;
-    const runtime = await this.ensureAgentRuntime();
-
-    this.currentStream = runtime.agent.stream(input, {
-      sessionId: this.sessionId,
-      maxTurns: this.activeAgentMaxTurns(),
-      ...(meta !== undefined ? { metadata: meta } : {}),
-    });
-    try {
-      const result = await driveRun({
-        currentStream: this.currentStream,
-        pendingApprovalCount: () => this.pendingApprovalCount(),
-        emit: (event) => this.emit(event),
-        onEvent: (event) => this.forward(event),
-        checkpoints: this.checkpoints,
-        checkpointLabel: prompt.slice(0, 80),
-      });
-      if ((result.pending?.length ?? 0) === 0) {
-        await this.ensureSessionTitle(this.sessionId, result.messages);
-        await this.maybeEnqueueMemoryExtraction(result, meta);
-      }
-      return result;
-    } finally {
-      this.currentStream = undefined;
-    }
+    const goal = this.goalService.active();
+    const runMetadata =
+      goal !== null && meta?.goalId === undefined
+        ? { ...meta, goalId: goal.id, goalUserRun: true }
+        : meta;
+    const result = await this.runInput(input, runMetadata, prompt.slice(0, 80));
+    this.scheduleGoalContinuation(result);
+    return result;
   }
 
   /** 运行中追加输入（steer）：优先注入当前 stream 的下一回合。 */
@@ -569,14 +586,20 @@ class CodingSessionImpl implements CodingSession {
     this.approvalDecisions.clear();
 
     const runtime = await this.ensureAgentRuntime();
+    const runMetadata = this.pendingRunMetadata;
     const resumed = runtime.agent.resume(
       {
         deferred,
         approvals,
       },
-      { sessionId: this.sessionId, maxTurns: this.activeAgentMaxTurns() },
+      {
+        sessionId: this.sessionId,
+        maxTurns: this.activeAgentMaxTurns(),
+        ...(runMetadata !== undefined ? { metadata: runMetadata } : {}),
+      },
     );
     this.currentStream = resumed;
+    let completed: AgentRunResult | undefined;
     try {
       const result = await driveRun({
         currentStream: this.currentStream,
@@ -585,12 +608,18 @@ class CodingSessionImpl implements CodingSession {
         onEvent: (event) => this.forward(event),
         checkpoints: this.checkpoints,
       });
+      completed = result;
+      await this.recordGoalUsage(result, runMetadata);
       if ((result.pending?.length ?? 0) === 0) {
+        this.pendingRunMetadata = undefined;
         await this.ensureSessionTitle(this.sessionId, result.messages);
-        await this.maybeEnqueueMemoryExtraction(result);
+        await this.maybeEnqueueMemoryExtraction(result, runMetadata);
       }
     } finally {
       this.currentStream = undefined;
+    }
+    if (completed !== undefined) {
+      this.scheduleGoalContinuation(completed);
     }
   }
 
@@ -598,6 +627,51 @@ class CodingSessionImpl implements CodingSession {
   abort(reason?: string): void {
     this.currentStream?.abort(reason);
     this.emit({ type: 'ui.interrupted', reason: reason ?? 'interrupted' });
+  }
+
+  async createGoal(
+    objective: string,
+    tokenBudget?: number,
+  ): Promise<GoalState> {
+    const goal = await this.goalService.create(objective, tokenBudget);
+    await this.submit(goal.objective, {
+      goalId: goal.id,
+      goalInitial: true,
+    });
+    const current = this.goalService.current();
+    if (current === null || current.id !== goal.id) {
+      throw new Error(`Goal ${goal.id} disappeared during its initial run.`);
+    }
+    return current;
+  }
+
+  async pauseGoal(): Promise<GoalState> {
+    const goal = await this.goalService.pause();
+    this.currentStream?.abort('goal paused by user');
+    this.notify(`Goal paused: ${goal.objective}`);
+    return goal;
+  }
+
+  async resumeGoal(): Promise<GoalState> {
+    const goal = await this.goalService.resume();
+    this.notify(`Goal resumed: ${goal.objective}`);
+    this.scheduleGoalContinuation();
+    return goal;
+  }
+
+  async clearGoal(): Promise<string> {
+    this.currentStream?.abort('goal cleared by user');
+    const goalId = await this.goalService.clear();
+    this.notify(`Goal cleared: ${goalId}`);
+    return goalId;
+  }
+
+  goalStatus(): GoalStatusView | null {
+    return this.goalService.status();
+  }
+
+  async waitForGoalContinuation(): Promise<void> {
+    await this.continuationTask;
   }
 
   /** 给前端视图写入一条产品级消息。 */
@@ -787,8 +861,10 @@ class CodingSessionImpl implements CodingSession {
   }
 
   /** 把当前 session 的 active path 历史推给前端。 */
-  loadHistory(): Promise<void> {
-    return this.emitHistoryLoaded({ allowMissing: true });
+  async loadHistory(): Promise<void> {
+    await this.emitHistoryLoaded({ allowMissing: true });
+    const goal = this.goalService.current();
+    if (goal !== null) this.emit({ type: 'goal.updated', goal });
   }
 
   /** 切换当前 session 的 active leaf，后续 turn 从该节点继续。 */
@@ -838,6 +914,7 @@ class CodingSessionImpl implements CodingSession {
     reason = 'fork from TUI',
     targetEntryId?: string,
   ): Promise<string> {
+    const previousGoalId = this.goalService.current()?.id;
     if (this.currentStream !== undefined) {
       this.abort('fork requested from TUI');
     }
@@ -858,6 +935,8 @@ class CodingSessionImpl implements CodingSession {
     });
     this.sessionId = next.sessionId;
     await this.deps.sessionStore.load(this.sessionId);
+    await this.goalService.load();
+    this.emitGoalSnapshot(previousGoalId);
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
     await this.emitHistoryLoaded();
@@ -897,7 +976,12 @@ class CodingSessionImpl implements CodingSession {
 
   /** 新建会话：换 sessionId 并重建 Agent。 */
   async newSession(): Promise<string> {
+    const previousGoalId = this.goalService.current()?.id;
     this.sessionId = randomUUID();
+    await this.goalService.load();
+    if (previousGoalId !== undefined) {
+      this.emit({ type: 'goal.cleared', goalId: previousGoalId });
+    }
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
     this.emit({ type: 'ui.clear' });
@@ -910,15 +994,22 @@ class CodingSessionImpl implements CodingSession {
     const id = idOrPath.endsWith('.jsonl')
       ? idOrPath.replace(/.*\/(.+)\.jsonl$/u, '$1')
       : idOrPath;
+    const previousGoalId = this.goalService.current()?.id;
     const loaded = await this.deps.sessionStore.repository.load(id);
     this.sessionId = id;
     await this.deps.sessionStore.load(id);
+    await this.goalService.load();
+    this.emitGoalSnapshot(previousGoalId);
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
     this.emitHistoryLoadedFromMessages(loaded.messages, loaded.messageEntryIds);
+    this.scheduleGoalContinuation();
   }
 
   async close(): Promise<void> {
+    this.closing = true;
+    this.currentStream?.abort('coding session closed');
+    await this.continuationTask;
     await this.deps.backgroundJobs.stopAll('coding session closed');
     await this.closeAgentRuntime();
     if (this.deps.memory !== undefined) {
@@ -983,6 +1074,151 @@ class CodingSessionImpl implements CodingSession {
       input: item.input,
       ...(item.metadata !== undefined ? { metadata: item.metadata } : {}),
     });
+  }
+
+  private async runInput(
+    input: AgentInput,
+    metadata?: Record<string, unknown>,
+    checkpointLabel?: string,
+  ): Promise<AgentRunResult> {
+    if (this.currentStream !== undefined) {
+      throw new Error('Cannot start a run while another run is active.');
+    }
+    const runtime = await this.ensureAgentRuntime();
+    this.currentStream = runtime.agent.stream(input, {
+      sessionId: this.sessionId,
+      maxTurns: this.activeAgentMaxTurns(),
+      ...(metadata !== undefined ? { metadata } : {}),
+    });
+    try {
+      const result = await driveRun({
+        currentStream: this.currentStream,
+        pendingApprovalCount: () => this.pendingApprovalCount(),
+        emit: (event) => this.emit(event),
+        onEvent: (event) => this.forward(event),
+        checkpoints: this.checkpoints,
+        ...(checkpointLabel !== undefined ? { checkpointLabel } : {}),
+      });
+      await this.recordGoalUsage(result, metadata);
+      if ((result.pending?.length ?? 0) === 0) {
+        this.pendingRunMetadata = undefined;
+        await this.ensureSessionTitle(this.sessionId, result.messages);
+        await this.maybeEnqueueMemoryExtraction(result, metadata);
+      } else {
+        this.pendingRunMetadata = metadata;
+      }
+      return result;
+    } finally {
+      this.currentStream = undefined;
+    }
+  }
+
+  private async recordGoalUsage(
+    result: AgentRunResult,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    const goalId = metadata?.goalId;
+    if (typeof goalId !== 'string') return;
+    const goal = await this.goalService.recordUsage(goalId, result.usage);
+    if (goal?.status === 'paused') {
+      if (goal.pauseReason === 'token_budget') {
+        this.notify(
+          `Goal paused: token budget exhausted (${goal.tokensUsed}/${goal.tokenBudget}).`,
+        );
+      } else if (goal.pauseReason === 'continuation_limit') {
+        this.notify(
+          `Goal paused: continuation limit reached (${goal.continuationTurns}/${this.config.goal.max_continuations}).`,
+        );
+      }
+    } else if (goal?.status === 'complete' && goal.tokenBudget !== undefined) {
+      this.notify(
+        `Goal complete. Final token usage: ${goal.tokensUsed}/${goal.tokenBudget}.`,
+      );
+    }
+  }
+
+  private scheduleGoalContinuation(result?: AgentRunResult): void {
+    if (result !== undefined && !canContinueAfter(result)) return;
+    if (
+      this.goalService.active() === null ||
+      this.closing ||
+      this.pendingApprovalCount() > 0 ||
+      this.continuationTask !== undefined
+    ) {
+      return;
+    }
+    const task = this.runGoalContinuations();
+    this.continuationTask = task;
+    void task
+      .catch((error) => {
+        this.notify(
+          `Goal continuation failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      })
+      .finally(() => {
+        if (this.continuationTask === task) {
+          this.continuationTask = undefined;
+        }
+      });
+  }
+
+  private async runGoalContinuations(): Promise<void> {
+    while (!this.closing && this.goalService.active() !== null) {
+      if (this.pendingApprovalCount() > 0 || this.currentStream !== undefined) {
+        return;
+      }
+      const started = await this.goalService.beginContinuation();
+      if (started.status === 'paused') {
+        this.notify(
+          `Goal paused: continuation limit reached (${started.continuationTurns}/${this.config.goal.max_continuations}).`,
+        );
+        return;
+      }
+      this.emit({ type: 'goal.continuation.started', goal: started });
+      const result = await this.runInput(
+        { messages: [] },
+        {
+          goalId: started.id,
+          goalContinuation: true,
+        },
+      );
+      const current = this.goalService.current();
+      if (current !== null) {
+        this.emit({ type: 'goal.continuation.completed', goal: current });
+      }
+      if (!canContinueAfter(result)) return;
+    }
+  }
+
+  private emitGoalChanged(goal: GoalState, previous: GoalState | null): void {
+    if (previous === null) {
+      this.emit({ type: 'goal.created', goal });
+      return;
+    }
+    if (goal.status !== previous.status) {
+      if (goal.status === 'paused') {
+        this.emit({ type: 'goal.paused', goal });
+        return;
+      }
+      if (goal.status === 'complete') {
+        this.emit({ type: 'goal.completed', goal });
+        return;
+      }
+      if (goal.status === 'blocked') {
+        this.emit({ type: 'goal.blocked', goal });
+        return;
+      }
+    }
+    this.emit({ type: 'goal.updated', goal });
+  }
+
+  private emitGoalSnapshot(previousGoalId?: string): void {
+    const goal = this.goalService.current();
+    if (goal !== null) {
+      this.emit({ type: 'goal.updated', goal });
+    } else if (previousGoalId !== undefined) {
+      this.emit({ type: 'goal.cleared', goalId: previousGoalId });
+    }
   }
 
   /** 大 tool 输出在下一次模型输入前替换成 artifact stub。 */
@@ -1220,6 +1456,7 @@ class CodingSessionImpl implements CodingSession {
       ...memoryTools,
     ];
     const selectedTools = selectToolsForAgent(tools, agentDef.tools);
+    const goalTools = createGoalTools(this.goalService);
     const skillTools = createSkillTools({
       skills: runtime.skills,
       active: this.activeSkills,
@@ -1266,6 +1503,7 @@ class CodingSessionImpl implements CodingSession {
           activation: 'activated',
         }),
       ),
+      dynamicSystemSection(createGoalSystemSection(this.goalService)),
     ];
 
     return createAgent({
@@ -1280,7 +1518,7 @@ class CodingSessionImpl implements CodingSession {
         () => this.deps.rulesStore.rules(),
         () => [...this.sessionExternalPaths],
       ),
-      tools: [...selectedTools, ...skillTools, delegateTool],
+      tools: [...selectedTools, ...goalTools, ...skillTools, delegateTool],
       transcript: this.deps.sessionStore,
       eventRecorder: createCodingEventRecorder(
         this.deps.sessionStore.repository,
@@ -1646,4 +1884,12 @@ async function driveRun(options: {
     state: pendingApprovalCount() > 0 ? 'awaiting_approval' : 'idle',
   });
   return result;
+}
+
+function canContinueAfter(result: AgentRunResult): boolean {
+  return (
+    (result.pending?.length ?? 0) === 0 &&
+    result.finishReason !== 'interrupted' &&
+    result.finishReason !== 'error'
+  );
 }

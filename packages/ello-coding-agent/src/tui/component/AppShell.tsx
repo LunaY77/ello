@@ -2,6 +2,7 @@ import type { AgentUsage } from '@ello/agent';
 import { Box } from 'ink';
 import type { ReactNode } from 'react';
 
+import type { GoalState } from '../../goal/types.js';
 import type { SubagentRunView, ToolCallView } from '../store/history-entry.js';
 import { tuiTokens } from '../ui/tokens.js';
 
@@ -19,6 +20,7 @@ export interface AppShellProps {
   readonly interruptNotice?: string;
   readonly pendingSteers?: readonly string[];
   readonly usage?: AgentUsage;
+  readonly goal?: GoalState;
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
 }
@@ -50,6 +52,7 @@ export function AppShell(props: AppShellProps) {
         profile={props.profile}
         approvalMode={props.approvalMode}
         {...(props.usage !== undefined ? { usage: props.usage } : {})}
+        {...(props.goal !== undefined ? { goal: props.goal } : {})}
         overlay={props.overlay}
         composer={props.composer}
       />

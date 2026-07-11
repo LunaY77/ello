@@ -11,6 +11,8 @@ import path from 'node:path';
 
 import type { AgentFinishReason, AgentMessage, AgentUsage } from '@ello/agent';
 
+import type { GoalState } from '../goal/types.js';
+
 import { SessionCatalog, type SessionCatalogRecord } from './catalog.js';
 import { parseSessionRecord } from './schema.js';
 
@@ -129,6 +131,16 @@ export type SessionRecord =
        */
       readonly kind: 'session-summary';
       readonly summary: string;
+      readonly createdAt: string;
+    }
+  | {
+      readonly kind: 'goal-state';
+      readonly goal: GoalState;
+      readonly createdAt: string;
+    }
+  | {
+      readonly kind: 'goal-cleared';
+      readonly goalId: string;
       readonly createdAt: string;
     };
 
@@ -521,6 +533,7 @@ export class JsonlSessionRepository {
   ): Promise<SessionInfo> {
     const reason = options.reason ?? 'fork';
     const source = await this.load(sessionId);
+    const sourceGoal = await this.latestGoal(sessionId);
     if (source.messages.length === 0) {
       throw new Error('Cannot fork an empty session.');
     }
@@ -551,6 +564,15 @@ export class JsonlSessionRepository {
             {
               kind: 'session-title' as const,
               title: source.info.title,
+              createdAt,
+            },
+          ]
+        : []),
+      ...(sourceGoal !== null
+        ? [
+            {
+              kind: 'goal-state' as const,
+              goal: forkGoal(sourceGoal, createdAt),
               createdAt,
             },
           ]
@@ -733,6 +755,29 @@ export class JsonlSessionRepository {
         createdAt: new Date().toISOString(),
       },
     ]);
+  }
+
+  async appendGoalState(sessionId: string, goal: GoalState): Promise<void> {
+    await this.appendRecords(sessionId, [
+      { kind: 'goal-state', goal, createdAt: new Date().toISOString() },
+    ]);
+  }
+
+  async appendGoalCleared(sessionId: string, goalId: string): Promise<void> {
+    await this.appendRecords(sessionId, [
+      { kind: 'goal-cleared', goalId, createdAt: new Date().toISOString() },
+    ]);
+  }
+
+  async latestGoal(sessionId: string): Promise<GoalState | null> {
+    const record = [...(await this.readRecords(sessionId))]
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.kind === 'goal-state' || candidate.kind === 'goal-cleared',
+      );
+    if (record === undefined || record.kind === 'goal-cleared') return null;
+    return record.goal;
   }
 
   /** 读取最近一次手动 `/summary` 纪要（仅供 `/summary` 迭代自己的 seed）。 */
@@ -1183,6 +1228,34 @@ function takePrefix(
     }
   }
   return result;
+}
+
+function forkGoal(goal: GoalState, createdAt: string): GoalState {
+  const activeMs =
+    goal.status === 'active'
+      ? goal.activeMs + activeInterval(goal, createdAt)
+      : goal.activeMs;
+  return {
+    id: randomUUID(),
+    objective: goal.objective,
+    status: 'paused',
+    createdAt,
+    updatedAt: createdAt,
+    continuationTurns: goal.continuationTurns,
+    ...(goal.tokenBudget !== undefined
+      ? { tokenBudget: goal.tokenBudget }
+      : {}),
+    tokensUsed: goal.tokensUsed,
+    activeMs,
+    blockerStreak: 0,
+  };
+}
+
+function activeInterval(goal: GoalState, endedAt: string): number {
+  if (goal.activeSince === undefined) {
+    throw new Error(`Active goal ${goal.id} is missing activeSince.`);
+  }
+  return Math.max(0, Date.parse(endedAt) - Date.parse(goal.activeSince));
 }
 
 /** 估算消息序列 token（`ceil(chars/4)`），用于投影后触发判定。 */
