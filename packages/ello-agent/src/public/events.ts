@@ -1,63 +1,144 @@
 import type {
-  AgentApprovalRequest,
-  DeferredApprovalItem,
   AgentError,
   AgentFinishReason,
-  AgentMessage,
   AgentUsage,
-} from './types.js';
+  DeferredApprovalItem,
+} from './agent.js';
+import type {
+  AgentMessage,
+  AgentModelRequest,
+  AgentModelResponse,
+} from './model.js';
+import type { AgentApprovalRequest } from './tool.js';
 
-export interface RunCompletedEvent {
-  readonly type: 'run.completed';
+export interface AgentEventMetadata {
   readonly runId: string;
+  readonly sequence: number;
+  readonly occurredAt: string;
+}
+
+export interface ModelCallIdentity {
+  readonly runId: string;
+  readonly turnIndex: number;
+  readonly modelCallId: string;
+  readonly provider: string;
+  readonly model: string;
+}
+
+export interface ModelCallDiagnostics {
+  readonly systemFingerprint: string;
+  readonly toolsetFingerprint: string;
+  readonly messagePrefixFingerprint: string;
+  readonly compactionBoundary: boolean;
+}
+
+export interface RunCompletedEvent extends AgentEventMetadata {
+  readonly type: 'run.completed';
   readonly finishReason: AgentFinishReason;
   readonly usage: AgentUsage;
 }
 
-/**
- * 稳定、可渲染、可持久化的 Agent 事件协议。
- *
- * 事件名使用点分层，方便 UI、日志和 JSONL session 直接消费。
- *
- * @example
- * ```ts
- * for await (const event of agent.stream('hello')) {
- *   if (event.type === 'message.delta') {
- *     process.stdout.write(event.text);
- *   }
- * }
- * ```
- */
 export type AgentStreamEvent =
-  /** 运行开始。 */
-  | { type: 'run.started'; runId: string }
-  /** 单个回合开始。 */
-  | { type: 'turn.started'; runId: string; turnIndex: number }
-  /** 某队列被抽空，携带本次抽空的条数。 */
-  | { type: 'queue.drained'; runId: string; queue: string; count: number }
-  /** 一条助手消息开始。 */
-  | { type: 'message.started'; messageId: string; role: 'assistant' }
-  /** 助手消息的文本增量。 */
-  | { type: 'message.delta'; messageId: string; text: string }
-  /** 工具开始执行，携带入参。 */
-  | { type: 'tool.started'; toolCallId: string; name: string; input: unknown }
-  /** 工具触发审批请求。 */
-  | { type: 'tool.approval_requested'; request: AgentApprovalRequest }
-  /** 运行因等待审批而挂起，携带待审批项（供 `resume`）。 */
-  | { type: 'approval.required'; runId: string; item: DeferredApprovalItem }
-  /** 工具执行完成，携带输出。 */
-  | { type: 'tool.completed'; toolCallId: string; output: unknown }
-  /** 工具执行失败，携带错误。 */
-  | { type: 'tool.failed'; toolCallId: string; error: AgentError }
-  /** 单个回合结束。 */
-  | { type: 'turn.completed'; turnIndex: number }
-  /** 运行被中断，携带中断时的消息现场。 */
-  | { type: 'run.interrupted'; runId: string; messages: AgentMessage[] }
-  /** 运行成功完成，只携带终态摘要。 */
+  | (AgentEventMetadata & { readonly type: 'run.started' })
+  | (AgentEventMetadata & {
+      readonly type: 'turn.started';
+      readonly turnIndex: number;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'turn.completed';
+      readonly turnIndex: number;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'queue.drained';
+      readonly queue: string;
+      readonly count: number;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'message.started';
+      readonly turnIndex: number;
+      readonly messageId: string;
+      readonly role: 'assistant';
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'message.delta';
+      readonly turnIndex: number;
+      readonly messageId: string;
+      readonly text: string;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'model.started';
+      readonly identity: ModelCallIdentity;
+      readonly request: AgentModelRequest;
+      readonly diagnostics: ModelCallDiagnostics;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'model.first_token';
+      readonly identity: ModelCallIdentity;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'model.completed';
+      readonly identity: ModelCallIdentity;
+      readonly response: AgentModelResponse;
+      readonly diagnostics: ModelCallDiagnostics;
+      readonly startedAt: string;
+      readonly firstTokenAt?: string;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'model.failed';
+      readonly identity: ModelCallIdentity;
+      readonly error: AgentError;
+      readonly diagnostics: ModelCallDiagnostics;
+      readonly startedAt: string;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'tool.started';
+      readonly turnIndex: number;
+      readonly toolCallId: string;
+      readonly name: string;
+      readonly input: unknown;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'tool.approval_requested';
+      readonly turnIndex: number;
+      readonly request: AgentApprovalRequest;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'approval.required';
+      readonly item: DeferredApprovalItem;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'tool.completed';
+      readonly turnIndex: number;
+      readonly toolCallId: string;
+      readonly output: unknown;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'tool.failed';
+      readonly turnIndex: number;
+      readonly toolCallId: string;
+      readonly error: AgentError;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'context.compaction';
+      readonly beforeMessageCount: number;
+      readonly afterMessageCount: number;
+      readonly compactor: string;
+      readonly metadata?: Record<string, unknown>;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'run.interrupted';
+      readonly messages: AgentMessage[];
+    })
   | RunCompletedEvent
-  /** 运行失败，携带错误与已产出的部分消息。 */
-  | {
-      type: 'run.failed';
-      error: AgentError;
-      partialMessages: AgentMessage[];
-    };
+  | (AgentEventMetadata & {
+      readonly type: 'run.failed';
+      readonly error: AgentError;
+      readonly partialMessages: AgentMessage[];
+    });
+
+type StripMetadata<T> = T extends unknown
+  ? Omit<T, keyof AgentEventMetadata> & { readonly runId?: string }
+  : never;
+
+/** 内核事件发射端的输入；运行身份、时间和序列号由 dispatcher 统一注入。 */
+export type AgentEventInput = StripMetadata<AgentStreamEvent>;

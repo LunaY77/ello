@@ -4,7 +4,7 @@ import type {
   AgentUsage,
   QueueDrainDiagnostic,
 } from '../public/agent.js';
-import type { AgentStreamEvent } from '../public/events.js';
+import type { AgentEventMetadata, AgentStreamEvent } from '../public/events.js';
 import type { AgentMessage } from '../public/model.js';
 
 export interface AgentRunState {
@@ -19,42 +19,45 @@ export type AgentTraceEvent =
       AgentStreamEvent,
       { type: 'run.started' | 'turn.started' | 'turn.completed' }
     >
-  | {
+  | (AgentEventMetadata & {
       readonly type: 'tool.started';
       readonly toolCallId: string;
       readonly name: string;
-    }
-  | {
+    })
+  | (AgentEventMetadata & {
       readonly type: 'tool.approval_requested';
       readonly toolCallId: string;
       readonly toolName: string;
-    }
-  | {
+    })
+  | (AgentEventMetadata & {
       readonly type: 'approval.required';
       readonly runId: string;
       readonly toolCallId: string;
       readonly toolName: string;
-    }
-  | { readonly type: 'tool.completed'; readonly toolCallId: string }
-  | {
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'tool.completed';
+      readonly toolCallId: string;
+    })
+  | (AgentEventMetadata & {
       readonly type: 'tool.failed';
       readonly toolCallId: string;
       readonly errorName: string;
       readonly errorMessage: string;
-    }
-  | { readonly type: 'run.interrupted'; readonly runId: string }
-  | {
+    })
+  | (AgentEventMetadata & { readonly type: 'run.interrupted' })
+  | (AgentEventMetadata & {
       readonly type: 'run.completed';
       readonly runId: string;
       readonly finishReason: AgentFinishReason;
       readonly usage: AgentUsage;
-    }
-  | {
+    })
+  | (AgentEventMetadata & {
       readonly type: 'run.failed';
       readonly runId: string;
       readonly errorName: string;
       readonly errorMessage: string;
-    };
+    });
 
 export interface AgentTrace {
   readonly events: AgentTraceEvent[];

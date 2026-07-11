@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type {
+  AgentEventRecorder,
   AgentModelRequest,
   AgentModelResponse,
-  AgentObserver,
+  AgentStreamEvent,
   ModelAdapter,
-  ModelCallCompletedEvent,
 } from '../index.js';
 import { createAgent, defineTool, z } from '../index.js';
 
@@ -36,17 +36,19 @@ class FinalAdapter implements ModelAdapter {
   }
 }
 
-describe('model-call observer', () => {
+describe('model-call lifecycle', () => {
   it('上报安全的 model-call usage 与 fingerprint', async () => {
-    const calls: ModelCallCompletedEvent[] = [];
-    const observer: AgentObserver = {
-      onModelCallCompleted: (event) => calls.push(event),
+    const calls: Extract<AgentStreamEvent, { type: 'model.completed' }>[] = [];
+    const recorder: AgentEventRecorder = {
+      record: (event) => {
+        if (event.type === 'model.completed') calls.push(event);
+      },
     };
     const agent = createAgent({
       model: 'test:model-a',
       modelAdapter: new FinalAdapter(),
       instructions: 'stable system',
-      observers: [observer],
+      eventRecorder: recorder,
     });
 
     await agent.run('hello');
@@ -54,17 +56,16 @@ describe('model-call observer', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      turnIndex: 0,
-      provider: 'test',
-      model: 'model-a',
-      finishReason: 'stop',
-      usage,
-      compactionBoundary: false,
+      identity: { turnIndex: 0, provider: 'test', model: 'model-a' },
+      response: { finishReason: 'stop', usage },
+      diagnostics: { compactionBoundary: false },
     });
-    expect(calls[0]?.durationMs).toBeGreaterThanOrEqual(0);
-    expect(calls[0]?.systemFingerprint).toHaveLength(64);
-    expect(calls[0]?.toolsetFingerprint).toHaveLength(64);
-    expect(calls[0]?.messagePrefixFingerprint).toHaveLength(64);
+    expect(
+      Date.parse(calls[0]!.occurredAt) - Date.parse(calls[0]!.startedAt),
+    ).toBeGreaterThanOrEqual(0);
+    expect(calls[0]?.diagnostics.systemFingerprint).toHaveLength(64);
+    expect(calls[0]?.diagnostics.toolsetFingerprint).toHaveLength(64);
+    expect(calls[0]?.diagnostics.messagePrefixFingerprint).toHaveLength(64);
   });
 
   it('工具 schema 变化会改变 toolset fingerprint', async () => {
@@ -81,12 +82,13 @@ describe('model-call observer', () => {
             execute: () => 'unused',
           }),
         ],
-        observers: [
-          {
-            onModelCallCompleted: (event) =>
-              fingerprints.push(event.toolsetFingerprint),
+        eventRecorder: {
+          record: (event) => {
+            if (event.type === 'model.completed') {
+              fingerprints.push(event.diagnostics.toolsetFingerprint);
+            }
           },
-        ],
+        },
       });
       await agent.run('hello');
       await agent.close();

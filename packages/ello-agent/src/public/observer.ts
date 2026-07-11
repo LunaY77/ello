@@ -1,26 +1,10 @@
 import type {
-  AgentFinishReason,
   AgentRunContext,
   AgentRunResult,
-  AgentUsage,
   DeferredApprovalItem,
 } from './agent.js';
 import type { MaybePromise } from './model.js';
 import type { AgentToolCall } from './tool.js';
-
-export interface ModelCallCompletedEvent {
-  readonly runId: string;
-  readonly turnIndex: number;
-  readonly provider: string;
-  readonly model: string;
-  readonly finishReason: AgentFinishReason;
-  readonly usage: AgentUsage;
-  readonly durationMs: number;
-  readonly systemFingerprint: string;
-  readonly toolsetFingerprint: string;
-  readonly messagePrefixFingerprint: string;
-  readonly compactionBoundary: boolean;
-}
 
 export interface AgentObserver<TContext = unknown> {
   onRunStarted?(
@@ -41,10 +25,6 @@ export interface AgentObserver<TContext = unknown> {
   ): MaybePromise<void>;
   onToolCompleted?(
     event: AgentToolCall,
-    ctx: AgentRunContext<TContext>,
-  ): MaybePromise<void>;
-  onModelCallCompleted?(
-    event: ModelCallCompletedEvent,
     ctx: AgentRunContext<TContext>,
   ): MaybePromise<void>;
   onRunCompleted?(

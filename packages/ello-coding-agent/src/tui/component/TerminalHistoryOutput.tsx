@@ -1,7 +1,7 @@
 import { Static } from 'ink';
 
 import type { HistoryEntry } from '../store/history-entry.js';
-import { renderHistoryEntry } from '../store/HistoryRenderer.js';
+import { HistoryEntryRenderer } from '../store/HistoryRenderer.js';
 
 export function TerminalHistoryOutput({
   entries,
@@ -12,7 +12,7 @@ export function TerminalHistoryOutput({
 }) {
   return (
     <Static key={resetKey} items={[...entries]}>
-      {(entry) => renderHistoryEntry(entry)}
+      {(entry) => <HistoryEntryRenderer entry={entry} />}
     </Static>
   );
 }

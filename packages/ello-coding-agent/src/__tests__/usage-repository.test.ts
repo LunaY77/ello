@@ -79,24 +79,38 @@ describe('UsageRepository', () => {
     const repo = storage.usage;
     for (const turnIndex of [0, 1]) {
       repo.recordModelCall({
+        type: 'model.completed',
         runId: 'run-model-calls',
-        turnIndex,
-        provider: 'openai',
-        model: 'gpt-5.4',
-        finishReason: turnIndex === 0 ? 'tool-calls' : 'stop',
-        usage: {
-          requests: 1,
-          inputTokens: 100,
-          outputTokens: 20,
-          cacheReadTokens: turnIndex === 0 ? 0 : 80,
-          cacheWriteTokens: turnIndex === 0 ? 50 : 0,
-          toolCalls: turnIndex === 0 ? 1 : 0,
+        sequence: turnIndex + 1,
+        occurredAt: `2026-06-29T00:00:0${turnIndex + 1}.000Z`,
+        identity: {
+          runId: 'run-model-calls',
+          turnIndex,
+          modelCallId: `call-${turnIndex}`,
+          provider: 'openai',
+          model: 'gpt-5.4',
         },
-        durationMs: 50 + turnIndex,
-        systemFingerprint: 'system',
-        toolsetFingerprint: 'tools',
-        messagePrefixFingerprint: `messages-${turnIndex}`,
-        compactionBoundary: false,
+        response: {
+          text: '',
+          messages: [],
+          usage: {
+            requests: 1,
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheReadTokens: turnIndex === 0 ? 0 : 80,
+            cacheWriteTokens: turnIndex === 0 ? 50 : 0,
+            toolCalls: turnIndex === 0 ? 1 : 0,
+          },
+          finishReason: turnIndex === 0 ? 'tool-calls' : 'stop',
+          provider: null,
+        },
+        diagnostics: {
+          systemFingerprint: 'system',
+          toolsetFingerprint: 'tools',
+          messagePrefixFingerprint: `messages-${turnIndex}`,
+          compactionBoundary: false,
+        },
+        startedAt: `2026-06-29T00:00:0${turnIndex}.000Z`,
       });
     }
 

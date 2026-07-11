@@ -65,6 +65,11 @@ import {
   type MemoryJob,
   type MemoryStatus,
 } from '../memory/index.js';
+import { createLangfuseEventRecorder } from '../observability/langfuse-recorder.js';
+import {
+  createLangfuseTracingRuntime,
+  type LangfuseTracingRuntime,
+} from '../observability/langfuse-runtime.js';
 import { createCodingObserver } from '../observability/observer.js';
 import { isPathInside, resolveAbsolute } from '../permission/engine.js';
 import { RulesStore } from '../permission/rules-store.js';
@@ -87,7 +92,10 @@ import { createTaskService, type Task } from '../tasks/index.js';
 import { createCodingTools } from '../tools/index.js';
 import { createBootProfile } from '../utils/boot-profile.js';
 
-import { createCodingEventRecorder } from './event-recorder.js';
+import {
+  combineEventRecorders,
+  createCodingEventRecorder,
+} from './event-recorder.js';
 import type {
   ApprovalDecision,
   CodingEventListener,
@@ -357,6 +365,7 @@ interface SessionDeps {
   readonly rulesStore: RulesStore;
   readonly registry: AgentRegistry;
   readonly backgroundJobs: BackgroundJobStore;
+  readonly tracing?: LangfuseTracingRuntime;
   readonly memory?: MemoryJobCoordinator;
   readonly modelAdapter?: ModelAdapter;
 }
@@ -379,6 +388,11 @@ export async function createCodingSession(
   const { config } = options;
   const profile = createBootProfile('session');
   const sessionId = config.sessionId ?? randomUUID();
+  const langfuse = config.observability?.langfuse;
+  const tracing =
+    langfuse?.enabled === true
+      ? createLangfuseTracingRuntime({ sessionId, config: langfuse })
+      : undefined;
 
   profile.mark('start');
   const storage = createCodingStorage();
@@ -412,6 +426,7 @@ export async function createCodingSession(
       rulesStore,
       registry,
       backgroundJobs: new BackgroundJobStore(),
+      ...(tracing !== undefined ? { tracing } : {}),
       ...(memory !== undefined ? { memory } : {}),
       ...(options.modelAdapter !== undefined
         ? { modelAdapter: options.modelAdapter }
@@ -421,6 +436,7 @@ export async function createCodingSession(
       await memory.start();
     }
   } catch (error) {
+    await tracing?.shutdown();
     storage.close();
     throw error;
   }
@@ -1015,6 +1031,7 @@ class CodingSessionImpl implements CodingSession {
     if (this.deps.memory !== undefined) {
       await this.deps.memory.close();
     }
+    await this.deps.tracing?.shutdown();
     this.deps.storage.close();
   }
 
@@ -1470,6 +1487,9 @@ class CodingSessionImpl implements CodingSession {
       parentSessionId: () => this.sessionId,
       rules: () => this.deps.rulesStore.rules(),
       backgroundJobs: this.deps.backgroundJobs,
+      ...(this.deps.tracing !== undefined
+        ? { tracing: this.deps.tracing }
+        : {}),
       hooks: {
         onEvent: (runId, event) =>
           this.emit({ type: 'subagent.event', runId, event }),
@@ -1522,9 +1542,20 @@ class CodingSessionImpl implements CodingSession {
       transcript: this.deps.sessionStore,
       eventRecorder: createCodingEventRecorder(
         this.deps.sessionStore.repository,
+        combineEventRecorders(
+          observer,
+          ...(this.deps.tracing === undefined
+            ? []
+            : [
+                createLangfuseEventRecorder({
+                  runtime: this.deps.tracing,
+                  agentKind: 'primary',
+                }),
+              ]),
+        ),
       ),
       compaction: runtime.compaction,
-      observers: [observer, runtimeObserver],
+      observers: [runtimeObserver],
       sessionWindow: { maxMessages: 200 },
       modelInputBudget: {
         maxInputTokens: config.context.max_input_tokens,
@@ -1844,18 +1875,8 @@ async function driveRun(options: {
   let completedEvent:
     | Extract<AgentStreamEvent, { type: 'run.completed' }>
     | undefined;
-  let activeMessageId: string | undefined;
-  let activeMessageHasDelta = false;
   for await (const event of currentStream) {
-    if (event.type === 'message.started') {
-      activeMessageId = event.messageId;
-      activeMessageHasDelta = false;
-    } else if (
-      event.type === 'message.delta' &&
-      event.messageId === activeMessageId
-    ) {
-      activeMessageHasDelta = true;
-    } else if (event.type === 'run.completed') {
+    if (event.type === 'run.completed') {
       completedEvent = event;
       continue;
     }
@@ -1864,17 +1885,6 @@ async function driveRun(options: {
   const result = await currentStream.final;
   if (completedEvent === undefined) {
     throw new Error(`Run ${result.id} completed without run.completed event.`);
-  }
-  if (
-    activeMessageId !== undefined &&
-    !activeMessageHasDelta &&
-    result.output.trim() !== ''
-  ) {
-    await onEvent({
-      type: 'message.delta',
-      messageId: activeMessageId,
-      text: result.output,
-    });
   }
   await onEvent(completedEvent);
   emit({ type: 'usage', usage: result.usage });

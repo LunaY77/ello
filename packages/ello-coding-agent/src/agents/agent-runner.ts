@@ -11,6 +11,8 @@ import {
 
 import type { CodingAgentConfig } from '../config/index.js';
 import { renderPromptTemplate } from '../context/prompts.js';
+import { createLangfuseEventRecorder } from '../observability/langfuse-recorder.js';
+import type { LangfuseTracingRuntime } from '../observability/langfuse-runtime.js';
 import type { PermissionRule } from '../permissions.js';
 import {
   modelSettingsFromRole,
@@ -177,6 +179,7 @@ export interface SubagentAgentDeps {
   readonly environment: AgentEnvironment;
   /** 已派生好的 child 权限规则（见 deriveSubagentPermission）。 */
   readonly permissionRules: readonly PermissionRule[];
+  readonly tracing?: LangfuseTracingRuntime;
   readonly modelAdapter?: ModelAdapter;
 }
 
@@ -223,7 +226,15 @@ export function createSubagentAgent(input: {
     environment: sharedEnvironment(deps.environment),
     tools,
     transcript: deps.session,
-    eventRecorder: createCodingEventRecorder(deps.session.repository),
+    eventRecorder: createCodingEventRecorder(
+      deps.session.repository,
+      deps.tracing === undefined
+        ? undefined
+        : createLangfuseEventRecorder({
+            runtime: deps.tracing,
+            agentKind: 'subagent',
+          }),
+    ),
     sessionWindow: { maxMessages: 200 },
     modelInputBudget: { maxInputTokens: 160_000, reservedOutputTokens: 8_000 },
     ...(deps.modelAdapter === undefined

@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 
 import { AiSdkModelAdapter } from '../adapters/ai-sdk.js';
 import { normalizeAgentError } from '../public/errors.js';
-import type { AgentStreamEvent } from '../public/events.js';
+import type { AgentEventInput, AgentStreamEvent } from '../public/events.js';
 import type {
   AgentEnvironment,
   AgentInput,
@@ -124,7 +124,7 @@ export function createRunSession(options: {
  */
 export class RunSession {
   /** 本次运行的唯一标识。 */
-  readonly runId = randomUUID();
+  readonly runId: string;
   /** 对外事件流，回合事件与最终结果都经此发布。 */
   readonly stream: AgentEventStream;
   /** 中断信号，内核统一据此感知中断。 */
@@ -179,6 +179,7 @@ export class RunSession {
     },
   ) {
     this.config = optionsBundle.config;
+    this.runId = optionsBundle.runOptions.runId ?? randomUUID();
     this.input = optionsBundle.input;
     this.options = optionsBundle.runOptions;
     this.environment = optionsBundle.environment;
@@ -230,6 +231,7 @@ export class RunSession {
     this.tools = buildToolSet({ tools: this.config.tools ?? [] });
     this.toolScheduler = new ToolScheduler({
       runId: this.runId,
+      turnIndex: () => this.state.turn,
       tools: this.config.tools ?? [],
       environment: this.environment,
       metadata: this.metadata,
@@ -438,6 +440,17 @@ export class RunSession {
         ? { sessionId: this.options.sessionId }
         : {}),
     });
+    for (const compaction of compactions) {
+      await this.events.emit({
+        type: 'context.compaction',
+        beforeMessageCount: compaction.beforeMessageCount,
+        afterMessageCount: compaction.afterMessageCount,
+        compactor: compaction.compactor,
+        ...(compaction.metadata !== undefined
+          ? { metadata: compaction.metadata }
+          : {}),
+      });
+    }
     const diagnostics = createRunDiagnostics({
       run: this,
       turns: this.turns,
@@ -468,13 +481,14 @@ export class RunSession {
   /** 运行失败：归一化错误、发布 `run.failed`（附带部分消息）并使事件流失败。 */
   async fail(error: unknown): Promise<void> {
     let failure = error;
-    let event: Extract<AgentStreamEvent, { type: 'run.failed' }> = {
+    let emitted: Extract<AgentStreamEvent, { type: 'run.failed' }> | undefined;
+    let event: Extract<AgentEventInput, { type: 'run.failed' }> = {
       type: 'run.failed',
       error: normalizeAgentError(error),
       partialMessages: [...this.state.messages],
     };
     try {
-      await this.events.fail(event);
+      emitted = await this.events.fail(event);
     } catch (recorderError) {
       failure = recorderError;
       event = {
@@ -483,7 +497,10 @@ export class RunSession {
         partialMessages: [...this.state.messages],
       };
     }
-    this.stream.fail(failure, event);
+    if (emitted === undefined) {
+      emitted = await this.events.fail(event);
+    }
+    this.stream.fail(failure, emitted);
   }
 
   /**

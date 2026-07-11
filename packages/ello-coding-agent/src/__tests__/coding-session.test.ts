@@ -460,7 +460,10 @@ describe('createCodingSession', () => {
         yield { type: 'final', response: await this.generate(request) };
       },
     };
-    const session = await createCodingSession({ config, modelAdapter: adapter });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
     const shownApprovals: string[] = [];
     session.subscribe((event) => {
       if (event.type === 'approval.pending') {
@@ -469,11 +472,7 @@ describe('createCodingSession', () => {
     });
 
     await session.submit('write three notes');
-    expect(shownApprovals.slice(0, 3)).toEqual([
-      'call_1',
-      'call_2',
-      'call_3',
-    ]);
+    expect(shownApprovals.slice(0, 3)).toEqual(['call_1', 'call_2', 'call_3']);
 
     await session.approve('call_3', {
       action: 'always_allow',

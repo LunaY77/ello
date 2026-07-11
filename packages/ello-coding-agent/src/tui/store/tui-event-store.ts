@@ -353,6 +353,12 @@ export function reduceTuiEvent(
         id: `diag-${state.history.length}`,
         text: `run failed: ${event.error.message}`,
       });
+    case 'model.started':
+    case 'model.first_token':
+    case 'model.completed':
+    case 'model.failed':
+    case 'context.compaction':
+      return state;
   }
   return assertNever(event);
 }
@@ -481,6 +487,11 @@ function updateSubagentEvent(
     case 'run.interrupted':
     case 'run.completed':
     case 'run.failed':
+    case 'model.started':
+    case 'model.first_token':
+    case 'model.completed':
+    case 'model.failed':
+    case 'context.compaction':
       return state;
   }
   return assertNever(event);

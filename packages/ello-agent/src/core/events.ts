@@ -1,11 +1,10 @@
-import type { AgentStreamEvent } from '../public/events.js';
+import type { AgentEventInput, AgentStreamEvent } from '../public/events.js';
 import type {
   AgentObserver,
   AgentRunContext,
   AgentRunResult,
   AgentToolCall,
   CreateAgentOptions,
-  ModelCallCompletedEvent,
 } from '../public/types.js';
 
 import type {
@@ -23,6 +22,7 @@ import type { AgentEventStream } from './stream.js';
 export class AgentEventDispatcher {
   /** 按 toolCallId 累积工具调用信息，用于在 completed 时补全 name/input。 */
   private readonly observerToolCalls = new Map<string, AgentToolCall>();
+  private sequence = 0;
 
   constructor(
     private readonly config: CreateAgentOptions,
@@ -35,7 +35,8 @@ export class AgentEventDispatcher {
    *
    * 实时事件先进入 stream，再执行会影响 run 的 observer 与 recorder。
    */
-  async emit(event: AgentStreamEvent): Promise<void> {
+  async emit(input: AgentEventInput): Promise<void> {
+    const event = this.enrich(input);
     this.recordTrace(event);
     this.stream.emit(event);
     await this.emitObserverEvent(event);
@@ -43,34 +44,43 @@ export class AgentEventDispatcher {
   }
 
   async complete(result: AgentRunResult): Promise<void> {
-    const event: AgentStreamEvent = {
+    await this.emit({
       type: 'run.completed',
-      runId: result.id,
       finishReason: result.finishReason,
       usage: result.usage,
-    };
-    this.recordTrace(event);
-    await this.config.eventRecorder?.record(event, this.ctx);
+    });
     await this.config.eventRecorder?.flush?.(this.ctx);
     for (const observer of this.config.observers ?? []) {
       await observer.onRunCompleted?.(result, this.ctx);
     }
-    this.stream.emit(event);
   }
 
   async fail(
-    event: Extract<AgentStreamEvent, { type: 'run.failed' }>,
-  ): Promise<void> {
-    this.recordTrace(event);
-    await this.config.eventRecorder?.record(event, this.ctx);
+    event: Extract<AgentEventInput, { type: 'run.failed' }>,
+  ): Promise<Extract<AgentStreamEvent, { type: 'run.failed' }>> {
+    const emitted = this.enrich(event) as Extract<
+      AgentStreamEvent,
+      { type: 'run.failed' }
+    >;
+    this.recordTrace(emitted);
+    await this.emitObserverEvent(emitted);
+    await this.config.eventRecorder?.record(emitted, this.ctx);
     await this.config.eventRecorder?.flush?.(this.ctx);
-    await this.emitObserverEvent(event);
+    return emitted;
   }
 
-  async modelCallCompleted(event: ModelCallCompletedEvent): Promise<void> {
-    for (const observer of this.config.observers ?? []) {
-      await observer.onModelCallCompleted?.(event, this.ctx);
+  private enrich(input: AgentEventInput): AgentStreamEvent {
+    if (input.runId !== undefined && input.runId !== this.ctx.runId) {
+      throw new Error(
+        `Event runId does not match dispatcher context: ${input.runId}`,
+      );
     }
+    return {
+      ...input,
+      runId: this.ctx.runId,
+      sequence: ++this.sequence,
+      occurredAt: new Date().toISOString(),
+    } as AgentStreamEvent;
   }
 
   private recordTrace(event: AgentStreamEvent): void {
@@ -112,12 +122,18 @@ function toTraceEvent(
     case 'tool.started':
       return {
         type: event.type,
+        runId: event.runId,
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
         toolCallId: event.toolCallId,
         name: event.name,
       };
     case 'tool.approval_requested':
       return {
         type: event.type,
+        runId: event.runId,
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
         toolCallId: event.request.toolCallId,
         toolName: event.request.name,
       };
@@ -125,29 +141,53 @@ function toTraceEvent(
       return {
         type: event.type,
         runId: event.runId,
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
         toolCallId: event.item.toolCallId,
         toolName: event.item.toolName,
       };
     case 'tool.completed':
-      return { type: event.type, toolCallId: event.toolCallId };
+      return {
+        type: event.type,
+        runId: event.runId,
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
+        toolCallId: event.toolCallId,
+      };
     case 'tool.failed':
       return {
         type: event.type,
+        runId: event.runId,
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
         toolCallId: event.toolCallId,
         errorName: event.error.name,
         errorMessage: event.error.message,
       };
     case 'run.interrupted':
-      return { type: event.type, runId: event.runId };
+      return {
+        type: event.type,
+        runId: event.runId,
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
+      };
     case 'run.completed':
       return event;
+    case 'context.compaction':
+      return null;
     case 'run.failed':
       return {
         type: event.type,
         runId,
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
         errorName: event.error.name,
         errorMessage: event.error.message,
       };
+    case 'model.started':
+    case 'model.first_token':
+    case 'model.completed':
+    case 'model.failed':
     case 'queue.drained':
     case 'message.started':
     case 'message.delta':
@@ -211,6 +251,7 @@ async function emitSingleObserverEvent(
   }
   if (event.type === 'run.failed') {
     await observer.onRunFailed?.({ error: event.error }, ctx);
+    return;
   }
 }
 

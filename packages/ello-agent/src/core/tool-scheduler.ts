@@ -23,6 +23,7 @@ import { createToolResultMessage } from './tool-messages.js';
 export interface ToolSchedulerOptions {
   /** 当前 run 的标识，注入到每次工具执行的上下文中。 */
   readonly runId: string;
+  readonly turnIndex: () => number;
   /** 本 run 可用的全部工具，按名建索引后供调度查找。 */
   readonly tools: readonly AnyAgentTool[];
   /** 工具运行所处的环境（文件系统、shell、资源等）。 */
@@ -147,6 +148,7 @@ export class ToolScheduler {
             : {}),
         };
         pending.push(item);
+        await sink.onToolStarted(call.id, call.name, call.input);
         await sink.onApprovalRequired(item);
         continue;
       }
@@ -206,8 +208,10 @@ export class ToolScheduler {
   private createContext(toolCallId: string): AgentToolContext {
     return {
       runId: this.options.runId,
+      turnIndex: this.options.turnIndex(),
+      toolCallId,
       environment: this.options.environment,
-      metadata: { ...this.options.metadata, toolCallId },
+      metadata: { ...this.options.metadata },
     };
   }
 }

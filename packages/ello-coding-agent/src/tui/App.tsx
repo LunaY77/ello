@@ -18,7 +18,6 @@ import {
 import {
   createProviderRegistry,
   type ModelRole,
-  type RuntimeModel,
   type RuntimeProfileSuite,
 } from '../provider/index.js';
 import type {
@@ -38,6 +37,10 @@ import {
 } from './component/OverlayHost.js';
 import { TerminalHistoryOutput } from './component/TerminalHistoryOutput.js';
 import { useRuntimeEvents } from './hooks/use-runtime-events.js';
+import {
+  buildModelCatalogOptions,
+  buildProfileSelectorOptions,
+} from './model-selectors.js';
 import {
   loadSkillsOverlay,
   loadTasksOverlay,
@@ -963,69 +966,6 @@ function bindRoleInConfig(
         },
       },
     },
-  };
-}
-
-export function buildProfileSelectorOptions(
-  config: CodingAgentConfig,
-): readonly SelectOption[] {
-  const registry = createProviderRegistry(config);
-  const options: SelectOption[] = [];
-  const profiles = registry.listProfiles();
-  options.push(groupOption('Profiles'));
-  for (const profile of profiles) {
-    options.push(profileOption(profile, config));
-  }
-  return options;
-}
-
-export function buildModelCatalogOptions(
-  config: CodingAgentConfig,
-): readonly SelectOption[] {
-  const registry = createProviderRegistry(config);
-  const options: SelectOption[] = [];
-  const providers = registry
-    .listProviders()
-    .filter(
-      (provider) =>
-        provider.enabled && registry.listModels(provider.id).length > 0,
-    );
-  for (const provider of providers) {
-    options.push(groupOption(provider.name));
-    for (const model of registry.listModels(provider.id)) {
-      options.push(modelOption(model));
-    }
-  }
-  return options;
-}
-
-function groupOption(label: string): SelectOption {
-  return {
-    label,
-    value: `group:${label}`,
-    disabled: true,
-  };
-}
-
-function profileOption(
-  profile: RuntimeProfileSuite,
-  config: CodingAgentConfig,
-): SelectOption {
-  const markers = [
-    profile.name === config.active_profile ? 'active' : null,
-  ].filter((item): item is string => item !== null);
-  const label = profile.label ?? profile.name;
-  const description = profile.description ?? '';
-  return {
-    label: `  ${profile.name}${markers.length > 0 ? ` [${markers.join(', ')}]` : ''}  ${label}${description.length > 0 ? `  ${description}` : ''}`,
-    value: profile.name,
-  };
-}
-
-function modelOption(model: RuntimeModel): SelectOption {
-  return {
-    label: `  ${model.ref}  ctx ${model.limit.context} / out ${model.limit.output}`,
-    value: model.ref,
   };
 }
 

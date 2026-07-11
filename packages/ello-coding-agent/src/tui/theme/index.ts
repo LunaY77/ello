@@ -5,4 +5,5 @@ export {
   resolveTheme,
   themeNames,
 } from './themes.js';
-export { ThemeProvider, useTheme } from './Context.js';
+export { ThemeProvider } from './ThemeProvider.js';
+export { useTheme } from './context.js';

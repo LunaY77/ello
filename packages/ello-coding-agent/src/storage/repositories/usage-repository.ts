@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 
 import type {
   AgentFinishReason,
+  AgentStreamEvent,
   AgentUsage,
-  ModelCallCompletedEvent,
 } from '@ello/agent';
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm';
 
@@ -73,9 +73,25 @@ export interface UsageSummaryRow {
   readonly uncachedInputTokens: number;
 }
 
-export interface UsageModelCallRecord extends ModelCallCompletedEvent {
+type CompletedModelCall = Extract<
+  AgentStreamEvent,
+  { type: 'model.completed' }
+>;
+
+export interface UsageModelCallRecord {
   readonly id: string;
   readonly createdAt: string;
+  readonly runId: string;
+  readonly turnIndex: number;
+  readonly provider: string;
+  readonly model: string;
+  readonly finishReason: AgentFinishReason;
+  readonly usage: AgentUsage;
+  readonly durationMs: number;
+  readonly systemFingerprint: string;
+  readonly toolsetFingerprint: string;
+  readonly messagePrefixFingerprint: string;
+  readonly compactionBoundary: boolean;
 }
 
 export interface PriceSnapshotInput {
@@ -98,30 +114,46 @@ export interface PriceSnapshotInput {
 export class UsageRepository {
   constructor(private readonly db: CodingDatabase) {}
 
-  recordModelCall(input: ModelCallCompletedEvent): UsageModelCallRecord {
-    if (!Number.isFinite(input.durationMs) || input.durationMs < 0) {
+  recordModelCall(input: CompletedModelCall): UsageModelCallRecord {
+    const durationMs =
+      Date.parse(input.occurredAt) - Date.parse(input.startedAt);
+    if (!Number.isFinite(durationMs) || durationMs < 0) {
       throw new Error('Model call durationMs must be a non-negative number.');
     }
     const row = {
       id: randomUUID(),
       runId: input.runId,
-      turnIndex: input.turnIndex,
-      provider: input.provider,
-      model: input.model,
-      finishReason: input.finishReason,
-      inputTokens: input.usage.inputTokens,
-      outputTokens: input.usage.outputTokens,
-      cacheReadTokens: input.usage.cacheReadTokens,
-      cacheWriteTokens: input.usage.cacheWriteTokens,
-      durationMs: input.durationMs,
-      systemFingerprint: input.systemFingerprint,
-      toolsetFingerprint: input.toolsetFingerprint,
-      messagePrefixFingerprint: input.messagePrefixFingerprint,
-      compactionBoundary: input.compactionBoundary,
+      turnIndex: input.identity.turnIndex,
+      provider: input.identity.provider,
+      model: input.identity.model,
+      finishReason: input.response.finishReason,
+      inputTokens: input.response.usage.inputTokens,
+      outputTokens: input.response.usage.outputTokens,
+      cacheReadTokens: input.response.usage.cacheReadTokens,
+      cacheWriteTokens: input.response.usage.cacheWriteTokens,
+      durationMs,
+      systemFingerprint: input.diagnostics.systemFingerprint,
+      toolsetFingerprint: input.diagnostics.toolsetFingerprint,
+      messagePrefixFingerprint: input.diagnostics.messagePrefixFingerprint,
+      compactionBoundary: input.diagnostics.compactionBoundary,
       createdAt: new Date().toISOString(),
     };
     this.db.insert(usageModelCalls).values(row).run();
-    return { ...input, id: row.id, createdAt: row.createdAt };
+    return {
+      id: row.id,
+      createdAt: row.createdAt,
+      runId: input.runId,
+      turnIndex: input.identity.turnIndex,
+      provider: input.identity.provider,
+      model: input.identity.model,
+      finishReason: input.response.finishReason,
+      usage: input.response.usage,
+      durationMs,
+      systemFingerprint: input.diagnostics.systemFingerprint,
+      toolsetFingerprint: input.diagnostics.toolsetFingerprint,
+      messagePrefixFingerprint: input.diagnostics.messagePrefixFingerprint,
+      compactionBoundary: input.diagnostics.compactionBoundary,
+    };
   }
 
   listModelCalls(runId: string): readonly UsageModelCallRecord[] {

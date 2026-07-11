@@ -57,6 +57,7 @@ export async function runSubagent(input: {
   });
   const stream = agent.stream(input.prompt, {
     sessionId: runId,
+    runId,
     ...(input.deps.maxTurns !== undefined
       ? { maxTurns: input.deps.maxTurns }
       : {}),

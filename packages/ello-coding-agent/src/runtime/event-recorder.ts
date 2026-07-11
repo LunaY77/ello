@@ -4,27 +4,30 @@ import type { JsonlSessionRepository } from '../session/repository.js';
 
 export function createCodingEventRecorder(
   repository: JsonlSessionRepository,
+  tracing?: AgentEventRecorder,
 ): AgentEventRecorder {
   return {
-    record: (event, ctx) => {
+    async record(event, ctx): Promise<void> {
       if (ctx.sessionId === undefined) {
         throw new Error(`Missing sessionId for recorded run ${ctx.runId}.`);
       }
       switch (event.type) {
         case 'run.started':
-          return repository.appendRunMarker(ctx.sessionId, {
+          await repository.appendRunMarker(ctx.sessionId, {
             runId: event.runId,
             status: 'started',
           });
+          break;
         case 'run.completed':
-          return repository.appendRunMarker(ctx.sessionId, {
+          await repository.appendRunMarker(ctx.sessionId, {
             runId: event.runId,
             status: 'completed',
             finishReason: event.finishReason,
             usage: event.usage,
           });
+          break;
         case 'run.failed':
-          return repository.appendRunMarker(ctx.sessionId, {
+          await repository.appendRunMarker(ctx.sessionId, {
             runId: ctx.runId,
             status: 'failed',
             error: {
@@ -32,9 +35,25 @@ export function createCodingEventRecorder(
               message: event.error.message,
             },
           });
+          break;
         default:
-          return;
+          break;
       }
+      await tracing?.record(event, ctx);
+    },
+    flush: (ctx) => tracing?.flush?.(ctx),
+  };
+}
+
+export function combineEventRecorders(
+  ...recorders: readonly AgentEventRecorder[]
+): AgentEventRecorder {
+  return {
+    async record(event, ctx): Promise<void> {
+      for (const recorder of recorders) await recorder.record(event, ctx);
+    },
+    async flush(ctx): Promise<void> {
+      for (const recorder of recorders) await recorder.flush?.(ctx);
     },
   };
 }

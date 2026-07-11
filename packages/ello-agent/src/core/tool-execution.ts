@@ -40,8 +40,26 @@ export async function executeToolCalls(
   }
   const scheduled = await run.toolScheduler.schedule(toolCallsFromModel, {
     onToolStarted: (toolCallId, name, input) =>
-      run.events.emit({ type: 'tool.started', toolCallId, name, input }),
+      run.events.emit({
+        type: 'tool.started',
+        turnIndex: run.state.turn,
+        toolCallId,
+        name,
+        input,
+      }),
     onApprovalRequired: async (item) => {
+      await run.events.emit({
+        type: 'tool.approval_requested',
+        turnIndex: run.state.turn,
+        request: {
+          id: item.toolCallId,
+          toolCallId: item.toolCallId,
+          name: item.toolName,
+          input: item.input,
+          ...(item.reason !== undefined ? { reason: item.reason } : {}),
+          ...(item.metadata !== undefined ? { metadata: item.metadata } : {}),
+        },
+      });
       // 审批去重：同一 tool call 可能在多次调度中重复触发审批，
       // 只有当它尚未进入 deferred 队列时才入队并对外发一次 `approval.required`，
       // 避免重复挂起同一审批项或重复通知产品层。
@@ -56,16 +74,21 @@ export async function executeToolCalls(
         run.runControl.pushDeferred(item);
         await run.events.emit({
           type: 'approval.required',
-          runId: run.runId,
           item,
         });
       }
     },
     onToolCompleted: (toolCallId, output) =>
-      run.events.emit({ type: 'tool.completed', toolCallId, output }),
+      run.events.emit({
+        type: 'tool.completed',
+        turnIndex: run.state.turn,
+        toolCallId,
+        output,
+      }),
     onToolFailed: (toolCallId, error) =>
       run.events.emit({
         type: 'tool.failed',
+        turnIndex: run.state.turn,
         toolCallId,
         error: normalizeAgentError(error),
       }),

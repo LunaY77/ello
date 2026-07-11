@@ -13,7 +13,11 @@ import { buildToolCardModel } from './tool-card.js';
 
 const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
 
-export function renderHistoryEntry(entry: HistoryEntry) {
+export function HistoryEntryRenderer({
+  entry,
+}: {
+  readonly entry: HistoryEntry;
+}) {
   const content = renderHistoryEntryContent(entry);
   return (
     <Box key={entry.id} marginBottom={1}>

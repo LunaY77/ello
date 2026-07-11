@@ -1,2 +1,0 @@
-Hello from ello coding-agent!
-This is a test file created at the workspace root.

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { ModelAdapterProtocolError } from '../public/errors.js';
+import { normalizeAgentError } from '../public/errors.js';
 import type {
   AgentModelRequest,
   AgentModelResponse,
@@ -53,13 +54,32 @@ export async function callModel(
   const messageId = randomUUID();
   await run.events.emit({
     type: 'message.started',
+    turnIndex: run.state.turn,
     messageId,
     role: 'assistant',
   });
 
   const request = createModelRequest(run, input);
-  const startedAt = performance.now();
+  const identity = {
+    ...modelIdentity(run.config.model),
+    runId: run.runId,
+    turnIndex: run.state.turn,
+    modelCallId: randomUUID(),
+  };
+  const diagnostics = input.diagnostics;
+  if (diagnostics === undefined) {
+    throw new Error('Model input diagnostics are required for model calls.');
+  }
+  await run.events.emit({
+    type: 'model.started',
+    identity,
+    request,
+    diagnostics: toDiagnostics(diagnostics),
+  });
+  const startedAt = new Date().toISOString();
+  let firstTokenAt: string | undefined;
   let finalResponse: AgentModelResponse | null = null;
+  let emittedTextDelta = false;
   try {
     for await (const event of run.modelAdapter.stream(request)) {
       if (finalResponse !== null) {
@@ -70,12 +90,18 @@ export async function callModel(
         );
       }
       if (event.type === 'text-delta') {
+        if (firstTokenAt === undefined) {
+          firstTokenAt = new Date().toISOString();
+          await run.events.emit({ type: 'model.first_token', identity });
+        }
         // 文本增量：实时转发为 message.delta，驱动上层增量渲染。
         await run.events.emit({
           type: 'message.delta',
+          turnIndex: run.state.turn,
           messageId,
           text: event.text,
         });
+        emittedTextDelta = true;
       } else {
         finalResponse = event.response;
       }
@@ -85,23 +111,21 @@ export async function callModel(
         'Model adapter stream ended without a final event.',
       );
     }
-    const diagnostics = input.diagnostics;
-    if (diagnostics === undefined) {
-      throw new Error('Model input diagnostics are required for model calls.');
+    if (!emittedTextDelta && finalResponse.text !== '') {
+      await run.events.emit({
+        type: 'message.delta',
+        turnIndex: run.state.turn,
+        messageId,
+        text: finalResponse.text,
+      });
     }
-    const identity = modelIdentity(run.config.model);
-    await run.events.modelCallCompleted({
-      runId: run.runId,
-      turnIndex: run.state.turn,
-      provider: identity.provider,
-      model: identity.model,
-      finishReason: finalResponse.finishReason,
-      usage: finalResponse.usage,
-      durationMs: performance.now() - startedAt,
-      systemFingerprint: diagnostics.systemFingerprint,
-      toolsetFingerprint: diagnostics.toolsetFingerprint,
-      messagePrefixFingerprint: diagnostics.messagePrefixFingerprint,
-      compactionBoundary: diagnostics.compactionBoundary,
+    await run.events.emit({
+      type: 'model.completed',
+      identity,
+      response: finalResponse,
+      diagnostics: toDiagnostics(diagnostics),
+      startedAt,
+      ...(firstTokenAt !== undefined ? { firstTokenAt } : {}),
     });
     return { response: finalResponse };
   } catch (error) {
@@ -110,8 +134,24 @@ export async function callModel(
       run.markInterrupted();
       return { stopReason: 'interrupted' };
     }
+    await run.events.emit({
+      type: 'model.failed',
+      identity,
+      error: normalizeAgentError(error),
+      diagnostics: toDiagnostics(diagnostics),
+      startedAt,
+    });
     throw error;
   }
+}
+
+function toDiagnostics(diagnostics: NonNullable<ModelInput['diagnostics']>) {
+  return {
+    systemFingerprint: diagnostics.systemFingerprint,
+    toolsetFingerprint: diagnostics.toolsetFingerprint,
+    messagePrefixFingerprint: diagnostics.messagePrefixFingerprint,
+    compactionBoundary: diagnostics.compactionBoundary,
+  };
 }
 
 function modelIdentity(model: AgentModelRequest['model']): {

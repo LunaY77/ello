@@ -73,7 +73,6 @@ export type {
   InterruptedRunItem,
   MaybePromise,
   ModelAdapter,
-  ModelCallCompletedEvent,
   ModelInput,
   ModelInputDiagnostics,
   PrepareModelInput,
@@ -86,7 +85,13 @@ export type {
   MessageTransform,
   UserMessage,
 } from './public/types.js';
-export type { AgentStreamEvent, RunCompletedEvent } from './public/events.js';
+export type {
+  AgentEventInput,
+  AgentStreamEvent,
+  ModelCallDiagnostics,
+  ModelCallIdentity,
+  RunCompletedEvent,
+} from './public/events.js';
 export type {
   CreateLocalEnvironmentOptions,
   DefaultAgentResourceRegistry,

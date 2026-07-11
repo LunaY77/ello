@@ -42,6 +42,8 @@ export type AnyAgentTool = AgentTool<unknown, unknown>;
 
 export interface AgentToolContext {
   readonly runId: string;
+  readonly turnIndex: number;
+  readonly toolCallId: string;
   readonly environment: AgentEnvironment;
   readonly metadata: Record<string, unknown>;
 }

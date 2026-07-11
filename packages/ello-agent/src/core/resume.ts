@@ -48,13 +48,25 @@ export async function prepareResume(
       },
       {
         onToolStarted: (toolCallId, name, input) =>
-          run.events.emit({ type: 'tool.started', toolCallId, name, input }),
+          run.events.emit({
+            type: 'tool.started',
+            turnIndex: run.state.turn,
+            toolCallId,
+            name,
+            input,
+          }),
         onApprovalRequired: async () => {},
         onToolCompleted: (toolCallId, output) =>
-          run.events.emit({ type: 'tool.completed', toolCallId, output }),
+          run.events.emit({
+            type: 'tool.completed',
+            turnIndex: run.state.turn,
+            toolCallId,
+            output,
+          }),
         onToolFailed: (toolCallId, error) =>
           run.events.emit({
             type: 'tool.failed',
+            turnIndex: run.state.turn,
             toolCallId,
             error: normalizeAgentError(error),
           }),

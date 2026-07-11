@@ -28,6 +28,7 @@ export type AgentInput =
     };
 
 export interface AgentRunOptions {
+  readonly runId?: string;
   readonly modelSettings?: Record<string, unknown>;
   readonly maxTurns?: number;
   readonly signal?: AbortSignal;

@@ -121,6 +121,21 @@ profile:
 # goal:
 #   max_continuations: 20
 
+# Langfuse 链路追踪默认关闭。关闭时无需配置 URL 或密钥；开启后密钥从
+# LANGFUSE_PUBLIC_KEY 和 LANGFUSE_SECRET_KEY 环境变量读取。
+# observability:
+#   langfuse:
+#     enabled: false
+#
+# 启用时必须提供完整连接配置：
+# observability:
+#   langfuse:
+#     enabled: true
+#     base_url: http://localhost:3000
+#     environment: development
+#     release: ello-ts-local
+#     content: metadata # metadata 或 full
+
 # 工具配置；disabled 表示完全不注册，needApproval 表示无论审批模式如何都要询问。
 # tools:
 #   disabled: []

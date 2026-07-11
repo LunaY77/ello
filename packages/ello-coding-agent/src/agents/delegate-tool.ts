@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   defineTool,
   type AgentEnvironment,
@@ -8,6 +10,7 @@ import {
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
+import type { LangfuseTracingRuntime } from '../observability/langfuse-runtime.js';
 import {
   makeApprovalPolicy,
   type DecideApproval,
@@ -57,6 +60,7 @@ export interface CreateDelegateToolOptions {
   /** 当前动态权限规则（来自 RulesStore），用于派生 child 规则与审批判定。 */
   readonly rules: () => readonly PermissionRule[];
   readonly backgroundJobs: BackgroundJobStore;
+  readonly tracing?: LangfuseTracingRuntime;
   readonly hooks: DelegateToolHooks;
   readonly modelAdapter?: ModelAdapter;
 }
@@ -136,11 +140,19 @@ export function createDelegateTool(
       }
       const background = input.background ?? false;
       const parentSessionId = options.parentSessionId();
+      const childRunId = input.run_id ?? randomUUID();
+      options.tracing?.registerChildRun({
+        childRunId,
+        parentRunId: ctx.runId,
+        parentToolCallId: ctx.toolCallId,
+        agentName: input.name,
+        background,
+      });
       const subagentRun = await runSubagent({
         definition,
         prompt: input.prompt,
         parentSessionId,
-        ...(input.run_id !== undefined ? { runId: input.run_id } : {}),
+        runId: childRunId,
         deps: {
           config: options.config,
           storage: options.storage,
@@ -154,6 +166,9 @@ export function createDelegateTool(
             options.rules(),
             definition,
           ),
+          ...(options.tracing !== undefined
+            ? { tracing: options.tracing }
+            : {}),
           ...(definition.maxTurns !== undefined
             ? { maxTurns: definition.maxTurns }
             : {}),

@@ -8,7 +8,7 @@ import { loadCodingAgentConfig } from '../config/index.js';
 import {
   buildModelCatalogOptions,
   buildProfileSelectorOptions,
-} from '../tui/App.js';
+} from '../tui/model-selectors.js';
 
 const dirs: string[] = [];
 
