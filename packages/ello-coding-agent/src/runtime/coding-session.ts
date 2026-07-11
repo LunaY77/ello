@@ -424,7 +424,8 @@ class CodingSessionImpl implements CodingSession {
   /** 当前激活技能名集合，被 skill 工具与 section 共享。 */
   private readonly activeSkills = new Set<string>();
   private readonly listeners = new Set<CodingEventListener>();
-  private readonly pendingApprovals = new Map<string, DeferredApprovalItem>();
+  private readonly approvalItems = new Map<string, DeferredApprovalItem>();
+  private readonly approvalDecisions = new Map<string, ApprovalDecision>();
   private readonly sessionExternalPaths = new Set<string>();
   private readonly steerQueue: string[] = [];
   private currentStream: AgentStream | undefined;
@@ -483,7 +484,7 @@ class CodingSessionImpl implements CodingSession {
     try {
       const result = await driveRun({
         currentStream: this.currentStream,
-        pendingApprovalCount: () => this.pendingApprovals.size,
+        pendingApprovalCount: () => this.pendingApprovalCount(),
         emit: (event) => this.emit(event),
         onEvent: (event) => this.forward(event),
         checkpoints: this.checkpoints,
@@ -516,15 +517,13 @@ class CodingSessionImpl implements CodingSession {
     await this.newSession();
   }
 
-  /** 审批决定：翻译成 DeferredRunResults 并 `agent.resume()`。 */
+  /** 收齐当前批次的审批决定后，一次性构造 DeferredRunResults 并恢复。 */
   async approve(requestId: string, decision: ApprovalDecision): Promise<void> {
-    const item = this.pendingApprovals.get(requestId);
-    if (item === undefined) {
+    const item = this.approvalItems.get(requestId);
+    if (item === undefined || this.approvalDecisions.has(requestId)) {
       throw new Error(`Unknown approval: ${requestId}`);
     }
-    this.pendingApprovals.delete(requestId);
 
-    const approved = decision.action !== 'deny';
     if (decision.action === 'always_allow') {
       await this.deps.rulesStore.addAllowRule(
         item,
@@ -537,18 +536,43 @@ class CodingSessionImpl implements CodingSession {
       await this.deps.rulesStore.addDenyRule(item, decision.scope ?? 'session');
     }
 
+    this.approvalDecisions.set(requestId, decision);
+    const next = this.nextPendingApproval();
+    if (next !== undefined) {
+      this.emitPendingApproval(next);
+      return;
+    }
+
+    const deferred = [...this.approvalItems.values()];
+    const approvals = Object.fromEntries(
+      deferred.map((approvalItem) => {
+        const approvalDecision = this.approvalDecisions.get(
+          approvalItem.toolCallId,
+        );
+        if (approvalDecision === undefined) {
+          throw new Error(
+            `Approval batch is missing a decision for ${approvalItem.toolCallId}.`,
+          );
+        }
+        return [
+          approvalItem.toolCallId,
+          {
+            approved: approvalDecision.action !== 'deny',
+            ...(approvalDecision.reason !== undefined
+              ? { reason: approvalDecision.reason }
+              : {}),
+          },
+        ];
+      }),
+    );
+    this.approvalItems.clear();
+    this.approvalDecisions.clear();
+
     const runtime = await this.ensureAgentRuntime();
     const resumed = runtime.agent.resume(
       {
-        deferred: [item],
-        approvals: {
-          [item.toolCallId]: {
-            approved,
-            ...(decision.reason !== undefined
-              ? { reason: decision.reason }
-              : {}),
-          },
-        },
+        deferred,
+        approvals,
       },
       { sessionId: this.sessionId, maxTurns: this.activeAgentMaxTurns() },
     );
@@ -556,7 +580,7 @@ class CodingSessionImpl implements CodingSession {
     try {
       const result = await driveRun({
         currentStream: this.currentStream,
-        pendingApprovalCount: () => this.pendingApprovals.size,
+        pendingApprovalCount: () => this.pendingApprovalCount(),
         emit: (event) => this.emit(event),
         onEvent: (event) => this.forward(event),
         checkpoints: this.checkpoints,
@@ -933,20 +957,32 @@ class CodingSessionImpl implements CodingSession {
   /** 原样转发内核事件，并截获 approval 维护交互状态。 */
   private async forward(event: AgentStreamEvent): Promise<void> {
     if (event.type === 'approval.required') {
-      this.pendingApprovals.set(event.item.toolCallId, event.item);
+      this.approvalItems.set(event.item.toolCallId, event.item);
       this.emit(event);
-      this.emit({
-        type: 'approval.pending',
-        requestId: event.item.toolCallId,
-        toolName: event.item.toolName,
-        input: event.item.input,
-        ...(event.item.metadata !== undefined
-          ? { metadata: event.item.metadata }
-          : {}),
-      });
+      this.emitPendingApproval(event.item);
       return;
     }
     this.emit(event);
+  }
+
+  private pendingApprovalCount(): number {
+    return this.approvalItems.size - this.approvalDecisions.size;
+  }
+
+  private nextPendingApproval(): DeferredApprovalItem | undefined {
+    return [...this.approvalItems.values()].find(
+      (item) => !this.approvalDecisions.has(item.toolCallId),
+    );
+  }
+
+  private emitPendingApproval(item: DeferredApprovalItem): void {
+    this.emit({
+      type: 'approval.pending',
+      requestId: item.toolCallId,
+      toolName: item.toolName,
+      input: item.input,
+      ...(item.metadata !== undefined ? { metadata: item.metadata } : {}),
+    });
   }
 
   /** 大 tool 输出在下一次模型输入前替换成 artifact stub。 */
@@ -994,7 +1030,8 @@ class CodingSessionImpl implements CodingSession {
   /** 关闭当前 Agent，按当前 sessionId 重建。 */
   private async rebuild(): Promise<void> {
     await this.closeAgentRuntime();
-    this.pendingApprovals.clear();
+    this.approvalItems.clear();
+    this.approvalDecisions.clear();
     this.steerQueue.length = 0;
   }
 

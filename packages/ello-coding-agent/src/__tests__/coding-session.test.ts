@@ -398,6 +398,111 @@ describe('createCodingSession', () => {
     ).toBe(true);
   });
 
+  it('resumes parallel approvals only after every tool call has a decision', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      approvalMode: 'default',
+    });
+    const targets = [1, 2, 3].map((index) =>
+      path.join(cwd, `note-${index}.txt`),
+    );
+    let initialTurn = true;
+    let resumedRequest: AgentModelRequest | undefined;
+    const adapter: ModelAdapter = {
+      async generate(request) {
+        if (initialTurn) {
+          initialTurn = false;
+          const calls = targets.map((target, index) => ({
+            id: `call_${index + 1}`,
+            name: 'write',
+            input: { path: target, content: `note-${index + 1}` },
+          }));
+          const toolCallMessage = {
+            role: 'assistant' as const,
+            content: calls.map((call) => ({
+              type: 'tool-call' as const,
+              toolCallId: call.id,
+              toolName: call.name,
+              input: call.input,
+            })),
+          };
+          return {
+            text: '',
+            messages: [...request.messages, toolCallMessage],
+            newMessages: [toolCallMessage],
+            toolCalls: calls,
+            usage,
+            finishReason: 'tool-calls',
+            provider: null,
+          };
+        }
+        if (request.messages.some((message) => message.role === 'tool')) {
+          resumedRequest = request;
+        }
+        return {
+          text: 'wrote all notes',
+          messages: [
+            ...request.messages,
+            { role: 'assistant', content: 'wrote all notes' },
+          ],
+          newMessages: [
+            { role: 'assistant' as const, content: 'wrote all notes' },
+          ],
+          usage,
+          finishReason: 'stop',
+          provider: null,
+        };
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+    const session = await createCodingSession({ config, modelAdapter: adapter });
+    const shownApprovals: string[] = [];
+    session.subscribe((event) => {
+      if (event.type === 'approval.pending') {
+        shownApprovals.push(event.requestId);
+      }
+    });
+
+    await session.submit('write three notes');
+    expect(shownApprovals.slice(0, 3)).toEqual([
+      'call_1',
+      'call_2',
+      'call_3',
+    ]);
+
+    await session.approve('call_3', {
+      action: 'always_allow',
+      scope: 'project',
+    });
+    expect(resumedRequest).toBeUndefined();
+    expect(shownApprovals.at(-1)).toBe('call_1');
+
+    await session.approve('call_1', { action: 'approve_once' });
+    expect(resumedRequest).toBeUndefined();
+    expect(shownApprovals.at(-1)).toBe('call_2');
+
+    await session.approve('call_2', { action: 'approve_once' });
+    if (resumedRequest === undefined) {
+      throw new Error('Approval batch did not resume the model.');
+    }
+    await session.close();
+
+    const toolResultIds = resumedRequest.messages.flatMap((message) =>
+      message.role === 'tool' && Array.isArray(message.content)
+        ? message.content.map((part) => part.toolCallId)
+        : [],
+    );
+    expect(toolResultIds).toEqual(['call_1', 'call_2', 'call_3']);
+    await expect(readFile(targets[0]!, 'utf8')).resolves.toBe('note-1');
+    await expect(readFile(targets[1]!, 'utf8')).resolves.toBe('note-2');
+    await expect(readFile(targets[2]!, 'utf8')).resolves.toBe('note-3');
+  });
+
   it('reads an external file after approve_once grants external_directory', async () => {
     const cwd = await tempDir();
     const sessionDir = await tempDir();
