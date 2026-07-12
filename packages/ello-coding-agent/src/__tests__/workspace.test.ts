@@ -96,6 +96,9 @@ describe('workspace', () => {
         remoteUrl: sourceRepo,
       },
     );
+    expect(
+      await git(['config', 'remote.origin.mirror'], added.mirrorPath),
+    ).toBe('false');
     await expect(
       repos.remoteSet('renamed', `${sourceRepo}/next`),
     ).resolves.toMatchObject({
@@ -130,6 +133,28 @@ describe('workspace', () => {
     await expect(
       git(['rev-parse', '--show-toplevel'], workspace.repos[0]!.path),
     ).resolves.toBe(workspace.repos[0]!.path);
+  });
+
+  it('branch worktree 使用普通 push 语义且不擅自设置 upstream', async () => {
+    await initializeSourceRepo(sourceRepo);
+    const added = await repos.add(sourceRepo, 'demo');
+    await repos.remoteAdd('demo', sourceRepo);
+
+    const workspace = await workspaces.create('feature', 'Push Branch', [
+      'demo',
+    ]);
+    const checkout = workspace.repos[0]!;
+    const branch = 'feature/push-branch';
+
+    expect(await git(['config', 'remote.origin.mirror'], added.mirrorPath)).toBe(
+      'false',
+    );
+    await expect(
+      git(['config', `branch.${branch}.remote`], checkout.path),
+    ).rejects.toThrow();
+    await expect(
+      git(['config', `branch.${branch}.merge`], checkout.path),
+    ).rejects.toThrow();
   });
 
   it('远端导入保留 origin，local-only fetch 明确失败', async () => {
