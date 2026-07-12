@@ -329,7 +329,7 @@ headline 规则：
 - running tool 颜色为 warning。
 - failed tool 颜色为 danger。
 - shell output preview 只展示最多 8 行非空输出。
-- diff 直接展开为 unified diff preview。
+- diff 直接展开为结构化文件块：`A/M/D/R` 文件状态、双行号 gutter、增删标记与主题化背景。
 
 live tool 渲染：
 

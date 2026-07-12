@@ -41,6 +41,10 @@ export interface TuiTheme {
   readonly diffAdded: string;
   readonly diffRemoved: string;
   readonly diffContext: string;
+  readonly diffAddedBackground: string;
+  readonly diffRemovedBackground: string;
+  readonly diffAddedGutter: string;
+  readonly diffRemovedGutter: string;
 
   /** markdown / 语法上色（v1 仅粗粒度）。 */
   readonly markdownHeading: string;

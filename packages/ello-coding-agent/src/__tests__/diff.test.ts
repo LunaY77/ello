@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseUnifiedDiff, summarizeDiff } from '../tui/store/diff.js';
+import { createFileChange } from '../tools/file-change.js';
+import {
+  patchDiffRows,
+  parseUnifiedDiff,
+  summarizeDiff,
+} from '../tui/store/diff.js';
 
 const DIFF = [
   'diff --git a/a.ts b/a.ts',
@@ -49,5 +54,36 @@ describe('parseUnifiedDiff', () => {
 describe('summarizeDiff', () => {
   it('counts added and removed lines', () => {
     expect(summarizeDiff(DIFF)).toEqual({ added: 2, removed: 1 });
+  });
+});
+
+describe('patchDiffRows', () => {
+  it('renders file status, move path, and dual line numbers', () => {
+    const rows = patchDiffRows([
+      createFileChange(
+        'src/old.ts',
+        'first\nold\n',
+        'first\nnew\nextra\n',
+        'src/new.ts',
+      ),
+    ]);
+
+    expect(rows[0]).toEqual({
+      kind: 'file',
+      status: 'R',
+      path: 'src/old.ts → src/new.ts',
+    });
+    expect(rows).toContainEqual({
+      kind: 'line',
+      lineKind: 'del',
+      text: 'old',
+      oldNo: 2,
+    });
+    expect(rows).toContainEqual({
+      kind: 'line',
+      lineKind: 'add',
+      text: 'new',
+      newNo: 2,
+    });
   });
 });

@@ -98,7 +98,7 @@ describe('buildToolCardModel', () => {
     expect(model.truncationNotice).toContain('/tmp/log');
   });
 
-  it('builds codex-style headlines and shell output previews', () => {
+  it('builds concise headlines and shell output previews', () => {
     const edited = buildToolCardModel(
       call({
         name: 'edit',

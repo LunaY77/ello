@@ -1,19 +1,13 @@
 import { readFile } from 'node:fs/promises';
 
-import { applyPatch as applyUnifiedPatch } from 'diff';
 import { z } from 'zod';
 
 import type { CodingAgentConfig } from '../config/index.js';
 import type { DecideApproval } from '../permission/policy.js';
 import type { PermissionMetadata } from '../permission/types.js';
 
-import {
-  applyStructuredPatches,
-  createFileChange,
-  parseUnifiedFileChanges,
-  summarizeFileChanges,
-  type FileChange,
-} from './file-change.js';
+import { parseApplyPatch, prepareApplyPatch } from './apply-patch.js';
+import { createFileChange, summarizeFileChanges } from './file-change.js';
 import {
   createCodingToolResult,
   defineCodingTool,
@@ -251,27 +245,39 @@ export function createFsTools(
     }),
     defineCodingTool({
       name: 'apply_patch',
-      description:
-        'Apply a unified diff patch with exact context matching. The patch must include file headers and apply cleanly.',
+      description: `Apply file changes using the structured patch protocol.
+The patch must start with *** Begin Patch and end with *** End Patch. Use explicit *** Add File:, *** Delete File:, or *** Update File: operations. Added file content and inserted update lines start with +; removed lines start with -; unchanged context lines start with a space. Do not use unified diff ---/+++ file headers.
+Example:
+*** Begin Patch
+*** Update File: src/example.ts
+@@
+-old line
++new line
+*** End Patch`,
       input: z.object({
-        patch: z.string(),
+        patch: z
+          .string()
+          .describe(
+            "Patch text using *** Begin Patch / *** End Patch. Update hunks use @@ plus context, '-' removed lines, and '+' added lines.",
+          ),
         reason: z.string().optional(),
       }),
       approval: async (input, ctx) => {
         const fs = requireFs(ctx.agent);
-        const patches = parseUnifiedFileChanges(input.patch);
-        const fileChanges = await previewPatchChanges(fs, patches);
-        const paths = fileChanges.map((change) => change.path);
+        const prepared = await prepareApplyPatch(
+          fs,
+          parseApplyPatch(input.patch),
+        );
         return decide(
           {
             permission: 'edit',
-            patterns: paths,
-            always: paths,
-            paths,
+            patterns: prepared.paths,
+            always: prepared.paths,
+            paths: prepared.paths,
             metadata: {
               kind: 'edit',
-              path: paths.join(', '),
-              fileChanges,
+              path: prepared.paths.join(', '),
+              fileChanges: prepared.fileChanges,
             },
           },
           ctx.agent,
@@ -279,21 +285,18 @@ export function createFsTools(
       },
       execute: async ({ patch, reason }, ctx) => {
         const fs = requireFs(ctx.agent);
-        const fileChanges = await applyStructuredPatches(
-          fs,
-          parseUnifiedFileChanges(patch),
-        );
-        const paths = fileChanges.map((change) => change.path);
-        const summary = summarizeFileChanges(fileChanges);
+        const prepared = await prepareApplyPatch(fs, parseApplyPatch(patch));
+        await prepared.apply();
+        const summary = summarizeFileChanges(prepared.fileChanges);
         return createCodingToolResult({
-          title: `Apply patch ${paths.join(', ')}`,
-          output: `Applied patch to ${paths.length} file(s) (+${summary.additions} -${summary.deletions}).`,
+          title: `Apply patch ${prepared.paths.join(', ')}`,
+          output: `Applied patch to ${prepared.paths.length} file(s) (+${summary.additions} -${summary.deletions}).`,
           metadata: {
             kind: 'edit',
-            path: paths.join(', '),
-            paths,
+            path: prepared.paths.join(', '),
+            paths: prepared.paths,
             reason: reason ?? 'apply patch',
-            fileChanges,
+            fileChanges: prepared.fileChanges,
           },
         });
       },
@@ -387,34 +390,4 @@ async function editMetadata(
     path: input.path,
     fileChanges: [createFileChange(input.path, current, next)],
   };
-}
-
-async function previewPatchChanges(
-  fs: ReturnType<typeof requireFs>,
-  patches: Parameters<typeof applyStructuredPatches>[1],
-): Promise<readonly FileChange[]> {
-  const changes: FileChange[] = [];
-  for (const patch of patches) {
-    const path =
-      patch.isDelete === true ? patch.oldFileName : patch.newFileName;
-    if (path === undefined || path === '/dev/null') {
-      throw new Error('Patch file name is missing.');
-    }
-    const targetPath = path.replace(/^[ab]\//u, '');
-    resolveRuntimePath(fs, targetPath);
-    const before =
-      patch.isCreate === true ? null : await fs.readText(targetPath);
-    const applied = applyUnifiedPatch(before ?? '', patch, { fuzzFactor: 0 });
-    if (applied === false) {
-      throw new Error(`Patch did not apply cleanly: ${targetPath}`);
-    }
-    changes.push(
-      createFileChange(
-        targetPath,
-        before,
-        patch.isDelete === true ? null : applied,
-      ),
-    );
-  }
-  return changes;
 }

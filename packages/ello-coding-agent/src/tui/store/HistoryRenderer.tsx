@@ -137,7 +137,13 @@ function HistoryTool({ tool }: { readonly tool: ToolCallView }) {
         >{`  ${model.truncationNotice}`}</Text>
       ) : null}
       {model.diff !== undefined ? (
-        <DiffPreview diff={model.diff} file={model.summary} />
+        <DiffPreview
+          diff={model.diff}
+          file={model.summary}
+          {...(model.fileChanges !== undefined
+            ? { fileChanges: model.fileChanges }
+            : {})}
+        />
       ) : null}
       {tool.status === 'fail' && tool.error !== undefined ? (
         <Text color={tuiTokens.color.danger}>{`  ${tool.error.message}`}</Text>

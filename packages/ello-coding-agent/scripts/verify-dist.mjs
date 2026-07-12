@@ -6,7 +6,10 @@ const packageDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
 );
-const distDir = path.join(packageDir, 'dist');
+const distDir =
+  process.env.ELLO_DIST_DIR === undefined
+    ? path.join(packageDir, 'dist')
+    : path.resolve(process.env.ELLO_DIST_DIR);
 const requiredAssets = [
   'context/prompts/core-behavior.md',
   'skills/bundled/code-review/SKILL.md',

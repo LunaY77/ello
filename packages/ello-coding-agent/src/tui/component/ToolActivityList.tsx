@@ -69,7 +69,13 @@ function ToolCard({
       {call.status === 'running' ? (
         <Text color={theme.warning}> working</Text>
       ) : collapsed ? null : model.diff !== undefined ? (
-        <DiffPreview diff={model.diff} file={model.summary} />
+        <DiffPreview
+          diff={model.diff}
+          file={model.summary}
+          {...(model.fileChanges !== undefined
+            ? { fileChanges: model.fileChanges }
+            : {})}
+        />
       ) : call.output !== undefined ? (
         presenter.renderResult(call.input, call.output)
       ) : (

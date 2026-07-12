@@ -27,7 +27,7 @@ export const codingToolRegistry = [
   },
   {
     name: 'apply_patch',
-    description: 'apply unified diff patch',
+    description: 'apply structured patch operations',
     risk: 'workspace-write',
   },
   { name: 'bash', description: 'run shell command', risk: 'external' },

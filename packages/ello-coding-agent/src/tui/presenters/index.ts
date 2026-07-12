@@ -1,7 +1,12 @@
 import { Box, Text } from 'ink';
 import { createElement, type ReactNode } from 'react';
 
-import { readFileChanges, unifiedDiffFromFileChanges } from '../store/diff.js';
+import type { FileChange } from '../../tools/file-change.js';
+import {
+  patchDiffRows,
+  readFileChanges,
+  unifiedDiffFromFileChanges,
+} from '../store/diff.js';
 import type { ToolResultView } from '../store/history-entry.js';
 import { useTheme } from '../theme/index.js';
 
@@ -59,8 +64,10 @@ const diffPresenter: ToolPresenter = {
   renderCall: (input) => createElement(MutedText, null, str(input, 'path')),
   renderResult: (_input, output) => {
     const metadata = readToolMetadata(output);
+    const fileChanges = readFileChanges(metadata.fileChanges);
     return createElement(DiffPreview, {
-      diff: unifiedDiffFromFileChanges(readFileChanges(metadata.fileChanges)),
+      diff: unifiedDiffFromFileChanges(fileChanges),
+      fileChanges,
       file: readString(metadata, 'path'),
     });
   },
@@ -136,16 +143,111 @@ export function DiffPreview({
   diff,
   file,
   maxLines = 80,
+  fileChanges,
 }: {
   readonly diff: string;
   readonly file?: string;
   readonly maxLines?: number;
+  readonly fileChanges?: readonly FileChange[];
 }): ReactNode {
   const theme = useTheme();
+  if (fileChanges !== undefined && fileChanges.length > 0) {
+    // 新记录直接消费结构化变更，避免重新解析 unified diff 时丢失 move 等语义。
+    const allRows = patchDiffRows(fileChanges);
+    const rows = allRows.slice(0, maxLines);
+    const lineRows = rows.filter((row) => row.kind === 'line');
+    const numberWidth = Math.max(
+      1,
+      ...lineRows.flatMap((row) => [row.oldNo ?? 0, row.newNo ?? 0]),
+    ).toString().length;
+    return createElement(
+      Box,
+      { flexDirection: 'column', marginTop: 1, marginLeft: 2 },
+      ...rows.map((row, index) => {
+        if (row.kind === 'file') {
+          return createElement(
+            Text,
+            {
+              key: `file:${index}:${row.path}`,
+              bold: true,
+              color: theme.text,
+            },
+            `${row.status} ${row.path}`,
+          );
+        }
+        if (row.kind === 'hunk') {
+          return createElement(
+            Text,
+            { key: `hunk:${index}`, color: theme.textMuted },
+            row.text,
+          );
+        }
+        const marker =
+          row.lineKind === 'add' ? '+' : row.lineKind === 'del' ? '-' : ' ';
+        // gutter 与内容区分开着色，浅色/深色终端均能保持清晰的增删层次。
+        const backgroundColor =
+          row.lineKind === 'add'
+            ? theme.diffAddedBackground
+            : row.lineKind === 'del'
+              ? theme.diffRemovedBackground
+              : undefined;
+        const gutterBackground =
+          row.lineKind === 'add'
+            ? theme.diffAddedGutter
+            : row.lineKind === 'del'
+              ? theme.diffRemovedGutter
+              : undefined;
+        const color =
+          row.lineKind === 'add'
+            ? theme.diffAdded
+            : row.lineKind === 'del'
+              ? theme.diffRemoved
+              : theme.text;
+        const oldNo =
+          row.oldNo?.toString().padStart(numberWidth, ' ') ??
+          ' '.repeat(numberWidth);
+        const newNo =
+          row.newNo?.toString().padStart(numberWidth, ' ') ??
+          ' '.repeat(numberWidth);
+        return createElement(
+          Text,
+          {
+            key: `line:${index}`,
+            wrap: 'truncate',
+          },
+          createElement(
+            Text,
+            {
+              color: row.lineKind === 'context' ? theme.textMuted : color,
+              ...(gutterBackground !== undefined
+                ? { backgroundColor: gutterBackground }
+                : {}),
+            },
+            `${oldNo} ${newNo}`,
+          ),
+          createElement(
+            Text,
+            {
+              color,
+              ...(backgroundColor !== undefined ? { backgroundColor } : {}),
+            },
+            ` ${marker} ${row.text.replaceAll('\t', '    ')}`,
+          ),
+        );
+      }),
+      allRows.length > maxLines
+        ? createElement(
+            Text,
+            { key: 'truncated', color: theme.textMuted },
+            `… ${allRows.length - maxLines} more diff lines`,
+          )
+        : null,
+    );
+  }
   const lines = normalizeUnifiedDiff(diff).slice(0, maxLines);
   return createElement(
     Box,
-    { flexDirection: 'column' },
+    { flexDirection: 'column', marginLeft: 2 },
     file !== undefined && file !== ''
       ? createElement(Text, { color: theme.textMuted }, file)
       : null,
