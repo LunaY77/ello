@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json && cp -R src/config/templates dist/config/templates && cp -R src/context/prompts dist/context/prompts && cp -R src/skills/bundled dist/skills/bundled && cp -R src/agents/bundled dist/agents/bundled && cp -R src/storage/migrations dist/storage/migrations && chmod +x dist/cli.js && node scripts/verify-dist.mjs",
+    "ello": "node dist/cli.js",
     "lint": "eslint src",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
