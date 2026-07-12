@@ -115,9 +115,22 @@ export class ToolScheduler {
       }
       const ctx = this.createContext(call.id);
       // 执行前先跑工具自带的审批策略（若有），据其结果决定拒绝 / 挂起 / 放行。
-      const decision = normalizeApprovalDecision(
-        await tool.approval?.(call.input, ctx),
-      );
+      let decision: ReturnType<typeof normalizeApprovalDecision>;
+      try {
+        decision = normalizeApprovalDecision(
+          await tool.approval?.(call.input, ctx),
+        );
+      } catch (error) {
+        const normalized =
+          error instanceof Error ? error : new Error(String(error));
+        await sink.onToolStarted(call.id, call.name, call.input);
+        await sink.onToolFailed(call.id, normalized);
+        toolCalls.push({ ...call, error: normalizeAgentError(normalized) });
+        messages.push(
+          createToolResultMessage(call, { error: normalized.message }, 'error'),
+        );
+        continue;
+      }
       if (decision.action === 'denied') {
         const error = new Error(
           decision.reason ??

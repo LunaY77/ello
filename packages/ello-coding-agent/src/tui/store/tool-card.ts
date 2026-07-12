@@ -6,6 +6,7 @@
  * - 尾部状态串优先级：denied/failed > exitCode > 耗时。
  * - 默认折叠：普通成功工具折叠；带 diff 或失败的工具默认展开（更需要被看到）。
  */
+import type { FileChange } from '../../tools/file-change.js';
 import type { ToolMetadata } from '../../tools/runtime/coding-tool.js';
 
 import {
@@ -32,6 +33,7 @@ export interface ToolCardModel {
   readonly truncationNotice?: string;
   /** edit/write 才有的完整 diff（对话历史里展开渲染）。 */
   readonly diff?: string;
+  readonly fileChanges?: readonly FileChange[];
   readonly hasDiff: boolean;
   /** 默认是否折叠。 */
   readonly defaultCollapsed: boolean;
@@ -292,6 +294,7 @@ export function buildToolCardModel(call: ToolCallView): ToolCardModel {
         }
       : {}),
     ...(hasDiff ? { diff } : {}),
+    ...(fileChanges.length > 0 ? { fileChanges } : {}),
     hasDiff,
     // 默认折叠普通成功工具；diff / 失败默认展开。
     defaultCollapsed: !hasDiff && call.status !== 'fail',

@@ -92,8 +92,11 @@ describe('TerminalHistoryOutput', () => {
     expect(output).toContain('• Ran pnpm build');
     expect(output).toContain('> @ello/coding-agent build');
     expect(output).toContain('─ Worked for 1m 2s');
-    expect(output).toContain('-old');
-    expect(output).toContain('+new');
+    expect(output).toContain('1   - old');
+    expect(output).toContain('  1 + new');
+    expect(output.split('\n').find((line) => line.includes('M tmp.txt'))).toBe(
+      '  M tmp.txt',
+    );
   });
 });
 
@@ -286,8 +289,9 @@ describe('AppShell', () => {
     );
     const output = renderToString(<>{diff}</>, { columns: 100 });
 
-    expect(output).toContain('-old');
-    expect(output).toContain('+new');
+    expect(output).toContain('M tmp.txt');
+    expect(output).toContain('1   - old');
+    expect(output).toContain('  1 + new');
   });
 
   it('renders the subagent browser overlay', () => {

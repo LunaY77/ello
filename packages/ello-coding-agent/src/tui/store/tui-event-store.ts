@@ -239,13 +239,17 @@ export function reduceTuiEvent(
         },
       };
 
-    case 'tool.started':
-      return upsertTool(state, event.toolCallId, {
+    case 'tool.started': {
+      // assistant 前言属于工具调用之前的时间线。若不先提交，它会继续留在
+      // 动态区域，而已完成的工具会进入上方静态历史，视觉顺序因此反转。
+      const flushed = flushAssistant(state);
+      return upsertTool(flushed, event.toolCallId, {
         id: event.toolCallId,
         name: event.name,
         input: event.input,
         status: 'running',
       });
+    }
 
     case 'tool.completed':
       return sealTool(state, event.toolCallId, {

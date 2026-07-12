@@ -217,6 +217,36 @@ describe('tui-event-store', () => {
     expect(state.history.at(-1)).toMatchObject({ kind: 'tool' });
   });
 
+  it('commits assistant preamble before the tool it introduces', () => {
+    let state = reduceTuiEvent(initialTuiEventState, {
+      type: 'message.delta',
+      messageId: 'm1',
+      text: 'I will read the file first.',
+    });
+
+    state = reduceTuiEvent(state, {
+      type: 'tool.started',
+      toolCallId: 't1',
+      name: 'read',
+      input: { path: 'a.ts' },
+    });
+    state = reduceTuiEvent(state, {
+      type: 'tool.completed',
+      toolCallId: 't1',
+      output: { totalLines: 3 },
+    });
+
+    expect(state.live.assistantText).toBe('');
+    expect(state.history.map((entry) => entry.kind)).toEqual([
+      'assistant',
+      'tool',
+    ]);
+    expect(state.history[0]).toMatchObject({
+      kind: 'assistant',
+      text: 'I will read the file first.',
+    });
+  });
+
   it('renders subagent runtime and nested tool activity', () => {
     let state = initialTuiEventState;
     state = reduceTuiEvent(state, {

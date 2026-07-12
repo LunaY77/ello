@@ -1,15 +1,4 @@
-import { rm } from 'node:fs/promises';
-
-import type { AgentFileSystem } from '@ello/agent';
-import {
-  applyPatch as applyUnifiedPatch,
-  formatPatch,
-  parsePatch,
-  structuredPatch,
-  type StructuredPatch,
-} from 'diff';
-
-import { resolveRuntimePath } from './shared.js';
+import { formatPatch, structuredPatch, type StructuredPatch } from 'diff';
 
 export interface DiffHunk {
   readonly oldStart: number;
@@ -54,12 +43,13 @@ export function createFileChange(
   targetPath: string,
   previous: string | null,
   next: string | null,
+  movePath?: string,
 ): FileChange {
   if (previous === null && next === null) {
     throw new Error(`Cannot create empty file change for ${targetPath}.`);
   }
   const oldName = previous === null ? '/dev/null' : targetPath;
-  const newName = next === null ? '/dev/null' : targetPath;
+  const newName = next === null ? '/dev/null' : (movePath ?? targetPath);
   const patch = structuredPatch(
     oldName,
     newName,
@@ -103,6 +93,7 @@ export function createFileChange(
     deletions: summary.deletions,
     hunks,
     unifiedDiff,
+    ...(movePath !== undefined ? { movePath } : {}),
   };
 }
 
@@ -132,54 +123,6 @@ export function unifiedDiffFromChanges(changes: readonly FileChange[]): string {
   return changes.map((change) => change.unifiedDiff).join('\n');
 }
 
-export function parseUnifiedFileChanges(patchText: string): StructuredPatch[] {
-  const patches = parsePatch(patchText);
-  if (patches.length === 0) {
-    throw new Error('Patch contains no file changes.');
-  }
-  return patches;
-}
-
-export async function applyStructuredPatches(
-  fs: AgentFileSystem,
-  patches: readonly StructuredPatch[],
-): Promise<readonly FileChange[]> {
-  const pending: Array<{
-    readonly path: string;
-    readonly before: string | null;
-    readonly after: string | null;
-  }> = [];
-  for (const patch of patches) {
-    const targetPath = pathFromPatch(patch);
-    resolveRuntimePath(fs, targetPath);
-    const before =
-      patch.isCreate === true ? null : await readExisting(fs, targetPath);
-    const applied = applyUnifiedPatch(before ?? '', patch, { fuzzFactor: 0 });
-    if (applied === false) {
-      throw new Error(`Patch did not apply cleanly: ${targetPath}`);
-    }
-    pending.push({
-      path: targetPath,
-      before,
-      after: patch.isDelete === true ? null : applied,
-    });
-  }
-
-  const changes = createFileChanges(
-    pending.map((change) =>
-      createFileChange(change.path, change.before, change.after),
-    ),
-  );
-  for (const change of pending) {
-    if (change.after === null) {
-      await rm(resolveRuntimePath(fs, change.path));
-    } else {
-      await fs.writeText(change.path, change.after);
-    }
-  }
-  return changes;
-}
-
 function toDiffHunk(hunk: StructuredPatch['hunks'][number]): DiffHunk {
   return {
     oldStart: hunk.oldStart,
@@ -206,33 +149,4 @@ function summarizeHunks(hunks: readonly DiffHunk[]): {
     }
   }
   return { additions, deletions };
-}
-
-function pathFromPatch(patch: StructuredPatch): string {
-  const candidate =
-    patch.isDelete === true ? patch.oldFileName : patch.newFileName;
-  if (candidate === undefined || candidate === '/dev/null') {
-    throw new Error('Patch file name is missing.');
-  }
-  return stripGitPrefix(candidate);
-}
-
-function stripGitPrefix(value: string): string {
-  return value.replace(/^[ab]\//u, '');
-}
-
-async function readExisting(
-  fs: AgentFileSystem,
-  targetPath: string,
-): Promise<string> {
-  try {
-    return await fs.readText(targetPath);
-  } catch (error) {
-    throw new Error(
-      `Cannot apply patch because file does not exist: ${targetPath}`,
-      {
-        cause: error,
-      },
-    );
-  }
 }

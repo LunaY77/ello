@@ -35,6 +35,9 @@ export interface CodingSystemPromptRuntime {
   readonly memoryIndexLoader?: MemoryIndexLoader;
 }
 
+/** 已读取模板的进程内快照；运行中的 CLI 不应受并发构建切换 dist 目录影响。 */
+const promptFileCache = new Map<string, string>();
+
 /** 渲染 coding-agent 的 Markdown prompt 模板。 */
 export function renderPromptTemplate(
   profile: string,
@@ -155,9 +158,15 @@ function loadPromptTemplate(profile: string): string {
 }
 
 function readPromptFile(fileName: string): string {
+  const cached = promptFileCache.get(fileName);
+  if (cached !== undefined) {
+    return cached;
+  }
   const promptPath = path.join(promptDir(), fileName);
   try {
-    return readFileSync(promptPath, 'utf8');
+    const template = readFileSync(promptPath, 'utf8');
+    promptFileCache.set(fileName, template);
+    return template;
   } catch (error) {
     throw new Error(`Failed to load prompt template: ${promptPath}`, {
       cause: error,

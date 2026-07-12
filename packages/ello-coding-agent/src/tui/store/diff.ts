@@ -1,9 +1,9 @@
 /**
  * 统一 diff 解析。
  *
- * 对话历史里的 edit/write 改动要展示「清晰的 unified diff」：行号、文件头、hunk 头、
- * 增删上色、可折叠。审批弹窗只用 {@link summarizeDiff} 给出 +N/-M 摘要，不塞完整 diff。
- * 解析是纯函数，便于单测。
+ * 对话历史里的 edit/write 改动使用结构化 FileChange 渲染文件块、双行号
+ * gutter 与增删背景；历史兼容路径仍可解析 unified diff。审批弹窗只用
+ * {@link summarizeDiff} 给出 +N/-M 摘要，不塞完整 diff。解析是纯函数，便于单测。
  */
 import type { FileChange } from '../../tools/file-change.js';
 
@@ -22,6 +22,21 @@ export interface DiffSummary {
   readonly added: number;
   readonly removed: number;
 }
+
+export type PatchDiffRow =
+  | {
+      readonly kind: 'file';
+      readonly status: 'A' | 'D' | 'M' | 'R';
+      readonly path: string;
+    }
+  | { readonly kind: 'hunk'; readonly text: string }
+  | {
+      readonly kind: 'line';
+      readonly lineKind: 'add' | 'del' | 'context';
+      readonly text: string;
+      readonly oldNo?: number;
+      readonly newNo?: number;
+    };
 
 const HUNK_RE = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/u;
 
@@ -110,6 +125,68 @@ export function unifiedDiffFromFileChanges(
   return changes.map((change) => change.unifiedDiff).join('\n');
 }
 
+/** 将结构化文件变更转成文件块与双行号 diff 行。 */
+export function patchDiffRows(
+  changes: readonly FileChange[],
+): readonly PatchDiffRow[] {
+  const rows: PatchDiffRow[] = [];
+  for (const change of changes) {
+    rows.push({
+      kind: 'file',
+      status:
+        change.kind === 'added'
+          ? 'A'
+          : change.kind === 'deleted'
+            ? 'D'
+            : change.movePath !== undefined
+              ? 'R'
+              : 'M',
+      path:
+        change.kind === 'modified' && change.movePath !== undefined
+          ? `${change.path} → ${change.movePath}`
+          : change.path,
+    });
+    for (const hunk of change.hunks) {
+      rows.push({
+        kind: 'hunk',
+        text: `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
+      });
+      let oldNo = hunk.oldStart;
+      let newNo = hunk.newStart;
+      for (const line of hunk.lines) {
+        if (line.startsWith('+')) {
+          rows.push({
+            kind: 'line',
+            lineKind: 'add',
+            text: line.slice(1),
+            newNo,
+          });
+          newNo += 1;
+        } else if (line.startsWith('-')) {
+          rows.push({
+            kind: 'line',
+            lineKind: 'del',
+            text: line.slice(1),
+            oldNo,
+          });
+          oldNo += 1;
+        } else if (line.startsWith(' ')) {
+          rows.push({
+            kind: 'line',
+            lineKind: 'context',
+            text: line.slice(1),
+            oldNo,
+            newNo,
+          });
+          oldNo += 1;
+          newNo += 1;
+        }
+      }
+    }
+  }
+  return rows;
+}
+
 function isFileChange(value: unknown): value is FileChange {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -121,6 +198,7 @@ function isFileChange(value: unknown): value is FileChange {
     deletions?: unknown;
     hunks?: unknown;
     unifiedDiff?: unknown;
+    movePath?: unknown;
   };
   return (
     (record.kind === 'added' ||
@@ -130,6 +208,7 @@ function isFileChange(value: unknown): value is FileChange {
     typeof record.additions === 'number' &&
     typeof record.deletions === 'number' &&
     Array.isArray(record.hunks) &&
-    typeof record.unifiedDiff === 'string'
+    typeof record.unifiedDiff === 'string' &&
+    (record.movePath === undefined || typeof record.movePath === 'string')
   );
 }

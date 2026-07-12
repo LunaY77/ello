@@ -13,6 +13,7 @@
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
+    "@ello/coding-agent": "workspace:*",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.10.2",
     "@types/react": "^19.2.7",
