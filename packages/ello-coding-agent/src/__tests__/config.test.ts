@@ -45,6 +45,8 @@ describe('loadCodingAgentConfig', () => {
 
     const globalConfig = await readFile(globalConfigPath(), 'utf8');
     expect(globalConfig).toContain('active_profile: main');
+    expect(globalConfig).toContain('workspace:');
+    expect(globalConfig).toContain('mount: ~/.ello');
     expect(globalConfig).toContain('provider:');
     expect(globalConfig).toContain('openai:');
     expect(globalConfig).toContain('anthropic:');
@@ -64,6 +66,7 @@ describe('loadCodingAgentConfig', () => {
       const registry = createProviderRegistry(config);
 
       expect(config.active_profile).toBe('main');
+      expect(config.workspace.mount).toBe('~/.ello');
       expect(registry.getProvider('openai').apiKey).toBe('test-openai-key');
       expect(
         registry

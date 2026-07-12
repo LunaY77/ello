@@ -41,11 +41,7 @@ import {
   buildModelCatalogOptions,
   buildProfileSelectorOptions,
 } from './model-selectors.js';
-import {
-  loadSkillsOverlay,
-  loadTasksOverlay,
-  loadWorkspaceOverlay,
-} from './overlay-loaders.js';
+import { loadSkillsOverlay, loadTasksOverlay } from './overlay-loaders.js';
 import { detectTrigger, rankCandidates } from './store/autocomplete.js';
 import type { HistoryEntry } from './store/history-entry.js';
 import {
@@ -196,8 +192,6 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
           void loadTasksOverlay(session).then(setOverlay);
         } else if (command.overlay === 'skills') {
           void loadSkillsOverlay(runtimeConfig).then(setOverlay);
-        } else if (command.overlay === 'workspace') {
-          void loadWorkspaceOverlay().then(setOverlay);
         } else if (command.overlay === 'session-selector') {
           void session
             .listSessions()

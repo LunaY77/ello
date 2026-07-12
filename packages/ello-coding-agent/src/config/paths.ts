@@ -51,11 +51,6 @@ export function globalCacheDir(): string {
   return path.join(elloHomeDir(), 'cache');
 }
 
-/** workspace registry 和 workspace 实体目录。 */
-export function globalWorkspacesDir(): string {
-  return path.join(elloHomeDir(), 'workspaces');
-}
-
 /** 项目内 `.ello` 目录。 */
 export function projectElloDir(cwd: string): string {
   return path.join(path.resolve(cwd), '.ello');
@@ -74,9 +69,4 @@ export function projectSkillsDir(cwd: string): string {
 /** 项目级 Markdown agent 覆盖目录。 */
 export function projectAgentsDir(cwd: string): string {
   return path.join(projectElloDir(cwd), 'agents');
-}
-
-/** workspace 工具写入的项目指针文件。 */
-export function projectWorkspacePointerPath(cwd: string): string {
-  return path.join(projectElloDir(cwd), 'workspace.yaml');
 }

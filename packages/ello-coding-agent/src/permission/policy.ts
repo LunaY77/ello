@@ -155,7 +155,6 @@ function derivePermission(toolName: string): string {
   if (toolName === 'bash') return 'bash';
   if (toolName === 'web_fetch') return 'web_fetch';
   if (toolName.startsWith('task_')) return 'task';
-  if (toolName.startsWith('workspace_')) return 'edit';
   return toolName;
 }
 

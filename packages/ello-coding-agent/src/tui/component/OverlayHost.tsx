@@ -10,7 +10,6 @@ import type { ModelRole, RuntimeProfileSuite } from '../../provider/index.js';
 import type { ApprovalDecision } from '../../runtime/intents.js';
 import type { JsonlSessionSummary } from '../../session/repository.js';
 import type { Task } from '../../tasks/index.js';
-import type { WorkspaceManifest } from '../../workspace/index.js';
 import type { ApprovalView } from '../store/history-entry.js';
 import {
   buildPermissionView,
@@ -72,10 +71,6 @@ export type OverlayState =
     }
   | { readonly type: 'skills'; readonly skills: readonly AgentSkill[] }
   | { readonly type: 'tasks'; readonly tasks: readonly Task[] }
-  | {
-      readonly type: 'workspace';
-      readonly workspaces: readonly WorkspaceManifest[];
-    }
   | {
       readonly type: 'session-selector';
       readonly sessions: readonly JsonlSessionSummary[];
@@ -416,24 +411,6 @@ export function OverlayHost({
                   {`  tools: ${formatAgentTools(agent.tools)}`}
                 </Text>
               </Box>
-            ))
-          )}
-        </Panel>
-      ) : null}
-      {overlay.type === 'workspace' ? (
-        <Panel title="Workspace" color={theme.accent}>
-          {overlay.workspaces.length === 0 ? (
-            <Text color={theme.textMuted}>workspaces &lt;none&gt;</Text>
-          ) : (
-            overlay.workspaces.slice(0, 10).map((workspace) => (
-              <Text
-                key={`${workspace.kind}/${workspace.name}`}
-                color={theme.text}
-              >
-                <Text color={theme.textMuted}>{workspace.kind.padEnd(8)}</Text>
-                <Text color={theme.accent}>{workspace.name.padEnd(18)}</Text>
-                <Text>{clip(workspace.rootPath, 60)}</Text>
-              </Text>
             ))
           )}
         </Panel>

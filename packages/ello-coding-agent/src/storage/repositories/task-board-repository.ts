@@ -456,7 +456,6 @@ function toBoard(row: typeof taskBoards.$inferSelect): TaskBoard {
 
 function toScope(rowId: string, type: string, id: string): TaskBoardScope {
   if (type === 'session') return { type, sessionId: id };
-  if (type === 'workspace') return { type, workspaceId: id };
   if (type === 'global') return { type, name: id };
   throw new Error(
     `Invalid task_boards row ${rowId}: unknown scope_type ${type}.`,
@@ -465,6 +464,5 @@ function toScope(rowId: string, type: string, id: string): TaskBoardScope {
 
 function scopeId(scope: TaskBoardScope): string {
   if (scope.type === 'session') return scope.sessionId;
-  if (scope.type === 'workspace') return scope.workspaceId;
   return scope.name;
 }

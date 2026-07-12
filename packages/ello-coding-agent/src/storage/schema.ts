@@ -53,9 +53,9 @@ export const artifactReferences = sqliteTable(
 export const repositories = sqliteTable('repositories', {
   id: text('id').primaryKey(),
   key: text('key').notNull().unique(),
-  sourceUrl: text('source_url'),
-  mirrorPath: text('mirror_path'),
-  defaultBranch: text('default_branch'),
+  remoteUrl: text('remote_url'),
+  mirrorPath: text('mirror_path').notNull(),
+  defaultBranch: text('default_branch').notNull(),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -85,7 +85,9 @@ export const workspaceRepositories = sqliteTable(
       .notNull()
       .references(() => repositories.id),
     checkoutPath: text('checkout_path').notNull(),
+    checkoutMode: text('checkout_mode').notNull(),
     branch: text('branch'),
+    headCommit: text('head_commit'),
     status: text('status').notNull(),
     lastGitStatus: text('last_git_status'),
     lastSyncedAt: text('last_synced_at'),
@@ -95,7 +97,7 @@ export const workspaceRepositories = sqliteTable(
   (table) => [primaryKey({ columns: [table.workspaceId, table.repositoryId] })],
 );
 
-/** 显式 sync 的执行记录；sync 只校验/标记漂移，不隐式改真实 worktree。 */
+/** reconcile 执行记录；诊断只保存 observation 计数，不隐式修改 workspace。 */
 export const workspaceSyncRuns = sqliteTable('workspace_sync_runs', {
   id: text('id').primaryKey(),
   workspaceId: text('workspace_id').references(() => workspaces.id),
@@ -177,7 +179,7 @@ export const usageReportCache = sqliteTable('usage_report_cache', {
 export const memoryJobs = sqliteTable('memory_jobs', {
   id: text('id').primaryKey(),
   kind: text('kind').notNull(),
-  workspaceCwd: text('workspace_cwd').notNull(),
+  cwd: text('cwd').notNull(),
   sessionId: text('session_id'),
   sourceLeafId: text('source_leaf_id'),
   status: text('status').notNull(),
@@ -228,7 +230,7 @@ export const checkpointRollbacks = sqliteTable('checkpoint_rollbacks', {
   createdAt: text('created_at').notNull(),
 });
 
-/** 显式 task board；scope 决定任务属于 session、workspace 或命名 global board。 */
+/** 显式 task board；scope 决定任务属于 session 或命名 global board。 */
 export const taskBoards = sqliteTable('task_boards', {
   id: text('id').primaryKey(),
   scopeType: text('scope_type').notNull(),

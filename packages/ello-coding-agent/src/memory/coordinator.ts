@@ -22,7 +22,7 @@ export type MemoryJobStatus = 'queued' | 'running' | 'completed' | 'failed';
 export interface MemoryJob {
   readonly id: string;
   readonly kind: MemoryJobKind;
-  readonly workspaceCwd: string;
+  readonly cwd: string;
   readonly sessionId: string | null;
   readonly sourceLeafId: string | null;
   readonly status: MemoryJobStatus;
@@ -97,7 +97,7 @@ export class MemoryJobCoordinator implements MemoryToolPort {
   }): Promise<MemoryJob> {
     const job = this.jobs.enqueueExtraction({
       ...input,
-      workspaceCwd: this.deps.config.cwd,
+      cwd: this.deps.config.cwd,
     });
     this.scheduleWorker();
     return job;
@@ -243,19 +243,19 @@ export class MemoryJobCoordinator implements MemoryToolPort {
 class MemoryJobRepository {
   constructor(private readonly storage: CodingStorage) {}
 
-  recoverInterrupted(workspaceCwd: string): void {
+  recoverInterrupted(cwd: string): void {
     this.storage.db.$client
       .prepare(
         `update memory_jobs
          set status = 'queued', started_at = null,
              error_message = 'worker interrupted before completion'
-         where workspace_cwd = ? and status = 'running'`,
+         where cwd = ? and status = 'running'`,
       )
-      .run(workspaceCwd);
+      .run(cwd);
   }
 
   enqueueExtraction(input: {
-    readonly workspaceCwd: string;
+    readonly cwd: string;
     readonly sessionId: string;
     readonly sourceLeafId: string;
   }): MemoryJob {
@@ -263,28 +263,24 @@ class MemoryJobRepository {
     this.storage.db.$client
       .prepare(
         `insert into memory_jobs(
-           id, kind, workspace_cwd, session_id, source_leaf_id,
+           id, kind, cwd, session_id, source_leaf_id,
            status, attempts, created_at
          ) values (?, 'extract', ?, ?, ?, 'queued', 0, ?)
-         on conflict(kind, workspace_cwd, session_id, source_leaf_id)
+         on conflict(kind, cwd, session_id, source_leaf_id)
          where kind = 'extract'
          do nothing`,
       )
-      .run(id, input.workspaceCwd, input.sessionId, input.sourceLeafId, now());
-    return this.requireBySource(
-      input.workspaceCwd,
-      input.sessionId,
-      input.sourceLeafId,
-    );
+      .run(id, input.cwd, input.sessionId, input.sourceLeafId, now());
+    return this.requireBySource(input.cwd, input.sessionId, input.sourceLeafId);
   }
 
-  enqueueDream(workspaceCwd: string): {
+  enqueueDream(cwd: string): {
     readonly job: MemoryJob;
     readonly created: boolean;
   } {
     return this.storage.db.$client
       .transaction(() => {
-        const active = this.activeDream(workspaceCwd);
+        const active = this.activeDream(cwd);
         if (active !== null) {
           return { job: active, created: false };
         }
@@ -292,39 +288,39 @@ class MemoryJobRepository {
         this.storage.db.$client
           .prepare(
             `insert into memory_jobs(
-             id, kind, workspace_cwd, status, attempts, created_at
+             id, kind, cwd, status, attempts, created_at
            ) values (?, 'dream', ?, 'queued', 0, ?)`,
           )
-          .run(id, workspaceCwd, now());
+          .run(id, cwd, now());
         return { job: this.require(id), created: true };
       })
       .immediate();
   }
 
-  hasQueued(workspaceCwd: string): boolean {
+  hasQueued(cwd: string): boolean {
     return (
       this.storage.db.$client
         .prepare(
           `select 1 from memory_jobs
-           where workspace_cwd = ? and status = 'queued'
+           where cwd = ? and status = 'queued'
            limit 1`,
         )
-        .get(workspaceCwd) !== undefined
+        .get(cwd) !== undefined
     );
   }
 
-  claimNext(workspaceCwd: string): MemoryJob | null {
+  claimNext(cwd: string): MemoryJob | null {
     return this.storage.db.$client
       .transaction(() => {
         const queued = mapJob(
           this.storage.db.$client
             .prepare(
               `select * from memory_jobs
-             where workspace_cwd = ? and status = 'queued'
+             where cwd = ? and status = 'queued'
              order by created_at, id
              limit 1`,
             )
-            .get(workspaceCwd),
+            .get(cwd),
         );
         if (queued === null) {
           return null;
@@ -367,7 +363,7 @@ class MemoryJobRepository {
   }
 
   status(
-    workspaceCwd: string,
+    cwd: string,
   ): Pick<
     MemoryStatus,
     'queuedJobs' | 'runningJobs' | 'failedJobs' | 'activeDream'
@@ -376,11 +372,11 @@ class MemoryJobRepository {
       .prepare(
         `select status, count(*) as count
          from memory_jobs
-         where workspace_cwd = ?
+         where cwd = ?
            and status in ('queued', 'running', 'failed')
          group by status`,
       )
-      .all(workspaceCwd) as Array<{
+      .all(cwd) as Array<{
       readonly status: MemoryJobStatus;
       readonly count: number;
     }>;
@@ -389,26 +385,26 @@ class MemoryJobRepository {
       queuedJobs: counts.get('queued') ?? 0,
       runningJobs: counts.get('running') ?? 0,
       failedJobs: counts.get('failed') ?? 0,
-      activeDream: this.activeDream(workspaceCwd),
+      activeDream: this.activeDream(cwd),
     };
   }
 
-  private activeDream(workspaceCwd: string): MemoryJob | null {
+  private activeDream(cwd: string): MemoryJob | null {
     return mapJob(
       this.storage.db.$client
         .prepare(
           `select * from memory_jobs
-           where kind = 'dream' and workspace_cwd = ?
+           where kind = 'dream' and cwd = ?
              and status in ('queued', 'running')
            order by created_at
            limit 1`,
         )
-        .get(workspaceCwd),
+        .get(cwd),
     );
   }
 
   private requireBySource(
-    workspaceCwd: string,
+    cwd: string,
     sessionId: string,
     sourceLeafId: string,
   ): MemoryJob {
@@ -416,10 +412,10 @@ class MemoryJobRepository {
       this.storage.db.$client
         .prepare(
           `select * from memory_jobs
-           where kind = 'extract' and workspace_cwd = ?
+           where kind = 'extract' and cwd = ?
              and session_id = ? and source_leaf_id = ?`,
         )
-        .get(workspaceCwd, sessionId, sourceLeafId),
+        .get(cwd, sessionId, sourceLeafId),
     );
     if (job === null) {
       throw new Error(
@@ -485,7 +481,7 @@ function mapJob(row: unknown): MemoryJob | null {
   return {
     id: value['id'] as string,
     kind: value['kind'] as MemoryJobKind,
-    workspaceCwd: value['workspace_cwd'] as string,
+    cwd: value['cwd'] as string,
     sessionId: (value['session_id'] as string | null) ?? null,
     sourceLeafId: (value['source_leaf_id'] as string | null) ?? null,
     status: value['status'] as MemoryJobStatus,

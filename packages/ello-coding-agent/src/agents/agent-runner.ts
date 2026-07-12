@@ -108,7 +108,7 @@ export async function runInternalAgent(input: {
             prepare: (modelInput: ModelInput) =>
               prepareModelInputForRuntimeModel(binding.model, modelInput, {
                 promptProfile: `internal:${input.definition.name}`,
-                workspaceIdentity: input.config.cwd,
+                cwdIdentity: input.config.cwd,
               }),
           },
         }),
@@ -154,7 +154,7 @@ export async function runInternalToolAgent(input: {
             prepare: (modelInput: ModelInput) =>
               prepareModelInputForRuntimeModel(binding.model, modelInput, {
                 promptProfile: `internal:${input.definition.name}`,
-                workspaceIdentity: input.config.cwd,
+                cwdIdentity: input.config.cwd,
               }),
           },
         }),
@@ -244,7 +244,7 @@ export function createSubagentAgent(input: {
             prepare: (input: ModelInput) =>
               prepareModelInputForRuntimeModel(binding.model, input, {
                 promptProfile: 'subagent',
-                workspaceIdentity: deps.config.cwd,
+                cwdIdentity: deps.config.cwd,
               }),
           },
         }

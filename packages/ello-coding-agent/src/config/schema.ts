@@ -272,6 +272,10 @@ export const ProjectTrustSchema = z.object({
   trust_level: z.enum(['trusted', 'untrusted']).default('untrusted'),
 });
 
+export const WorkspaceConfigSchema = z.object({
+  mount: z.string().default('~/.ello'),
+});
+
 /**
  * 运行时最终配置 schema。
  *
@@ -292,6 +296,7 @@ export const CodingAgentConfigSchema = z.object({
     .default({}),
   profile: z.record(z.string(), ProfileSuiteSchema).default({}),
   projects: z.record(z.string(), ProjectTrustSchema).default({}),
+  workspace: WorkspaceConfigSchema.default({ mount: '~/.ello' }),
   tools: ToolConfigSchema.default({ needApproval: [], disabled: [] }),
   tool_output: ToolOutputConfigSchema.default({
     max_bytes: 12_000,
@@ -373,5 +378,6 @@ export type LangfuseTracingConfig = Extract<
 >;
 export type ObservabilityConfig = z.infer<typeof ObservabilityConfigSchema>;
 export type PermissionRule = z.infer<typeof PermissionRuleSchema>;
+export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
 export type CodingAgentConfig = z.infer<typeof CodingAgentConfigSchema>;
 export type CodingAgentConfigOverrides = Partial<CodingAgentConfig>;

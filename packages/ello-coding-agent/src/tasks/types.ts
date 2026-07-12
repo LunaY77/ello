@@ -2,7 +2,6 @@ export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 
 export type TaskBoardScope =
   | { readonly type: 'session'; readonly sessionId: string }
-  | { readonly type: 'workspace'; readonly workspaceId: string }
   | { readonly type: 'global'; readonly name: string };
 
 export interface TaskBoard {

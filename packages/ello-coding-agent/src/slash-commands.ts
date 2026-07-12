@@ -21,7 +21,6 @@ export type CommandResult =
         | 'skills'
         | 'tasks'
         | 'theme'
-        | 'workspace'
         | 'permission-rules';
     }
   | {
@@ -151,11 +150,6 @@ export const slashCommands: readonly SlashCommand[] = [
     name: 'goal',
     description: 'Create or manage the session goal',
     run: (_ctx, args) => ({ type: 'runtime-action', action: 'goal', args }),
-  },
-  {
-    name: 'workspace',
-    description: 'Open workspace status',
-    run: () => ({ type: 'open-overlay', overlay: 'workspace' }),
   },
   {
     name: 'new',

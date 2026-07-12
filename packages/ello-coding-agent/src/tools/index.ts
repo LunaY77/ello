@@ -9,7 +9,6 @@ import {
 import type { PermissionRule } from '../permission/types.js';
 import type { CodingStorage } from '../storage/index.js';
 import { createTaskService, type TaskBoardScope } from '../tasks/index.js';
-import { RepoStore, WorkspaceStore } from '../workspace/index.js';
 
 import { createFsTools } from './fs.js';
 import { formatToolRegistry } from './registry.js';
@@ -20,7 +19,6 @@ import type { ApprovalFor } from './shared.js';
 import { createShellTools } from './shell.js';
 import { createTaskTools } from './task.js';
 import { canFetch, webFetchTool } from './web.js';
-import { createWorkspaceTools } from './workspace.js';
 
 /**
  * coding 工具集装配。
@@ -41,7 +39,7 @@ export interface CreateCodingToolsOptions {
 /**
  * 创建 coding-agent 默认工具集。
  *
- * 按域拆分：fs / search / shell / task / workspace；`web_fetch` 仅在可联网时注册。
+ * 按域拆分：fs / search / shell / task；`web_fetch` 仅在可联网时注册。
  */
 export function createCodingTools(
   options: CreateCodingToolsOptions,
@@ -56,8 +54,6 @@ export function createCodingTools(
     options.storage.taskBoards,
     options.taskBoardScope,
   );
-  const repos = new RepoStore();
-  const workspaces = new WorkspaceStore(options.storage.workspaces, repos);
 
   const codingTools = [
     ...createFsTools(config, decide),
@@ -69,7 +65,6 @@ export function createCodingTools(
   return [
     ...adaptCodingTools(codingTools, { config, outputStore }),
     ...createTaskTools(approval, tasks),
-    ...createWorkspaceTools(approval, repos, workspaces),
   ].filter((tool) => !disabled.has(tool.name));
 }
 

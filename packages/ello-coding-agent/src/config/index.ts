@@ -32,12 +32,10 @@ export {
   globalMcpPath,
   globalSessionsDir,
   globalSkillsDir,
-  globalWorkspacesDir,
   projectAgentsDir,
   projectConfigPath,
   projectElloDir,
   projectSkillsDir,
-  projectWorkspacePointerPath,
 } from './paths.js';
 export {
   AgentConfigSchema,
@@ -54,6 +52,7 @@ export {
   ProfileSuiteSchema,
   ProviderConnectionSchema,
   ToolConfigSchema,
+  WorkspaceConfigSchema,
   type AgentConfigEntry,
   type ApprovalMode,
   type CodingAgentConfig,
@@ -68,4 +67,5 @@ export {
   type ProfileSuiteConfig,
   type ProviderConnectionConfig,
   type ToolConfig,
+  type WorkspaceConfig,
 } from './schema.js';

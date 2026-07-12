@@ -33,7 +33,7 @@ export function prepareModelInputForRuntimeModel(
   input: ModelInput,
   cache: {
     readonly promptProfile: string;
-    readonly workspaceIdentity: string;
+    readonly cwdIdentity: string;
   },
 ): ModelInput {
   const messages = input.messages.map((message) =>
@@ -73,7 +73,7 @@ function addOpenAiPromptCacheKey(
   input: ModelInput,
   cache: {
     readonly promptProfile: string;
-    readonly workspaceIdentity: string;
+    readonly cwdIdentity: string;
   },
   cacheSegments: { readonly stable: string; readonly dynamic: string },
 ): ModelInput {
@@ -90,7 +90,7 @@ function addOpenAiPromptCacheKey(
       model.providerId,
       model.id,
       cache.promptProfile,
-      cache.workspaceIdentity,
+      cache.cwdIdentity,
       toolsetFingerprint,
       hash(cacheSegments.stable),
     ].join('\n'),

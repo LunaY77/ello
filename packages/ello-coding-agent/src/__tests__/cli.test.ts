@@ -49,6 +49,35 @@ describe('cli buildProgram', () => {
     expect(out()).toMatch(/read|write|bash/u);
   });
 
+  it('只暴露 repo/workspace 命令树和 workspace 内 tmux', () => {
+    const { io } = fakeIo();
+    const program = buildProgram(io);
+    const topLevel = program.commands.map((command) => command.name());
+    expect(topLevel).toContain('repo');
+    expect(topLevel).toContain('workspace');
+    expect(topLevel).not.toContain('tmux');
+
+    const workspace = program.commands.find(
+      (command) => command.name() === 'workspace',
+    )!;
+    expect(workspace.alias()).toBe('ws');
+    expect(workspace.commands.map((command) => command.name())).toEqual([
+      'create',
+      'list',
+      'archived',
+      'show',
+      'path',
+      'status',
+      'repo',
+      'rename',
+      'archive',
+      'delete',
+      'reconcile',
+      'repair',
+      'tmux',
+    ]);
+  });
+
   it('prints merged config as JSON with --json config get', async () => {
     const cwd = await tempDir();
     const { io, out } = fakeIo();

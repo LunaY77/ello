@@ -1568,7 +1568,7 @@ class CodingSessionImpl implements CodingSession {
         prepare: (input) =>
           prepareModelInputForRuntimeModel(primaryRole.model, input, {
             promptProfile: config.context.system_prompt_profile,
-            workspaceIdentity: config.cwd,
+            cwdIdentity: config.cwd,
           }),
       },
       ...(this.deps.modelAdapter !== undefined

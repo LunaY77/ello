@@ -98,12 +98,6 @@ const META: Record<string, CommandMeta> = {
     title: 'Goal',
     keywords: ['objective', 'continue'],
   },
-  workspace: {
-    id: 'workspace.list',
-    group: 'Workspace',
-    title: 'Workspace',
-    keywords: [],
-  },
   new: {
     id: 'session.new',
     group: 'Session',

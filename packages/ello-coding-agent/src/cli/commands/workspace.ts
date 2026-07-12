@@ -1,115 +1,178 @@
+import path from 'node:path';
+
 import type { Command } from 'commander';
 
-import type { WorkspaceStore } from '../../workspace/index.js';
+import type {
+  RepoStore,
+  Workspace,
+  WorkspaceStore,
+} from '../../workspace/index.js';
+import { resolveWorkspaceMount } from '../../workspace/paths.js';
 import type { CliCommandContext, CliCommandModule } from '../types.js';
 
 export const workspaceCommands: CliCommandModule = {
   register(program, ctx) {
     registerRepoCommands(program, ctx);
     registerWorkspaceCommands(program, ctx);
-    registerTmuxCommands(program, ctx);
   },
 };
 
 function registerRepoCommands(program: Command, ctx: CliCommandContext): void {
-  const repoCmd = program.command('repo').description('manage repo mirrors');
-  repoCmd
+  const repo = program.command('repo').description('manage repository mirrors');
+
+  repo
     .command('add')
-    .argument('<key>', 'repo key')
-    .argument('<url>', 'repo URL')
-    .description('add repo mirror')
-    .action(async (key: string, url: string, _opts: unknown, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { RepoStore, formatRepoList } =
-        await import('../../workspace/index.js');
-      const repo = await new RepoStore().add(key, url);
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(repo, null, 2) : formatRepoList([repo])}\n`,
-      );
-    });
-  repoCmd
-    .command('sync')
-    .argument('[key...]', 'repo keys')
-    .option('--all', 'sync all registered repos')
-    .description('sync repo mirrors')
-    .action(async (keys: string[], _opts: { all?: boolean }, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { RepoStore, formatRepoList } =
-        await import('../../workspace/index.js');
-      const repos = await new RepoStore().sync(keys);
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(repos, null, 2) : formatRepoList(repos)}\n`,
-      );
-    });
-  repoCmd
-    .command('ls')
-    .description('list repos')
-    .action(async (_opts: unknown, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { RepoStore, formatRepoList } =
-        await import('../../workspace/index.js');
-      const repos = await new RepoStore().list();
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(repos, null, 2) : formatRepoList(repos)}\n`,
-      );
-    });
-  repoCmd
-    .command('remove')
-    .argument('<key>', 'repo key')
-    .description('remove repo mirror')
-    .action(async (key: string, _opts: unknown, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { RepoStore } = await import('../../workspace/index.js');
-      const removed = await new RepoStore().remove(key);
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify({ key, removed }) : `removed\t${key}\t${removed}`}\n`,
-      );
-    });
-  repoCmd
-    .command('rename')
-    .argument('<key>', 'repo key')
-    .argument('<newKey>', 'new repo key')
-    .description('rename repo')
+    .argument('[source]', 'local Git path or remote Git URL')
+    .option('--key <key>', 'repository key')
+    .description('register a local or remote repository')
     .action(
-      async (key: string, newKey: string, _opts: unknown, cmd: Command) => {
-        const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { RepoStore, formatRepoList } =
-          await import('../../workspace/index.js');
-        const repo = await new RepoStore().rename(key, newKey);
-        ctx.io.stdout.write(
-          `${config.json ? JSON.stringify(repo, null, 2) : formatRepoList([repo])}\n`,
-        );
+      async (
+        source: string | undefined,
+        opts: { key?: string },
+        cmd: Command,
+      ) => {
+        await withRepoStore(ctx, cmd, async (store, config) => {
+          print(
+            ctx,
+            config.json,
+            await store.add(source ?? config.cwd, opts.key),
+          );
+        });
       },
     );
-  repoCmd
-    .command('set-url')
-    .argument('<key>', 'repo key')
-    .argument('<url>', 'repo URL')
-    .description('set repo origin URL')
-    .action(async (key: string, url: string, _opts: unknown, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { RepoStore, formatRepoList } =
-        await import('../../workspace/index.js');
-      const repo = await new RepoStore().setUrl(key, url);
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(repo, null, 2) : formatRepoList([repo])}\n`,
-      );
+
+  repo
+    .command('list')
+    .alias('ls')
+    .description('list registered repositories')
+    .action(async (_opts: unknown, cmd: Command) => {
+      await withRepoStore(ctx, cmd, async (store, config) => {
+        const { formatRepoList } = await import('../../workspace/index.js');
+        print(ctx, config.json, store.list(), formatRepoList(store.list()));
+      });
     });
-  repoCmd
+
+  repo
     .command('show')
-    .argument('<key>', 'repo key')
-    .description('show repo')
+    .argument('<key>')
+    .description('show one repository')
     .action(async (key: string, _opts: unknown, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { RepoStore, formatRepoList } =
-        await import('../../workspace/index.js');
-      const repo = await new RepoStore().show(key);
-      if (repo === null) {
-        throw new Error(`Unknown repo: ${key}`);
-      }
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(repo, null, 2) : formatRepoList([repo])}\n`,
-      );
+      await withRepoStore(ctx, cmd, async (store, config) => {
+        const value = store.show(key);
+        if (value === null) throw new Error(`Unknown repo: ${key}`);
+        print(ctx, config.json, value);
+      });
+    });
+
+  repo
+    .command('rename')
+    .argument('<key>')
+    .argument('<new-key>')
+    .description('rename a repository key')
+    .action(
+      async (key: string, newKey: string, _opts: unknown, cmd: Command) => {
+        await withRepoStore(ctx, cmd, async (store, config) => {
+          print(ctx, config.json, store.rename(key, newKey));
+        });
+      },
+    );
+
+  repo
+    .command('remove')
+    .argument('<key>')
+    .description('remove an unreferenced repository and its mirror')
+    .action(async (key: string, _opts: unknown, cmd: Command) => {
+      await withRepoStore(ctx, cmd, async (store, config) => {
+        await store.remove(key);
+        print(ctx, config.json, { key, removed: true }, `removed\t${key}`);
+      });
+    });
+
+  repo
+    .command('fetch')
+    .argument('[key...]')
+    .option('--all', 'fetch all remote-backed repositories')
+    .description('fetch registered remote repositories')
+    .action(async (keys: string[], opts: { all?: boolean }, cmd: Command) => {
+      await withRepoStore(ctx, cmd, async (store, config) => {
+        print(ctx, config.json, await store.fetch(keys, opts.all === true));
+      });
+    });
+
+  repo
+    .command('fetch-local')
+    .argument('<key>')
+    .argument('<path>')
+    .description('ingest refs once from a local Git repository')
+    .action(
+      async (key: string, source: string, _opts: unknown, cmd: Command) => {
+        await withRepoStore(ctx, cmd, async (store, config) => {
+          print(ctx, config.json, await store.fetchLocal(key, source));
+        });
+      },
+    );
+
+  const remote = repo
+    .command('remote')
+    .description('manage repository remotes');
+  remote
+    .command('show')
+    .argument('<key>')
+    .action(async (key: string, _opts: unknown, cmd: Command) => {
+      await withRepoStore(ctx, cmd, async (store, config) => {
+        print(ctx, config.json, store.remoteShow(key));
+      });
+    });
+  remote
+    .command('add')
+    .argument('<key>')
+    .argument('<url>')
+    .action(async (key: string, url: string, _opts: unknown, cmd: Command) => {
+      await withRepoStore(ctx, cmd, async (store, config) => {
+        print(ctx, config.json, await store.remoteAdd(key, url));
+      });
+    });
+  remote
+    .command('set')
+    .argument('<key>')
+    .argument('<url>')
+    .action(async (key: string, url: string, _opts: unknown, cmd: Command) => {
+      await withRepoStore(ctx, cmd, async (store, config) => {
+        print(ctx, config.json, await store.remoteSet(key, url));
+      });
+    });
+  remote
+    .command('remove')
+    .argument('<key>')
+    .action(async (key: string, _opts: unknown, cmd: Command) => {
+      await withRepoStore(ctx, cmd, async (store, config) => {
+        print(ctx, config.json, await store.remoteRemove(key));
+      });
+    });
+
+  repo
+    .command('export')
+    .argument('[key...]')
+    .requiredOption('--output <dir>')
+    .description('export repository metadata and local-only bundles')
+    .action(async (keys: string[], opts: { output: string }, cmd: Command) => {
+      await withRepoStore(ctx, cmd, async (store, config) => {
+        print(
+          ctx,
+          config.json,
+          await store.export(keys, path.resolve(opts.output)),
+        );
+      });
+    });
+
+  repo
+    .command('import')
+    .argument('<dir>')
+    .description('import a repository registry export')
+    .action(async (dir: string, _opts: unknown, cmd: Command) => {
+      await withRepoStore(ctx, cmd, async (store, config) => {
+        print(ctx, config.json, await store.import(path.resolve(dir)));
+      });
     });
 }
 
@@ -117,280 +180,411 @@ function registerWorkspaceCommands(
   program: Command,
   ctx: CliCommandContext,
 ): void {
-  const workspaceCmd = program
+  const workspace = program
     .command('workspace')
-    .description('manage workspaces');
-  workspaceCmd
+    .alias('ws')
+    .description('manage multi-repository workspaces');
+
+  workspace
     .command('create')
-    .argument('<kind>', 'feature | fix | explore')
-    .argument('<name>', 'workspace name')
-    .argument('<repo...>', 'repo keys')
-    .option('--tmux', 'create a tmux session after workspace creation')
-    .option('--session <name>', 'tmux session name')
-    .description('create workspace')
+    .argument('<selector>', 'feature/name | fix/name | explore/name')
+    .argument('<repo...>', 'registered repository keys')
+    .option('--tmux [name]', 'create and bind a tmux session')
+    .description('create a workspace')
     .action(
       async (
-        kind: string,
-        name: string,
-        repos: string[],
-        opts: { tmux?: boolean; session?: string },
+        selector: string,
+        keys: string[],
+        opts: { tmux?: true | string },
         cmd: Command,
       ) => {
-        const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { TmuxStore, formatWorkspaceList } =
-          await import('../../workspace/index.js');
-        const session =
-          opts.session ?? (opts.tmux === true ? `${kind}-${name}` : undefined);
-        const workspace = await withWorkspaceStore((store) =>
-          store.create(kind, name, repos, {
-            ...(session !== undefined ? { tmuxSession: session } : {}),
-          }),
-        );
-        if (session !== undefined) {
-          await new TmuxStore().newSession(session, workspace.rootPath);
-        }
-        ctx.io.stdout.write(
-          `${config.json ? JSON.stringify(workspace, null, 2) : formatWorkspaceList([workspace])}\n`,
-        );
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          const { kind, name } = parseSelector(selector);
+          const session =
+            opts.tmux === undefined
+              ? undefined
+              : typeof opts.tmux === 'string'
+                ? opts.tmux
+                : `${kind}-${name}`;
+          print(
+            ctx,
+            config.json,
+            await store.create(kind, name, keys, session),
+          );
+        });
       },
     );
-  workspaceCmd
-    .command('add-repo')
-    .argument('<kind>', 'workspace kind')
-    .argument('<name>', 'workspace name')
-    .argument('<repo...>', 'repo keys')
-    .description('add repos to workspace')
-    .action(
-      async (
-        kind: string,
-        name: string,
-        repos: string[],
-        _opts: unknown,
-        cmd: Command,
-      ) => {
-        const config = await ctx.resolveConfig(cmd.optsWithGlobals());
+
+  workspace
+    .command('list')
+    .option('--kind <kind>')
+    .option('--status <status>')
+    .description('list workspaces')
+    .action(async (opts: { kind?: string; status?: string }, cmd: Command) => {
+      await withWorkspaceStore(ctx, cmd, async (store, config) => {
+        const values = store.list(opts);
         const { formatWorkspaceList } =
           await import('../../workspace/index.js');
-        const workspace = await withWorkspaceStore((store) =>
-          store.addRepos(kind, name, repos),
-        );
-        ctx.io.stdout.write(
-          `${config.json ? JSON.stringify(workspace, null, 2) : formatWorkspaceList([workspace])}\n`,
-        );
-      },
-    );
-  workspaceCmd
-    .command('remove-repo')
-    .argument('<kind>', 'workspace kind')
-    .argument('<name>', 'workspace name')
-    .argument('<repo...>', 'repo keys')
-    .option('--force', 'force remove dirty worktrees')
-    .description('remove repos from workspace')
-    .action(
-      async (
-        kind: string,
-        name: string,
-        repos: string[],
-        opts: { force?: boolean },
-        cmd: Command,
-      ) => {
-        const config = await ctx.resolveConfig(cmd.optsWithGlobals());
+        print(ctx, config.json, values, formatWorkspaceList(values));
+      });
+    });
+
+  workspace
+    .command('archived')
+    .argument('[selector]')
+    .description('list archived workspaces')
+    .action(async (selector: string | undefined, _opts: unknown, cmd: Command) => {
+      await withWorkspaceStore(ctx, cmd, async (store, config) => {
+        const values = selector === undefined
+          ? store.list({ status: 'archived' })
+          : store.listArchived(...selectorParts(selector));
         const { formatWorkspaceList } =
           await import('../../workspace/index.js');
-        const workspace = await withWorkspaceStore((store) =>
-          store.removeRepos(kind, name, repos, opts.force ?? false),
-        );
-        ctx.io.stdout.write(
-          `${config.json ? JSON.stringify(workspace, null, 2) : formatWorkspaceList([workspace])}\n`,
-        );
+        print(ctx, config.json, values, formatWorkspaceList(values));
+      });
+    });
+
+  workspace
+    .command('show')
+    .argument('[selector]')
+    .option('--id <id>')
+    .action(async (selector: string | undefined, opts: { id?: string }, cmd: Command) => {
+      await withWorkspaceStore(ctx, cmd, async (store, config) => {
+        print(ctx, config.json, workspaceTarget(store, selector, opts.id));
+      });
+    });
+  workspace
+    .command('path')
+    .argument('[selector]')
+    .option('--id <id>')
+    .action(async (selector: string | undefined, opts: { id?: string }, cmd: Command) => {
+      await withWorkspaceStore(ctx, cmd, async (store, config) => {
+        const value = workspaceTarget(store, selector, opts.id).rootPath;
+        print(ctx, config.json, { path: value }, value);
+      });
+    });
+
+  workspace
+    .command('status')
+    .argument('[selector]')
+    .option('--id <id>')
+    .description('show workspace filesystem and Git status')
+    .action(
+      async (selector: string | undefined, opts: { id?: string }, cmd: Command) => {
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          const selected =
+            selector === undefined && opts.id === undefined
+              ? [store.fromCwd(config.cwd)]
+              : [workspaceTarget(store, selector, opts.id)];
+          print(ctx, config.json, await store.status(selected));
+        });
       },
     );
-  workspaceCmd
+
+  const workspaceRepo = workspace
+    .command('repo')
+    .description('manage workspace repositories');
+  workspaceRepo
+    .command('add')
+    .argument('<repo...>')
+    .option('--workspace <selector>')
+    .action(
+      async (keys: string[], opts: { workspace?: string }, cmd: Command) => {
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          const selected = resolveWorkspace(store, opts.workspace, config.cwd);
+          print(ctx, config.json, await store.addRepos(selected, keys));
+        });
+      },
+    );
+  workspaceRepo
+    .command('create')
+    .argument('<key>')
+    .option('--workspace <selector>')
+    .action(async (key: string, opts: { workspace?: string }, cmd: Command) => {
+      await withWorkspaceStore(ctx, cmd, async (store, config) => {
+        const selected = resolveWorkspace(store, opts.workspace, config.cwd);
+        print(ctx, config.json, await store.createRepo(selected, key));
+      });
+    });
+  workspaceRepo
+    .command('remove')
+    .argument('<repo...>')
+    .option('--workspace <selector>')
+    .option('--force', 'discard dirty worktree content')
+    .action(
+      async (
+        keys: string[],
+        opts: { workspace?: string; force?: boolean },
+        cmd: Command,
+      ) => {
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          const selected = resolveWorkspace(store, opts.workspace, config.cwd);
+          print(
+            ctx,
+            config.json,
+            await store.removeRepos(selected, keys, opts.force === true),
+          );
+        });
+      },
+    );
+
+  workspace
     .command('rename')
-    .argument('<kind>', 'workspace kind')
-    .argument('<name>', 'workspace name')
-    .argument('<newName>', 'new workspace name')
-    .description('rename workspace')
+    .argument('<selector>')
+    .argument('<new-name>')
     .action(
       async (
-        kind: string,
-        name: string,
+        selector: string,
         newName: string,
         _opts: unknown,
         cmd: Command,
       ) => {
-        const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { formatWorkspaceList } =
-          await import('../../workspace/index.js');
-        const workspace = await withWorkspaceStore((store) =>
-          store.rename(kind, name, newName),
-        );
-        ctx.io.stdout.write(
-          `${config.json ? JSON.stringify(workspace, null, 2) : formatWorkspaceList([workspace])}\n`,
-        );
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          print(
+            ctx,
+            config.json,
+            await store.rename(openActiveSelector(store, selector), newName),
+          );
+        });
       },
     );
-  workspaceCmd
-    .command('remove')
-    .argument('<kind>', 'workspace kind')
-    .argument('<name>', 'workspace name')
-    .option('--force', 'force remove dirty worktrees')
-    .description('remove workspace')
-    .action(
-      async (
-        kind: string,
-        name: string,
-        opts: { force?: boolean },
-        cmd: Command,
-      ) => {
-        const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const removed = await withWorkspaceStore((store) =>
-          store.remove(kind, name, opts.force ?? false),
-        );
-        ctx.io.stdout.write(
-          `${config.json ? JSON.stringify({ kind, name, removed }) : `removed\t${kind}/${name}\t${removed}`}\n`,
-        );
-      },
-    );
-  workspaceCmd
-    .command('list')
-    .argument('[kind]', 'workspace kind')
-    .description('list workspaces')
-    .action(async (kind: string | undefined, _opts: unknown, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { formatWorkspaceList } = await import('../../workspace/index.js');
-      const workspaces = await withWorkspaceStore((store) => store.list(kind));
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(workspaces, null, 2) : formatWorkspaceList(workspaces)}\n`,
-      );
-    });
-  workspaceCmd
-    .command('open')
-    .argument('<kind>', 'workspace kind')
-    .argument('<name>', 'workspace name')
-    .option('--print-cd', 'print cd command')
-    .description('open workspace')
-    .action(
-      async (
-        kind: string,
-        name: string,
-        opts: { printCd?: boolean },
-        cmd: Command,
-      ) => {
-        const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { formatWorkspaceList } =
-          await import('../../workspace/index.js');
-        const workspace = await withWorkspaceStore((store) =>
-          store.open(kind, name),
-        );
-        const text = opts.printCd
-          ? `cd ${workspace.rootPath}`
-          : formatWorkspaceList([workspace]);
-        ctx.io.stdout.write(
-          `${config.json ? JSON.stringify(workspace, null, 2) : text}\n`,
-        );
-      },
-    );
-  workspaceCmd
+  workspace
     .command('archive')
-    .argument('<kind>', 'workspace kind')
-    .argument('<name>', 'workspace name')
-    .description('archive workspace')
-    .action(
-      async (kind: string, name: string, _opts: unknown, cmd: Command) => {
-        const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { formatWorkspaceList } =
-          await import('../../workspace/index.js');
-        const workspace = await withWorkspaceStore((store) =>
-          store.archive(kind, name),
+    .argument('<selector>')
+    .action(async (selector: string, _opts: unknown, cmd: Command) => {
+      await withWorkspaceStore(ctx, cmd, async (store, config) => {
+        print(
+          ctx,
+          config.json,
+          await store.archive(openActiveSelector(store, selector)),
         );
-        ctx.io.stdout.write(
-          `${config.json ? JSON.stringify(workspace, null, 2) : formatWorkspaceList([workspace])}\n`,
-        );
-      },
-    );
-  workspaceCmd
-    .command('status')
-    .description('show workspace status')
-    .action(async (_opts: unknown, cmd: Command) => {
-      await ctx.resolveConfig(cmd.optsWithGlobals());
-      const status = await withWorkspaceStore((store) => store.status());
-      ctx.io.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
+      });
     });
-  workspaceCmd
-    .command('sync')
-    .option('--fix-missing', 'mark missing roots/checkouts in the global DB')
-    .option('--prune', 'mark removed checkouts in the global DB')
-    .description('sync workspace DB state with filesystem/git observations')
-    .action(
-      async (opts: { fixMissing?: boolean; prune?: boolean }, cmd: Command) => {
-        const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const result = await withWorkspaceStore((store) =>
-          store.sync({
-            fixMissing: opts.fixMissing ?? false,
-            prune: opts.prune ?? false,
-          }),
-        );
-        ctx.io.stdout.write(
-          `${config.json ? JSON.stringify(result, null, 2) : `workspace-sync\t${result.status}\tchecked=${result.checkedCount}\tfixed=${result.fixedCount}`}\n`,
-        );
-      },
-    );
-}
-
-function registerTmuxCommands(program: Command, ctx: CliCommandContext): void {
-  const tmuxCmd = program
-    .command('tmux')
-    .description('optional tmux integration');
-  tmuxCmd
-    .command('new')
-    .argument('<kind>', 'workspace kind')
-    .argument('<name>', 'workspace name')
-    .argument('[session]', 'tmux session name')
-    .description('create tmux session for workspace')
+  workspace
+    .command('delete')
+    .argument('[selector]')
+    .option('--archived', 'delete the archived workspace for this selector')
+    .option('--id <id>', 'delete one workspace by id')
+    .option('--force', 'discard dirty worktree and workspace content')
     .action(
       async (
-        kind: string,
-        name: string,
-        session: string | undefined,
-        _opts: unknown,
+        selector: string | undefined,
+        opts: { archived?: boolean; id?: string; force?: boolean },
         cmd: Command,
       ) => {
-        const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-        const { TmuxStore } = await import('../../workspace/index.js');
-        const workspace = await withWorkspaceStore((store) =>
-          store.open(kind, name),
-        );
-        const result = await new TmuxStore().newSession(
-          session ?? `${kind}-${name}`,
-          workspace.rootPath,
-        );
-        ctx.io.stdout.write(
-          `${config.json ? JSON.stringify(result, null, 2) : `tmux\t${result.session}\t${result.cwd}`}\n`,
-        );
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          const selected = opts.archived === true
+            ? archivedTarget(store, selector, opts.id)
+            : workspaceTarget(store, selector, opts.id);
+          const status = await store.status([selected]);
+          const [view] = status;
+          if (view === undefined) {
+            throw new Error(`Workspace status is missing: ${selected.id}`);
+          }
+          const preview = {
+            rootPath: selected.rootPath,
+            repoCount: selected.repos.length,
+            tmuxSession: selected.tmuxSession,
+            dirty: view.repos.some((repo) => repo.dirty),
+          };
+          print(ctx, config.json, {
+            preview,
+            workspace: await store.delete(selected, opts.force === true),
+          });
+        });
       },
     );
-  tmuxCmd
-    .command('ls')
-    .description('list tmux sessions')
-    .action(async (_opts: unknown, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { TmuxStore } = await import('../../workspace/index.js');
-      const sessions = await new TmuxStore().list();
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(sessions, null, 2) : sessions.join('\n')}\n`,
-      );
+
+  workspace
+    .command('reconcile')
+    .argument('[selector]')
+    .option('--id <id>')
+    .action(
+      async (
+        selector: string | undefined,
+        opts: { id?: string },
+        cmd: Command,
+      ) => {
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          const selected =
+            selector === undefined && opts.id === undefined
+              ? store.listRepairable()
+              : [workspaceTarget(store, selector, opts.id)];
+          print(
+            ctx,
+            config.json,
+            await store.reconcile(selected),
+          );
+        });
+      },
+    );
+
+  workspace
+    .command('repair')
+    .argument('[selector]')
+    .option('--id <id>')
+    .description('repair workspace filesystem, Git worktrees, and SQLite paths')
+    .action(
+      async (
+        selector: string | undefined,
+        opts: { id?: string },
+        cmd: Command,
+      ) => {
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          const selected =
+            selector === undefined && opts.id === undefined
+              ? store.listRepairable()
+              : [workspaceTarget(store, selector, opts.id)];
+          print(ctx, config.json, await store.repair(selected));
+        });
+      },
+    );
+
+  const tmux = workspace
+    .command('tmux')
+    .description('manage workspace-bound tmux lifecycle');
+  tmux
+    .command('new')
+    .argument('<selector>')
+    .option('--name <name>')
+    .action(async (selector: string, opts: { name?: string }, cmd: Command) => {
+      await withWorkspaceStore(ctx, cmd, async (store, config) => {
+        const selected = openActiveSelector(store, selector);
+        print(
+          ctx,
+          config.json,
+          await store.bindTmux(
+            selected,
+            opts.name ?? `${selected.kind}-${selected.name}`,
+          ),
+        );
+      });
     });
 }
 
-async function withWorkspaceStore<T>(
-  fn: (store: WorkspaceStore) => Promise<T>,
-): Promise<T> {
-  const [{ withCodingStorage }, { WorkspaceStore }] = await Promise.all([
+async function withRepoStore(
+  ctx: CliCommandContext,
+  cmd: Command,
+  fn: (
+    store: RepoStore,
+    config: Awaited<ReturnType<CliCommandContext['resolveConfig']>>,
+  ) => Promise<void>,
+): Promise<void> {
+  const config = await ctx.resolveConfig(cmd.optsWithGlobals());
+  const [{ withCodingStorage }, { RepoStore }] = await Promise.all([
     import('../../storage/index.js'),
     import('../../workspace/index.js'),
   ]);
-  return withCodingStorage((storage) =>
-    fn(new WorkspaceStore(storage.workspaces)),
+  await withCodingStorage((storage) =>
+    fn(new RepoStore(storage.repositories), config),
   );
+}
+
+async function withWorkspaceStore(
+  ctx: CliCommandContext,
+  cmd: Command,
+  fn: (
+    store: WorkspaceStore,
+    config: Awaited<ReturnType<CliCommandContext['resolveConfig']>>,
+  ) => Promise<void>,
+): Promise<void> {
+  const config = await ctx.resolveConfig(cmd.optsWithGlobals());
+  const mount = resolveWorkspaceMount(config.workspace.mount);
+  const [{ withCodingStorage }, { RepoStore, WorkspaceStore }] =
+    await Promise.all([
+      import('../../storage/index.js'),
+      import('../../workspace/index.js'),
+    ]);
+  await withCodingStorage((storage) => {
+    const repos = new RepoStore(storage.repositories);
+    return fn(new WorkspaceStore(storage.workspaces, repos, mount), config);
+  });
+}
+
+function parseSelector(selector: string): {
+  readonly kind: string;
+  readonly name: string;
+} {
+  const slash = selector.indexOf('/');
+  if (
+    slash <= 0 ||
+    slash === selector.length - 1 ||
+    selector.indexOf('/', slash + 1) !== -1
+  ) {
+    throw new Error(`Invalid workspace selector: ${selector}`);
+  }
+  return { kind: selector.slice(0, slash), name: selector.slice(slash + 1) };
+}
+
+function openSelector(store: WorkspaceStore, selector: string): Workspace {
+  const { kind, name } = parseSelector(selector);
+  return store.open(kind, name);
+}
+
+function openActiveSelector(
+  store: WorkspaceStore,
+  selector: string,
+): Workspace {
+  const { kind, name } = parseSelector(selector);
+  return store.openActive(kind, name);
+}
+
+function workspaceTarget(
+  store: WorkspaceStore,
+  selector: string | undefined,
+  id: string | undefined,
+): Workspace {
+  if (id !== undefined) {
+    if (selector !== undefined) {
+      throw new Error('Specify a workspace selector or --id');
+    }
+    return store.openById(id);
+  }
+  if (selector === undefined) {
+    throw new Error('Workspace selector or --id is required');
+  }
+  return openSelector(store, selector);
+}
+
+function archivedTarget(
+  store: WorkspaceStore,
+  selector: string | undefined,
+  id: string | undefined,
+): Workspace {
+  if (id !== undefined) {
+    const workspace = workspaceTarget(store, undefined, id);
+    if (workspace.status !== 'archived') {
+      throw new Error(`Workspace is not archived: ${id}`);
+    }
+    return workspace;
+  }
+  if (selector === undefined) {
+    throw new Error('Archived workspace selector or --id is required');
+  }
+  const { kind, name } = parseSelector(selector);
+  return store.openArchived(kind, name);
+}
+
+function selectorParts(selector: string): readonly [string, string] {
+  const { kind, name } = parseSelector(selector);
+  return [kind, name];
+}
+
+function resolveWorkspace(
+  store: WorkspaceStore,
+  selector: string | undefined,
+  cwd: string,
+): Workspace {
+  return selector === undefined
+    ? store.fromCwd(cwd)
+    : openActiveSelector(store, selector);
+}
+
+function print(
+  ctx: CliCommandContext,
+  json: boolean,
+  value: unknown,
+  text = JSON.stringify(value, null, 2),
+): void {
+  ctx.io.stdout.write(`${json ? JSON.stringify(value, null, 2) : text}\n`);
 }

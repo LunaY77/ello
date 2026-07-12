@@ -45,21 +45,21 @@ describe('provider cache transforms', () => {
       modelInput(diagnostics, {
         system: cacheSystem('stable rule A', 'skill review'),
       }),
-      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+      { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
     const dynamicChanged = prepareModelInputForRuntimeModel(
       model,
       modelInput(diagnostics, {
         system: cacheSystem('stable rule A', 'skill verify'),
       }),
-      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+      { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
     const instructionChanged = prepareModelInputForRuntimeModel(
       model,
       modelInput(diagnostics, {
         system: cacheSystem('stable rule B', 'skill verify'),
       }),
-      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+      { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
     const historyGrew = prepareModelInputForRuntimeModel(
       model,
@@ -70,7 +70,7 @@ describe('provider cache transforms', () => {
           content: `message-${index}`,
         })),
       }),
-      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+      { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
 
     const firstKey = readPromptCacheKey(first);
@@ -86,12 +86,12 @@ describe('provider cache transforms', () => {
     const changedTools = prepareModelInputForRuntimeModel(
       model,
       modelInput({ ...diagnostics, toolsetFingerprint: 'x'.repeat(64) }),
-      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+      { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
     const baseline = prepareModelInputForRuntimeModel(
       model,
       modelInput(diagnostics),
-      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+      { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
     expect(readPromptCacheKey(changedTools)).not.toBe(
       readPromptCacheKey(baseline),
@@ -110,7 +110,7 @@ describe('provider cache transforms', () => {
     const transformed = prepareModelInputForRuntimeModel(
       runtimeModel('anthropic'),
       input,
-      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+      { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
 
     expect(transformed).not.toHaveProperty('system');
@@ -137,14 +137,14 @@ describe('provider cache transforms', () => {
       modelInput(diagnostics, {
         system: cacheSystem('stable rule', 'skill review'),
       }),
-      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+      { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
     const second = prepareModelInputForRuntimeModel(
       runtimeModel('anthropic'),
       modelInput(diagnostics, {
         system: cacheSystem('stable rule', 'skill verify'),
       }),
-      { promptProfile: 'coding', workspaceIdentity: '/workspace' },
+      { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
 
     expect(first.messages[0]).toEqual(second.messages[0]);

@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 
 import type {
-  RepoEntry,
+  Workspace,
   WorkspaceKind,
-  WorkspaceManifest,
   WorkspaceRepo,
+  WorkspaceStatus,
 } from '../../workspace/types.js';
 import { transaction, type CodingDatabase } from '../database.js';
 import {
@@ -16,221 +16,169 @@ import {
   workspaces,
 } from '../schema.js';
 
-export interface WorkspaceSyncDiff {
-  readonly workspace: WorkspaceManifest;
+export interface WorkspaceObservation {
+  readonly workspace: Workspace;
   readonly missingRoot: boolean;
   readonly repos: readonly {
+    readonly repositoryId: string;
     readonly key: string;
     readonly path: string;
-    readonly status: 'active' | 'missing' | 'dirty' | 'removed';
-    readonly gitStatus?: string | undefined;
+    readonly status: 'active' | 'missing' | 'dirty' | 'invalid' | 'removed';
+    readonly gitStatus?: string;
+    readonly error?: string;
   }[];
 }
 
-export interface WorkspaceSyncResult {
+export interface WorkspaceReconcileResult {
   readonly id: string;
-  readonly status: 'completed' | 'failed';
+  readonly status: 'completed';
   readonly checkedCount: number;
   readonly fixedCount: number;
-  readonly diffs: readonly WorkspaceSyncDiff[];
+  readonly observations: readonly WorkspaceObservation[];
 }
 
-/**
- * workspace 仓储。
- *
- * DB 是 workspace 的唯一事实源，所有 mutation 在当前连接内同步提交。
- */
+/** workspace 与 checkout 关系的唯一结构化主源。 */
 export class WorkspaceRepository {
   constructor(private readonly db: CodingDatabase) {}
 
-  upsertRepo(entry: RepoEntry): string {
-    const id = stableRepoId(entry.key);
-    this.db
-      .insert(repositories)
-      .values({
-        id,
-        key: entry.key,
-        sourceUrl: entry.url,
-        mirrorPath: entry.mirrorPath,
-        defaultBranch: entry.defaultBranch ?? null,
-        createdAt: entry.createdAt,
-        updatedAt: entry.updatedAt,
-      })
-      .onConflictDoUpdate({
-        target: repositories.key,
-        set: {
-          sourceUrl: entry.url,
-          mirrorPath: entry.mirrorPath,
-          defaultBranch: entry.defaultBranch ?? null,
-          updatedAt: entry.updatedAt,
-        },
-      })
-      .run();
-    return id;
-  }
-
-  save(manifest: WorkspaceManifest): WorkspaceManifest {
+  insert(workspace: Workspace): Workspace {
     transaction(this.db, () => {
-      const workspaceId = workspaceKey(manifest.kind, manifest.name);
-      this.db
-        .insert(workspaces)
-        .values({
-          id: workspaceId,
-          kind: manifest.kind,
-          name: manifest.name,
-          rootPath: manifest.rootPath,
-          status: 'active',
-          branch: manifest.branch ?? null,
-          tmuxSession: manifest.tmuxSession ?? null,
-          lastSyncedAt: null,
-          createdAt: manifest.createdAt,
-          updatedAt: manifest.updatedAt,
-        })
-        .onConflictDoUpdate({
-          target: workspaces.id,
-          set: {
-            rootPath: manifest.rootPath,
-            status: 'active',
-            branch: manifest.branch ?? null,
-            tmuxSession: manifest.tmuxSession ?? null,
-            updatedAt: manifest.updatedAt,
-          },
-        })
-        .run();
-      this.db
-        .delete(workspaceRepositories)
-        .where(eq(workspaceRepositories.workspaceId, workspaceId))
-        .run();
-      for (const repo of manifest.repos) {
-        this.db
-          .insert(workspaceRepositories)
-          .values({
-            workspaceId,
-            repositoryId: stableRepoId(repo.key),
-            checkoutPath: repo.path,
-            branch: repo.branch ?? null,
-            status: 'active',
-            lastGitStatus: null,
-            lastSyncedAt: null,
-            createdAt: manifest.createdAt,
-            updatedAt: manifest.updatedAt,
-          })
-          .run();
-      }
+      this.db.insert(workspaces).values(workspaceRow(workspace)).run();
+      this.replaceRepos(workspace);
     });
-    return manifest;
+    return workspace;
   }
 
-  list(kind?: WorkspaceKind): readonly WorkspaceManifest[] {
-    const rows = this.db
+  update(workspace: Workspace): Workspace {
+    transaction(this.db, () => {
+      const result = this.db
+        .update(workspaces)
+        .set({
+          kind: workspace.kind,
+          name: workspace.name,
+          rootPath: workspace.rootPath,
+          status: workspace.status,
+          branch: workspace.branch,
+          tmuxSession: workspace.tmuxSession,
+          updatedAt: workspace.updatedAt,
+        })
+        .where(eq(workspaces.id, workspace.id))
+        .run();
+      if (result.changes !== 1) {
+        throw new Error(`Unknown workspace id: ${workspace.id}`);
+      }
+      this.replaceRepos(workspace);
+    });
+    return workspace;
+  }
+
+  list(
+    filters: {
+      readonly kind?: WorkspaceKind;
+      readonly status?: WorkspaceStatus;
+    } = {},
+  ): readonly Workspace[] {
+    const clauses = [
+      ...(filters.kind === undefined
+        ? []
+        : [eq(workspaces.kind, filters.kind)]),
+      ...(filters.status === undefined
+        ? [eq(workspaces.status, 'active')]
+        : [eq(workspaces.status, filters.status)]),
+    ];
+    return this.db
       .select()
       .from(workspaces)
-      .where(kind === undefined ? undefined : eq(workspaces.kind, kind))
+      .where(clauses.length === 1 ? clauses[0] : and(...clauses))
       .orderBy(asc(workspaces.rootPath))
-      .all();
-    return rows
-      .filter((row) => row.status !== 'deleted')
-      .map((row) => this.toManifest(row));
+      .all()
+      .map((row) => this.toWorkspace(row));
   }
 
-  open(kind: WorkspaceKind, name: string): WorkspaceManifest | null {
+  find(kind: WorkspaceKind, name: string): Workspace | null {
+    const active = this.findActive(kind, name);
+    if (active !== null) return active;
+    const archived = this.listArchived(kind, name);
+    if (archived.length === 0) return null;
+    if (archived.length > 1) {
+      throw new Error(
+        `Workspace selector is ambiguous: ${kind}/${name}; use workspace id`,
+      );
+    }
+    const [workspace] = archived;
+    if (workspace === undefined) {
+      throw new Error(`Archived workspace lookup failed: ${kind}/${name}`);
+    }
+    return workspace;
+  }
+
+  findActive(kind: WorkspaceKind, name: string): Workspace | null {
     const row = this.db
       .select()
       .from(workspaces)
-      .where(and(eq(workspaces.kind, kind), eq(workspaces.name, name)))
-      .get();
-    return row === undefined || row.status === 'deleted'
-      ? null
-      : this.toManifest(row);
-  }
-
-  markDeleted(kind: WorkspaceKind, name: string): void {
-    const now = new Date().toISOString();
-    this.db
-      .update(workspaces)
-      .set({ status: 'deleted', updatedAt: now })
-      .where(and(eq(workspaces.kind, kind), eq(workspaces.name, name)))
-      .run();
-  }
-
-  markArchived(manifest: WorkspaceManifest): WorkspaceManifest {
-    const now = new Date().toISOString();
-    this.db
-      .update(workspaces)
-      .set({
-        status: 'archived',
-        rootPath: manifest.rootPath,
-        updatedAt: now,
-      })
       .where(
         and(
-          eq(workspaces.kind, manifest.kind),
-          eq(workspaces.name, manifest.name),
+          eq(workspaces.kind, kind),
+          eq(workspaces.name, name),
+          inArray(workspaces.status, ['active', 'missing']),
         ),
       )
-      .run();
-    return { ...manifest, updatedAt: now };
+      .get();
+    return row === undefined ? null : this.toWorkspace(row);
   }
 
-  sync(
-    diffs: readonly WorkspaceSyncDiff[],
-    options: { readonly fixMissing?: boolean; readonly prune?: boolean } = {},
-  ): WorkspaceSyncResult {
+  listArchived(kind?: WorkspaceKind, name?: string): readonly Workspace[] {
+    const clauses = [
+      eq(workspaces.status, 'archived'),
+      ...(kind === undefined ? [] : [eq(workspaces.kind, kind)]),
+      ...(name === undefined ? [] : [eq(workspaces.name, name)]),
+    ];
+    return this.db
+      .select()
+      .from(workspaces)
+      .where(and(...clauses))
+      .orderBy(desc(workspaces.updatedAt))
+      .all()
+      .map((row) => this.toWorkspace(row));
+  }
+
+  findById(id: string): Workspace | null {
+    const row = this.db
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.id, id))
+      .get();
+    return row === undefined ? null : this.toWorkspace(row);
+  }
+
+  findActiveByRoot(rootPath: string): Workspace | null {
+    const row = this.db
+      .select()
+      .from(workspaces)
+      .where(
+        and(eq(workspaces.rootPath, rootPath), eq(workspaces.status, 'active')),
+      )
+      .get();
+    return row === undefined ? null : this.toWorkspace(row);
+  }
+
+  recordReconcile(
+    observations: readonly WorkspaceObservation[],
+  ): WorkspaceReconcileResult {
     const id = randomUUID();
     const now = new Date().toISOString();
-    let fixedCount = 0;
     transaction(this.db, () => {
-      for (const diff of diffs) {
-        const workspaceId = workspaceKey(
-          diff.workspace.kind,
-          diff.workspace.name,
-        );
-        if (options.fixMissing === true && diff.missingRoot) {
-          this.db
-            .update(workspaces)
-            .set({ status: 'missing', lastSyncedAt: now, updatedAt: now })
-            .where(eq(workspaces.id, workspaceId))
-            .run();
-          fixedCount += 1;
-        }
-        for (const repo of diff.repos) {
-          if (repo.status === 'active') {
-            continue;
-          }
-          if (
-            (options.fixMissing === true && repo.status === 'missing') ||
-            (options.prune === true && repo.status === 'removed')
-          ) {
-            this.db
-              .update(workspaceRepositories)
-              .set({
-                status: repo.status,
-                lastGitStatus: repo.gitStatus ?? null,
-                lastSyncedAt: now,
-                updatedAt: now,
-              })
-              .where(
-                and(
-                  eq(workspaceRepositories.workspaceId, workspaceId),
-                  eq(
-                    workspaceRepositories.repositoryId,
-                    stableRepoId(repo.key),
-                  ),
-                ),
-              )
-              .run();
-            fixedCount += 1;
-          }
-        }
-      }
       this.db
         .insert(workspaceSyncRuns)
         .values({
           id,
           workspaceId: null,
           status: 'completed',
-          checkedCount: diffs.reduce((sum, diff) => sum + diff.repos.length, 0),
-          fixedCount,
+          checkedCount: observations.reduce(
+            (sum, item) => sum + item.repos.length,
+            0,
+          ),
+          fixedCount: 0,
           errorMessage: null,
           startedAt: now,
           completedAt: new Date().toISOString(),
@@ -240,18 +188,49 @@ export class WorkspaceRepository {
     return {
       id,
       status: 'completed',
-      checkedCount: diffs.reduce((sum, diff) => sum + diff.repos.length, 0),
-      fixedCount,
-      diffs,
+      checkedCount: observations.reduce(
+        (sum, item) => sum + item.repos.length,
+        0,
+      ),
+      fixedCount: 0,
+      observations,
     };
   }
 
-  private toManifest(row: typeof workspaces.$inferSelect): WorkspaceManifest {
+  private replaceRepos(workspace: Workspace): void {
+    this.db
+      .delete(workspaceRepositories)
+      .where(eq(workspaceRepositories.workspaceId, workspace.id))
+      .run();
+    for (const repo of workspace.repos) {
+      this.db
+        .insert(workspaceRepositories)
+        .values({
+          workspaceId: workspace.id,
+          repositoryId: repo.repositoryId,
+          checkoutPath: repo.path,
+          checkoutMode: repo.checkoutMode,
+          branch: repo.branch,
+          headCommit: repo.headCommit,
+          status: workspace.status === 'deleted' ? 'removed' : 'active',
+          lastGitStatus: null,
+          lastSyncedAt: null,
+          createdAt: workspace.createdAt,
+          updatedAt: workspace.updatedAt,
+        })
+        .run();
+    }
+  }
+
+  private toWorkspace(row: typeof workspaces.$inferSelect): Workspace {
     const repoRows = this.db
       .select({
+        repositoryId: repositories.id,
         key: repositories.key,
-        checkoutPath: workspaceRepositories.checkoutPath,
+        path: workspaceRepositories.checkoutPath,
+        checkoutMode: workspaceRepositories.checkoutMode,
         branch: workspaceRepositories.branch,
+        headCommit: workspaceRepositories.headCommit,
       })
       .from(workspaceRepositories)
       .innerJoin(
@@ -262,16 +241,21 @@ export class WorkspaceRepository {
       .orderBy(asc(repositories.key))
       .all();
     const repos: WorkspaceRepo[] = repoRows.map((repo) => ({
+      repositoryId: repo.repositoryId,
       key: repo.key,
-      path: repo.checkoutPath,
-      ...(repo.branch !== null ? { branch: repo.branch } : {}),
+      path: repo.path,
+      checkoutMode: repo.checkoutMode as WorkspaceRepo['checkoutMode'],
+      branch: repo.branch,
+      headCommit: repo.headCommit,
     }));
     return {
-      name: row.name,
+      id: row.id,
       kind: row.kind as WorkspaceKind,
+      name: row.name,
       rootPath: row.rootPath,
-      ...(row.branch !== null ? { branch: row.branch } : {}),
-      ...(row.tmuxSession !== null ? { tmuxSession: row.tmuxSession } : {}),
+      status: row.status as WorkspaceStatus,
+      branch: row.branch,
+      tmuxSession: row.tmuxSession,
       repos,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -279,10 +263,17 @@ export class WorkspaceRepository {
   }
 }
 
-function workspaceKey(kind: string, name: string): string {
-  return `${kind}:${name}`;
-}
-
-function stableRepoId(key: string): string {
-  return `repo:${key}`;
+function workspaceRow(workspace: Workspace): typeof workspaces.$inferInsert {
+  return {
+    id: workspace.id,
+    kind: workspace.kind,
+    name: workspace.name,
+    rootPath: workspace.rootPath,
+    status: workspace.status,
+    branch: workspace.branch,
+    tmuxSession: workspace.tmuxSession,
+    lastSyncedAt: null,
+    createdAt: workspace.createdAt,
+    updatedAt: workspace.updatedAt,
+  };
 }

@@ -159,3 +159,8 @@ profile:
 # projects:
 #   /path/to/project:
 #     trust_level: trusted
+
+# workspace 挂载根目录；默认使用 ~/.ello。
+# 活动 workspace 位于 <mount>/workspace，归档 workspace 位于 <mount>/archive。
+# workspace:
+#   mount: ~/.ello

@@ -1,4 +1,4 @@
-import { mkdir, readFile, lstat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 
 import { globalHomeDir } from '../config/index.js';
@@ -10,48 +10,54 @@ export function mirrorsDir(): string {
   return path.join(globalHomeDir(), 'mirrors');
 }
 
-export function repoRegistryPath(): string {
-  return path.join(globalHomeDir(), 'repos.json');
+export function repositoryMirrorPath(repositoryId: string): string {
+  return path.join(mirrorsDir(), `${repositoryId}.git`);
 }
 
-export function archiveDir(): string {
-  return path.join(globalHomeDir(), 'archive');
-}
-
-export function workspacePointerPath(): string {
-  return path.join(globalHomeDir(), 'workspaces');
-}
-
-export async function resolveWorkspaceRoot(): Promise<string> {
-  const pointer = workspacePointerPath();
-  try {
-    const stat = await lstat(pointer);
-    if (stat.isSymbolicLink() || stat.isDirectory()) {
-      return pointer;
-    }
-    const text = await readFile(pointer, 'utf8');
-    return path.resolve(text.trim());
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
-    }
-    const fallback = path.join(globalHomeDir(), 'workspace-roots');
-    await mkdir(fallback, { recursive: true });
-    return fallback;
+export function resolveWorkspaceMount(
+  configuredMount: string,
+): string {
+  const expanded =
+    configuredMount === '~'
+      ? homedir()
+      : configuredMount.startsWith('~/')
+        ? path.join(homedir(), configuredMount.slice(2))
+        : configuredMount;
+  if (!path.isAbsolute(expanded)) {
+    throw new Error(
+      `Workspace mount must be an absolute path: ${configuredMount}`,
+    );
   }
+  return path.resolve(expanded);
 }
 
-export async function workspaceDir(
+export function activeWorkspacesDir(mount: string): string {
+  return path.join(mount, 'workspace');
+}
+
+export function archivedWorkspacesDir(mount: string): string {
+  return path.join(mount, 'archive');
+}
+
+export function workspaceDir(
+  mount: string,
   kind: WorkspaceKind,
   name: string,
-): Promise<string> {
-  return path.join(await resolveWorkspaceRoot(), kind, slugify(name));
+): string {
+  return path.join(activeWorkspacesDir(mount), kind, slugify(name));
 }
 
-export function workspaceManifestPath(rootPath: string): string {
-  return path.join(rootPath, 'workspace.json');
-}
-
-export function workspaceYamlManifestPath(rootPath: string): string {
-  return path.join(rootPath, 'workspace.yaml');
+export function archivedWorkspaceDir(
+  mount: string,
+  kind: WorkspaceKind,
+  name: string,
+  workspaceId: string,
+  archivedAt: string,
+): string {
+  const timestamp = archivedAt.replace(/[-:.]/gu, '');
+  return path.join(
+    archivedWorkspacesDir(mount),
+    kind,
+    `${slugify(name)}-${timestamp}-${workspaceId}`,
+  );
 }
