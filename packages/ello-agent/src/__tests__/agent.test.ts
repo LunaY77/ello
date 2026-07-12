@@ -1201,6 +1201,55 @@ describe('createAgent', () => {
     await resumedAgent.close();
   });
 
+  it('resume denial emits a terminal tool failure without executing', async () => {
+    let executions = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      tools: [
+        defineTool({
+          name: 'danger',
+          description: 'Dangerous tool',
+          input: z.object({ value: z.string() }),
+          execute: () => {
+            executions += 1;
+            return 'unexpected';
+          },
+        }),
+      ],
+      modelAdapter: new EchoAdapter(),
+    });
+    const stream = agent.stream([], {
+      resume: {
+        deferred: [
+          {
+            kind: 'approval',
+            toolCallId: 'call_denied',
+            toolName: 'danger',
+            input: { value: 'x' },
+          },
+        ],
+        approvals: {
+          call_denied: { approved: false, reason: 'Denied by user' },
+        },
+      },
+    });
+    const events: AgentStreamEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+    }
+    await stream.final;
+
+    expect(executions).toBe(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'call_denied',
+        error: expect.objectContaining({ message: 'Denied by user' }),
+      }),
+    );
+    await agent.close();
+  });
+
   it('stream emits turn and queue events across multiple turns', async () => {
     let calls = 0;
     const agent = createAgent({

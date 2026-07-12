@@ -10,13 +10,11 @@ export function mirrorsDir(): string {
   return path.join(globalHomeDir(), 'mirrors');
 }
 
-export function repositoryMirrorPath(repositoryId: string): string {
-  return path.join(mirrorsDir(), `${repositoryId}.git`);
+export function repositoryMirrorPath(repositoryKey: string): string {
+  return path.join(mirrorsDir(), repositoryKey);
 }
 
-export function resolveWorkspaceMount(
-  configuredMount: string,
-): string {
+export function resolveWorkspaceMount(configuredMount: string): string {
   const expanded =
     configuredMount === '~'
       ? homedir()

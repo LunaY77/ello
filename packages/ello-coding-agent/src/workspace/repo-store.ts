@@ -9,7 +9,7 @@ import type { RepositoryRepository } from '../storage/repositories/repository-re
 import { parseYamlConfig, stringifyYamlConfig } from '../utils/yaml.js';
 
 import { CommandError, git, gitWithInput } from './git.js';
-import { mirrorsDir, repositoryMirrorPath } from './paths.js';
+import { repositoryMirrorPath } from './paths.js';
 import { validateRepoKey } from './slug.js';
 import type { RepoExportDocument, Repository } from './types.js';
 
@@ -165,8 +165,8 @@ export class RepoStore {
     this.assertKeyAvailable(key);
     const { name, email } = await readGitIdentity(identityCwd);
     const id = randomUUID();
-    const mirrorPath = repositoryMirrorPath(id);
-    await mkdir(mirrorsDir(), { recursive: true });
+    const mirrorPath = repositoryMirrorPath(key);
+    await mkdir(path.dirname(mirrorPath), { recursive: true });
     await git([
       'init',
       '--bare',
@@ -230,6 +230,9 @@ export class RepoStore {
     for (const repo of selected) {
       if (repo.remoteUrl === null) {
         const bundle = `bundles/${repo.key}.bundle`;
+        await mkdir(path.dirname(path.join(outputDir, bundle)), {
+          recursive: true,
+        });
         await git(
           ['bundle', 'create', path.join(outputDir, bundle), '--all'],
           repo.mirrorPath,
@@ -304,8 +307,8 @@ export class RepoStore {
   private async importLocal(source: string, key: string): Promise<Repository> {
     await assertGitRepositoryWithCommit(source);
     const id = randomUUID();
-    const mirrorPath = repositoryMirrorPath(id);
-    await mkdir(mirrorsDir(), { recursive: true });
+    const mirrorPath = repositoryMirrorPath(key);
+    await mkdir(path.dirname(mirrorPath), { recursive: true });
     await git(['clone', '--mirror', source, mirrorPath]);
     await git(['remote', 'remove', 'origin'], mirrorPath);
     return this.insertImported(id, key, mirrorPath, null);
@@ -317,8 +320,8 @@ export class RepoStore {
     expectedDefaultBranch?: string,
   ): Promise<Repository> {
     const id = randomUUID();
-    const mirrorPath = repositoryMirrorPath(id);
-    await mkdir(mirrorsDir(), { recursive: true });
+    const mirrorPath = repositoryMirrorPath(key);
+    await mkdir(path.dirname(mirrorPath), { recursive: true });
     await git(['clone', '--mirror', url, mirrorPath]);
     return this.insertImported(id, key, mirrorPath, url, expectedDefaultBranch);
   }
@@ -329,9 +332,9 @@ export class RepoStore {
     expectedDefaultBranch: string,
   ): Promise<Repository> {
     const id = randomUUID();
-    const mirrorPath = repositoryMirrorPath(id);
+    const mirrorPath = repositoryMirrorPath(key);
     await access(bundlePath);
-    await mkdir(mirrorsDir(), { recursive: true });
+    await mkdir(path.dirname(mirrorPath), { recursive: true });
     await git(['clone', '--mirror', bundlePath, mirrorPath]);
     await git(['remote', 'remove', 'origin'], mirrorPath);
     await git(

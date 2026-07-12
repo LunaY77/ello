@@ -233,36 +233,51 @@ function registerWorkspaceCommands(
     .command('archived')
     .argument('[selector]')
     .description('list archived workspaces')
-    .action(async (selector: string | undefined, _opts: unknown, cmd: Command) => {
-      await withWorkspaceStore(ctx, cmd, async (store, config) => {
-        const values = selector === undefined
-          ? store.list({ status: 'archived' })
-          : store.listArchived(...selectorParts(selector));
-        const { formatWorkspaceList } =
-          await import('../../workspace/index.js');
-        print(ctx, config.json, values, formatWorkspaceList(values));
-      });
-    });
+    .action(
+      async (selector: string | undefined, _opts: unknown, cmd: Command) => {
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          const values =
+            selector === undefined
+              ? store.list({ status: 'archived' })
+              : store.listArchived(...selectorParts(selector));
+          const { formatWorkspaceList } =
+            await import('../../workspace/index.js');
+          print(ctx, config.json, values, formatWorkspaceList(values));
+        });
+      },
+    );
 
   workspace
     .command('show')
     .argument('[selector]')
     .option('--id <id>')
-    .action(async (selector: string | undefined, opts: { id?: string }, cmd: Command) => {
-      await withWorkspaceStore(ctx, cmd, async (store, config) => {
-        print(ctx, config.json, workspaceTarget(store, selector, opts.id));
-      });
-    });
+    .action(
+      async (
+        selector: string | undefined,
+        opts: { id?: string },
+        cmd: Command,
+      ) => {
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          print(ctx, config.json, workspaceTarget(store, selector, opts.id));
+        });
+      },
+    );
   workspace
     .command('path')
     .argument('[selector]')
     .option('--id <id>')
-    .action(async (selector: string | undefined, opts: { id?: string }, cmd: Command) => {
-      await withWorkspaceStore(ctx, cmd, async (store, config) => {
-        const value = workspaceTarget(store, selector, opts.id).rootPath;
-        print(ctx, config.json, { path: value }, value);
-      });
-    });
+    .action(
+      async (
+        selector: string | undefined,
+        opts: { id?: string },
+        cmd: Command,
+      ) => {
+        await withWorkspaceStore(ctx, cmd, async (store, config) => {
+          const value = workspaceTarget(store, selector, opts.id).rootPath;
+          print(ctx, config.json, { path: value }, value);
+        });
+      },
+    );
 
   workspace
     .command('status')
@@ -270,7 +285,11 @@ function registerWorkspaceCommands(
     .option('--id <id>')
     .description('show workspace filesystem and Git status')
     .action(
-      async (selector: string | undefined, opts: { id?: string }, cmd: Command) => {
+      async (
+        selector: string | undefined,
+        opts: { id?: string },
+        cmd: Command,
+      ) => {
         await withWorkspaceStore(ctx, cmd, async (store, config) => {
           const selected =
             selector === undefined && opts.id === undefined
@@ -373,9 +392,10 @@ function registerWorkspaceCommands(
         cmd: Command,
       ) => {
         await withWorkspaceStore(ctx, cmd, async (store, config) => {
-          const selected = opts.archived === true
-            ? archivedTarget(store, selector, opts.id)
-            : workspaceTarget(store, selector, opts.id);
+          const selected =
+            opts.archived === true
+              ? archivedTarget(store, selector, opts.id)
+              : workspaceTarget(store, selector, opts.id);
           const status = await store.status([selected]);
           const [view] = status;
           if (view === undefined) {
@@ -410,11 +430,7 @@ function registerWorkspaceCommands(
             selector === undefined && opts.id === undefined
               ? store.listRepairable()
               : [workspaceTarget(store, selector, opts.id)];
-          print(
-            ctx,
-            config.json,
-            await store.reconcile(selected),
-          );
+          print(ctx, config.json, await store.reconcile(selected));
         });
       },
     );

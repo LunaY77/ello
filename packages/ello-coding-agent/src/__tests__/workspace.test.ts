@@ -56,7 +56,14 @@ describe('workspace', () => {
 
   it('校验 selector 组成和 mount', () => {
     expect(validateRepoKey('ello-ts')).toBe('ello-ts');
+    expect(validateRepoKey('github.com/xxx')).toBe('github.com/xxx');
     expect(() => validateRepoKey('../bad')).toThrow('Invalid repo key');
+    expect(() => validateRepoKey('github.com//xxx')).toThrow(
+      'Invalid repo key',
+    );
+    expect(() => validateRepoKey('/github.com/xxx')).toThrow(
+      'Invalid repo key',
+    );
     expect(validateKind('feature')).toBe('feature');
     expect(validateKind('fix')).toBe('fix');
     expect(validateKind('explore')).toBe('explore');
@@ -74,9 +81,7 @@ describe('workspace', () => {
     await initializeSourceRepo(sourceRepo);
     const added = await repos.add(sourceRepo, 'demo');
     expect(added).toMatchObject({ key: 'demo', remoteUrl: null });
-    expect(added.mirrorPath).toBe(
-      path.join(home, 'mirrors', `${added.id}.git`),
-    );
+    expect(added.mirrorPath).toBe(path.join(home, 'mirrors', 'demo'));
     await expect(
       git(['remote', 'get-url', 'origin'], added.mirrorPath),
     ).rejects.toThrow();
@@ -99,6 +104,32 @@ describe('workspace', () => {
     await expect(repos.remoteRemove('renamed')).resolves.toMatchObject({
       remoteUrl: null,
     });
+  });
+
+  it('按带斜杠的 repo key 分层创建 mirror 和 checkout', async () => {
+    await initializeSourceRepo(sourceRepo);
+    const key = 'github.com/xxx';
+    const added = await repos.add(sourceRepo, key);
+
+    expect(added.mirrorPath).toBe(
+      path.join(home, 'mirrors', 'github.com', 'xxx'),
+    );
+
+    const workspace = await workspaces.create('feature', 'Nested Repo', [key]);
+    expect(workspace.repos[0]?.path).toBe(
+      path.join(
+        mount,
+        'workspace',
+        'feature',
+        'nested-repo',
+        'repos',
+        'github.com',
+        'xxx',
+      ),
+    );
+    await expect(
+      git(['rev-parse', '--show-toplevel'], workspace.repos[0]!.path),
+    ).resolves.toBe(workspace.repos[0]!.path);
   });
 
   it('远端导入保留 origin，local-only fetch 明确失败', async () => {
@@ -216,14 +247,17 @@ describe('workspace', () => {
       '',
     );
     const mirrorPath = repos.show('demo')!.mirrorPath;
-    expect(await git(['worktree', 'list', '--porcelain'], mirrorPath)).toContain(
-      archived.repos[0]!.path,
-    );
+    expect(
+      await git(['worktree', 'list', '--porcelain'], mirrorPath),
+    ).toContain(archived.repos[0]!.path);
     expect(workspaces.list({ status: 'archived' })).toMatchObject([
       { id: archived.id, status: 'archived' },
     ]);
 
-    const archivedHead = await git(['rev-parse', 'HEAD'], archived.repos[0]!.path);
+    const archivedHead = await git(
+      ['rev-parse', 'HEAD'],
+      archived.repos[0]!.path,
+    );
     await rm(archived.repos[0]!.path, { recursive: true });
     const repaired = await workspaces.repair([archived]);
     expect(repaired[0]!.actions).toContain('restored_checkout:demo');
@@ -279,25 +313,15 @@ describe('workspace', () => {
     ]);
     const archived = await workspaces.archive(workspace);
     const mirrorPath = repos.show('aidraw-server')!.mirrorPath;
-    await git(
-      ['worktree', 'remove', archived.repos[0]!.path],
-      mirrorPath,
-    );
+    await git(['worktree', 'remove', archived.repos[0]!.path], mirrorPath);
     await rm(archived.rootPath, { recursive: true });
 
     const repaired = await workspaces.repair([archived]);
     expect(repaired[0]!.actions).toContain('created_root');
-    expect(repaired[0]!.actions).toContain(
-      'restored_checkout:aidraw-server',
-    );
+    expect(repaired[0]!.actions).toContain('restored_checkout:aidraw-server');
     expect(
       await readFile(
-        path.join(
-          archived.rootPath,
-          'repos',
-          'aidraw-server',
-          'README.md',
-        ),
+        path.join(archived.rootPath, 'repos', 'aidraw-server', 'README.md'),
         'utf8',
       ),
     ).toBe('hello\n');

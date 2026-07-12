@@ -2,7 +2,17 @@ import type { WorkspaceKind } from './types.js';
 
 /** 校验 repo key，避免路径穿越和难读 manifest。 */
 export function validateRepoKey(value: string): string {
-  if (!/^[a-zA-Z0-9._-]+$/u.test(value)) {
+  const segments = value.split('/');
+  if (
+    segments.length === 0 ||
+    segments.some(
+      (segment) =>
+        segment === '' ||
+        segment === '.' ||
+        segment === '..' ||
+        !/^[a-zA-Z0-9._-]+$/u.test(segment),
+    )
+  ) {
     throw new Error(`Invalid repo key: ${value}`);
   }
   return value;

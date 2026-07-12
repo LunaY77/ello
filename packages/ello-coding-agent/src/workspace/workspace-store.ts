@@ -470,10 +470,13 @@ export class WorkspaceStore {
         : workspaceDir(this.mount, workspace.kind, workspace.name);
     const worktreeInfo = new Map(
       await Promise.all(
-        workspace.repos.map(async (repo) => [
-          repo.repositoryId,
-          await readWorktreeInfo(this.requireRepo(repo.key), repo.path),
-        ] as const),
+        workspace.repos.map(
+          async (repo) =>
+            [
+              repo.repositoryId,
+              await readWorktreeInfo(this.requireRepo(repo.key), repo.path),
+            ] as const,
+        ),
       ),
     );
     const expectedRepos = workspace.repos.map((repo) => ({
@@ -503,7 +506,9 @@ export class WorkspaceStore {
       const registered = this.requireRepo(repo.key);
       if (repo.checkoutMode === 'branch') {
         if (repo.branch === null) {
-          throw new Error(`Branch checkout is missing branch state: ${repo.key}`);
+          throw new Error(
+            `Branch checkout is missing branch state: ${repo.key}`,
+          );
         }
         await assertCommit(registered, repo.branch);
       } else {
@@ -512,7 +517,10 @@ export class WorkspaceStore {
       }
     }
 
-    if (workspace.rootPath !== expectedRoot && (await exists(workspace.rootPath))) {
+    if (
+      workspace.rootPath !== expectedRoot &&
+      (await exists(workspace.rootPath))
+    ) {
       await assertPathMissing(expectedRoot);
       await mkdir(path.dirname(expectedRoot), { recursive: true });
       await rename(workspace.rootPath, expectedRoot);
@@ -553,7 +561,9 @@ export class WorkspaceStore {
       await git(['worktree', 'prune'], registered.mirrorPath);
       if (repo.checkoutMode === 'branch') {
         if (repo.branch === null) {
-          throw new Error(`Branch checkout is missing branch state: ${repo.key}`);
+          throw new Error(
+            `Branch checkout is missing branch state: ${repo.key}`,
+          );
         }
         await assertCommit(registered, repo.branch);
         await git(
@@ -614,6 +624,7 @@ export class WorkspaceStore {
     branch: string | null,
   ): Promise<WorkspaceRepo> {
     const checkout = planWorkspaceRepo(rootPath, repository, branch);
+    await mkdir(path.dirname(checkout.path), { recursive: true });
     if (branch === null) {
       await git(
         [
@@ -781,7 +792,10 @@ async function assertManagedCheckout(repo: WorkspaceRepo): Promise<void> {
     return;
   }
   try {
-    const branch = await git(['symbolic-ref', '--short', '-q', 'HEAD'], repo.path);
+    const branch = await git(
+      ['symbolic-ref', '--short', '-q', 'HEAD'],
+      repo.path,
+    );
     throw new Error(
       `Workspace repo must be detached: ${repo.key}, found ${branch}`,
     );

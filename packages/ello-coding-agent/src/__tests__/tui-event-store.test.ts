@@ -286,6 +286,30 @@ describe('tui-event-store', () => {
     expect(state.pendingApproval).toBeUndefined();
   });
 
+  it('seals a working tool when its approval is denied', () => {
+    let state = reduceTuiEvent(initialTuiEventState, {
+      type: 'tool.started',
+      toolCallId: 'write-1',
+      name: 'write',
+      input: { path: 'note.txt' },
+    });
+    state = reduceTuiEvent(state, {
+      type: 'tool.failed',
+      toolCallId: 'write-1',
+      error: { name: 'Error', message: "Tool 'write' was denied by the user." },
+    });
+
+    expect(state.live.runningTools.has('write-1')).toBe(false);
+    expect(state.history.at(-1)).toMatchObject({
+      kind: 'tool',
+      tool: {
+        id: 'write-1',
+        status: 'fail',
+        error: { message: "Tool 'write' was denied by the user." },
+      },
+    });
+  });
+
   it('renders product messages into committed history', () => {
     const state = reduceTuiEvent(initialTuiEventState, {
       type: 'ui.message',

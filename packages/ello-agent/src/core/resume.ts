@@ -36,8 +36,22 @@ export async function prepareResume(
     const decision = resume.approvals?.[item.toolCallId];
     const approved =
       typeof decision === 'boolean' ? decision : (decision?.approved ?? false);
+    if (!approved) {
+      const reason = typeof decision === 'object' ? decision.reason : undefined;
+      await run.events.emit({
+        type: 'tool.failed',
+        turnIndex: run.state.turn,
+        toolCallId: item.toolCallId,
+        error: normalizeAgentError(
+          new Error(
+            reason ?? `Tool '${item.toolName}' was denied by the user.`,
+          ),
+        ),
+      });
+      continue;
+    }
     // 仅对「已批准且还没有结果」的项补跑，避免重复执行或执行被拒项。
-    if (!approved || toolResults[item.toolCallId] !== undefined) {
+    if (toolResults[item.toolCallId] !== undefined) {
       continue;
     }
     const result = await run.toolScheduler.executeApproved(
