@@ -12,7 +12,7 @@ import {
   workspaceDir,
 } from './paths.js';
 import { planWorkspaceCreate, planWorkspaceRepo } from './plan.js';
-import { RepoStore } from './repo-store.js';
+import { prepareMirrorRemote, RepoStore } from './repo-store.js';
 import { slugify, validateKind, validateRepoKey } from './slug.js';
 import { TmuxStore } from './tmux.js';
 import type {
@@ -623,6 +623,7 @@ export class WorkspaceStore {
     repository: Repository,
     branch: string | null,
   ): Promise<WorkspaceRepo> {
+    await prepareMirrorRemote(repository.mirrorPath);
     const checkout = planWorkspaceRepo(rootPath, repository, branch);
     await mkdir(path.dirname(checkout.path), { recursive: true });
     if (branch === null) {
@@ -653,6 +654,9 @@ export class WorkspaceStore {
         ],
         repository.mirrorPath,
       );
+    }
+    if (branch !== null) {
+      await clearBranchUpstream(checkout.path, branch);
     }
     return {
       ...checkout,
@@ -740,6 +744,29 @@ export class WorkspaceStore {
       updatedAt: new Date().toISOString(),
     };
     return this.repository.update(next);
+  }
+}
+
+/**
+ * 清除可能由 mirror 或旧 workspace 遗留的 upstream。
+ * 远端分支必须由用户在准备发布时显式 `push --set-upstream` 创建。
+ */
+async function clearBranchUpstream(
+  checkoutPath: string,
+  branch: string,
+): Promise<void> {
+  for (const key of [
+    `branch.${branch}.remote`,
+    `branch.${branch}.merge`,
+    `branch.${branch}.pushRemote`,
+  ]) {
+    try {
+      await git(['config', '--unset-all', key], checkoutPath);
+    } catch (error) {
+      if (!(error instanceof CommandError) || error.exitCode !== 5) {
+        throw error;
+      }
+    }
   }
 }
 

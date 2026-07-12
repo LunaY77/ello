@@ -123,6 +123,7 @@ export class RepoStore {
       throw new Error(`Repository already has a remote: ${repo.key}`);
     }
     await git(['remote', 'add', 'origin', url], repo.mirrorPath);
+    await prepareMirrorRemote(repo.mirrorPath);
     return this.repository.update({
       ...repo,
       remoteUrl: url,
@@ -323,6 +324,7 @@ export class RepoStore {
     const mirrorPath = repositoryMirrorPath(key);
     await mkdir(path.dirname(mirrorPath), { recursive: true });
     await git(['clone', '--mirror', url, mirrorPath]);
+    await prepareMirrorRemote(mirrorPath);
     return this.insertImported(id, key, mirrorPath, url, expectedDefaultBranch);
   }
 
@@ -390,6 +392,23 @@ export class RepoStore {
       throw new Error(`Repo already exists: ${key}`);
     }
   }
+}
+
+/**
+ * mirror 负责汇总远端 refs，但不能继承 `clone --mirror` 的全量 push 语义。
+ * 保留全量 fetch refspec 后，普通 worktree 可以安全地自行决定何时发布分支。
+ */
+export async function prepareMirrorRemote(mirrorPath: string): Promise<void> {
+  try {
+    await git(['remote', 'get-url', 'origin'], mirrorPath);
+  } catch (error) {
+    if (error instanceof CommandError && error.exitCode === 2) {
+      return;
+    }
+    throw error;
+  }
+  await git(['config', 'remote.origin.mirror', 'false'], mirrorPath);
+  await git(['config', 'remote.origin.fetch', '+refs/*:refs/*'], mirrorPath);
 }
 
 async function assertGitRepositoryWithCommit(source: string): Promise<void> {
