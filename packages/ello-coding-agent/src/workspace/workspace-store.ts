@@ -1,3 +1,24 @@
+/**
+ * WorkspaceStore 管理任务目录、各仓库的工作目录、任务分支、归档和恢复。
+ * Git 提交和分支保存在 RepoStore 管理的 bare mirror 中；Workspace 保存任务目录、
+ * 工作目录位置和生命周期状态。
+ *
+ * 创建 `feature/name` 或 `fix/name` 时：校验 selector 和 repo key，从 SQLite 找到
+ * Repository，确认每个仓库都有 Workspace 起点，创建 `repos/docs/tmp` 目录，
+ * 从 Workspace 起点创建或复用同名分支，为每个仓库挂载工作目录，清除隐式 upstream，
+ * 最后写入 Workspace 和各 checkout 的结构化记录。
+ *
+ * 跨仓库任务使用同名的 `feature/name` 或 `fix/name` 分支，分支默认不绑定 upstream，
+ * 远端发布由用户显式执行，系统不创建远端分支。`explore/name` 从 Workspace 起点
+ * 挂载 detached 工作目录，不占用任务分支。
+ *
+ * `addRepos` 和 `removeRepos` 修改任务中的仓库集合；`rename` 移动任务目录并修复
+ * worktree 连接；`archive` 保存完整任务现场、释放工作分支并允许同名任务创建新代；
+ * `repair` 根据 SQLite 和 mirror 状态恢复缺失目录及 checkout；`delete` 清理任务
+ * 的 tmux、worktree、目录和记录。遇到 dirty 文件、非 Git 占位目录或不安全冲突时失败。
+ * RepoStore 提供仓库和 Workspace 起点，WorkspaceRepository 提供任务记录，TmuxStore
+ * 管理终端会话；WorkspaceStore 负责协调三者。
+ */
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -12,7 +33,11 @@ import {
   workspaceDir,
 } from './paths.js';
 import { planWorkspaceCreate, planWorkspaceRepo } from './plan.js';
-import { prepareMirrorRemote, RepoStore } from './repo-store.js';
+import {
+  assertRepositoryUserBranch,
+  REPOSITORY_BASELINE_REF,
+  RepoStore,
+} from './repo-store.js';
 import { slugify, validateKind, validateRepoKey } from './slug.js';
 import { TmuxStore } from './tmux.js';
 import type {
@@ -41,7 +66,7 @@ export interface WorkspaceRepairResult {
   readonly status: WorkspaceStatusView;
 }
 
-/** workspace 生命周期编排；目录、worktree、tmux 与 DB mutation 在这里收敛。 */
+/** Workspace 产品生命周期服务。 */
 export class WorkspaceStore {
   constructor(
     private readonly repository: WorkspaceRepository,
@@ -76,7 +101,7 @@ export class WorkspaceStore {
     await assertPathMissing(plan.rootPath);
     const selected = plan.repoKeys.map((key) => this.requireRepo(key));
     for (const repo of selected) {
-      await assertCommit(repo, repo.defaultBranch);
+      await assertCommit(repo, REPOSITORY_BASELINE_REF);
     }
     await this.releaseArchivedSelector(kind, name);
     if (tmuxSession !== undefined) {
@@ -213,7 +238,7 @@ export class WorkspaceStore {
       if (existing.has(repo.id)) {
         throw new Error(`Repository already belongs to workspace: ${repo.key}`);
       }
-      await assertCommit(repo, repo.defaultBranch);
+      await assertCommit(repo, REPOSITORY_BASELINE_REF);
     }
     const added: WorkspaceRepo[] = [];
     for (const repo of selected) {
@@ -510,6 +535,7 @@ export class WorkspaceStore {
             `Branch checkout is missing branch state: ${repo.key}`,
           );
         }
+        assertRepositoryUserBranch(repo.branch);
         await assertCommit(registered, repo.branch);
       } else {
         const info = requireWorktreeInfo(worktreeInfo, repo.repositoryId);
@@ -623,18 +649,12 @@ export class WorkspaceStore {
     repository: Repository,
     branch: string | null,
   ): Promise<WorkspaceRepo> {
-    await prepareMirrorRemote(repository.mirrorPath);
+    if (branch !== null) assertRepositoryUserBranch(branch);
     const checkout = planWorkspaceRepo(rootPath, repository, branch);
     await mkdir(path.dirname(checkout.path), { recursive: true });
     if (branch === null) {
       await git(
-        [
-          'worktree',
-          'add',
-          '--detach',
-          checkout.path,
-          repository.defaultBranch,
-        ],
+        ['worktree', 'add', '--detach', checkout.path, REPOSITORY_BASELINE_REF],
         repository.mirrorPath,
       );
     } else if (await refExists(repository, `refs/heads/${branch}`)) {
@@ -650,7 +670,7 @@ export class WorkspaceStore {
           '-b',
           branch,
           checkout.path,
-          repository.defaultBranch,
+          REPOSITORY_BASELINE_REF,
         ],
         repository.mirrorPath,
       );
@@ -688,6 +708,7 @@ export class WorkspaceStore {
               `Archived branch checkout is missing branch state: ${repo.key}`,
             );
           }
+          assertRepositoryUserBranch(repo.branch);
           headCommit = await git(
             ['rev-parse', '--verify', `${repo.branch}^{commit}`],
             registered.mirrorPath,
@@ -810,6 +831,7 @@ async function assertManagedCheckout(repo: WorkspaceRepo): Promise<void> {
     if (repo.branch === null) {
       throw new Error(`Branch checkout is missing branch state: ${repo.key}`);
     }
+    assertRepositoryUserBranch(repo.branch);
     const branch = await git(['symbolic-ref', '--short', 'HEAD'], repo.path);
     if (branch !== repo.branch) {
       throw new Error(

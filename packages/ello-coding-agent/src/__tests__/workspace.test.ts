@@ -17,6 +17,7 @@ import { git } from '../workspace/git.js';
 import {
   formatRepoList,
   formatWorkspaceList,
+  REPOSITORY_BASELINE_REF,
   RepoStore,
   WorkspaceStore,
 } from '../workspace/index.js';
@@ -81,7 +82,7 @@ describe('workspace', () => {
     await initializeSourceRepo(sourceRepo);
     const added = await repos.add(sourceRepo, 'demo');
     expect(added).toMatchObject({ key: 'demo', remoteUrl: null });
-    expect(added.mirrorPath).toBe(path.join(home, 'mirrors', 'demo'));
+    expect(added.mirrorPath).toBe(path.join(home, 'mirrors', added.id));
     await expect(
       git(['remote', 'get-url', 'origin'], added.mirrorPath),
     ).rejects.toThrow();
@@ -90,15 +91,21 @@ describe('workspace', () => {
     expect(renamed.id).toBe(added.id);
     expect(renamed.mirrorPath).toBe(added.mirrorPath);
     expect(formatRepoList([renamed])).toContain('<local-only>');
+    const replacement = await repos.add(sourceRepo, 'demo');
+    expect(replacement.id).not.toBe(added.id);
+    expect(replacement.mirrorPath).not.toBe(added.mirrorPath);
 
     await expect(repos.remoteAdd('renamed', sourceRepo)).resolves.toMatchObject(
       {
         remoteUrl: sourceRepo,
       },
     );
-    expect(
-      await git(['config', 'remote.origin.mirror'], added.mirrorPath),
-    ).toBe('false');
+    await expect(
+      git(['config', 'remote.origin.mirror'], added.mirrorPath),
+    ).rejects.toThrow();
+    expect(await git(['config', 'remote.origin.fetch'], added.mirrorPath)).toBe(
+      '+refs/heads/*:refs/remotes/origin/*',
+    );
     await expect(
       repos.remoteSet('renamed', `${sourceRepo}/next`),
     ).resolves.toMatchObject({
@@ -114,9 +121,7 @@ describe('workspace', () => {
     const key = 'github.com/xxx';
     const added = await repos.add(sourceRepo, key);
 
-    expect(added.mirrorPath).toBe(
-      path.join(home, 'mirrors', 'github.com', 'xxx'),
-    );
+    expect(added.mirrorPath).toBe(path.join(home, 'mirrors', added.id));
 
     const workspace = await workspaces.create('feature', 'Nested Repo', [key]);
     expect(workspace.repos[0]?.path).toBe(
@@ -146,8 +151,11 @@ describe('workspace', () => {
     const checkout = workspace.repos[0]!;
     const branch = 'feature/push-branch';
 
-    expect(await git(['config', 'remote.origin.mirror'], added.mirrorPath)).toBe(
-      'false',
+    await expect(
+      git(['config', 'remote.origin.mirror'], added.mirrorPath),
+    ).rejects.toThrow();
+    expect(await git(['config', 'remote.origin.fetch'], added.mirrorPath)).toBe(
+      '+refs/heads/*:refs/remotes/origin/*',
     );
     await expect(
       git(['config', `branch.${branch}.remote`], checkout.path),
@@ -159,14 +167,85 @@ describe('workspace', () => {
 
   it('远端导入保留 origin，local-only fetch 明确失败', async () => {
     await initializeSourceRepo(sourceRepo);
+    await git(['branch', 'release'], sourceRepo);
     const remote = await repos.add(`file://${sourceRepo}`, 'remote');
     expect(remote.remoteUrl).toBe(`file://${sourceRepo}`);
     expect(await git(['remote', 'get-url', 'origin'], remote.mirrorPath)).toBe(
       `file://${sourceRepo}`,
     );
+    await expect(
+      git(
+        [
+          'rev-parse',
+          '--verify',
+          `refs/remotes/origin/${remote.defaultBranch}`,
+        ],
+        remote.mirrorPath,
+      ),
+    ).resolves.toBe(await git(['rev-parse', 'HEAD'], sourceRepo));
+    await expect(
+      git(
+        ['rev-parse', '--verify', REPOSITORY_BASELINE_REF],
+        remote.mirrorPath,
+      ),
+    ).resolves.toBe(await git(['rev-parse', 'HEAD'], sourceRepo));
+    await expect(
+      git(['symbolic-ref', 'refs/remotes/origin/HEAD'], remote.mirrorPath),
+    ).resolves.toBe(`refs/remotes/origin/${remote.defaultBranch}`);
+    await expect(
+      git(
+        ['rev-parse', '--verify', 'refs/remotes/origin/release'],
+        remote.mirrorPath,
+      ),
+    ).resolves.toBe(await git(['rev-parse', 'release'], sourceRepo));
+    await expect(
+      git(['rev-parse', '--verify', 'refs/heads/release'], remote.mirrorPath),
+    ).rejects.toThrow();
+
+    const originalMain = await git(['rev-parse', 'HEAD'], sourceRepo);
+    await git(
+      ['update-ref', 'refs/heads/main', originalMain],
+      remote.mirrorPath,
+    );
+    await writeFile(path.join(sourceRepo, 'remote-main.txt'), 'remote main\n');
+    await git(['add', '.'], sourceRepo);
+    await git(['commit', '-m', 'remote main'], sourceRepo);
+    const updatedMain = await git(['rev-parse', 'HEAD'], sourceRepo);
     await expect(repos.fetch(['remote'])).resolves.toEqual([
       { key: 'remote', status: 'fetched' },
     ]);
+    expect(await git(['rev-parse', 'refs/heads/main'], remote.mirrorPath)).toBe(
+      originalMain,
+    );
+    expect(
+      await git(['rev-parse', REPOSITORY_BASELINE_REF], remote.mirrorPath),
+    ).toBe(updatedMain);
+
+    await git(['switch', '-c', 'trunk'], sourceRepo);
+    await writeFile(path.join(sourceRepo, 'trunk.txt'), 'trunk\n');
+    await git(['add', '.'], sourceRepo);
+    await git(['commit', '-m', 'trunk'], sourceRepo);
+    await git(
+      ['update-ref', 'refs/heads/trunk', originalMain],
+      remote.mirrorPath,
+    );
+    await expect(repos.fetch(['remote'])).resolves.toEqual([
+      { key: 'remote', status: 'fetched' },
+    ]);
+    const remoteTrunk = await git(['rev-parse', 'HEAD'], sourceRepo);
+    expect(repos.show('remote')?.defaultBranch).toBe('trunk');
+    expect(
+      await git(['rev-parse', 'refs/heads/trunk'], remote.mirrorPath),
+    ).toBe(originalMain);
+    expect(
+      await git(['rev-parse', REPOSITORY_BASELINE_REF], remote.mirrorPath),
+    ).toBe(remoteTrunk);
+    await expect(
+      git(['symbolic-ref', 'refs/remotes/origin/HEAD'], remote.mirrorPath),
+    ).resolves.toBe('refs/remotes/origin/trunk');
+    await expect(
+      git(['symbolic-ref', 'HEAD'], remote.mirrorPath),
+    ).resolves.toBe(REPOSITORY_BASELINE_REF);
 
     await repos.add(sourceRepo, 'local');
     await expect(repos.fetch(['local'])).rejects.toThrow(
@@ -178,9 +257,62 @@ describe('workspace', () => {
     });
   });
 
+  it('remote add 失败会补偿 origin，fetch-local 只导入 branches 和 tags', async () => {
+    await initializeSourceRepo(sourceRepo);
+    const local = await repos.add(sourceRepo, 'local');
+
+    await expect(
+      repos.remoteAdd('local', path.join(mount, 'missing-remote')),
+    ).rejects.toThrow();
+    await expect(
+      git(['remote', 'get-url', 'origin'], local.mirrorPath),
+    ).rejects.toThrow();
+    expect(repos.show('local')?.remoteUrl).toBeNull();
+
+    await git(['branch', 'topic'], sourceRepo);
+    await git(['tag', 'v1'], sourceRepo);
+    await git(
+      ['update-ref', 'refs/remotes/upstream/internal', 'HEAD'],
+      sourceRepo,
+    );
+    await repos.fetchLocal('local', sourceRepo);
+    await expect(
+      git(['rev-parse', '--verify', 'refs/heads/topic'], local.mirrorPath),
+    ).resolves.toBe(await git(['rev-parse', 'topic'], sourceRepo));
+    await expect(
+      git(['rev-parse', '--verify', 'refs/tags/v1'], local.mirrorPath),
+    ).resolves.toBe(await git(['rev-parse', 'v1'], sourceRepo));
+    await expect(
+      git(
+        ['rev-parse', '--verify', 'refs/remotes/upstream/internal'],
+        local.mirrorPath,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('拒绝保留分支命名空间', async () => {
+    await initializeSourceRepo(sourceRepo);
+    await git(['branch', '__repostore/user'], sourceRepo);
+    await expect(repos.add(sourceRepo, 'reserved')).rejects.toThrow(
+      'Reserved repository branch',
+    );
+    await expect(
+      repos.createManaged('managed', '__repostore/default', sourceRepo),
+    ).rejects.toThrow('Reserved repository branch');
+  });
+
   it('创建标准目录、共同分支且不写 marker 或 manifest', async () => {
     await initializeSourceRepo(sourceRepo);
-    await repos.add(sourceRepo, 'demo');
+    await writeFile(path.join(sourceRepo, 'second.txt'), 'second\n');
+    await git(['add', '.'], sourceRepo);
+    await git(['commit', '-m', 'second'], sourceRepo);
+    const baselineCommit = await git(['rev-parse', 'HEAD'], sourceRepo);
+    const olderCommit = await git(['rev-parse', 'HEAD^'], sourceRepo);
+    const repository = await repos.add(sourceRepo, 'demo');
+    await git(
+      ['update-ref', 'refs/heads/main', olderCommit],
+      repository.mirrorPath,
+    );
     const workspace = await workspaces.create('feature', 'Add API', ['demo']);
 
     expect(workspace).toMatchObject({
@@ -213,6 +345,9 @@ describe('workspace', () => {
       access(path.join(workspace.rootPath, 'workspace.yaml')),
     ).rejects.toThrow();
     expect(formatWorkspaceList([workspace])).toContain('feature');
+    expect(await git(['rev-parse', 'HEAD'], workspace.repos[0]!.path)).toBe(
+      baselineCommit,
+    );
   });
 
   it('创建受管新 repo 后加入现有 workspace', async () => {
@@ -222,6 +357,10 @@ describe('workspace', () => {
       'demo',
     ]);
     await repos.createManaged('new-service', 'main', sourceRepo);
+    const managed = repos.show('new-service')!;
+    await expect(
+      git(['symbolic-ref', 'HEAD'], managed.mirrorPath),
+    ).resolves.toBe(REPOSITORY_BASELINE_REF);
     const updated = await workspaces.addRepos(workspace, ['new-service']);
     expect(updated.repos.map((repo) => repo.key)).toEqual([
       'demo',

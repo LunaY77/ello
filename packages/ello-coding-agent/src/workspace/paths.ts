@@ -10,8 +10,8 @@ export function mirrorsDir(): string {
   return path.join(globalHomeDir(), 'mirrors');
 }
 
-export function repositoryMirrorPath(repositoryKey: string): string {
-  return path.join(mirrorsDir(), repositoryKey);
+export function repositoryMirrorPath(repositoryId: string): string {
+  return path.join(mirrorsDir(), repositoryId);
 }
 
 export function resolveWorkspaceMount(configuredMount: string): string {
