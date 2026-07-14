@@ -8,7 +8,7 @@ Use `ello repo fetch-local <key> <path>` to ingest local refs again. The path is
 
 ## Existing remote repository
 
-Use `ello repo add <url> [--key <key>]`. Ello stores the remote URL, creates a mirror, and resolves a real default branch commit. Use `repo fetch` for later synchronization.
+Use `ello repo add <url> [--key <key>]`. Ello initializes a bare repository, keeps remote branches under `refs/remotes/origin/*`, and maintains a reserved system baseline for new workspaces. Use `repo fetch` for later synchronization; it detects remote default-branch changes and moves only that baseline without touching user branches.
 
 ## New repository
 

@@ -16,7 +16,7 @@ Do not call `git worktree`, `git clone --mirror`, or `tmux` directly for managed
 ├── workspace/<kind>/<name>/{repos,tmp,docs}
 └── archive/<kind>/<name>-<timestamp>-<workspace-id>/{repos,tmp,docs}
 
-~/.ello/mirrors/<repository-id>.git
+~/.ello/mirrors/<repository-id>
 ```
 
 ## Choose the operation
