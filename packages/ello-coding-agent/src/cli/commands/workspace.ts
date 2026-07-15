@@ -307,11 +307,24 @@ function registerWorkspaceCommands(
     .command('add')
     .argument('<repo...>')
     .option('--workspace <selector>')
+    .option('--detached', 'add detached reference checkouts under references/')
     .action(
-      async (keys: string[], opts: { workspace?: string }, cmd: Command) => {
+      async (
+        keys: string[],
+        opts: { workspace?: string; detached?: boolean },
+        cmd: Command,
+      ) => {
         await withWorkspaceStore(ctx, cmd, async (store, config) => {
           const selected = resolveWorkspace(store, opts.workspace, config.cwd);
-          print(ctx, config.json, await store.addRepos(selected, keys));
+          print(
+            ctx,
+            config.json,
+            await store.addRepos(
+              selected,
+              keys,
+              opts.detached === true ? 'reference' : 'development',
+            ),
+          );
         });
       },
     );

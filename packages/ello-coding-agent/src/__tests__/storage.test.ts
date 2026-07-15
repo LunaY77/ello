@@ -58,6 +58,7 @@ describe('global coding storage', () => {
         { version: 7, name: 'workspace-model' },
         { version: 8, name: 'cwd-naming' },
         { version: 9, name: 'workspace-archive-generations' },
+        { version: 10, name: 'workspace-references' },
       ]);
       expect(
         storage.db.$client

@@ -13,8 +13,8 @@ Do not call `git worktree`, `git clone --mirror`, or `tmux` directly for managed
 
 ```text
 <configured-mount>/
-├── workspace/<kind>/<name>/{repos,tmp,docs}
-└── archive/<kind>/<name>-<timestamp>-<workspace-id>/{repos,tmp,docs}
+├── workspace/<kind>/<name>/{repos,references,tmp,docs}
+└── archive/<kind>/<name>-<timestamp>-<workspace-id>/{repos,references,tmp,docs}
 
 ~/.ello/mirrors/<repository-id>
 ```
@@ -25,6 +25,7 @@ Do not call `git worktree`, `git clone --mirror`, or `tmux` directly for managed
 - Existing remote URL: `ello repo add <url>`.
 - New project inside the current workspace: `ello workspace repo create <key>`.
 - Multi-repository feature or fix: register repositories first, then create one workspace; every checkout shares the workspace branch.
+- Read-only context repository: `ello workspace repo add <key> --detached`; it checks out the default branch commit under `references/` without creating a workspace branch.
 - Reusing an archived selector: run the same `workspace create`; Ello creates a new active generation while retaining archived generations as detached snapshots.
 - Move repository registry state between machines: use `ello repo export` and `ello repo import`.
 - Workspace/SQLite drift: run `workspace reconcile` first, then `workspace repair`; omit the selector to scan all registered workspaces.
@@ -44,7 +45,7 @@ Do not call `git worktree`, `git clone --mirror`, or `tmux` directly for managed
 - Confirm that no active, archived, or missing workspace generation references a repository before `repo remove`.
 - Check dirty status before workspace repo removal, archive, or delete.
 - State explicitly when `remoteUrl` is null; adding a remote does not push commits.
-- Archive preserves complete `repos/`, `docs/`, and `tmp/` content, converts every checkout to a detached commit snapshot, records its archive-time `headCommit`, repairs worktree paths, and kills bound tmux.
+- Archive preserves complete `repos/`, `references/`, `docs/`, and `tmp/` content, converts every checkout to a detached commit snapshot, records its archive-time `headCommit`, repairs worktree paths, and kills bound tmux.
 - Delete removes the complete workspace root, removes managed worktrees, and kills bound tmux.
 - Delete archived generations with `--archived` only when one version matches; otherwise select an ID from `workspace archived` and use `--id`.
 - Repair never overwrites dirty checkouts or deletes unmanaged directories; report conflicts that require user judgment.

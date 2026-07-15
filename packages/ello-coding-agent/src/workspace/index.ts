@@ -14,6 +14,7 @@ export type {
   Workspace,
   WorkspaceKind,
   WorkspaceRepo,
+  WorkspaceRepoRole,
   WorkspaceStatus,
 } from './types.js';
 

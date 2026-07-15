@@ -4,7 +4,7 @@
  * 工作目录位置和生命周期状态。
  *
  * 创建 `feature/name` 或 `fix/name` 时：校验 selector 和 repo key，从 SQLite 找到
- * Repository，确认每个仓库都有 Workspace 起点，创建 `repos/docs/tmp` 目录，
+ * Repository，确认每个仓库都有 Workspace 起点，创建 `repos/references/docs/tmp` 目录，
  * 从 Workspace 起点创建或复用同名分支，为每个仓库挂载工作目录，清除隐式 upstream，
  * 最后写入 Workspace 和各 checkout 的结构化记录。
  *
@@ -44,6 +44,7 @@ import type {
   Repository,
   Workspace,
   WorkspaceRepo,
+  WorkspaceRepoRole,
   WorkspaceStatus,
 } from './types.js';
 
@@ -110,11 +111,14 @@ export class WorkspaceStore {
     }
     await this.initializeMount();
     await mkdir(path.join(plan.rootPath, 'repos'), { recursive: true });
+    await mkdir(path.join(plan.rootPath, 'references'));
     await mkdir(path.join(plan.rootPath, 'tmp'));
     await mkdir(path.join(plan.rootPath, 'docs'));
     const checkouts: WorkspaceRepo[] = [];
     for (const repo of selected) {
-      checkouts.push(await this.attachRepo(plan.rootPath, repo, plan.branch));
+      checkouts.push(
+        await this.attachRepo(plan.rootPath, repo, plan.branch, 'development'),
+      );
     }
     const now = new Date().toISOString();
     let workspace: Workspace = {
@@ -230,6 +234,7 @@ export class WorkspaceStore {
   async addRepos(
     workspace: Workspace,
     repoKeys: readonly string[],
+    role: WorkspaceRepoRole = 'development',
   ): Promise<Workspace> {
     assertActive(workspace);
     const existing = new Set(workspace.repos.map((repo) => repo.repositoryId));
@@ -241,11 +246,9 @@ export class WorkspaceStore {
       await assertCommit(repo, REPOSITORY_BASELINE_REF);
     }
     const added: WorkspaceRepo[] = [];
-    for (const repo of selected) {
-      added.push(
-        await this.attachRepo(workspace.rootPath, repo, workspace.branch),
-      );
-    }
+    const branch = role === 'reference' ? null : workspace.branch;
+    for (const repo of selected)
+      added.push(await this.attachRepo(workspace.rootPath, repo, branch, role));
     const next = {
       ...workspace,
       repos: [...workspace.repos, ...added],
@@ -506,18 +509,30 @@ export class WorkspaceStore {
     );
     const expectedRepos = workspace.repos.map((repo) => ({
       ...repo,
-      path: path.join(expectedRoot, 'repos', repo.key),
+      path: path.join(
+        expectedRoot,
+        repo.role === 'reference' ? 'references' : 'repos',
+        repo.key,
+      ),
     }));
-    const expectedReposDir = path.join(expectedRoot, 'repos');
-    if (await exists(expectedReposDir)) {
-      const managedKeys = new Set(expectedRepos.map((repo) => repo.key));
-      const unexpected = (await readdir(expectedReposDir)).filter(
-        (entry) => !managedKeys.has(entry),
+    for (const role of ['development', 'reference'] as const) {
+      const expectedDir = path.join(
+        expectedRoot,
+        role === 'reference' ? 'references' : 'repos',
       );
-      if (unexpected.length > 0) {
-        throw new Error(
-          `Workspace has unmanaged repo directories: ${unexpected.join(', ')}`,
+      if (await exists(expectedDir)) {
+        const managedKeys = new Set(
+          expectedRepos
+            .filter((repo) => repo.role === role)
+            .map((repo) => repo.key.split('/')[0]),
         );
+        const unexpected = (await readdir(expectedDir)).filter(
+          (entry) => !managedKeys.has(entry),
+        );
+        if (unexpected.length > 0)
+          throw new Error(
+            `Workspace has unmanaged ${role === 'reference' ? 'references' : 'repo'} directories: ${unexpected.join(', ')}`,
+          );
       }
     }
     for (const repo of expectedRepos) {
@@ -556,7 +571,8 @@ export class WorkspaceStore {
       await mkdir(expectedRoot, { recursive: true });
       actions.push('created_root');
     }
-    for (const directory of ['repos', 'tmp', 'docs'] as const) {
+    const directories = ['repos', 'references', 'tmp', 'docs'] as const;
+    for (const directory of directories) {
       const directoryPath = path.join(expectedRoot, directory);
       if (!(await exists(directoryPath))) {
         await mkdir(directoryPath);
@@ -585,6 +601,7 @@ export class WorkspaceStore {
         continue;
       }
       await git(['worktree', 'prune'], registered.mirrorPath);
+      await mkdir(path.dirname(repo.path), { recursive: true });
       if (repo.checkoutMode === 'branch') {
         if (repo.branch === null) {
           throw new Error(
@@ -648,9 +665,10 @@ export class WorkspaceStore {
     rootPath: string,
     repository: Repository,
     branch: string | null,
+    role: WorkspaceRepoRole,
   ): Promise<WorkspaceRepo> {
     if (branch !== null) assertRepositoryUserBranch(branch);
-    const checkout = planWorkspaceRepo(rootPath, repository, branch);
+    const checkout = planWorkspaceRepo(rootPath, repository, branch, role);
     await mkdir(path.dirname(checkout.path), { recursive: true });
     if (branch === null) {
       await git(

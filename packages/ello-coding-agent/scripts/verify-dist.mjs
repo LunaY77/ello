@@ -22,6 +22,7 @@ const requiredAssets = [
   'storage/migrations/0003-artifacts.sql',
   'storage/migrations/0004-usage-model-calls.sql',
   'storage/migrations/0005-drop-structured-memory.sql',
+  'storage/migrations/0010-workspace-references.sql',
 ];
 
 for (const asset of requiredAssets) {

@@ -1,6 +1,7 @@
 export type WorkspaceKind = 'feature' | 'fix' | 'explore';
 export type WorkspaceStatus = 'active' | 'archived' | 'missing' | 'deleted';
 export type CheckoutMode = 'branch' | 'detached';
+export type WorkspaceRepoRole = 'development' | 'reference';
 
 export interface Repository {
   readonly id: string;
@@ -16,6 +17,7 @@ export interface WorkspaceRepo {
   readonly repositoryId: string;
   readonly key: string;
   readonly path: string;
+  readonly role: WorkspaceRepoRole;
   readonly checkoutMode: CheckoutMode;
   readonly branch: string | null;
   readonly headCommit: string | null;

@@ -324,6 +324,7 @@ describe('workspace', () => {
     });
     expect(workspace.repos[0]).toMatchObject({
       key: 'demo',
+      role: 'development',
       checkoutMode: 'branch',
       branch: 'feature/add-api',
       path: path.join(
@@ -335,7 +336,12 @@ describe('workspace', () => {
         'demo',
       ),
     });
-    expect(await readdir(workspace.rootPath)).toEqual(['docs', 'repos', 'tmp']);
+    expect(await readdir(workspace.rootPath)).toEqual([
+      'docs',
+      'references',
+      'repos',
+      'tmp',
+    ]);
     expect(await readdir(path.join(workspace.rootPath, 'docs'))).toEqual([]);
     expect(await readdir(path.join(workspace.rootPath, 'tmp'))).toEqual([]);
     await expect(
@@ -371,6 +377,70 @@ describe('workspace', () => {
       checkoutMode: 'branch',
     });
     expect(repos.show('new-service')).toMatchObject({ remoteUrl: null });
+  });
+
+  it('detached reference 独立放入 references 并保留完整生命周期语义', async () => {
+    await initializeSourceRepo(sourceRepo);
+    await repos.add(sourceRepo, 'demo');
+    const referenceKey = 'github.com/api-reference';
+    await repos.add(sourceRepo, referenceKey);
+    const workspace = await workspaces.create('feature', 'Reference Checkout', [
+      'demo',
+    ]);
+
+    await workspaces.addRepos(workspace, [referenceKey], 'reference');
+    const persisted = workspaces.openActive('feature', 'Reference Checkout');
+    const reference = persisted.repos.find(
+      (repo) => repo.key === referenceKey,
+    )!;
+    expect(reference).toMatchObject({
+      role: 'reference',
+      checkoutMode: 'detached',
+      branch: null,
+      path: path.join(
+        workspace.rootPath,
+        'references',
+        'github.com',
+        'api-reference',
+      ),
+    });
+    await expect(
+      git(['symbolic-ref', '--short', 'HEAD'], reference.path),
+    ).rejects.toThrow('HEAD is not a symbolic ref');
+
+    const renamed = await workspaces.rename(persisted, 'Reference Renamed');
+    const renamedReference = renamed.repos.find(
+      (repo) => repo.key === referenceKey,
+    )!;
+    expect(renamedReference.path).toBe(
+      path.join(renamed.rootPath, 'references', 'github.com', 'api-reference'),
+    );
+
+    const archived = await workspaces.archive(renamed);
+    const archivedReference = archived.repos.find(
+      (repo) => repo.key === referenceKey,
+    )!;
+    expect(archivedReference).toMatchObject({
+      role: 'reference',
+      checkoutMode: 'detached',
+      branch: null,
+      path: path.join(
+        archived.rootPath,
+        'references',
+        'github.com',
+        'api-reference',
+      ),
+    });
+
+    const referenceMirror = repos.show(referenceKey)!.mirrorPath;
+    await git(['worktree', 'remove', archivedReference.path], referenceMirror);
+    await rm(path.join(archived.rootPath, 'references'), { recursive: true });
+    const repaired = await workspaces.repair([archived]);
+    expect(repaired[0]!.actions).toContain('created_references_directory');
+    expect(repaired[0]!.actions).toContain(`restored_checkout:${referenceKey}`);
+    expect(await git(['rev-parse', 'HEAD'], archivedReference.path)).toBe(
+      archivedReference.headCommit,
+    );
   });
 
   it('archive 保留完整 checkout、修复 worktree 路径且删除时清理元数据', async () => {
@@ -451,6 +521,7 @@ describe('workspace', () => {
     expect(repaired[0]!.actions).toEqual([
       'created_root',
       'created_repos_directory',
+      'created_references_directory',
       'created_tmp_directory',
       'created_docs_directory',
       'restored_checkout:demo',

@@ -85,6 +85,7 @@ export const workspaceRepositories = sqliteTable(
       .notNull()
       .references(() => repositories.id),
     checkoutPath: text('checkout_path').notNull(),
+    checkoutRole: text('checkout_role').notNull(),
     checkoutMode: text('checkout_mode').notNull(),
     branch: text('branch'),
     headCommit: text('head_commit'),
