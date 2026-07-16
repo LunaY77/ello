@@ -1,5 +1,6 @@
 import {
   createAgent,
+  defineTool,
   type Agent,
   type AgentEnvironment,
   type AgentModel,
@@ -7,6 +8,7 @@ import {
   type AnyAgentTool,
   type ModelAdapter,
   type ModelInput,
+  z,
 } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
@@ -26,6 +28,10 @@ import type { JsonlSessionStore } from '../session/jsonl-store.js';
 import type { CodingStorage } from '../storage/index.js';
 import type { TaskBoardScope } from '../tasks/index.js';
 import { createCodingTools } from '../tools/index.js';
+import {
+  createMetaToolRuntime,
+  TOOL_ROUTING_INSTRUCTIONS,
+} from '../tools/meta-tools.js';
 
 import type { CodingAgentDefinition } from './schema.js';
 
@@ -74,7 +80,7 @@ function resolveAgentModel(
 /**
  * 跑一次 internal agent（如 summarizer），返回最终文本。
  *
- * internal agent 是 `tools: []` 的纯补全 agent：用定义里的 prompt 作系统指令、
+ * internal agent 只暴露 internal_complete：用定义里的 prompt 作系统指令、
  * 按 role 解析模型，跑一轮 `prompt` 即关闭。它让 coding-session 里压缩用的
  * 临时 `createAgent` 收敛进 registry。
  */
@@ -93,10 +99,24 @@ export async function runInternalAgent(input: {
       : {}),
   };
   const binding = resolveBinding(input.definition, deps);
+  assertToolCallSupport(binding);
+  const internalTarget = defineTool({
+    name: 'internal_complete',
+    description: 'Return a completed internal-agent response payload.',
+    discovery: { aliases: ['complete response'], risk: 'readonly' },
+    input: z.object({ output: z.string() }).strict(),
+    execute: ({ output }) => output,
+  });
+  const toolRuntime = createMetaToolRuntime(
+    [internalTarget as AnyAgentTool],
+    input.config.tools,
+  );
   const agent = createAgent({
     name: `ello-${input.definition.name}`,
     model: resolveAgentModel(binding, deps),
     modelSettings: modelSettingsFromRole(binding),
+    executionTools: toolRuntime.executionTools,
+    modelTools: toolRuntime.modelTools,
     ...(input.definition.prompt !== undefined
       ? { instructions: input.definition.prompt }
       : {}),
@@ -140,12 +160,18 @@ export async function runInternalToolAgent(input: {
       : {}),
   };
   const binding = resolveBinding(input.definition, deps);
+  assertToolCallSupport(binding);
+  const toolRuntime = createMetaToolRuntime(input.tools, input.config.tools);
   const agent = createAgent({
     name: `ello-${input.definition.name}`,
     model: resolveAgentModel(binding, deps),
     modelSettings: modelSettingsFromRole(binding),
-    instructions: input.instructions,
-    tools: input.tools,
+    instructions: withToolRoutingInstructions(
+      input.instructions,
+      toolRuntime.usesToolRouting,
+    ),
+    executionTools: toolRuntime.executionTools,
+    modelTools: toolRuntime.modelTools,
     ...(input.modelAdapter !== undefined
       ? { modelAdapter: input.modelAdapter }
       : {
@@ -204,6 +230,7 @@ export function createSubagentAgent(input: {
       : {}),
   };
   const binding = resolveBinding(definition, deps);
+  assertToolCallSupport(binding);
   const tools = selectTools(
     createCodingTools({
       config: childConfig,
@@ -217,14 +244,19 @@ export function createSubagentAgent(input: {
     definition.prompt !== undefined
       ? `${renderPromptTemplate('subagent', { model: binding.ref })}\n\n${definition.prompt}`
       : renderPromptTemplate('subagent', { model: binding.ref });
+  const toolRuntime = createMetaToolRuntime(tools, childConfig.tools);
 
   return createAgent({
     name: `ello-${definition.name}`,
     model: resolveAgentModel(binding, deps),
     modelSettings: modelSettingsFromRole(binding),
-    instructions,
+    instructions: withToolRoutingInstructions(
+      instructions,
+      toolRuntime.usesToolRouting,
+    ),
     environment: sharedEnvironment(deps.environment),
-    tools,
+    executionTools: toolRuntime.executionTools,
+    modelTools: toolRuntime.modelTools,
     transcript: deps.session,
     eventRecorder: createCodingEventRecorder(
       deps.session.repository,
@@ -251,6 +283,23 @@ export function createSubagentAgent(input: {
       : { modelAdapter: deps.modelAdapter }),
     metadata: { agentName: definition.name },
   });
+}
+
+function assertToolCallSupport(binding: RuntimeRoleModel): void {
+  if (!binding.model.capabilities.toolCall) {
+    throw new Error(
+      `Agent model '${binding.ref}' does not support tool calls.`,
+    );
+  }
+}
+
+function withToolRoutingInstructions(
+  instructions: string,
+  usesToolRouting: boolean,
+): string {
+  return usesToolRouting
+    ? `${instructions}\n\n${TOOL_ROUTING_INSTRUCTIONS}`
+    : instructions;
 }
 
 function sharedEnvironment(environment: AgentEnvironment): AgentEnvironment {

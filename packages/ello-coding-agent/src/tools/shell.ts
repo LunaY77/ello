@@ -25,12 +25,18 @@ export function createShellTools(
       name: 'bash',
       description:
         'Run a shell command in the workspace with timeout and captured stdout/stderr.',
-      input: z.object({
-        command: z.string(),
-        timeoutMs: z.number().int().min(1000).max(120_000).default(30_000),
-        cwd: z.string().optional(),
-        reason: z.string().optional(),
-      }),
+      discovery: {
+        aliases: ['shell', 'terminal', 'command'],
+        risk: 'external',
+      },
+      input: z
+        .object({
+          command: z.string().min(1),
+          timeoutMs: z.number().int().min(1000).max(120_000).default(30_000),
+          cwd: z.string().optional(),
+          reason: z.string().optional(),
+        })
+        .strict(),
       approval: async (input, ctx) =>
         decide(
           {

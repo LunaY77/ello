@@ -29,6 +29,7 @@ export function adaptCodingTool<TInput>(
   return defineTool({
     name: tool.name,
     description: tool.description,
+    discovery: tool.discovery,
     input: tool.input,
     approval:
       tool.approval === undefined
@@ -80,6 +81,7 @@ function createContext(
     sessionId: readString(ctx.metadata.sessionId) ?? 'default',
     runId: ctx.runId,
     callId: readString(ctx.metadata.toolCallId) ?? ctx.runId,
+    abortSignal: ctx.signal,
     agent: ctx,
   };
 }

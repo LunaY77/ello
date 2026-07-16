@@ -1,6 +1,7 @@
 import type {
   AgentApprovalDecision,
   AgentToolContext,
+  AgentToolDiscovery,
   MaybePromise,
 } from '@ello/agent';
 import type { z } from 'zod';
@@ -73,6 +74,7 @@ export interface CodingToolContext {
 export interface DefineCodingToolOptions<TInput> {
   readonly name: string;
   readonly description: string;
+  readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<TInput>;
   execute(
     input: TInput,
@@ -89,6 +91,7 @@ export type CodingTool<TInput = unknown> = DefineCodingToolOptions<TInput>;
 export type AnyCodingTool = {
   readonly name: string;
   readonly description: string;
+  readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<unknown>;
   execute(
     input: unknown,

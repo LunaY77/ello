@@ -26,10 +26,13 @@ export interface ToolSchedulerOptions {
   readonly turnIndex: () => number;
   /** 本 run 可用的全部工具，按名建索引后供调度查找。 */
   readonly tools: readonly AnyAgentTool[];
+  /** 模型实际可以发起的名称；隐藏目标仍在 tools 中供代理调用。 */
+  readonly callableToolNames: ReadonlySet<string>;
   /** 工具运行所处的环境（文件系统、shell、资源等）。 */
   readonly environment: AgentEnvironment;
   /** 透传给工具上下文的元数据。 */
   readonly metadata: Record<string, unknown>;
+  readonly signal: AbortSignal;
 }
 
 /** 调度过程中的事件回调集合，由调用方提供以转发为运行事件。 */
@@ -101,7 +104,9 @@ export class ToolScheduler {
     const toolCalls: AgentToolCall[] = [];
     const pending: ToolScheduleResult['pending'] = [];
     for (const call of calls) {
-      const tool = this.byName.get(call.name);
+      const tool = this.options.callableToolNames.has(call.name)
+        ? this.byName.get(call.name)
+        : undefined;
       // 模型可能臆造出不存在的工具名：记为失败并回灌错误结果，而非直接抛出中断整批。
       if (tool === undefined) {
         const error = new Error(`Unknown tool: ${call.name}`);
@@ -195,7 +200,9 @@ export class ToolScheduler {
     call: AgentToolCall,
     sink: ToolSchedulerEventSink,
   ): Promise<AgentToolCall> {
-    const tool = this.byName.get(call.name);
+    const tool = this.options.callableToolNames.has(call.name)
+      ? this.byName.get(call.name)
+      : undefined;
     if (tool === undefined) {
       const error = new Error(`Unknown tool: ${call.name}`);
       await sink.onToolFailed(call.id, error);
@@ -225,6 +232,7 @@ export class ToolScheduler {
       toolCallId,
       environment: this.options.environment,
       metadata: { ...this.options.metadata },
+      signal: this.options.signal,
     };
   }
 }

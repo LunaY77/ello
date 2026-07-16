@@ -228,13 +228,18 @@ export class RunSession {
       state: this.state,
       trace: this.trace,
     };
-    this.tools = buildToolSet({ tools: this.config.tools ?? [] });
+    validateToolCollections(this.config.executionTools, this.config.modelTools);
+    this.tools = buildToolSet({ tools: this.config.modelTools });
     this.toolScheduler = new ToolScheduler({
       runId: this.runId,
       turnIndex: () => this.state.turn,
-      tools: this.config.tools ?? [],
+      tools: this.config.executionTools,
+      callableToolNames: new Set(
+        this.config.modelTools.map((tool) => tool.name),
+      ),
       environment: this.environment,
       metadata: this.metadata,
+      signal: this.signal,
     });
     this.events = new AgentEventDispatcher(this.config, this.stream, this.ctx);
     this.maxTurns = Math.max(1, this.options.maxTurns ?? 8);
@@ -515,6 +520,45 @@ export class RunSession {
     });
     this.stopReason = 'interrupted';
   }
+}
+
+function validateToolCollections(
+  executionTools: readonly { readonly name: string }[],
+  modelTools: readonly { readonly name: string }[],
+): void {
+  // modelTools 必须是 executionTools 的子集，保证模型看见的名称都可由调度器处理。
+  if (executionTools.length === 0 || modelTools.length === 0) {
+    throw new Error('executionTools and modelTools must both be non-empty.');
+  }
+  const executionNames = validateUniqueToolNames(
+    executionTools,
+    'executionTools',
+  );
+  validateUniqueToolNames(modelTools, 'modelTools');
+  for (const tool of modelTools) {
+    if (!executionNames.has(tool.name)) {
+      throw new Error(
+        `Model tool '${tool.name}' is not registered in executionTools.`,
+      );
+    }
+  }
+}
+
+function validateUniqueToolNames(
+  tools: readonly { readonly name: string }[],
+  collection: string,
+): Set<string> {
+  const names = new Set<string>();
+  for (const tool of tools) {
+    if (tool.name.trim() === '') {
+      throw new Error(`${collection} contains an empty tool name.`);
+    }
+    if (names.has(tool.name)) {
+      throw new Error(`Duplicate tool '${tool.name}' in ${collection}.`);
+    }
+    names.add(tool.name);
+  }
+  return names;
 }
 
 /** 默认模型适配器：基于 AI SDK 的实现。 */

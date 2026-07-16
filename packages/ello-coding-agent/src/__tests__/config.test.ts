@@ -240,8 +240,11 @@ describe('loadCodingAgentConfig', () => {
       approvalMode: 'plan',
       tui: false,
       tools: {
-        disabled: ['web_fetch'],
-        needApproval: ['bash'],
+        routing_enabled: false,
+        search: {
+          result_limit: 4,
+          max_result_bytes: 12000,
+        },
       },
     });
 
@@ -250,8 +253,22 @@ describe('loadCodingAgentConfig', () => {
     expect(config.approvalMode).toBe('plan');
     expect(config.tui).toBe(false);
     expect(config.tools).toEqual({
-      disabled: ['web_fetch'],
-      needApproval: ['bash'],
+      routing_enabled: false,
+      search: {
+        result_limit: 4,
+        max_result_bytes: 12000,
+      },
+    });
+  });
+
+  it('tools 未配置时使用完整默认值', async () => {
+    await writeGlobalText(['active_profile: main', '']);
+
+    const config = await loadCodingAgentConfig({ cwd });
+
+    expect(config.tools).toEqual({
+      routing_enabled: true,
+      search: { result_limit: 6, max_result_bytes: 24000 },
     });
   });
 

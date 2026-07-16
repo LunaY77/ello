@@ -3,8 +3,9 @@ import { z } from 'zod';
 
 import type { GoalService } from './service.js';
 
-export const UPDATE_GOAL_DESCRIPTION = `Update the existing goal.
-Use this tool only to mark the goal achieved or genuinely blocked.
+export const UPDATE_GOAL_DESCRIPTION = `Update the active session goal.
+Use this tool only when the current run includes an active ello goal controller. Never use it for an ordinary user request or merely because a task is complete.
+Use it only to mark the active goal achieved or genuinely blocked.
 Producing a final answer does not update the host goal state. If the objective is achieved, you must call this tool with status \`complete\` before returning the final answer.
 Set status to \`complete\` only when the objective has actually been achieved and no required work remains.
 Set status to \`blocked\` only when the same blocking condition has repeated for at least three consecutive goal turns, counting the original/user-triggered turn and any automatic continuations, and the agent cannot make meaningful progress without user input or an external-state change.
@@ -21,6 +22,7 @@ export function createGoalTools(service: GoalService): AnyAgentTool[] {
       name: 'get_goal',
       description:
         'Get the current session goal, including status, usage, blocker audit, and remaining host limits.',
+      discovery: { aliases: ['goal status'], risk: 'readonly' },
       input: z.object({}).strict(),
       execute: () => {
         const status = service.status();
@@ -33,6 +35,10 @@ export function createGoalTools(service: GoalService): AnyAgentTool[] {
     defineTool({
       name: 'update_goal',
       description: UPDATE_GOAL_DESCRIPTION,
+      discovery: {
+        aliases: ['complete goal', 'block goal'],
+        risk: 'workspace-write',
+      },
       input: z
         .object({
           status: z.enum(['complete', 'blocked']),

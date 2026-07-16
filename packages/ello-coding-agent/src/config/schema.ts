@@ -135,11 +135,40 @@ export const ProfileSuiteSchema = z.object({
     .default({}),
 });
 
-/** 工具注册与审批偏好配置，实际消费点在 tools/index.ts 与 permission/policy.ts。 */
-export const ToolConfigSchema = z.object({
-  needApproval: z.array(z.string()).default([]),
-  disabled: z.array(z.string()).default([]),
-});
+const DEFAULT_TOOL_SEARCH_CONFIG = {
+  result_limit: 6,
+  max_result_bytes: 24_000,
+};
+
+const DEFAULT_TOOL_CONFIG = {
+  routing_enabled: true,
+  search: DEFAULT_TOOL_SEARCH_CONFIG,
+};
+
+/** tool_search 的单次结果数量与总字节限制。 */
+export const ToolSearchConfigSchema = z
+  .object({
+    result_limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(8)
+      .default(DEFAULT_TOOL_SEARCH_CONFIG.result_limit),
+    max_result_bytes: z
+      .number()
+      .int()
+      .positive()
+      .default(DEFAULT_TOOL_SEARCH_CONFIG.max_result_bytes),
+  })
+  .strict();
+
+export const ToolConfigSchema = z
+  .object({
+    /** 是否只向模型暴露 tool_search/call_tool，并通过它们发现和调用真实工具。 */
+    routing_enabled: z.boolean().default(DEFAULT_TOOL_CONFIG.routing_enabled),
+    search: ToolSearchConfigSchema.default(DEFAULT_TOOL_SEARCH_CONFIG),
+  })
+  .strict();
 
 /** 工具长输出策略：模型拿 preview，完整内容写入 session artifact。 */
 export const ToolOutputConfigSchema = z.object({
@@ -297,7 +326,7 @@ export const CodingAgentConfigSchema = z.object({
   profile: z.record(z.string(), ProfileSuiteSchema).default({}),
   projects: z.record(z.string(), ProjectTrustSchema).default({}),
   workspace: WorkspaceConfigSchema.default({ mount: '~/.ello' }),
-  tools: ToolConfigSchema.default({ needApproval: [], disabled: [] }),
+  tools: ToolConfigSchema.default(DEFAULT_TOOL_CONFIG),
   tool_output: ToolOutputConfigSchema.default({
     max_bytes: 12_000,
     max_lines: 400,

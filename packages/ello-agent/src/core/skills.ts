@@ -69,19 +69,22 @@ export function createSkillTools(options: {
   const list = defineTool({
     name: 'skill_list',
     description: 'List available skills without loading full references.',
-    input: z.object({}),
+    discovery: { aliases: ['skills'], risk: 'readonly' },
+    input: z.object({}).strict(),
     execute: () => options.skills.map(skillSummary),
   });
   const get = defineTool({
     name: 'skill_get',
     description: 'Read one skill definition and metadata.',
-    input: z.object({ name: z.string() }),
+    discovery: { aliases: ['read skill'], risk: 'readonly' },
+    input: z.object({ name: z.string() }).strict(),
     execute: ({ name }) => requireSkill(options.skills, name),
   });
   const search = defineTool({
     name: 'skill_search',
     description: 'Search skills by name, description, and whenToUse.',
-    input: z.object({ query: z.string() }),
+    discovery: { aliases: ['find skill'], risk: 'readonly' },
+    input: z.object({ query: z.string().trim().min(1) }).strict(),
     execute: ({ query }) => {
       const normalized = query.toLowerCase();
       return options.skills
@@ -97,7 +100,8 @@ export function createSkillTools(options: {
   const invoke = defineTool({
     name: 'skill_invoke',
     description: 'Invoke a skill inline or report fork invocation metadata.',
-    input: z.object({ name: z.string(), args: z.string().optional() }),
+    discovery: { aliases: ['use skill'], risk: 'workspace-write' },
+    input: z.object({ name: z.string(), args: z.string().optional() }).strict(),
     execute: ({ name, args }) => {
       const skill = requireSkill(options.skills, name);
       active.add(name);
@@ -120,7 +124,8 @@ export function createSkillTools(options: {
   const activate = defineTool({
     name: 'skill_activate',
     description: 'Activate a named skill for later turns.',
-    input: z.object({ name: z.string() }),
+    discovery: { aliases: ['enable skill'], risk: 'workspace-write' },
+    input: z.object({ name: z.string() }).strict(),
     execute: ({ name }) => {
       requireSkill(options.skills, name);
       active.add(name);
@@ -130,7 +135,8 @@ export function createSkillTools(options: {
   const deactivate = defineTool({
     name: 'skill_deactivate',
     description: 'Deactivate a named skill for later turns.',
-    input: z.object({ name: z.string() }),
+    discovery: { aliases: ['disable skill'], risk: 'workspace-write' },
+    input: z.object({ name: z.string() }).strict(),
     execute: ({ name }) => {
       active.delete(name);
       return { deactivated: name };

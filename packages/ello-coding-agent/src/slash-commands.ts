@@ -1,5 +1,4 @@
 import type { ApprovalMode, CodingAgentConfig } from './config/index.js';
-import { describeCodingTools } from './tools/index.js';
 
 /** slash command 的运行上下文。 */
 export interface CommandContext {
@@ -182,8 +181,12 @@ export const slashCommands: readonly SlashCommand[] = [
   },
   {
     name: 'tools',
-    description: 'List default tools',
-    run: () => ({ type: 'message', message: describeCodingTools() }),
+    description: 'Explain tool discovery',
+    run: () => ({
+      type: 'message',
+      message:
+        'Use tool_search to discover the current agent tools and their schemas.',
+    }),
   },
   {
     name: 'permissions',

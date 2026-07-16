@@ -32,7 +32,6 @@ export function makeApprovalPolicy(
     assertDescriptor(descriptor);
     const rules: PermissionRule[] = [
       ...defaultRulesetForMode(config.approvalMode),
-      ...config.tools.needApproval.map(toolNeedApprovalRule),
       ...config.permissionRules,
       ...dynamicRules(),
     ];
@@ -98,6 +97,7 @@ export interface ApprovalPolicyMetadata {
   readonly always: readonly string[];
   readonly externalDirs?: readonly string[];
   readonly request: PermissionMetadata;
+  readonly proxiedTool?: string;
 }
 
 /** required/denied 的 metadata 是后续 TUI 展示和 RulesStore 落盘的协议。 */
@@ -135,25 +135,13 @@ function assertDescriptor(descriptor: PermissionDescriptor): void {
   }
 }
 
-/** tools.needApproval 作为显式 ask 规则进入同一套 last-match 引擎。 */
-function toolNeedApprovalRule(toolName: string): PermissionRule {
-  return {
-    permission: derivePermission(toolName),
-    pattern: toolName,
-    action: 'ask',
-    scope: 'user',
-    source: 'tools.needApproval',
-  };
-}
-
 /** 工具名到权限类别的产品层映射。 */
 function derivePermission(toolName: string): string {
-  if (toolName === 'read' || toolName === 'ls') return 'read';
+  if (toolName === 'read') return 'read';
   if (toolName === 'grep' || toolName === 'glob') return 'search';
   if (toolName === 'write' || toolName === 'edit' || toolName === 'apply_patch')
     return 'edit';
   if (toolName === 'bash') return 'bash';
-  if (toolName === 'web_fetch') return 'web_fetch';
   if (toolName.startsWith('task_')) return 'task';
   return toolName;
 }

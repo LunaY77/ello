@@ -72,6 +72,10 @@ import {
 } from '../observability/langfuse-runtime.js';
 import { createCodingObserver } from '../observability/observer.js';
 import { isPathInside, resolveAbsolute } from '../permission/engine.js';
+import {
+  genericApprovalFor,
+  makeApprovalPolicy,
+} from '../permission/policy.js';
 import { RulesStore } from '../permission/rules-store.js';
 import {
   createProviderRegistry,
@@ -89,7 +93,15 @@ import type {
 import { loadCodingSkills } from '../skills/index.js';
 import { createCodingStorage, type CodingStorage } from '../storage/index.js';
 import { createTaskService, type Task } from '../tasks/index.js';
+import {
+  projectApprovalItem,
+  projectToolEvent,
+} from '../tools/event-projection.js';
 import { createCodingTools } from '../tools/index.js';
+import {
+  createMetaToolRuntime,
+  TOOL_ROUTING_INSTRUCTIONS,
+} from '../tools/meta-tools.js';
 import { createBootProfile } from '../utils/boot-profile.js';
 
 import {
@@ -463,6 +475,8 @@ class CodingSessionImpl implements CodingSession {
   private currentStream: AgentStream | undefined;
   private pendingRunMetadata: Record<string, unknown> | undefined;
   private continuationTask: Promise<void> | undefined;
+  /** goal active 状态变化后延迟重建，避免当前工具调用关闭自己的 runtime。 */
+  private runtimeInvalidated = false;
   private closing = false;
   private readonly goalService: GoalService;
   private config: CodingAgentConfig;
@@ -493,8 +507,16 @@ class CodingSessionImpl implements CodingSession {
         sessionId: () => this.sessionId,
       }),
       maxContinuations: config.goal.max_continuations,
-      onChanged: (goal, previous) => this.emitGoalChanged(goal, previous),
-      onCleared: (goalId) => this.emit({ type: 'goal.cleared', goalId }),
+      onChanged: (goal, previous) => {
+        this.emitGoalChanged(goal, previous);
+        if (isActiveGoal(previous) !== isActiveGoal(goal)) {
+          this.runtimeInvalidated = true;
+        }
+      },
+      onCleared: (goalId) => {
+        this.runtimeInvalidated = true;
+        this.emit({ type: 'goal.cleared', goalId });
+      },
     });
     this.deps.backgroundJobs.onSettled((job) =>
       this.injectBackgroundResult(job),
@@ -633,6 +655,7 @@ class CodingSessionImpl implements CodingSession {
       }
     } finally {
       this.currentStream = undefined;
+      await this.closeInvalidatedRuntime();
     }
     if (completed !== undefined) {
       this.scheduleGoalContinuation(completed);
@@ -649,7 +672,11 @@ class CodingSessionImpl implements CodingSession {
     objective: string,
     tokenBudget?: number,
   ): Promise<GoalState> {
+    if (this.currentStream !== undefined) {
+      throw new Error('Cannot create a goal while another run is active.');
+    }
     const goal = await this.goalService.create(objective, tokenBudget);
+    await this.closeInvalidatedRuntime();
     await this.submit(goal.objective, {
       goalId: goal.id,
       goalInitial: true,
@@ -664,12 +691,14 @@ class CodingSessionImpl implements CodingSession {
   async pauseGoal(): Promise<GoalState> {
     const goal = await this.goalService.pause();
     this.currentStream?.abort('goal paused by user');
+    await this.closeInvalidatedRuntime();
     this.notify(`Goal paused: ${goal.objective}`);
     return goal;
   }
 
   async resumeGoal(): Promise<GoalState> {
     const goal = await this.goalService.resume();
+    await this.closeInvalidatedRuntime();
     this.notify(`Goal resumed: ${goal.objective}`);
     this.scheduleGoalContinuation();
     return goal;
@@ -678,6 +707,7 @@ class CodingSessionImpl implements CodingSession {
   async clearGoal(): Promise<string> {
     this.currentStream?.abort('goal cleared by user');
     const goalId = await this.goalService.clear();
+    await this.closeInvalidatedRuntime();
     this.notify(`Goal cleared: ${goalId}`);
     return goalId;
   }
@@ -1066,11 +1096,11 @@ class CodingSessionImpl implements CodingSession {
   private async forward(event: AgentStreamEvent): Promise<void> {
     if (event.type === 'approval.required') {
       this.approvalItems.set(event.item.toolCallId, event.item);
-      this.emit(event);
+      this.emit(projectToolEvent(event));
       this.emitPendingApproval(event.item);
       return;
     }
-    this.emit(event);
+    this.emit(projectToolEvent(event));
   }
 
   private pendingApprovalCount(): number {
@@ -1084,12 +1114,15 @@ class CodingSessionImpl implements CodingSession {
   }
 
   private emitPendingApproval(item: DeferredApprovalItem): void {
+    const projected = projectApprovalItem(item);
     this.emit({
       type: 'approval.pending',
       requestId: item.toolCallId,
-      toolName: item.toolName,
-      input: item.input,
-      ...(item.metadata !== undefined ? { metadata: item.metadata } : {}),
+      toolName: projected.toolName,
+      input: projected.input,
+      ...(projected.metadata !== undefined
+        ? { metadata: projected.metadata }
+        : {}),
     });
   }
 
@@ -1127,6 +1160,7 @@ class CodingSessionImpl implements CodingSession {
       return result;
     } finally {
       this.currentStream = undefined;
+      await this.closeInvalidatedRuntime();
     }
   }
 
@@ -1386,6 +1420,14 @@ class CodingSessionImpl implements CodingSession {
     if (runtime !== undefined) {
       await runtime.agent.close();
     }
+    this.runtimeInvalidated = false;
+  }
+
+  private async closeInvalidatedRuntime(): Promise<void> {
+    if (!this.runtimeInvalidated || this.currentStream !== undefined) {
+      return;
+    }
+    await this.closeAgentRuntime();
   }
 
   /** 后台 subagent 结束时把结果作为 parent 输入注入。 */
@@ -1426,6 +1468,11 @@ class CodingSessionImpl implements CodingSession {
     }
     this.primaryRole = this.resolveRuntimeRole(agentDef.role);
     const primaryRole = this.primaryRole;
+    if (!primaryRole.model.capabilities.toolCall) {
+      throw new Error(
+        `Coding agent model '${primaryRole.ref}' does not support tool calls.`,
+      );
+    }
     const config: CodingAgentConfig = {
       ...this.config,
       ...(agentDef.approvalMode !== undefined
@@ -1446,6 +1493,9 @@ class CodingSessionImpl implements CodingSession {
     };
     const contentReplacementTransform = (messages: readonly AgentMessage[]) =>
       this.deps.sessionStore.applyContentReplacements(this.sessionId, messages);
+    const decide = makeApprovalPolicy(config, () =>
+      this.deps.rulesStore.rules(),
+    );
 
     const memory = this.deps.memory;
     const memoryTools =
@@ -1453,6 +1503,7 @@ class CodingSessionImpl implements CodingSession {
         ? []
         : createMemoryTools({
             port: memory,
+            approval: genericApprovalFor(decide),
             onMutation: (mutation) => {
               memory.reload();
               this.emit({
@@ -1463,17 +1514,20 @@ class CodingSessionImpl implements CodingSession {
               });
             },
           });
-    const tools = [
-      ...createCodingTools({
-        config,
-        storage: this.deps.storage,
-        taskBoardScope: { type: 'session', sessionId: this.sessionId },
-        rules: () => this.deps.rulesStore.rules(),
-      }),
+    const codingTools = createCodingTools({
+      config,
+      storage: this.deps.storage,
+      taskBoardScope: { type: 'session', sessionId: this.sessionId },
+      rules: () => this.deps.rulesStore.rules(),
+      decide,
+    });
+    const selectedTools = [
+      ...selectToolsForAgent(codingTools, agentDef.tools),
       ...memoryTools,
     ];
-    const selectedTools = selectToolsForAgent(tools, agentDef.tools);
-    const goalTools = createGoalTools(this.goalService);
+    // goal 工具只在 active 状态加入候选集合；超过直连上限后通过 tool_search/call_tool 暴露。
+    const goalActive = this.goalService.active() !== null;
+    const goalTools = goalActive ? createGoalTools(this.goalService) : [];
     const skillTools = createSkillTools({
       skills: runtime.skills,
       active: this.activeSkills,
@@ -1492,7 +1546,11 @@ class CodingSessionImpl implements CodingSession {
         : {}),
       hooks: {
         onEvent: (runId, event) =>
-          this.emit({ type: 'subagent.event', runId, event }),
+          this.emit({
+            type: 'subagent.event',
+            runId,
+            event: projectToolEvent(event),
+          }),
         onStarted: (info) => this.emit({ type: 'subagent.started', ...info }),
         onCompleted: (info) =>
           this.emit({ type: 'subagent.completed', ...info }),
@@ -1502,6 +1560,13 @@ class CodingSessionImpl implements CodingSession {
         ? { modelAdapter: this.deps.modelAdapter }
         : {}),
     });
+    const targetTools = [
+      ...selectedTools,
+      ...goalTools,
+      ...skillTools,
+      delegateTool,
+    ];
+    const toolRuntime = createMetaToolRuntime(targetTools, config.tools);
 
     const sections = [
       skillIndexContext({
@@ -1516,6 +1581,9 @@ class CodingSessionImpl implements CodingSession {
           ? { memoryIndexLoader: this.deps.memory.indexLoader }
           : {}),
       }),
+      ...(toolRuntime.usesToolRouting
+        ? [dynamicSystemSection(() => TOOL_ROUTING_INSTRUCTIONS)]
+        : []),
       dynamicSystemSection(
         activeSkillsContext({
           skills: runtime.skills,
@@ -1523,7 +1591,9 @@ class CodingSessionImpl implements CodingSession {
           activation: 'activated',
         }),
       ),
-      dynamicSystemSection(createGoalSystemSection(this.goalService)),
+      ...(goalActive
+        ? [dynamicSystemSection(createGoalSystemSection(this.goalService))]
+        : []),
     ];
 
     return createAgent({
@@ -1538,7 +1608,8 @@ class CodingSessionImpl implements CodingSession {
         () => this.deps.rulesStore.rules(),
         () => [...this.sessionExternalPaths],
       ),
-      tools: [...selectedTools, ...goalTools, ...skillTools, delegateTool],
+      executionTools: toolRuntime.executionTools,
+      modelTools: toolRuntime.modelTools,
       transcript: this.deps.sessionStore,
       eventRecorder: createCodingEventRecorder(
         this.deps.sessionStore.repository,
@@ -1823,6 +1894,10 @@ function selectToolsForAgent(
   }
   const selected = new Set(whitelist);
   return tools.filter((tool) => selected.has(tool.name));
+}
+
+function isActiveGoal(goal: GoalState | null): boolean {
+  return goal?.status === 'active';
 }
 
 /**

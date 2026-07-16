@@ -6,7 +6,6 @@ role: small
 max-turns: 12
 tools:
   - read
-  - ls
   - grep
   - glob
 ---

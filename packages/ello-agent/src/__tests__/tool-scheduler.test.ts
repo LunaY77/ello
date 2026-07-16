@@ -8,7 +8,11 @@ describe('ToolScheduler', () => {
     const tool = defineTool({
       name: 'apply_patch',
       description: 'Apply a patch',
-      input: z.object({ patch: z.string() }),
+      discovery: {
+        aliases: ['patch'],
+        risk: 'workspace-write',
+      },
+      input: z.object({ patch: z.string() }).strict(),
       approval: () => {
         throw new Error('Patch file name is missing.');
       },
@@ -19,8 +23,10 @@ describe('ToolScheduler', () => {
       runId: 'run-1',
       turnIndex: () => 0,
       tools: [tool],
+      callableToolNames: new Set([tool.name]),
       environment: {},
       metadata: {},
+      signal: new AbortController().signal,
     });
 
     const result = await scheduler.schedule(

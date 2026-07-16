@@ -1,5 +1,7 @@
 import type { AgentMessage } from '@ello/agent';
 
+import { logicalToolCall } from '../../tools/meta-tools.js';
+
 import type { HistoryEntry, ToolCallView } from './history-entry.js';
 
 export function messagesToHistoryEntries(
@@ -114,7 +116,8 @@ function readToolCalls(message: AgentMessage): Array<{
     if (!Object.hasOwn(part, 'input')) {
       return [];
     }
-    return [{ id, name, input: part.input }];
+    const logical = logicalToolCall({ name, input: part.input });
+    return [{ id, name: logical.name, input: logical.input }];
   });
 }
 

@@ -78,7 +78,7 @@ export class RulesStore {
           pattern,
           action,
           scope: scopeToPermissionScope(scope),
-          source: `approval:${item.toolName}`,
+          source: `approval:${meta.proxiedTool ?? item.toolName}`,
         },
         scope,
       );
@@ -92,7 +92,7 @@ export class RulesStore {
             pattern: externalDir,
             action: 'allow',
             scope: scopeToPermissionScope(scope),
-            source: `approval:${item.toolName}`,
+            source: `approval:${meta.proxiedTool ?? item.toolName}`,
           },
           scope,
         );
@@ -162,7 +162,10 @@ function extractPolicyMetadata(
     );
   }
   const parsed = ApprovalPolicyMetadataSchema.parse(metadata);
-  return parsed;
+  if (item.toolName !== 'call_tool') {
+    return parsed;
+  }
+  return { ...parsed, proxiedTool: readString(metadata, 'proxiedTool') };
 }
 
 const ApprovalPolicyMetadataSchema = {
