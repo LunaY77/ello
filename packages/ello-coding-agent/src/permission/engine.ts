@@ -97,7 +97,6 @@ export function defaultRulesetForMode(mode: ApprovalMode): PermissionRule[] {
         rule('search', 'allow'),
         rule('edit', 'deny'),
         rule('bash', 'deny'),
-        rule('web_fetch', 'deny'),
         rule('external_directory', 'deny'),
         rule('task', 'ask'),
       ];
@@ -107,7 +106,6 @@ export function defaultRulesetForMode(mode: ApprovalMode): PermissionRule[] {
         rule('search', 'allow'),
         rule('edit', 'allow'),
         rule('bash', 'ask'),
-        rule('web_fetch', 'ask'),
         rule('external_directory', 'ask'),
         rule('task', 'ask'),
       ];
@@ -120,7 +118,6 @@ export function defaultRulesetForMode(mode: ApprovalMode): PermissionRule[] {
         rule('search', 'allow'),
         rule('edit', 'ask'),
         rule('bash', 'ask'),
-        rule('web_fetch', 'ask'),
         rule('external_directory', 'ask'),
         rule('task', 'ask'),
       ];

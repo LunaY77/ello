@@ -33,7 +33,7 @@ describe('permission-view kind resolution', () => {
     expect(buildPermissionView(request({ toolName: 'grep' })).kind).toBe(
       'search',
     );
-    expect(buildPermissionView(request({ toolName: 'web_fetch' })).kind).toBe(
+    expect(buildPermissionView(request({ toolName: 'fetch' })).kind).toBe(
       'network',
     );
     expect(buildPermissionView(request({ toolName: 'task-run' })).kind).toBe(

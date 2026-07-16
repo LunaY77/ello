@@ -73,6 +73,7 @@ function createDreamReadTools(
     defineTool({
       name: 'session_list_recent',
       description: 'List a bounded catalog of sessions updated recently.',
+      discovery: { aliases: ['recent sessions'], risk: 'readonly' },
       input: z
         .object({
           days: z.number().int().min(1).max(30),
@@ -94,6 +95,7 @@ function createDreamReadTools(
       name: 'session_search',
       description:
         'Search recent session messages using a required narrow query, date range, and result limit.',
+      discovery: { aliases: ['find session'], risk: 'readonly' },
       input: z
         .object({
           query: z.string().trim().min(2),
@@ -150,6 +152,7 @@ function createDreamReadTools(
       name: 'repo_current_read',
       description:
         'Read one current repository file to verify a specific remembered claim.',
+      discovery: { aliases: ['read repository'], risk: 'readonly' },
       input: z
         .object({
           path: z.string().min(1),
@@ -171,6 +174,7 @@ function createDreamReadTools(
       name: 'repo_current_search',
       description:
         'Search current repository files using a required glob and bounded result limit.',
+      discovery: { aliases: ['search repository'], risk: 'readonly' },
       input: z
         .object({
           query: z.string().trim().min(2),

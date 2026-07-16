@@ -11,14 +11,12 @@ import type { CodingStorage } from '../storage/index.js';
 import { createTaskService, type TaskBoardScope } from '../tasks/index.js';
 
 import { createFsTools } from './fs.js';
-import { formatToolRegistry } from './registry.js';
 import { adaptCodingTools } from './runtime/adapter.js';
 import { SessionToolOutputStore } from './runtime/output-store.js';
 import { createSearchTools } from './search.js';
 import type { ApprovalFor } from './shared.js';
 import { createShellTools } from './shell.js';
 import { createTaskTools } from './task.js';
-import { canFetch, webFetchTool } from './web.js';
 
 /**
  * coding 工具集装配。
@@ -39,7 +37,7 @@ export interface CreateCodingToolsOptions {
 /**
  * 创建 coding-agent 默认工具集。
  *
- * 按域拆分：fs / search / shell / task；`web_fetch` 仅在可联网时注册。
+ * 按域拆分：fs / search / shell / task。
  */
 export function createCodingTools(
   options: CreateCodingToolsOptions,
@@ -48,7 +46,6 @@ export function createCodingTools(
   const decide =
     options.decide ?? makeApprovalPolicy(config, options.rules ?? (() => []));
   const approval: ApprovalFor = genericApprovalFor(decide);
-  const disabled = new Set(config.tools.disabled);
   const outputStore = new SessionToolOutputStore(config.sessionDir);
   const tasks = createTaskService(
     options.storage.taskBoards,
@@ -59,18 +56,19 @@ export function createCodingTools(
     ...createFsTools(config, decide),
     ...createSearchTools(config, decide),
     ...createShellTools(config, decide),
-    ...(canFetch(config) ? [webFetchTool(config, decide)] : []),
   ];
 
   return [
     ...adaptCodingTools(codingTools, { config, outputStore }),
     ...createTaskTools(approval, tasks),
-  ].filter((tool) => !disabled.has(tool.name));
+  ];
 }
 
 /** 生成工具列表的 CLI 视图（`ello tools` 与 `/tools` 用）。 */
-export function describeCodingTools(): string {
-  return formatToolRegistry();
+export function describeCodingTools(tools: readonly AnyAgentTool[]): string {
+  return tools
+    .map((tool) => `${tool.name}\t${tool.description}\t${tool.discovery.risk}`)
+    .join('\n');
 }
 
 export type { ApprovalFor } from './shared.js';

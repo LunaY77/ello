@@ -178,7 +178,10 @@ export interface CreateAgentOptions<TContext = unknown> {
   readonly modelSettings?: Record<string, unknown>;
   readonly modelAdapter?: ModelAdapter;
   readonly environment?: AgentEnvironment;
-  readonly tools?: readonly AnyAgentTool[];
+  /** 完整执行注册表；超过直连上限时同时包含目标工具和路由工具。 */
+  readonly executionTools: readonly AnyAgentTool[];
+  /** 模型可见工具集；由产品层决定直接暴露或切换为 tool_search/call_tool。 */
+  readonly modelTools: readonly AnyAgentTool[];
   readonly transcript?: TranscriptStore;
   readonly observers?: readonly AgentObserver<TContext>[];
   readonly eventRecorder?: AgentEventRecorder<TContext>;

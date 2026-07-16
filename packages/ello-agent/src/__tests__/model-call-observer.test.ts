@@ -6,8 +6,32 @@ import type {
   AgentModelResponse,
   AgentStreamEvent,
   ModelAdapter,
+  AnyAgentTool,
+  CreateAgentOptions,
 } from '../index.js';
-import { createAgent, defineTool, z } from '../index.js';
+import { createAgent as createBaseAgent, defineTool, z } from '../index.js';
+
+const testTool = defineTool({
+  name: 'test_noop',
+  description: 'No-op tool for model observer tests.',
+  discovery: { aliases: ['noop'], risk: 'readonly' },
+  input: z.object({}).strict(),
+  execute: () => null,
+});
+
+function createAgent(
+  options: Omit<CreateAgentOptions, 'executionTools' | 'modelTools'> & {
+    readonly tools?: readonly AnyAgentTool[];
+  },
+) {
+  const { tools, ...rest } = options;
+  const selected = tools ?? [testTool as AnyAgentTool];
+  return createBaseAgent({
+    ...rest,
+    executionTools: selected,
+    modelTools: selected,
+  });
+}
 
 const usage = {
   requests: 1,

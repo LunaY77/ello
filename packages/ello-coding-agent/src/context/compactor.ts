@@ -10,6 +10,7 @@ import type {
   CompactionRef,
   CompactionSessionPort,
 } from '../session/repository.js';
+import { logicalToolCall, projectToolMessages } from '../tools/meta-tools.js';
 
 /**
  * 长会话上下文压缩器（投影模型）。
@@ -180,16 +181,18 @@ export function extractFileOps(messages: readonly AgentMessage[]): {
       if (!isToolCallPart(part)) {
         continue;
       }
-      const input = (part.input ?? part.args) as
-        | Record<string, unknown>
-        | undefined;
+      const logical = logicalToolCall({
+        name: part.toolName,
+        input: part.input ?? part.args,
+      });
+      const input = logical.input as Record<string, unknown> | undefined;
       const file = typeof input?.path === 'string' ? input.path : undefined;
       if (file === undefined) {
         continue;
       }
-      if (/^(write|edit|apply_patch|create)/u.test(part.toolName)) {
+      if (/^(write|edit|apply_patch|create)/u.test(logical.name)) {
         modifiedFiles.add(file);
-      } else if (/^(read|cat|open)/u.test(part.toolName)) {
+      } else if (/^(read|cat|open)/u.test(logical.name)) {
         readFiles.add(file);
       }
     }
@@ -280,7 +283,7 @@ export function serializeForCompact(
   } = {},
 ): AgentMessage[] {
   const maxChars = options.toolOutputMaxChars ?? 2000;
-  return messages.map((message) => {
+  return projectToolMessages(messages).map((message) => {
     if (message.role !== 'tool' || options.pruneToolOutput !== true) {
       return message;
     }

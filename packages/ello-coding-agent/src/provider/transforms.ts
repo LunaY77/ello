@@ -42,9 +42,6 @@ export function prepareModelInputForRuntimeModel(
   const transformed: ModelInput = {
     ...input,
     messages,
-    ...(model.capabilities.toolCall
-      ? {}
-      : { tools: {}, activeTools: [] as readonly string[] }),
   };
   const cacheSegments =
     transformed.system === undefined

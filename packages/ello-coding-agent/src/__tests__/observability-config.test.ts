@@ -24,4 +24,12 @@ describe('Langfuse observability config', () => {
       }),
     ).toThrow();
   });
+
+  it('rejects an invalid explicit routing switch', () => {
+    expect(() =>
+      CodingAgentConfigSchema.parse({
+        tools: { routing_enabled: 'yes' },
+      }),
+    ).toThrow('expected boolean');
+  });
 });

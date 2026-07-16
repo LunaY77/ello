@@ -136,12 +136,12 @@ profile:
 #     release: ello-ts-local
 #     content: metadata # metadata 或 full
 
-# 工具配置；disabled 表示完全不注册，needApproval 表示无论审批模式如何都要询问。
+# 工具路由与搜索配置。routing_enabled=true 时只暴露 tool_search/call_tool。
 # tools:
-#   disabled: []
-#   needApproval:
-#     - bash
-#     - web_fetch
+#   routing_enabled: true
+#   search:
+#     result_limit: 6
+#     max_result_bytes: 24000
 
 # 工具长输出策略；超过阈值时模型只收到 preview，完整内容写入 session artifact。
 # tool_output:

@@ -117,7 +117,8 @@ export function createDelegateTool(
   return defineTool({
     name: 'delegate_to_subagent',
     description,
-    input: DelegateInputSchema,
+    discovery: { aliases: ['delegate', 'subagent'], risk: 'external' },
+    input: DelegateInputSchema.strict(),
     approval: (input: DelegateInput, ctx) =>
       decide(
         {

@@ -189,9 +189,6 @@ function headline(
   if (kind === 'edit' || call.name === 'edit' || call.name === 'write') {
     return `Edited${path !== '' ? ` ${path}` : ''}${diffSummarySuffix(diff)}`;
   }
-  if (call.name === 'ls') {
-    return `List${path !== '' ? ` ${path}` : ''}`;
-  }
   if (kind === 'read' || call.name === 'read') {
     return `Read${path !== '' ? ` ${path}` : ''}`;
   }
@@ -206,7 +203,7 @@ function headline(
       text(metadata?.command) || inputString(call.input, 'command');
     return command !== '' ? `Ran ${command}` : `Ran ${formatName(call.name)}`;
   }
-  if (kind === 'network' || call.name === 'web_fetch') {
+  if (kind === 'network') {
     return `Fetched ${text(metadata?.url) || inputString(call.input, 'url')}`;
   }
   if (kind === 'task' || call.name === 'delegate_to_subagent') {

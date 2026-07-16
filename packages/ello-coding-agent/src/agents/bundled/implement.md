@@ -6,7 +6,6 @@ role: primary
 max-turns: 20
 tools:
   - read
-  - ls
   - grep
   - glob
   - write

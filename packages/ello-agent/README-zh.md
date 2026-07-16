@@ -27,6 +27,14 @@ import {
   z,
 } from '@ello/agent';
 
+const echo = defineTool({
+  name: 'echo',
+  description: '返回文本',
+  discovery: { aliases: ['重复文本'], risk: 'readonly' },
+  input: z.object({ text: z.string() }).strict(),
+  execute: ({ text }) => text,
+});
+
 const agent = createAgent({
   model: 'openai:gpt-4.1-mini',
   instructions: '请简洁回答。',
@@ -34,14 +42,8 @@ const agent = createAgent({
     cwd: process.cwd(),
     allowedPaths: [process.cwd()],
   }),
-  tools: [
-    defineTool({
-      name: 'echo',
-      description: '返回文本',
-      input: z.object({ text: z.string() }),
-      execute: ({ text }) => text,
-    }),
-  ],
+  executionTools: [echo],
+  modelTools: [echo],
 });
 
 const result = await agent.run('你好');

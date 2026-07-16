@@ -4,6 +4,14 @@ import type { AgentError } from './agent.js';
 import type { AgentEnvironment } from './environment.js';
 import type { MaybePromise } from './model.js';
 
+export type ToolRisk = 'readonly' | 'workspace-write' | 'external';
+
+/** 供 tool_search 和权限/展示层使用的发现元数据。 */
+export interface AgentToolDiscovery {
+  readonly aliases: readonly string[];
+  readonly risk: ToolRisk;
+}
+
 export interface AgentApprovalRequest {
   readonly id: string;
   readonly toolCallId: string;
@@ -29,6 +37,8 @@ export type AgentApprovalPolicy<TInput = unknown> = (
 export interface AgentTool<TInput = unknown, TOutput = unknown> {
   readonly name: string;
   readonly description: string;
+  /** 工具发现信息必须随工具定义声明，不能由名称或独立 registry 推断。 */
+  readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<TInput>;
   execute(input: TInput, ctx: AgentToolContext): MaybePromise<TOutput>;
   approval?(
@@ -46,6 +56,7 @@ export interface AgentToolContext {
   readonly toolCallId: string;
   readonly environment: AgentEnvironment;
   readonly metadata: Record<string, unknown>;
+  readonly signal: AbortSignal;
 }
 
 export interface AgentToolCall {
@@ -86,6 +97,7 @@ export interface AgentSkill {
 export interface DefineToolOptions<TInput, TOutput> {
   readonly name: string;
   readonly description: string;
+  readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<TInput>;
   readonly execute: (
     input: TInput,
@@ -101,6 +113,7 @@ export function defineTool<TInput, TOutput>(
   return {
     name: options.name,
     description: options.description,
+    discovery: options.discovery,
     input: options.input,
     execute: options.execute,
     ...(options.approval !== undefined ? { approval: options.approval } : {}),
