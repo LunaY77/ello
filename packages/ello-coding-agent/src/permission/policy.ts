@@ -1,6 +1,7 @@
 import type { AgentApprovalDecision, AgentToolContext } from '@ello/agent';
 
 import type { CodingAgentConfig } from '../config/index.js';
+import type { SessionModeState } from '../runtime/session-mode.js';
 
 import {
   defaultRulesetForMode,
@@ -27,21 +28,36 @@ export type DecideApproval = (
 export function makeApprovalPolicy(
   config: CodingAgentConfig,
   dynamicRules: () => readonly PermissionRule[],
+  mode: () => SessionModeState,
 ): DecideApproval {
   return (descriptor: PermissionDescriptor): AgentApprovalDecision => {
     assertDescriptor(descriptor);
+    const currentMode = mode().mode;
+    // Plan 规则是安全边界而非默认偏好，因此不能被配置或历史审批规则覆盖。
     const rules: PermissionRule[] = [
-      ...defaultRulesetForMode(config.approvalMode),
-      ...config.tools.needApproval.map(toolNeedApprovalRule),
-      ...config.permissionRules,
-      ...dynamicRules(),
+      ...defaultRulesetForMode(currentMode),
+      ...(currentMode === 'plan'
+        ? []
+        : [
+            ...config.permissionRules,
+            ...dynamicRules(),
+            ...config.tools.needApproval.map(toolNeedApprovalRule),
+          ]),
     ];
 
     let needsApproval = false;
+    // 先判断工具自身声明；任一 pattern 被拒绝即可短路整次调用。
     for (const pattern of descriptor.patterns) {
       const action = evaluatePermission(rules, descriptor.permission, pattern);
       if (action === 'deny') {
-        return buildDecision('denied', descriptor);
+        return buildDecision(
+          'denied',
+          descriptor,
+          [],
+          currentMode === 'plan'
+            ? `Denied by Plan mode: ${descriptor.permission}`
+            : undefined,
+        );
       }
       if (action === 'ask') {
         needsApproval = true;
@@ -49,6 +65,7 @@ export function makeApprovalPolicy(
     }
 
     const externalDirs = externalPaths(config.cwd, descriptor.paths ?? []);
+    // 路径越界是独立权限维度，即使 read/edit 本身允许也必须再次检查。
     for (const externalDir of externalDirs) {
       const action = evaluatePermission(
         rules,
@@ -56,7 +73,14 @@ export function makeApprovalPolicy(
         externalDir,
       );
       if (action === 'deny') {
-        return buildDecision('denied', descriptor, externalDirs);
+        return buildDecision(
+          'denied',
+          descriptor,
+          externalDirs,
+          currentMode === 'plan'
+            ? 'Denied by Plan mode: external_directory'
+            : undefined,
+        );
       }
       if (action === 'ask') {
         needsApproval = true;
@@ -98,6 +122,8 @@ export interface ApprovalPolicyMetadata {
   readonly always: readonly string[];
   readonly externalDirs?: readonly string[];
   readonly request: PermissionMetadata;
+  readonly proxiedTool?: string;
+  readonly reason?: string;
 }
 
 /** required/denied 的 metadata 是后续 TUI 展示和 RulesStore 落盘的协议。 */
@@ -105,6 +131,7 @@ function buildDecision(
   action: 'required' | 'denied',
   descriptor: PermissionDescriptor,
   externalDirs: readonly string[] = [],
+  reason?: string,
 ): AgentApprovalDecision {
   return {
     action,
@@ -113,6 +140,7 @@ function buildDecision(
       patterns: descriptor.patterns,
       always: descriptor.always,
       ...(externalDirs.length > 0 ? { externalDirs } : {}),
+      ...(reason !== undefined ? { reason } : {}),
       request: descriptor.metadata,
     } satisfies ApprovalPolicyMetadata as unknown as Record<string, unknown>,
   };
@@ -135,11 +163,11 @@ function assertDescriptor(descriptor: PermissionDescriptor): void {
   }
 }
 
-/** tools.needApproval 作为显式 ask 规则进入同一套 last-match 引擎。 */
+/** tools.needApproval 在运行期规则之后追加，保证非 Plan 模式下始终询问。 */
 function toolNeedApprovalRule(toolName: string): PermissionRule {
   return {
     permission: derivePermission(toolName),
-    pattern: toolName,
+    pattern: '**',
     action: 'ask',
     scope: 'user',
     source: 'tools.needApproval',

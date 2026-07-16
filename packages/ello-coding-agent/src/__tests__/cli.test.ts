@@ -76,6 +76,16 @@ describe('cli buildProgram', () => {
       'repair',
       'tmux',
     ]);
+    const workspaceRepo = workspace.commands.find(
+      (command) => command.name() === 'repo',
+    )!;
+    const repoAdd = workspaceRepo.commands.find(
+      (command) => command.name() === 'add',
+    )!;
+    expect(repoAdd.options.map((option) => option.long)).toEqual([
+      '--workspace',
+      '--detached',
+    ]);
   });
 
   it('prints merged config as JSON with --json config get', async () => {

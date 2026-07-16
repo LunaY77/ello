@@ -80,7 +80,7 @@ function inferKindFromName(name: string): PermissionViewKind {
   if (name === 'grep' || name === 'glob' || name === 'search') {
     return 'search';
   }
-  if (name === 'fetch' || name === 'web' || name === 'web_fetch') {
+  if (name === 'fetch' || name === 'web') {
     return 'network';
   }
   if (name === 'delegate' || name.startsWith('task')) {

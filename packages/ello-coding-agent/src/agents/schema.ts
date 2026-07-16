@@ -3,10 +3,8 @@ import { z } from 'zod';
 import {
   AgentModeSchema,
   AgentRoleSchema,
-  ApprovalModeSchema,
   PermissionRuleSchema,
   type AgentConfigEntry,
-  type ApprovalMode,
   type PermissionRule,
 } from '../config/schema.js';
 import type { ModelRole } from '../provider/types.js';
@@ -45,8 +43,6 @@ export interface CodingAgentDefinition {
   readonly modelRef?: string;
   /** 工具名白名单；缺省时由 mode 决定默认（见 agent-runner）。 */
   readonly tools?: readonly string[];
-  /** 该 agent 的初始 approval 预设。 */
-  readonly approvalMode?: ApprovalMode;
   /** 静态 permission 规则（与派生规则、运行期规则合并）。 */
   readonly permission?: readonly PermissionRule[];
   readonly maxTurns?: number;
@@ -66,8 +62,6 @@ export const MarkdownAgentFrontmatterSchema = z
     tools: z.union([z.array(z.string()), z.string()]).optional(),
     'inherit-tools': z.boolean().optional(),
     inheritTools: z.boolean().optional(),
-    'approval-mode': ApprovalModeSchema.optional(),
-    approvalMode: ApprovalModeSchema.optional(),
     permission: z.array(PermissionRuleSchema).optional(),
     'max-turns': z.number().int().positive().optional(),
     maxTurns: z.number().int().positive().optional(),
@@ -116,9 +110,6 @@ export function agentDefinitionFromConfigEntry(
     ...(entry.prompt !== undefined ? { prompt: entry.prompt } : {}),
     ...(entry.model !== undefined ? { modelRef: entry.model } : {}),
     ...(entry.tools !== undefined ? { tools: entry.tools } : {}),
-    ...(entry.approval_mode !== undefined
-      ? { approvalMode: entry.approval_mode }
-      : {}),
     ...(entry.permission !== undefined ? { permission: entry.permission } : {}),
     ...(entry.max_turns !== undefined ? { maxTurns: entry.max_turns } : {}),
     ...(entry.color !== undefined ? { color: entry.color } : {}),
@@ -151,7 +142,6 @@ export function agentDefinitionFromMarkdown(input: {
     throw new Error('Markdown agent has conflicting inheritTools settings.');
   }
   const tools = normalizeToolNames(frontmatter.tools);
-  const approvalMode = frontmatter['approval-mode'] ?? frontmatter.approvalMode;
   const maxTurns = frontmatter['max-turns'] ?? frontmatter.maxTurns;
   const prompt = body.trim();
   const permission = frontmatter.permission;
@@ -164,7 +154,6 @@ export function agentDefinitionFromMarkdown(input: {
     source,
     ...(prompt !== '' ? { prompt } : {}),
     ...(inheritTools === true || tools === undefined ? {} : { tools }),
-    ...(approvalMode !== undefined ? { approvalMode } : {}),
     ...(permission !== undefined ? { permission } : {}),
     ...(maxTurns !== undefined ? { maxTurns } : {}),
     ...(typeof frontmatter['color'] === 'string'

@@ -20,7 +20,7 @@ describe('TerminalHistoryOutput', () => {
             cwd: '/tmp/ello-workspace',
             profile: 'main',
             model: 'openai-chat:test',
-            approvalMode: 'ask',
+            mode: 'ask',
           },
         ]}
       />,
@@ -31,7 +31,7 @@ describe('TerminalHistoryOutput', () => {
     expect(output).toContain('profile: main');
     expect(output).toContain('directory: /tmp/ello-workspace');
     expect(output).toContain('model: openai-chat:test');
-    expect(output).toContain('permissions: ask');
+    expect(output).toContain('mode: ask');
   });
 
   it('renders user, assistant and tool history outside AppShell', () => {
@@ -110,7 +110,12 @@ describe('AppShell', () => {
       <AppShell
         cwd="/workspace"
         profile="main"
-        approvalMode="bypass"
+        mode={{
+          mode: 'bypass',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-01-01T00:00:00.000Z',
+        }}
         liveAssistantText=""
         runningTools={[]}
         runningSubagents={[]}
@@ -123,7 +128,7 @@ describe('AppShell', () => {
 
     expect(output).not.toContain('Ello Coding Agent');
     expect(output).toContain('main');
-    expect(output).toContain('bypass');
+    expect(output).toContain('Bypass');
   });
 
   it('shows running status in the live viewport', () => {
@@ -131,7 +136,12 @@ describe('AppShell', () => {
       <AppShell
         cwd="/workspace"
         profile="main"
-        approvalMode="default"
+        mode={{
+          mode: 'default',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-01-01T00:00:00.000Z',
+        }}
         liveAssistantText="I am checking the parser"
         runningTools={[]}
         runningSubagents={[]}
@@ -152,7 +162,12 @@ describe('AppShell', () => {
       <AppShell
         cwd="/workspace"
         profile="main"
-        approvalMode="default"
+        mode={{
+          mode: 'default',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-01-01T00:00:00.000Z',
+        }}
         liveAssistantText={'\n\n   \n'}
         runningTools={[]}
         runningSubagents={[]}
@@ -173,7 +188,12 @@ describe('AppShell', () => {
       <AppShell
         cwd="/workspace"
         profile="main"
-        approvalMode="default"
+        mode={{
+          mode: 'default',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-01-01T00:00:00.000Z',
+        }}
         liveAssistantText=""
         runningTools={[]}
         runningSubagents={[]}
@@ -193,7 +213,12 @@ describe('AppShell', () => {
       <AppShell
         cwd="/workspace"
         profile="main"
-        approvalMode="default"
+        mode={{
+          mode: 'default',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-01-01T00:00:00.000Z',
+        }}
         liveAssistantText=""
         runningTools={[]}
         runningSubagents={[]}
@@ -214,7 +239,12 @@ describe('AppShell', () => {
       <AppShell
         cwd="/workspace"
         profile="main"
-        approvalMode="default"
+        mode={{
+          mode: 'default',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-01-01T00:00:00.000Z',
+        }}
         liveAssistantText=""
         runningTools={[]}
         runningSubagents={[
@@ -262,7 +292,12 @@ describe('AppShell', () => {
       <AppShell
         cwd="/workspace"
         profile="main"
-        approvalMode="default"
+        mode={{
+          mode: 'default',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-01-01T00:00:00.000Z',
+        }}
         liveAssistantText=""
         runningTools={[]}
         runningSubagents={[

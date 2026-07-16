@@ -24,6 +24,69 @@ import { JsonlSessionRepository } from '../session/repository.js';
 
 const dirs: string[] = [];
 
+function proxyAdapter(adapter: ModelAdapter): ModelAdapter {
+  return {
+    async generate(request) {
+      const response = await adapter.generate(request);
+      return Object.hasOwn(request.tools, 'call_tool')
+        ? proxyResponse(response)
+        : response;
+    },
+    async *stream(request) {
+      for await (const event of adapter.stream(request)) {
+        yield event.type === 'final' && Object.hasOwn(request.tools, 'call_tool')
+          ? { ...event, response: proxyResponse(event.response) }
+          : event;
+      }
+    },
+  };
+}
+
+function proxyResponse(response: AgentModelResponse): AgentModelResponse {
+  const proxyCall = (call: { id: string; name: string; input: unknown }) =>
+    call.name === 'tool_search' || call.name === 'call_tool'
+      ? call
+      : {
+          ...call,
+          name: 'call_tool',
+          input: { name: call.name, arguments: call.input },
+        };
+  const proxyMessage = (message: AgentModelResponse['messages'][number]) => {
+    if (message.role !== 'assistant' || !Array.isArray(message.content)) {
+      return message;
+    }
+    return {
+      ...message,
+      content: message.content.map((part) => {
+        if (
+          typeof part !== 'object' ||
+          part === null ||
+          part.type !== 'tool-call' ||
+          part.toolName === 'tool_search' ||
+          part.toolName === 'call_tool'
+        ) {
+          return part;
+        }
+        return {
+          ...part,
+          toolName: 'call_tool',
+          input: { name: part.toolName, arguments: part.input },
+        };
+      }),
+    } as typeof message;
+  };
+  return {
+    ...response,
+    messages: response.messages.map(proxyMessage),
+    ...(response.newMessages !== undefined
+      ? { newMessages: response.newMessages.map(proxyMessage) }
+      : {}),
+    ...(response.toolCalls !== undefined
+      ? { toolCalls: response.toolCalls.map(proxyCall) }
+      : {}),
+  };
+}
+
 afterEach(async () => {
   await Promise.all(
     dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
@@ -89,7 +152,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -131,7 +194,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const adapter: ModelAdapter = {
       generate: (request) => new TextAdapter('final only').generate(request),
@@ -144,7 +207,7 @@ describe('createCodingSession', () => {
     };
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
     const events: CodingSessionEvent[] = [];
     session.subscribe((event) => events.push(event));
@@ -159,7 +222,7 @@ describe('createCodingSession', () => {
     expect(completed).not.toHaveProperty('result');
   });
 
-  it('把 primary agent 的专属指令放入稳定 system 前缀', async () => {
+  it('把 Plan mode 指令放入稳定 system 前缀', async () => {
     const cwd = await tempDir();
     const sessionDir = await tempDir();
     const config = await loadCodingAgentConfig({ cwd, sessionDir });
@@ -175,15 +238,29 @@ describe('createCodingSession', () => {
     };
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
+    const events: CodingSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
 
-    await session.setAgent('plan');
-    await session.submit('inspect only');
+    await session.handlePlanCommand({
+      kind: 'with-input',
+      input: 'inspect only',
+    });
     await session.close();
 
+    expect(session.mode().mode).toBe('plan');
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'session.mode.changed',
+          state: expect.objectContaining({ mode: 'plan' }),
+        }),
+        { type: 'plan.input.submitted', prompt: 'inspect only' },
+      ]),
+    );
     expect(systems).toContainEqual(
-      expect.stringContaining('You are in plan mode'),
+      expect.stringContaining('<mode>plan</mode>'),
     );
   });
 
@@ -224,7 +301,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const seenModels: AgentModelRequest['model'][] = [];
     const adapter: ModelAdapter = {
@@ -245,7 +322,7 @@ describe('createCodingSession', () => {
     };
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
 
     expect(await session.setPrimaryModel('openai/gpt-5.4')).toBe(
@@ -263,7 +340,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -288,7 +365,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
 
     const target = path.join(cwd, 'note.txt');
@@ -346,7 +423,7 @@ describe('createCodingSession', () => {
 
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
     const pending: {
       requestId: string;
@@ -404,7 +481,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const targets = [1, 2, 3].map((index) =>
       path.join(cwd, `note-${index}.txt`),
@@ -462,7 +539,7 @@ describe('createCodingSession', () => {
     };
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
     const shownApprovals: string[] = [];
     session.subscribe((event) => {
@@ -511,7 +588,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
 
     let turn = 0;
@@ -567,7 +644,7 @@ describe('createCodingSession', () => {
 
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
     const pending: {
       requestId: string;
@@ -605,7 +682,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
 
     let turn = 0;
@@ -661,7 +738,7 @@ describe('createCodingSession', () => {
 
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
     const pending: {
       requestId: string;
@@ -696,7 +773,14 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'bypass',
+      initialMode: 'bypass',
+      bypassEnabled: true,
+      tools: {
+        disabled: [],
+        needApproval: [],
+        routing_enabled: true,
+        search: { result_limit: 6, max_result_bytes: 24_000 },
+      },
     });
 
     let parentTurns = 0;
@@ -704,7 +788,9 @@ describe('createCodingSession', () => {
     let parentFollowUpContent = '';
     const adapter: ModelAdapter = {
       async generate(request) {
-        const isParent = Object.hasOwn(request.tools, 'delegate_to_subagent');
+        const isParent = JSON.stringify(request.messages).includes(
+          'delegate it',
+        );
         if (!isParent) {
           return {
             text: 'sub done',
@@ -730,12 +816,15 @@ describe('createCodingSession', () => {
               {
                 type: 'tool-call',
                 toolCallId: 'delegate-1',
-                toolName: 'delegate_to_subagent',
+                toolName: 'call_tool',
                 input: {
-                  name: 'explore',
-                  description: 'check sidechain',
-                  prompt: 'return sub done',
-                  run_id: 'run-sidechain',
+                  name: 'delegate_to_subagent',
+                  arguments: {
+                    name: 'explore',
+                    description: 'check sidechain',
+                    prompt: 'return sub done',
+                    run_id: 'run-sidechain',
+                  },
                 },
               },
             ],
@@ -747,12 +836,15 @@ describe('createCodingSession', () => {
             toolCalls: [
               {
                 id: 'delegate-1',
-                name: 'delegate_to_subagent',
+                name: 'call_tool',
                 input: {
-                  name: 'explore',
-                  description: 'check sidechain',
-                  prompt: 'return sub done',
-                  run_id: 'run-sidechain',
+                  name: 'delegate_to_subagent',
+                  arguments: {
+                    name: 'explore',
+                    description: 'check sidechain',
+                    prompt: 'return sub done',
+                    run_id: 'run-sidechain',
+                  },
                 },
               },
             ],
@@ -781,7 +873,7 @@ describe('createCodingSession', () => {
 
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
     session.subscribe((event) => events.push(event.type));
 
@@ -814,7 +906,8 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'bypass',
+      initialMode: 'bypass',
+      bypassEnabled: true,
       agent: {
         main: {
           mode: 'primary',
@@ -826,6 +919,9 @@ describe('createCodingSession', () => {
     });
     const adapter: ModelAdapter = {
       async generate(request) {
+        if (!(request.system ?? '').includes('# Primary Agent Role')) {
+          return new TextAdapter('Loop session').generate(request);
+        }
         const toolCallMessage = {
           role: 'assistant' as const,
           content: [
@@ -860,7 +956,7 @@ describe('createCodingSession', () => {
 
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
     const result = await session.submit('loop');
     await session.close();
@@ -882,7 +978,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
       tool_output: {
         max_bytes: 20,
         max_lines: 3,
@@ -944,7 +1040,7 @@ describe('createCodingSession', () => {
     };
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
     const completed: Array<{ output: unknown }> = [];
     session.subscribe((event) => {
@@ -977,7 +1073,7 @@ describe('createCodingSession', () => {
     const baseConfig = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
       tool_output: {
         max_bytes: 1000,
         max_lines: 100,
@@ -1049,7 +1145,7 @@ describe('createCodingSession', () => {
     };
     const session = await createCodingSession({
       config,
-      modelAdapter: adapter,
+      modelAdapter: proxyAdapter(adapter),
     });
 
     await session.submit('read big file');
@@ -1065,7 +1161,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1095,7 +1191,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1131,7 +1227,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1162,7 +1258,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1187,7 +1283,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1228,6 +1324,7 @@ describe('createCodingSession', () => {
     await utimes(path.join(sessionDir, 'older.jsonl'), oldDate, oldDate);
     await utimes(path.join(sessionDir, 'newer.jsonl'), newDate, newDate);
     await utimes(path.join(sessionDir, 'empty.jsonl'), emptyDate, emptyDate);
+    await repository.rebuildCatalog();
 
     expect((await repository.list()).map((item) => item.sessionId)).toEqual([
       'newer',
@@ -1241,7 +1338,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1263,7 +1360,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,

@@ -5,6 +5,7 @@ import { CodingAgentConfigSchema } from '../config/schema.js';
 describe('Langfuse observability config', () => {
   it('allows disabled tracing without valid connection fields', () => {
     const config = CodingAgentConfigSchema.parse({
+      initialMode: 'default',
       observability: {
         langfuse: {
           enabled: false,
@@ -20,8 +21,17 @@ describe('Langfuse observability config', () => {
   it('requires complete Langfuse configuration only when enabled', () => {
     expect(() =>
       CodingAgentConfigSchema.parse({
+        initialMode: 'default',
         observability: { langfuse: { enabled: true } },
       }),
     ).toThrow();
+  });
+
+  it('rejects an invalid explicit routing switch', () => {
+    expect(() =>
+      CodingAgentConfigSchema.parse({
+        tools: { routing_enabled: 'yes' },
+      }),
+    ).toThrow('expected boolean');
   });
 });

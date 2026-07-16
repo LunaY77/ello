@@ -24,7 +24,7 @@ ello workspace archived [<kind/name>]
 ello workspace show [<kind/name>] [--id <workspace-id>]
 ello workspace path [<kind/name>] [--id <workspace-id>]
 ello workspace status [<kind/name>] [--id <workspace-id>]
-ello workspace repo add <repo...> [--workspace <kind/name>]
+ello workspace repo add <repo...> [--workspace <kind/name>] [--detached]
 ello workspace repo create <key> [--workspace <kind/name>]
 ello workspace repo remove <repo...> [--workspace <kind/name>] [--force]
 ello workspace rename <kind/name> <new-name>

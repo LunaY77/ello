@@ -40,7 +40,7 @@ describe('permission policy', () => {
   });
 
   it('falls back to ask when nothing matches', () => {
-    expect(evaluatePermission([], 'web_fetch', 'example.com')).toBe('ask');
+    expect(evaluatePermission([], 'external_api', 'example.com')).toBe('ask');
   });
 
   it('persists project approval rules as YAML using typed metadata', async () => {
@@ -49,10 +49,10 @@ describe('permission policy', () => {
     const item: DeferredApprovalItem = {
       kind: 'approval',
       toolCallId: 'call_1',
-      toolName: 'web_fetch',
+      toolName: 'external_api',
       input: { url: 'https://example.com/a' },
       metadata: {
-        permission: 'web_fetch',
+        permission: 'external_api',
         patterns: ['example.com'],
         always: ['example.com'],
         request: {
@@ -67,7 +67,7 @@ describe('permission policy', () => {
 
     const text = await readFile(projectPermissionsFile(cwd), 'utf8');
     expect(text).toContain('rules:');
-    expect(text).toContain('permission: web_fetch');
+    expect(text).toContain('permission: external_api');
     expect(text).toContain('pattern: example.com');
     expect(text).not.toContain('[');
 
@@ -76,7 +76,7 @@ describe('permission policy', () => {
     expect(reloaded.rules()).toEqual([
       expect.objectContaining({
         action: 'allow',
-        permission: 'web_fetch',
+        permission: 'external_api',
         pattern: 'example.com',
       }),
     ]);

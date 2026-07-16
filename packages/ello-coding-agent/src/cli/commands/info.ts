@@ -65,9 +65,29 @@ function registerToolCommands(program: Command, ctx: CliCommandContext): void {
   program
     .command('tools')
     .description('list available tools')
-    .action(async () => {
+    .action(async (_opts: unknown, cmd: Command) => {
+      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
       const { describeCodingTools } = await import('../../tools/index.js');
-      ctx.io.stdout.write(`${describeCodingTools()}\n`);
+      const { createCodingTools } = await import('../../tools/index.js');
+      const { createCodingStorage } = await import('../../storage/index.js');
+      const storage = createCodingStorage({ databasePath: ':memory:' });
+      try {
+        const tools = createCodingTools({
+          config,
+          storage,
+          taskBoardScope: { type: 'session', sessionId: 'cli-tools' },
+          decide: () => 'auto',
+          mode: () => ({
+            mode: config.initialMode,
+            previousMode: null,
+            source: 'resume',
+            changedAt: new Date(0).toISOString(),
+          }),
+        });
+        ctx.io.stdout.write(`${describeCodingTools(tools)}\n`);
+      } finally {
+        storage.close();
+      }
     });
 }
 
@@ -171,7 +191,7 @@ function registerPermissionCommands(
           config.json
             ? JSON.stringify(
                 {
-                  mode: config.approvalMode,
+                  initialMode: config.initialMode,
                   allowedPaths: config.allowedPaths,
                   rules: config.permissionRules,
                 },
@@ -179,7 +199,7 @@ function registerPermissionCommands(
                 2,
               )
             : [
-                `mode\t${config.approvalMode}`,
+                `initial mode\t${config.initialMode}`,
                 `allowedPaths\t${config.allowedPaths.join(', ')}`,
                 formatPermissionRules(config.permissionRules),
               ].join('\n')

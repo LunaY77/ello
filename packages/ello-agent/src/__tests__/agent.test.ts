@@ -12,7 +12,7 @@ import {
 import {
   AgentStreamBackpressureError,
   ModelAdapterProtocolError,
-  createAgent,
+  createAgent as createBaseAgent,
   createLocalEnvironment,
   createLocalShellEnvironment,
   defineTool,
@@ -21,8 +21,34 @@ import {
   type AgentModelRequest,
   type AgentModelResponse,
   type AgentStreamEvent,
+  type AnyAgentTool,
+  type CreateAgentOptions,
   type ModelAdapter,
 } from '../index.js';
+
+const testTool = defineTool({
+  name: 'test_noop',
+  description: 'No-op tool for agent loop tests.',
+  discovery: { aliases: ['noop'], risk: 'readonly' },
+  input: z.object({}).strict(),
+  execute: () => null,
+});
+
+function createAgent(
+  options: Omit<CreateAgentOptions, 'executionTools' | 'modelTools'> & {
+    readonly tools?: readonly AnyAgentTool[];
+    readonly executionTools?: readonly AnyAgentTool[];
+    readonly modelTools?: readonly AnyAgentTool[];
+  },
+) {
+  const { tools, executionTools, modelTools, ...rest } = options;
+  const selected = tools ?? executionTools ?? [testTool as AnyAgentTool];
+  return createBaseAgent({
+    ...rest,
+    executionTools: executionTools ?? selected,
+    modelTools: modelTools ?? selected,
+  });
+}
 
 class EchoAdapter implements ModelAdapter {
   async generate(request: AgentModelRequest): Promise<AgentModelResponse> {
@@ -284,14 +310,13 @@ describe('createAgent', () => {
     expect(seen).toEqual([['alpha', 'zeta']]);
     await agent.close();
 
-    const duplicate = createAgent({
-      model: 'test:model',
-      modelAdapter: adapter,
-      tools: [makeTool('same'), makeTool('same')],
-    });
-    await expect(duplicate.run('hi')).rejects.toThrow(
-      'Duplicate agent tool name: same',
-    );
+    expect(() =>
+      createAgent({
+        model: 'test:model',
+        modelAdapter: adapter,
+        tools: [makeTool('same'), makeTool('same')],
+      }),
+    ).toThrow("Duplicate tool 'same' in executionTools.");
   });
 
   it('uses local environment and session store', async () => {

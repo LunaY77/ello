@@ -1,7 +1,12 @@
 import path from 'node:path';
 
 import { slugify, validateKind, validateRepoKey } from './slug.js';
-import type { Repository, WorkspaceKind, WorkspaceRepo } from './types.js';
+import type {
+  Repository,
+  WorkspaceKind,
+  WorkspaceRepo,
+  WorkspaceRepoRole,
+} from './types.js';
 
 export interface WorkspaceCreatePlan {
   readonly kind: WorkspaceKind;
@@ -36,11 +41,20 @@ export function planWorkspaceRepo(
   rootPath: string,
   repository: Repository,
   branch: string | null,
+  role: WorkspaceRepoRole,
 ): WorkspaceRepo {
+  if (role === 'reference' && branch !== null) {
+    throw new Error(`Workspace reference must be detached: ${repository.key}`);
+  }
   return {
     repositoryId: repository.id,
     key: repository.key,
-    path: path.join(rootPath, 'repos', repository.key),
+    path: path.join(
+      rootPath,
+      role === 'reference' ? 'references' : 'repos',
+      repository.key,
+    ),
+    role,
     checkoutMode: branch === null ? 'detached' : 'branch',
     branch,
     headCommit: null,

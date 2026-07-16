@@ -376,7 +376,8 @@ describe('file memory', () => {
     return loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'bypass',
+      initialMode: 'bypass',
+      bypassEnabled: true,
       context: {
         memory: {
           enabled: true,
@@ -458,7 +459,7 @@ class MemoryScenarioAdapter implements ModelAdapter {
     }
     if (
       this.scenario === 'main-write' &&
-      Object.hasOwn(request.tools, 'memory_write')
+      system.includes('# Primary Agent Role')
     ) {
       return hasToolResult
         ? textResponse(request, 'Remembered.')
@@ -509,14 +510,21 @@ function toolResponse(
   request: AgentModelRequest,
   call: { readonly id: string; readonly name: string; readonly input: unknown },
 ): AgentModelResponse {
+  const visibleCall = Object.hasOwn(request.tools, call.name)
+    ? call
+    : {
+        id: call.id,
+        name: 'call_tool',
+        input: { name: call.name, arguments: call.input },
+      };
   const message = {
     role: 'assistant' as const,
     content: [
       {
         type: 'tool-call' as const,
         toolCallId: call.id,
-        toolName: call.name,
-        input: call.input,
+        toolName: visibleCall.name,
+        input: visibleCall.input,
       },
     ],
   };
@@ -524,7 +532,7 @@ function toolResponse(
     text: '',
     messages: [...request.messages, message],
     newMessages: [message],
-    toolCalls: [call],
+    toolCalls: [visibleCall],
     usage,
     finishReason: 'tool-calls',
     provider: null,

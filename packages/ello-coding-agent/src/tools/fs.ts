@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import path from 'node:path';
 
 import { z } from 'zod';
 
@@ -20,7 +21,7 @@ import {
 } from './shared.js';
 
 /**
- * 文件系统工具：read / ls / write / edit。
+ * 文件系统工具：read / write / edit / apply_patch。
  *
  * IO 与 allowedPaths 边界检查全部委托给 `ctx.environment.fileSystem`，
  * 工具本身只负责产品化输出（行号、diff、字节数）和声明审批策略。
@@ -34,11 +35,14 @@ export function createFsTools(
       name: 'read',
       description:
         'Read a UTF-8 text file with optional offset and limit. Output includes line numbers.',
-      input: z.object({
-        path: z.string(),
-        offset: z.number().int().min(1).optional(),
-        limit: z.number().int().min(1).max(2000).optional(),
-      }),
+      discovery: { aliases: ['file', 'directory', 'cat'], risk: 'readonly' },
+      input: z
+        .object({
+          path: z.string().min(1),
+          offset: z.number().int().min(1).optional(),
+          limit: z.number().int().min(1).max(2000).optional(),
+        })
+        .strict(),
       approval: (input, ctx) =>
         decide(
           {
@@ -56,9 +60,22 @@ export function createFsTools(
         const info = await statRuntimePath(fs, targetPath);
         if (info.isDirectory()) {
           const entries = await fs.listDir(targetPath);
+          entries.sort((left, right) => left.localeCompare(right));
+          const renderedEntries = await Promise.all(
+            entries.map(async (entry) => {
+              const entryInfo = await statRuntimePath(
+                fs,
+                path.join(targetPath, entry),
+              );
+              const entryStat = await stat(
+                resolveRuntimePath(fs, path.join(targetPath, entry)),
+              );
+              return `${entry}\t${entryInfo.isDirectory() ? 'directory' : 'file'}\t${entryStat.size}`;
+            }),
+          );
           return createCodingToolResult({
             title: `Directory ${targetPath}`,
-            output: entries.join('\n'),
+            output: renderedEntries.join('\n'),
             metadata: {
               kind: 'read',
               path: targetPath,
@@ -118,43 +135,21 @@ export function createFsTools(
       },
     }),
     defineCodingTool({
-      name: 'ls',
-      description: 'List directory entries inside the workspace.',
-      input: z.object({ path: z.string().default('.') }),
-      approval: (input, ctx) =>
-        decide(
-          {
-            permission: 'read',
-            patterns: [input.path],
-            always: [input.path],
-            paths: [input.path],
-            metadata: { kind: 'read', path: input.path },
-          },
-          ctx.agent,
-        ),
-      execute: async ({ path: targetPath }, ctx) => {
-        const entries = await requireFs(ctx.agent).listDir(targetPath);
-        return createCodingToolResult({
-          title: `List ${targetPath}`,
-          output: entries.join('\n'),
-          metadata: {
-            kind: 'read',
-            path: targetPath,
-            entryCount: entries.length,
-          },
-        });
-      },
-    }),
-    defineCodingTool({
       name: 'write',
       description:
         'Create or overwrite a file. Requires approval outside bypass or accept-edits mode.',
-      input: z.object({
-        path: z.string(),
-        content: z.string(),
-        expectedContent: z.string().optional(),
-        reason: z.string().optional(),
-      }),
+      discovery: {
+        aliases: ['create file', 'overwrite file'],
+        risk: 'workspace-write',
+      },
+      input: z
+        .object({
+          path: z.string().min(1),
+          content: z.string(),
+          expectedContent: z.string().optional(),
+          reason: z.string().optional(),
+        })
+        .strict(),
       approval: async (input, ctx) =>
         decide(
           {
@@ -195,12 +190,18 @@ export function createFsTools(
       name: 'edit',
       description:
         'Replace a unique text fragment in a file. Fails when the old text is not unique.',
-      input: z.object({
-        path: z.string(),
-        oldText: z.string(),
-        newText: z.string(),
-        reason: z.string().optional(),
-      }),
+      discovery: {
+        aliases: ['replace text', 'modify file'],
+        risk: 'workspace-write',
+      },
+      input: z
+        .object({
+          path: z.string().min(1),
+          oldText: z.string().min(1),
+          newText: z.string(),
+          reason: z.string().optional(),
+        })
+        .strict(),
       approval: async (input, ctx) =>
         decide(
           {
@@ -254,14 +255,21 @@ Example:
 -old line
 +new line
 *** End Patch`,
-      input: z.object({
-        patch: z
-          .string()
-          .describe(
-            "Patch text using *** Begin Patch / *** End Patch. Update hunks use @@ plus context, '-' removed lines, and '+' added lines.",
-          ),
-        reason: z.string().optional(),
-      }),
+      discovery: {
+        aliases: ['patch', 'structured patch', 'multi file edit'],
+        risk: 'workspace-write',
+      },
+      input: z
+        .object({
+          patch: z
+            .string()
+            .min(1)
+            .describe(
+              "Patch text using *** Begin Patch / *** End Patch. Update hunks use @@ plus context, '-' removed lines, and '+' added lines.",
+            ),
+          reason: z.string().optional(),
+        })
+        .strict(),
       approval: async (input, ctx) => {
         const fs = requireFs(ctx.agent);
         const prepared = await prepareApplyPatch(

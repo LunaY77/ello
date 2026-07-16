@@ -1,12 +1,9 @@
 /** `@ello/coding-agent` 的稳定产品层入口。 */
 export {
-  ApprovalModeSchema,
   CodingAgentConfigSchema,
   getProjectConfigPath,
   loadCodingAgentConfig,
-  normalizeApprovalMode,
   PermissionRuleSchema,
-  type ApprovalMode,
   type CodingAgentConfig,
   type CodingAgentConfigOverrides,
 } from './config/index.js';
@@ -17,6 +14,19 @@ export {
   type CodingSession,
   type CreateCodingSessionOptions,
 } from './runtime/coding-session.js';
+export {
+  PlanModeError,
+  SessionModeSchema,
+  modeLabel,
+  type SessionMode,
+  type SessionModeState,
+} from './runtime/session-mode.js';
+export type {
+  PlanCommandResult,
+  PlanPreview,
+  PlanRecord,
+  PlanSlashCommand,
+} from './plan/index.js';
 export type { MemoryJob, MemoryStatus } from './memory/index.js';
 export type {
   GoalPauseReason,

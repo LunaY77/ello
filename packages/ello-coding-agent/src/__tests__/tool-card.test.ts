@@ -76,11 +76,11 @@ describe('buildToolCardModel', () => {
   it('humanizes tool name and picks a summary from metadata', () => {
     const model = buildToolCardModel(
       call({
-        name: 'web_fetch',
+        name: 'fetch',
         output: { metadata: { kind: 'network', url: 'https://x' } },
       }),
     );
-    expect(model.name).toBe('Web Fetch');
+    expect(model.name).toBe('Fetch');
     expect(model.headline).toBe('Fetched https://x');
     expect(model.summary).toBe('https://x');
     expect(model.icon).toBe('✓');

@@ -3,6 +3,7 @@ import { Box } from 'ink';
 import type { ReactNode } from 'react';
 
 import type { GoalState } from '../../goal/types.js';
+import type { SessionModeState } from '../../runtime/session-mode.js';
 import type { SubagentRunView, ToolCallView } from '../store/history-entry.js';
 import { tuiTokens } from '../ui/tokens.js';
 
@@ -12,7 +13,8 @@ import { LiveViewport } from './LiveViewport.js';
 export interface AppShellProps {
   readonly cwd: string;
   readonly profile: string;
-  readonly approvalMode: string;
+  readonly mode: SessionModeState;
+  readonly pendingPlanApproval?: boolean;
   readonly liveAssistantText: string;
   readonly runningTools: readonly ToolCallView[];
   readonly runningSubagents: readonly SubagentRunView[];
@@ -52,7 +54,8 @@ export function AppShell(props: AppShellProps) {
       </Box>
       <BottomDock
         profile={props.profile}
-        approvalMode={props.approvalMode}
+        mode={props.mode}
+        pendingPlanApproval={props.pendingPlanApproval === true}
         {...(props.usage !== undefined ? { usage: props.usage } : {})}
         {...(props.goal !== undefined ? { goal: props.goal } : {})}
         overlay={props.overlay}

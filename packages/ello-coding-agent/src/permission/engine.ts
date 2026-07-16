@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import type { ApprovalMode } from '../config/index.js';
+import type { SessionMode } from '../runtime/session-mode.js';
 
 import type { PermissionAction, PermissionRule } from './types.js';
 
@@ -68,11 +68,12 @@ export function isExternalPath(cwd: string, target: string): boolean {
 }
 
 /**
- * approval mode 只生成最低优先级 default 规则。
+ * 为会话模式生成完整的基础权限表。
  *
- * 显式配置和运行期审批规则仍按 last-match 覆盖它，避免 mode 成为绕过引擎的旁路。
+ * 非 Plan 模式仍可在 policy 层叠加配置和运行期规则；Plan 模式则使用封闭规则集，
+ * 明确拒绝 edit/bash/web/external，避免一条历史 allow 规则把只读边界重新打开。
  */
-export function defaultRulesetForMode(mode: ApprovalMode): PermissionRule[] {
+export function defaultRulesetForMode(mode: SessionMode): PermissionRule[] {
   const rule = (
     permission: string,
     action: PermissionAction,
@@ -111,7 +112,6 @@ export function defaultRulesetForMode(mode: ApprovalMode): PermissionRule[] {
         rule('external_directory', 'ask'),
         rule('task', 'ask'),
       ];
-    case 'dont-ask':
     case 'bypass':
       return [allowAll];
     case 'default':

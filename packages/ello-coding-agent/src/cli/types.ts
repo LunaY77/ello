@@ -12,7 +12,7 @@ export interface GlobalOpts {
   readonly profile?: string;
   readonly cwd?: string;
   readonly allowedPath?: string[];
-  readonly approval?: string;
+  readonly mode?: string;
   readonly json?: boolean;
   readonly tui?: boolean;
 }

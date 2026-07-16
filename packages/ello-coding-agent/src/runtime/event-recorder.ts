@@ -1,6 +1,7 @@
 import type { AgentEventRecorder } from '@ello/agent';
 
 import type { JsonlSessionRepository } from '../session/repository.js';
+import { projectToolEvent } from '../tools/event-projection.js';
 
 export function createCodingEventRecorder(
   repository: JsonlSessionRepository,
@@ -39,7 +40,7 @@ export function createCodingEventRecorder(
         default:
           break;
       }
-      await tracing?.record(event, ctx);
+      await tracing?.record(projectToolEvent(event), ctx);
     },
     flush: (ctx) => tracing?.flush?.(ctx),
   };

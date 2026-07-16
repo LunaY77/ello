@@ -1,3 +1,29 @@
+/**
+ * RepoStore 负责登记和维护可供 Workspace 使用的 Git 仓库。
+ *
+ * `key` 是用户在命令中使用的仓库名称，例如 `ello`，重命名只改变这个名称。
+ * `id` 是系统生成的唯一编号，只用于内部识别仓库；mirror 目录使用这个编号命名，
+ * 所以改名不会移动目录，也不会影响已有 Workspace。mirror 是 Workspace 的共同
+ * 仓库来源，但用户不会直接在 mirror 中编辑文件，WorkspaceStore 会从 mirror
+ * 创建各自的工作目录。
+ *
+ * Git 用 ref 名称指向一个提交。mirror 中的 ref 分为三类：
+ * - `refs/remotes/origin/*`：远端分支在本机的记录，只由远端同步更新。
+ * - `refs/heads/__repostore/default`：隐藏的 Workspace 起点，每次同步远端后更新。
+ * - 其它 `refs/heads/*`：用户工作分支，禁止使用 `__repostore/*` 名称。
+ *
+ * 添加远端仓库时：创建 bare mirror，添加普通 origin，把远端分支和标签下载到
+ * `refs/remotes/origin/*`，读取远端默认分支对应的提交，并将该提交设为 Workspace
+ * 起点，最后写入 SQLite。`syncOrigin` 用于首次导入和后续 fetch：它更新远端分支
+ * 记录、远端默认分支指针、Workspace 起点和 `defaultBranch`，不修改用户分支。
+ * 远端默认分支名称变化时，只更新 Workspace 起点，不重置同名用户分支。
+ *
+ * 本地导入复制分支和标签，并将来源当前提交设为 Workspace 起点；`createManaged`
+ * 将新仓库的初始提交直接设为 Workspace 起点；`fetchLocal` 不导入来源仓库记录的
+ * 远端分支。`remoteAdd` 接入并同步远端，失败时移除临时 remote；`remoteSet`、
+ * `remoteRemove` 只维护远端连接；`rename` 只修改 key；export/import 负责 URL 和
+ * bundle 的可移植性。用户分支、worktree、归档和恢复由 WorkspaceStore 管理。
+ */
 import { randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -26,12 +52,16 @@ const ExportDocumentSchema = z.object({
   ),
 });
 
+export const REPOSITORY_BASELINE_REF =
+  'refs/heads/__repostore/default' as const;
+const RESERVED_REPOSITORY_BRANCH_PREFIX = '__repostore/';
+
 export interface FetchResult {
   readonly key: string;
   readonly status: 'fetched' | 'no_remote';
 }
 
-/** Git mirror application service；结构化状态只写 SQLite。 */
+/** Repository 产品生命周期服务。 */
 export class RepoStore {
   constructor(private readonly repository: RepositoryRepository) {}
 
@@ -57,7 +87,8 @@ export class RepoStore {
     keys: readonly string[],
     all = false,
   ): Promise<readonly FetchResult[]> {
-    if (all === keys.length > 0) {
+    const hasKeys = keys.length > 0;
+    if (all === hasKeys) {
       throw new Error('Specify repository keys or --all');
     }
     const selected = all ? this.list() : keys.map((key) => this.require(key));
@@ -68,10 +99,10 @@ export class RepoStore {
         results.push({ key: repo.key, status: 'no_remote' });
         continue;
       }
-      await git(['remote', 'update', '--prune', 'origin'], repo.mirrorPath);
+      const defaultBranch = await syncOrigin(repo.mirrorPath);
       this.repository.update({
         ...repo,
-        defaultBranch: await detectDefaultBranch(repo.mirrorPath),
+        defaultBranch,
         updatedAt: new Date().toISOString(),
       });
       results.push({ key: repo.key, status: 'fetched' });
@@ -83,10 +114,21 @@ export class RepoStore {
     const repo = this.require(key);
     const source = expandPath(sourceInput);
     await assertGitRepositoryWithCommit(source);
-    await git(['fetch', source, '+refs/*:refs/*'], repo.mirrorPath);
+    await assertNoReservedBranches(source);
+    const defaultBranch = await detectDefaultBranch(source);
+    await git(
+      [
+        'fetch',
+        source,
+        '+refs/heads/*:refs/heads/*',
+        '+refs/tags/*:refs/tags/*',
+      ],
+      repo.mirrorPath,
+    );
+    await updateBaseline(repo.mirrorPath, `refs/heads/${defaultBranch}`);
     const next = {
       ...repo,
-      defaultBranch: await detectDefaultBranch(repo.mirrorPath),
+      defaultBranch,
       updatedAt: new Date().toISOString(),
     };
     return this.repository.update(next);
@@ -122,13 +164,22 @@ export class RepoStore {
     if (repo.remoteUrl !== null) {
       throw new Error(`Repository already has a remote: ${repo.key}`);
     }
-    await git(['remote', 'add', 'origin', url], repo.mirrorPath);
-    await prepareMirrorRemote(repo.mirrorPath);
-    return this.repository.update({
-      ...repo,
-      remoteUrl: url,
-      updatedAt: new Date().toISOString(),
-    });
+    try {
+      await git(['remote', 'add', 'origin', url], repo.mirrorPath);
+      await configureOrigin(repo.mirrorPath);
+      const defaultBranch = await syncOrigin(repo.mirrorPath);
+      return this.repository.update({
+        ...repo,
+        remoteUrl: url,
+        defaultBranch,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      await git(['remote', 'remove', 'origin'], repo.mirrorPath).catch(
+        () => {},
+      );
+      throw error;
+    }
   }
 
   async remoteSet(key: string, url: string): Promise<Repository> {
@@ -163,18 +214,13 @@ export class RepoStore {
     identityCwd = process.cwd(),
   ): Promise<Repository> {
     const key = validateRepoKey(keyInput);
+    assertRepositoryUserBranch(defaultBranch);
     this.assertKeyAvailable(key);
     const { name, email } = await readGitIdentity(identityCwd);
     const id = randomUUID();
-    const mirrorPath = repositoryMirrorPath(key);
+    const mirrorPath = repositoryMirrorPath(id);
     await mkdir(path.dirname(mirrorPath), { recursive: true });
-    await git([
-      'init',
-      '--bare',
-      '--initial-branch',
-      defaultBranch,
-      mirrorPath,
-    ]);
+    await git(['init', '--bare', mirrorPath]);
     await git(['config', 'user.name', name], mirrorPath);
     await git(['config', 'user.email', email], mirrorPath);
     const emptyTree = await gitWithInput(
@@ -182,19 +228,12 @@ export class RepoStore {
       '',
       mirrorPath,
     );
-    const commit = await gitWithInput(
+    const commit = await git(
       ['commit-tree', emptyTree, '-m', 'Initial commit'],
-      '',
       mirrorPath,
     );
-    await git(
-      ['update-ref', `refs/heads/${defaultBranch}`, commit],
-      mirrorPath,
-    );
-    await git(
-      ['symbolic-ref', 'HEAD', `refs/heads/${defaultBranch}`],
-      mirrorPath,
-    );
+    await git(['update-ref', REPOSITORY_BASELINE_REF, commit], mirrorPath);
+    await git(['symbolic-ref', 'HEAD', REPOSITORY_BASELINE_REF], mirrorPath);
     const now = new Date().toISOString();
     return this.repository.insert({
       id,
@@ -307,12 +346,15 @@ export class RepoStore {
 
   private async importLocal(source: string, key: string): Promise<Repository> {
     await assertGitRepositoryWithCommit(source);
+    await assertNoReservedBranches(source);
+    const defaultBranch = await detectDefaultBranch(source);
     const id = randomUUID();
-    const mirrorPath = repositoryMirrorPath(key);
+    const mirrorPath = repositoryMirrorPath(id);
     await mkdir(path.dirname(mirrorPath), { recursive: true });
     await git(['clone', '--mirror', source, mirrorPath]);
     await git(['remote', 'remove', 'origin'], mirrorPath);
-    return this.insertImported(id, key, mirrorPath, null);
+    await updateBaseline(mirrorPath, `refs/heads/${defaultBranch}`);
+    return this.insertImported(id, key, mirrorPath, null, defaultBranch);
   }
 
   private async importRemote(
@@ -321,11 +363,35 @@ export class RepoStore {
     expectedDefaultBranch?: string,
   ): Promise<Repository> {
     const id = randomUUID();
-    const mirrorPath = repositoryMirrorPath(key);
+    const mirrorPath = repositoryMirrorPath(id);
     await mkdir(path.dirname(mirrorPath), { recursive: true });
-    await git(['clone', '--mirror', url, mirrorPath]);
-    await prepareMirrorRemote(mirrorPath);
-    return this.insertImported(id, key, mirrorPath, url, expectedDefaultBranch);
+    try {
+      await git(['init', '--bare', mirrorPath]);
+      await git(['remote', 'add', 'origin', url], mirrorPath);
+      await configureOrigin(mirrorPath);
+      const defaultBranch = await syncOrigin(mirrorPath);
+      if (
+        expectedDefaultBranch !== undefined &&
+        defaultBranch !== expectedDefaultBranch
+      ) {
+        throw new Error(
+          `Default branch mismatch for ${key}: expected ${expectedDefaultBranch}, found ${defaultBranch}`,
+        );
+      }
+      const now = new Date().toISOString();
+      return this.repository.insert({
+        id,
+        key,
+        mirrorPath,
+        remoteUrl: url,
+        defaultBranch,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (error) {
+      await rm(mirrorPath, { recursive: true, force: true }).catch(() => {});
+      throw error;
+    }
   }
 
   private async importBundle(
@@ -334,15 +400,12 @@ export class RepoStore {
     expectedDefaultBranch: string,
   ): Promise<Repository> {
     const id = randomUUID();
-    const mirrorPath = repositoryMirrorPath(key);
+    const mirrorPath = repositoryMirrorPath(id);
     await access(bundlePath);
     await mkdir(path.dirname(mirrorPath), { recursive: true });
     await git(['clone', '--mirror', bundlePath, mirrorPath]);
     await git(['remote', 'remove', 'origin'], mirrorPath);
-    await git(
-      ['symbolic-ref', 'HEAD', `refs/heads/${expectedDefaultBranch}`],
-      mirrorPath,
-    );
+    await updateBaseline(mirrorPath, REPOSITORY_BASELINE_REF);
     return this.insertImported(
       id,
       key,
@@ -357,17 +420,8 @@ export class RepoStore {
     key: string,
     mirrorPath: string,
     remoteUrl: string | null,
-    expectedDefaultBranch?: string,
+    defaultBranch: string,
   ): Promise<Repository> {
-    const defaultBranch = await detectDefaultBranch(mirrorPath);
-    if (
-      expectedDefaultBranch !== undefined &&
-      defaultBranch !== expectedDefaultBranch
-    ) {
-      throw new Error(
-        `Default branch mismatch for ${key}: expected ${expectedDefaultBranch}, found ${defaultBranch}`,
-      );
-    }
     const now = new Date().toISOString();
     return this.repository.insert({
       id,
@@ -394,21 +448,83 @@ export class RepoStore {
   }
 }
 
-/**
- * mirror 负责汇总远端 refs，但不能继承 `clone --mirror` 的全量 push 语义。
- * 保留全量 fetch refspec 后，普通 worktree 可以安全地自行决定何时发布分支。
- */
-export async function prepareMirrorRemote(mirrorPath: string): Promise<void> {
-  try {
-    await git(['remote', 'get-url', 'origin'], mirrorPath);
-  } catch (error) {
-    if (error instanceof CommandError && error.exitCode === 2) {
-      return;
-    }
-    throw error;
+async function configureOrigin(mirrorPath: string): Promise<void> {
+  await git(
+    [
+      'config',
+      '--replace-all',
+      'remote.origin.fetch',
+      '+refs/heads/*:refs/remotes/origin/*',
+    ],
+    mirrorPath,
+  );
+}
+
+/** 同步远端命名空间，并重建系统管理的默认分支基线。 */
+async function syncOrigin(mirrorPath: string): Promise<string> {
+  await git(
+    ['fetch', '--prune', '--prune-tags', '--tags', 'origin'],
+    mirrorPath,
+  );
+  const defaultBranch = await detectRemoteDefaultBranch(mirrorPath);
+  const remoteRef = `refs/remotes/origin/${defaultBranch}`;
+  await updateBaseline(mirrorPath, remoteRef);
+  await git(
+    ['symbolic-ref', 'refs/remotes/origin/HEAD', remoteRef],
+    mirrorPath,
+  );
+  return defaultBranch;
+}
+
+async function updateBaseline(
+  mirrorPath: string,
+  sourceRef: string,
+): Promise<void> {
+  const commit = await git(
+    ['rev-parse', '--verify', `${sourceRef}^{commit}`],
+    mirrorPath,
+  );
+  await git(['update-ref', REPOSITORY_BASELINE_REF, commit], mirrorPath);
+  await git(['symbolic-ref', 'HEAD', REPOSITORY_BASELINE_REF], mirrorPath);
+}
+
+export function assertRepositoryUserBranch(branch: string): void {
+  if (
+    branch === RESERVED_REPOSITORY_BRANCH_PREFIX.slice(0, -1) ||
+    branch.startsWith(RESERVED_REPOSITORY_BRANCH_PREFIX)
+  ) {
+    throw new Error(`Reserved repository branch: ${branch}`);
   }
-  await git(['config', 'remote.origin.mirror', 'false'], mirrorPath);
-  await git(['config', 'remote.origin.fetch', '+refs/*:refs/*'], mirrorPath);
+}
+
+async function assertNoReservedBranches(repositoryPath: string): Promise<void> {
+  const refs = await git(
+    ['for-each-ref', '--format=%(refname:strip=2)', 'refs/heads'],
+    repositoryPath,
+  );
+  const branch = refs
+    .split(/\r?\n/u)
+    .find(
+      (candidate) =>
+        candidate !== '' &&
+        (candidate === RESERVED_REPOSITORY_BRANCH_PREFIX.slice(0, -1) ||
+          candidate.startsWith(RESERVED_REPOSITORY_BRANCH_PREFIX)),
+    );
+  if (branch !== undefined) {
+    throw new Error(`Reserved repository branch: ${branch}`);
+  }
+}
+
+async function detectRemoteDefaultBranch(mirrorPath: string): Promise<string> {
+  const output = await git(
+    ['ls-remote', '--symref', 'origin', 'HEAD'],
+    mirrorPath,
+  );
+  const match = /^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/mu.exec(output);
+  if (match?.[1] === undefined) {
+    throw new Error('Cannot detect remote default branch');
+  }
+  return match[1];
 }
 
 async function assertGitRepositoryWithCommit(source: string): Promise<void> {

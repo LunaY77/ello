@@ -36,7 +36,7 @@ export type HistoryEntry =
       readonly cwd: string;
       readonly profile: string;
       readonly model: string;
-      readonly approvalMode: string;
+      readonly mode: string;
       readonly version?: string;
     }
   | {

@@ -1,3 +1,4 @@
+import { lstat, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { AgentFileSystem } from '@ello/agent';
@@ -30,13 +31,20 @@ export function createSearchTools(
   return [
     defineCodingTool({
       name: 'grep',
-      description: 'Search file contents inside the workspace.',
-      input: z.object({
-        pattern: z.string(),
-        path: z.string().default('.'),
-        glob: z.string().optional(),
-        limit: z.number().int().min(1).max(500).default(100),
-      }),
+      description:
+        'Search UTF-8 file contents with a Unicode regular expression. Skips binary files, ignored directories, and files larger than 2 MiB.',
+      discovery: {
+        aliases: ['search text', 'find content', 'regex'],
+        risk: 'readonly',
+      },
+      input: z
+        .object({
+          pattern: z.string().min(1),
+          path: z.string().default('.'),
+          glob: z.string().min(1).optional(),
+          limit: z.number().int().min(1).max(500).default(100),
+        })
+        .strict(),
       approval: (input, ctx) =>
         decide(
           {
@@ -61,6 +69,7 @@ export function createSearchTools(
           pattern,
           ...(glob !== undefined ? { glob } : {}),
           limit,
+          ...(ctx.abortSignal !== undefined ? { signal: ctx.abortSignal } : {}),
         });
         return createCodingToolResult({
           title: `Search ${pattern}`,
@@ -78,12 +87,19 @@ export function createSearchTools(
     }),
     defineCodingTool({
       name: 'glob',
-      description: 'Find files by a simple glob pattern inside the workspace.',
-      input: z.object({
-        pattern: z.string(),
-        path: z.string().default('.'),
-        limit: z.number().int().min(1).max(1000).default(200),
-      }),
+      description:
+        'Find files using * and ** glob syntax. Does not traverse symlinked directories and ignores .git, node_modules, dist, build, and coverage.',
+      discovery: {
+        aliases: ['find files', 'match paths', 'files'],
+        risk: 'readonly',
+      },
+      input: z
+        .object({
+          pattern: z.string().min(1),
+          path: z.string().default('.'),
+          limit: z.number().int().min(1).max(1000).default(200),
+        })
+        .strict(),
       approval: (input, ctx) =>
         decide(
           {
@@ -102,10 +118,11 @@ export function createSearchTools(
       execute: async ({ pattern, path: targetPath, limit }, ctx) => {
         const fs = requireFs(ctx.agent);
         const root = resolveRuntimePath(fs, targetPath);
-        const files = await walk(fs, root, limit * 5);
+        const files = await walk(fs, root, 100_000, ctx.abortSignal);
         const matcher = globToRegExp(pattern);
         const matches = files
           .filter((file) => matcher.test(path.relative(root, file)))
+          .sort((left, right) => left.localeCompare(right))
           .slice(0, limit);
         return createCodingToolResult({
           title: `Glob ${pattern}`,
@@ -129,13 +146,28 @@ async function searchFiles(input: {
   readonly pattern: string;
   readonly glob?: string;
   readonly limit: number;
+  readonly signal?: AbortSignal;
 }): Promise<string> {
-  const files = await walk(input.fs, input.root, input.limit * 200);
-  const pattern = new RegExp(input.pattern, 'u');
+  const files = await walk(
+    input.fs,
+    input.root,
+    input.limit * 200,
+    input.signal,
+  );
+  let pattern: RegExp;
+  try {
+    pattern = new RegExp(input.pattern, 'u');
+  } catch (error) {
+    throw new Error(
+      `Invalid grep regular expression '${input.pattern}': ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
   const fileMatcher =
     input.glob !== undefined ? globToRegExp(input.glob) : undefined;
   const matches: string[] = [];
   for (const file of files) {
+    input.signal?.throwIfAborted();
     const relativePath = path.relative(input.root, file);
     if (fileMatcher !== undefined && !fileMatcher.test(relativePath)) {
       continue;
@@ -161,6 +193,10 @@ async function readSearchableFile(
   fs: AgentFileSystem,
   filePath: string,
 ): Promise<string | undefined> {
+  const info = await stat(filePath);
+  if (info.size > 2 * 1024 * 1024) {
+    return undefined;
+  }
   const content = await fs.readText(filePath);
   if (content.includes('\u0000') || content.includes('\uFFFD')) {
     return undefined;
@@ -173,17 +209,25 @@ async function walk(
   fs: AgentFileSystem,
   root: string,
   limit: number,
+  signal?: AbortSignal,
 ): Promise<string[]> {
   const result: string[] = [];
   async function visit(dir: string): Promise<void> {
+    signal?.throwIfAborted();
     if (result.length >= limit) {
       return;
     }
-    for (const entry of await fs.listDir(dir)) {
-      if (entry === 'node_modules' || entry === '.git' || entry === 'dist') {
+    const entries = await fs.listDir(dir);
+    entries.sort((left, right) => left.localeCompare(right));
+    for (const entry of entries) {
+      if (IGNORED_DIRECTORIES.has(entry)) {
         continue;
       }
       const fullPath = path.join(dir, entry);
+      const linkInfo = await lstat(fullPath);
+      if (linkInfo.isSymbolicLink()) {
+        continue;
+      }
       const info = await statRuntimePath(fs, fullPath);
       if (info.isDirectory()) {
         await visit(fullPath);
@@ -199,6 +243,14 @@ async function walk(
   return result;
 }
 
+const IGNORED_DIRECTORIES = new Set([
+  '.git',
+  'node_modules',
+  'dist',
+  'build',
+  'coverage',
+]);
+
 function countLines(value: string): number {
   if (value.trim() === '') {
     return 0;
@@ -208,9 +260,26 @@ function countLines(value: string): number {
 
 /** 把简单 glob（`*` / `**`）编译成正则。 */
 function globToRegExp(pattern: string): RegExp {
-  const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/gu, '\\$&')
-    .replace(/\*\*/gu, '.*')
-    .replace(/\*/gu, '[^/]*');
-  return new RegExp(`^${escaped}$`, 'u');
+  let source = '';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index];
+    if (character === '*' && pattern[index + 1] === '*') {
+      if (pattern[index + 2] === '/') {
+        source += '(?:.*/)?';
+        index += 2;
+      } else {
+        source += '.*';
+        index += 1;
+      }
+      continue;
+    }
+    if (character === '*') {
+      source += '[^/]*';
+      continue;
+    }
+    source += /[.+^${}()|[\]\\]/u.test(character ?? '')
+      ? `\\${character}`
+      : character;
+  }
+  return new RegExp(`^${source}$`, 'u');
 }

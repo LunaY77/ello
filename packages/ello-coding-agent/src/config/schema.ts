@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { PermissionRuleSchema } from '../permission/types.js';
+import { SessionModeSchema } from '../runtime/session-mode.js';
 
 const ZeroCostSchema = z.object({
   input: z.number().nonnegative().default(0),
@@ -8,15 +9,6 @@ const ZeroCostSchema = z.object({
   cache_read: z.number().nonnegative().default(0),
   cache_write: z.number().nonnegative().default(0),
 });
-
-/** 审批模式：与 CLI `--approval`、权限策略和 system prompt 中的说明保持一致。 */
-export const ApprovalModeSchema = z.enum([
-  'default',
-  'plan',
-  'accept-edits',
-  'dont-ask',
-  'bypass',
-]);
 
 export { PermissionRuleSchema };
 
@@ -46,7 +38,6 @@ export const AgentConfigSchema = z.object({
   prompt: z.string().optional(),
   model: z.string().optional(),
   tools: z.array(z.string()).optional(),
-  approval_mode: ApprovalModeSchema.optional(),
   permission: z.array(PermissionRuleSchema).optional(),
   max_turns: z.number().int().positive().optional(),
   color: z.string().optional(),
@@ -135,11 +126,46 @@ export const ProfileSuiteSchema = z.object({
     .default({}),
 });
 
-/** 工具注册与审批偏好配置，实际消费点在 tools/index.ts 与 permission/policy.ts。 */
-export const ToolConfigSchema = z.object({
-  needApproval: z.array(z.string()).default([]),
-  disabled: z.array(z.string()).default([]),
-});
+const DEFAULT_TOOL_SEARCH_CONFIG = {
+  result_limit: 6,
+  max_result_bytes: 24_000,
+};
+
+const DEFAULT_TOOL_CONFIG = {
+  disabled: [] as string[],
+  needApproval: [] as string[],
+  routing_enabled: false,
+  search: DEFAULT_TOOL_SEARCH_CONFIG,
+};
+
+/** tool_search 的单次结果数量与总字节限制。 */
+export const ToolSearchConfigSchema = z
+  .object({
+    result_limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(8)
+      .default(DEFAULT_TOOL_SEARCH_CONFIG.result_limit),
+    max_result_bytes: z
+      .number()
+      .int()
+      .positive()
+      .default(DEFAULT_TOOL_SEARCH_CONFIG.max_result_bytes),
+  })
+  .strict();
+
+export const ToolConfigSchema = z
+  .object({
+    /** 完全不注册的核心 coding 工具名。 */
+    disabled: z.array(z.string()).default(DEFAULT_TOOL_CONFIG.disabled),
+    /** 非 Plan 模式下始终需要审批的工具名。 */
+    needApproval: z.array(z.string()).default(DEFAULT_TOOL_CONFIG.needApproval),
+    /** 是否只向模型暴露 tool_search/call_tool，并通过它们发现和调用真实工具。 */
+    routing_enabled: z.boolean().default(DEFAULT_TOOL_CONFIG.routing_enabled),
+    search: ToolSearchConfigSchema.default(DEFAULT_TOOL_SEARCH_CONFIG),
+  })
+  .strict();
 
 /** 工具长输出策略：模型拿 preview，完整内容写入 session artifact。 */
 export const ToolOutputConfigSchema = z.object({
@@ -297,7 +323,7 @@ export const CodingAgentConfigSchema = z.object({
   profile: z.record(z.string(), ProfileSuiteSchema).default({}),
   projects: z.record(z.string(), ProjectTrustSchema).default({}),
   workspace: WorkspaceConfigSchema.default({ mount: '~/.ello' }),
-  tools: ToolConfigSchema.default({ needApproval: [], disabled: [] }),
+  tools: ToolConfigSchema.default(DEFAULT_TOOL_CONFIG),
   tool_output: ToolOutputConfigSchema.default({
     max_bytes: 12_000,
     max_lines: 400,
@@ -307,7 +333,10 @@ export const CodingAgentConfigSchema = z.object({
   allowedPaths: z.array(z.string()).default([]),
   sessionDir: z.string().default(''),
   sessionId: z.string().nullable().default(null),
-  approvalMode: ApprovalModeSchema.default('default'),
+  /** 新会话必须明确给出初始模式；缺失时启动失败，不从 agent 名称推断。 */
+  initialMode: SessionModeSchema,
+  /** bypass 的独立安全闸门；仅配置 initialMode=bypass 仍不足以启用。 */
+  bypassEnabled: z.boolean().default(false),
   permissionRules: z.array(PermissionRuleSchema).default([]),
   mcpConfigPath: z.string().nullable().default(null),
   systemPromptProfile: z.string().default('coding'),
@@ -352,7 +381,6 @@ export const CodingAgentConfigSchema = z.object({
   json: z.boolean().default(false),
 });
 
-export type ApprovalMode = z.infer<typeof ApprovalModeSchema>;
 export type AgentConfigEntry = z.infer<typeof AgentConfigSchema>;
 export type ProviderConnectionConfig = z.infer<typeof ProviderConnectionSchema>;
 export type ModelCatalogEntryConfig = z.infer<typeof ModelCatalogEntrySchema>;

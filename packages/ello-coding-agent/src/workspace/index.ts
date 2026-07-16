@@ -1,6 +1,10 @@
 import type { Repository, Workspace } from './types.js';
 
-export { RepoStore, type FetchResult } from './repo-store.js';
+export {
+  REPOSITORY_BASELINE_REF,
+  RepoStore,
+  type FetchResult,
+} from './repo-store.js';
 export { TmuxStore } from './tmux.js';
 export { WorkspaceStore, type WorkspaceStatusView } from './workspace-store.js';
 export type {
@@ -10,6 +14,7 @@ export type {
   Workspace,
   WorkspaceKind,
   WorkspaceRepo,
+  WorkspaceRepoRole,
   WorkspaceStatus,
 } from './types.js';
 
