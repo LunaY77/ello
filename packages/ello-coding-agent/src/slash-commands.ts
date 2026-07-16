@@ -1,8 +1,11 @@
-import type { ApprovalMode, CodingAgentConfig } from './config/index.js';
+import type { CodingAgentConfig } from './config/index.js';
+import type { PlanSlashCommand } from './plan/types.js';
+import type { SessionMode } from './runtime/session-mode.js';
 
 /** slash command 的运行上下文。 */
 export interface CommandContext {
   readonly config: CodingAgentConfig;
+  readonly rawArgs: string;
 }
 
 /** slash command 可以返回的产品动作。 */
@@ -39,7 +42,8 @@ export type CommandResult =
       readonly args?: string[];
     }
   | { readonly type: 'set-profile'; readonly profile: string }
-  | { readonly type: 'set-permission-mode'; readonly mode: ApprovalMode }
+  | { readonly type: 'set-mode'; readonly mode: SessionMode }
+  | { readonly type: 'plan-command'; readonly command: PlanSlashCommand }
   | { readonly type: 'submit'; readonly prompt: string };
 
 /** slash command 定义。 */
@@ -61,6 +65,33 @@ export interface SlashCommandResult {
 
 /** 内置命令 registry。 */
 export const slashCommands: readonly SlashCommand[] = [
+  {
+    name: 'mode',
+    description: 'Show or change the session mode',
+    run: (_ctx, args) => {
+      const mode = args[0];
+      if (mode === undefined)
+        return {
+          type: 'message',
+          message: 'Usage: /mode <plan|default|accept-edits|bypass>',
+        };
+      if (!['plan', 'default', 'accept-edits', 'bypass'].includes(mode)) {
+        return { type: 'message', message: `Unknown mode: ${mode}` };
+      }
+      return { type: 'set-mode', mode: mode as SessionMode };
+    },
+  },
+  {
+    name: 'plan',
+    description: 'Enter, update, or preview Plan mode',
+    run: (ctx) => ({
+      type: 'plan-command',
+      command:
+        ctx.rawArgs === ''
+          ? { kind: 'without-input' }
+          : { kind: 'with-input', input: ctx.rawArgs },
+    }),
+  },
   {
     name: 'help',
     aliases: ['?'],
@@ -240,7 +271,10 @@ export function handleSlashCommand(
   if (!trimmed.startsWith('/')) {
     return { handled: false, output: '' };
   }
-  const [nameWithSlash = '', ...args] = trimmed.split(/\s+/);
+  const commandMatch = /^\/(\S+)(?:\s+([\s\S]*))?$/u.exec(trimmed);
+  const nameWithSlash = `/${commandMatch?.[1] ?? ''}`;
+  const rawArgs = (commandMatch?.[2] ?? '').trim();
+  const args = rawArgs === '' ? [] : rawArgs.split(/\s+/);
   const name = nameWithSlash.slice(1);
   const command = slashCommands.find(
     (candidate) => candidate.name === name || candidate.aliases?.includes(name),
@@ -248,7 +282,7 @@ export function handleSlashCommand(
   if (command === undefined) {
     return { handled: true, output: `Unknown command: /${name}` };
   }
-  const result = command.run({ config }, args);
+  const result = command.run({ config, rawArgs }, args);
   if (result instanceof Promise) {
     return {
       handled: true,
@@ -268,7 +302,7 @@ function renderCommandResult(result: CommandResult): string {
   if (result.type === 'runtime-action')
     return `Runtime action: ${result.action}`;
   if (result.type === 'set-profile') return `Switch profile: ${result.profile}`;
-  if (result.type === 'set-permission-mode')
-    return `Set permission mode: ${result.mode}`;
+  if (result.type === 'set-mode') return `Set mode: ${result.mode}`;
+  if (result.type === 'plan-command') return 'Plan command';
   return result.prompt;
 }

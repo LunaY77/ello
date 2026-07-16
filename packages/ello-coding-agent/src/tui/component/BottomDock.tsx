@@ -3,18 +3,24 @@ import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 
 import type { GoalState } from '../../goal/types.js';
+import {
+  modeLabel,
+  type SessionModeState,
+} from '../../runtime/session-mode.js';
 import { tuiTokens } from '../ui/tokens.js';
 
 export function BottomDock({
   profile,
-  approvalMode,
+  mode,
+  pendingPlanApproval,
   usage,
   goal,
   overlay,
   composer,
 }: {
   readonly profile: string;
-  readonly approvalMode: string;
+  readonly mode: SessionModeState;
+  readonly pendingPlanApproval: boolean;
   readonly usage?: AgentUsage;
   readonly goal?: GoalState;
   readonly overlay: ReactNode;
@@ -39,7 +45,15 @@ export function BottomDock({
       <Box justifyContent="space-between">
         <Box gap={1}>
           <Text color={tuiTokens.color.muted}>{profile}</Text>
-          <Text color={approvalColor(approvalMode)}>{approvalMode}</Text>
+          <Text color={modeColor(mode.mode)}>{modeLabel(mode.mode)}</Text>
+          {mode.mode === 'plan' ? (
+            <Text color={tuiTokens.color.accent}>Shift+Tab to cycle</Text>
+          ) : null}
+          {pendingPlanApproval ? (
+            <Text color={tuiTokens.color.warning}>
+              Plan ready · Accept / Chat about this / Deny
+            </Text>
+          ) : null}
           {goal !== undefined ? (
             <Text color={tuiTokens.color.accent}>{formatGoal(goal)}</Text>
           ) : null}
@@ -63,13 +77,13 @@ function formatGoal(goal: GoalState): string {
   return `goal ${goal.status} · turn ${goal.continuationTurns} · ${usage}`;
 }
 
-function approvalColor(mode: string): string {
+function modeColor(mode: SessionModeState['mode']): string {
   switch (mode) {
     case 'bypass':
       return tuiTokens.color.danger;
     case 'accept-edits':
       return tuiTokens.color.warning;
-    case 'dont-ask':
+    case 'plan':
       return tuiTokens.color.accent;
     default:
       return tuiTokens.color.success;

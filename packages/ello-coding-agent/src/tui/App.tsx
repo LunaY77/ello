@@ -84,6 +84,7 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   const [workingSeconds, setWorkingSeconds] = useState(0);
   const [inputHistory, setInputHistory] = useState<readonly string[]>([]);
   const [pendingSteers, setPendingSteers] = useState<readonly string[]>([]);
+  const [dismissedPlanRequest, setDismissedPlanRequest] = useState<string>();
   const activeTrigger = detectTrigger(currentLineBeforeCursor(input));
   const fileQuery =
     activeTrigger?.kind === 'file' ? activeTrigger.query : undefined;
@@ -103,15 +104,34 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
     [profileOptions],
   );
 
-  // 审批是最高优先级浮层：pendingApproval 一来就盖过其它浮层。
+  // Plan 审批优先于工具审批和普通浮层；Escape 只暂时隐藏，不改变引擎中的 pending 状态。
   const effectiveOverlay: OverlayState =
-    state.pendingApproval !== undefined
-      ? { type: 'approval', request: state.pendingApproval }
-      : overlay;
+    state.pendingPlanApproval !== undefined &&
+    state.pendingPlanApproval.plan.requestId !== dismissedPlanRequest
+      ? {
+          type: 'plan-approval',
+          plan: state.pendingPlanApproval.plan,
+          preview: state.pendingPlanApproval.preview,
+        }
+      : state.pendingApproval !== undefined
+        ? { type: 'approval', request: state.pendingApproval }
+        : overlay;
 
   useInput((_input, key) => {
     if (key.escape && effectiveOverlay.type !== 'none') {
       escapeOverlayOrAbort();
+    }
+    if (
+      key.shift &&
+      key.tab &&
+      effectiveOverlay.type === 'none' &&
+      activeTrigger === undefined &&
+      state.status === 'idle'
+    ) {
+      // TUI 只提交“向后循环”意图，不在本地猜测下一模式。
+      void session
+        .cycleMode('next')
+        .catch((error) => session.notify(formatRuntimeError(error)));
     }
   });
 
@@ -129,6 +149,7 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
       setFileSuggestions([]);
       setWorkingSeconds(0);
       setPendingSteers([]);
+      setDismissedPlanRequest(undefined);
     });
   }, [clearCount]);
 
@@ -289,6 +310,28 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
       case 'set-profile':
         applyProfileSelection(command.profile);
         return;
+      case 'set-mode':
+        void session
+          .setMode(command.mode, 'slash-command')
+          .catch((error) => session.notify(formatRuntimeError(error)));
+        return;
+      case 'plan-command':
+        void session
+          .handlePlanCommand(command.command)
+          .then((result) => {
+            if (result.kind === 'previewed') {
+              if (
+                result.preview.status === 'awaiting-approval' &&
+                state.pendingPlanApproval !== undefined
+              ) {
+                setDismissedPlanRequest(undefined);
+              } else {
+                setOverlay({ type: 'plan-preview', preview: result.preview });
+              }
+            }
+          })
+          .catch((error) => session.notify(formatRuntimeError(error)));
+        return;
       case 'message':
         session.notify(command.message);
         return;
@@ -414,6 +457,10 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   }
 
   function escapeOverlayOrAbort(): void {
+    if (effectiveOverlay.type === 'plan-approval') {
+      setDismissedPlanRequest(effectiveOverlay.plan.requestId);
+      return;
+    }
     if (effectiveOverlay.type === 'profile-detail') {
       openProfiles();
       return;
@@ -757,17 +804,11 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         cwd: runtimeConfig.cwd,
         profile,
         model: primaryModel,
-        approvalMode: runtimeConfig.approvalMode,
+        mode: state.mode.mode,
       },
       ...state.history,
     ],
-    [
-      primaryModel,
-      profile,
-      runtimeConfig.approvalMode,
-      runtimeConfig.cwd,
-      state.history,
-    ],
+    [primaryModel, profile, state.mode.mode, runtimeConfig.cwd, state.history],
   );
 
   return (
@@ -778,7 +819,8 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
       />
       <AppShell
         profile={`${profile} / ${primaryModel}`}
-        approvalMode={runtimeConfig.approvalMode}
+        mode={state.mode}
+        pendingPlanApproval={state.pendingPlanApproval !== undefined}
         liveAssistantText={state.live.assistantText}
         runningTools={runningTools}
         runningSubagents={runningSubagents}
@@ -798,6 +840,22 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
                 : effectiveOverlay
             }
             onApprove={onApprove}
+            onAcceptPlan={(requestId, contentHash) => {
+              void session
+                .acceptPlan(requestId, contentHash)
+                .catch((error) => session.notify(formatRuntimeError(error)));
+            }}
+            onChatAboutPlan={(requestId, prompt) => {
+              void session
+                .chatAboutPlan(requestId, prompt)
+                .catch((error) => session.notify(formatRuntimeError(error)));
+            }}
+            onDenyPlan={(requestId) => {
+              void session
+                .denyPlan(requestId, null)
+                .catch((error) => session.notify(formatRuntimeError(error)));
+            }}
+            onClosePlanPreview={() => setOverlay({ type: 'none' })}
             onSelectModel={(selected) => {
               setOverlay({ type: 'none' });
               applyPrimaryModelSelection(selected);
@@ -825,6 +883,22 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
               overlay={effectiveOverlay}
               marginTop={0}
               onApprove={onApprove}
+              onAcceptPlan={(requestId, contentHash) => {
+                void session
+                  .acceptPlan(requestId, contentHash)
+                  .catch((error) => session.notify(formatRuntimeError(error)));
+              }}
+              onChatAboutPlan={(requestId, prompt) => {
+                void session
+                  .chatAboutPlan(requestId, prompt)
+                  .catch((error) => session.notify(formatRuntimeError(error)));
+              }}
+              onDenyPlan={(requestId) => {
+                void session
+                  .denyPlan(requestId, null)
+                  .catch((error) => session.notify(formatRuntimeError(error)));
+              }}
+              onClosePlanPreview={() => setOverlay({ type: 'none' })}
               onSelectModel={(selected) => {
                 setOverlay({ type: 'none' });
                 applyPrimaryModelSelection(selected);
@@ -869,6 +943,13 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
       />
     </ThemeProvider>
   );
+}
+
+function formatRuntimeError(error: unknown): string {
+  if (error instanceof Error && 'code' in error) {
+    return `${String((error as Error & { code: unknown }).code)}: ${error.message}`;
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 function formatMemoryStatus(status: CodingMemoryStatus): string {

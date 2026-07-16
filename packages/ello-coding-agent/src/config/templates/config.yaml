@@ -64,8 +64,10 @@ profile:
 # 会话保存目录；留空时使用 ~/.ello/sessions。
 # sessionDir: ~/.ello/sessions
 
-# 默认审批模式。可选 default、plan、accept-edits、dont-ask、bypass。
-# approvalMode: default
+# 新会话初始模式。可选 default、plan、accept-edits、bypass。
+initial_mode: default
+# bypass 必须同时由这个安全开关显式启用。
+bypass_enabled: false
 
 # 允许工具访问的路径根目录；默认至少包含当前 cwd。
 # allowedPaths:
@@ -136,9 +138,14 @@ profile:
 #     release: ello-ts-local
 #     content: metadata # metadata 或 full
 
-# 工具路由与搜索配置。routing_enabled=true 时只暴露 tool_search/call_tool。
+# 工具配置。disabled 表示完全不注册，needApproval 表示在非 Plan 模式下始终询问；
+# routing_enabled=true 时模型只直接看到 tool_search/call_tool。
 # tools:
-#   routing_enabled: true
+#   disabled: []
+#   needApproval:
+#     - bash
+#     - web_fetch
+#   routing_enabled: false
 #   search:
 #     result_limit: 6
 #     max_result_bytes: 24000

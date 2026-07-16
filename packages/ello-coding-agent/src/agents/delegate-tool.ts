@@ -17,6 +17,7 @@ import {
 } from '../permission/policy.js';
 import type { PermissionRule } from '../permissions.js';
 import type { ProviderRegistry } from '../provider/index.js';
+import type { SessionModeState } from '../runtime/session-mode.js';
 import type { JsonlSessionStore } from '../session/jsonl-store.js';
 import type { CodingStorage } from '../storage/index.js';
 
@@ -59,6 +60,7 @@ export interface CreateDelegateToolOptions {
   readonly parentSessionId: () => string;
   /** 当前动态权限规则（来自 RulesStore），用于派生 child 规则与审批判定。 */
   readonly rules: () => readonly PermissionRule[];
+  readonly mode: () => SessionModeState;
   readonly backgroundJobs: BackgroundJobStore;
   readonly tracing?: LangfuseTracingRuntime;
   readonly hooks: DelegateToolHooks;
@@ -89,6 +91,7 @@ export function createDelegateTool(
   const decide: DecideApproval = makeApprovalPolicy(
     options.config,
     options.rules,
+    options.mode,
   );
   const description = [
     'Delegate a self-contained side task to a named subagent running in a parent-scoped sidechain.',

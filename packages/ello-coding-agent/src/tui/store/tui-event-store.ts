@@ -1,10 +1,12 @@
 import type { AgentUsage } from '@ello/agent';
 
 import type { GoalState } from '../../goal/types.js';
+import type { PlanPreview, PlanRecord } from '../../plan/types.js';
 import type {
   CodingSessionEvent,
   CodingSessionState,
 } from '../../runtime/intents.js';
+import type { SessionModeState } from '../../runtime/session-mode.js';
 
 import {
   appendCommittedHistory,
@@ -30,6 +32,12 @@ export interface TuiEventState {
   readonly live: LiveRunState;
   readonly status: CodingSessionState;
   readonly pendingApproval?: ApprovalView;
+  readonly mode: SessionModeState;
+  readonly pendingPlanApproval?: {
+    readonly plan: Extract<PlanRecord, { status: 'awaiting-approval' }>;
+    readonly preview: PlanPreview;
+  };
+  readonly planPath?: string;
   readonly usage?: AgentUsage;
   readonly goal?: GoalState;
   readonly interruptNotice?: string;
@@ -43,6 +51,12 @@ export const initialTuiEventState: TuiEventState = {
     runningSubagents: new Map(),
   },
   status: 'idle',
+  mode: {
+    mode: 'default',
+    previousMode: null,
+    source: 'config',
+    changedAt: new Date(0).toISOString(),
+  },
 };
 
 export interface PushUserAction {
@@ -105,6 +119,49 @@ export function reduceTuiEvent(
         id: `session-opened-${state.history.length}`,
         text: `session opened: ${event.sessionId}`,
       });
+
+    case 'session.mode.changed':
+      if (state.mode.mode === event.state.mode) {
+        return { ...state, mode: event.state };
+      }
+      return appendHistory(
+        { ...state, mode: event.state },
+        {
+          kind: 'system',
+          id: `mode-${state.history.length}`,
+          text: `mode: ${event.state.mode}`,
+        },
+      );
+
+    case 'plan.input.submitted':
+      return appendHistory(state, {
+        kind: 'user',
+        id: `plan-input-${state.history.length}`,
+        text: event.prompt,
+      });
+
+    case 'plan.updated':
+      return { ...state, planPath: event.path };
+
+    case 'plan.previewed':
+      return { ...state, planPath: event.preview.path };
+
+    case 'plan.approval.requested':
+      return {
+        ...state,
+        planPath: event.preview.path,
+        pendingPlanApproval: { plan: event.plan, preview: event.preview },
+      };
+
+    case 'plan.accepted':
+    case 'plan.chat.requested':
+    case 'plan.rejected': {
+      const { pendingPlanApproval: _pending, ...rest } = state;
+      return rest;
+    }
+
+    case 'plan.execution.started':
+      return state;
 
     case 'session.switched':
       return appendHistory(state, {

@@ -7,6 +7,7 @@ import {
   type DecideApproval,
 } from '../permission/policy.js';
 import type { PermissionRule } from '../permission/types.js';
+import type { SessionModeState } from '../runtime/session-mode.js';
 import type { CodingStorage } from '../storage/index.js';
 import { createTaskService, type TaskBoardScope } from '../tasks/index.js';
 
@@ -32,6 +33,7 @@ export interface CreateCodingToolsOptions {
   /** 动态权限规则读取器。 */
   readonly rules?: () => readonly PermissionRule[];
   readonly decide?: DecideApproval;
+  readonly mode: () => SessionModeState;
 }
 
 /**
@@ -44,8 +46,10 @@ export function createCodingTools(
 ): AnyAgentTool[] {
   const { config } = options;
   const decide =
-    options.decide ?? makeApprovalPolicy(config, options.rules ?? (() => []));
+    options.decide ??
+    makeApprovalPolicy(config, options.rules ?? (() => []), options.mode);
   const approval: ApprovalFor = genericApprovalFor(decide);
+  const disabled = new Set(config.tools.disabled);
   const outputStore = new SessionToolOutputStore(config.sessionDir);
   const tasks = createTaskService(
     options.storage.taskBoards,
@@ -61,7 +65,7 @@ export function createCodingTools(
   return [
     ...adaptCodingTools(codingTools, { config, outputStore }),
     ...createTaskTools(approval, tasks),
-  ];
+  ].filter((tool) => !disabled.has(tool.name));
 }
 
 /** 生成工具列表的 CLI 视图（`ello tools` 与 `/tools` 用）。 */

@@ -41,7 +41,11 @@ export class SessionCatalog {
   async list(): Promise<readonly SessionCatalogRecord[]> {
     return [...(await this.latest()).values()]
       .filter((record) => record.messageCount > 0)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          right.sessionId.localeCompare(left.sessionId),
+      );
   }
 
   async recordMessages(

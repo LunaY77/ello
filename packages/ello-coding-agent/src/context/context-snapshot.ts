@@ -110,8 +110,9 @@ async function loadEnvironmentSource(
     `  <allowed-paths>\n${indent(allowed)}\n  </allowed-paths>`,
     '</shell>',
     '<approval>',
-    `  <mode>${config.approvalMode}</mode>`,
-    `  <guidance>${approvalGuidance(config.approvalMode)}</guidance>`,
+    // runtime 构建时 config.initialMode 已被替换为当前 session mode，而非启动快照。
+    `  <mode>${config.initialMode}</mode>`,
+    `  <guidance>${modeGuidance(config.initialMode)}</guidance>`,
     '</approval>',
     'Stay within the allowed paths unless the user explicitly broadens the scope.',
   ].join('\n');
@@ -159,17 +160,16 @@ function compareSource(left: ContextSource, right: ContextSource): number {
     : left.priority - right.priority;
 }
 
-function approvalGuidance(mode: CodingAgentConfig['approvalMode']): string {
-  const guidance: Record<CodingAgentConfig['approvalMode'], string> = {
+function modeGuidance(mode: CodingAgentConfig['initialMode']): string {
+  // 提示词只解释行为边界；真正的安全约束仍由 permission policy 强制执行。
+  const guidance: Record<CodingAgentConfig['initialMode'], string> = {
     default:
       'File edits and command execution require explicit user approval each time.',
-    plan: 'Plan first; file edits and command execution require explicit user approval.',
+    plan: 'Investigate first. Only write the session plan with write_plan, then call request_plan_exit. Business files, shell commands, and network access are denied.',
     'accept-edits':
       'File edits are auto-approved; higher-risk actions still need approval.',
     bypass:
       'All approvals are bypassed; act carefully because changes apply without a prompt.',
-    'dont-ask':
-      'Approvals are not prompted; actions are decided silently by configured rules.',
   };
   return guidance[mode];
 }
