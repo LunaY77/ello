@@ -329,7 +329,7 @@ describe('loadCodingAgentConfig', () => {
     expect(config.tools).toEqual({
       disabled: [],
       needApproval: [],
-      routing_enabled: true,
+      routing_enabled: false,
       search: { result_limit: 6, max_result_bytes: 24000 },
     });
   });

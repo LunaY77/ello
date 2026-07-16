@@ -27,11 +27,14 @@ const dirs: string[] = [];
 function proxyAdapter(adapter: ModelAdapter): ModelAdapter {
   return {
     async generate(request) {
-      return proxyResponse(await adapter.generate(request));
+      const response = await adapter.generate(request);
+      return Object.hasOwn(request.tools, 'call_tool')
+        ? proxyResponse(response)
+        : response;
     },
     async *stream(request) {
       for await (const event of adapter.stream(request)) {
-        yield event.type === 'final'
+        yield event.type === 'final' && Object.hasOwn(request.tools, 'call_tool')
           ? { ...event, response: proxyResponse(event.response) }
           : event;
       }
@@ -772,6 +775,12 @@ describe('createCodingSession', () => {
       sessionDir,
       initialMode: 'bypass',
       bypassEnabled: true,
+      tools: {
+        disabled: [],
+        needApproval: [],
+        routing_enabled: true,
+        search: { result_limit: 6, max_result_bytes: 24_000 },
+      },
     });
 
     let parentTurns = 0;
