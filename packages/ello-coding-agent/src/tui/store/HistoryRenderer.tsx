@@ -15,10 +15,12 @@ const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
 
 export function HistoryEntryRenderer({
   entry,
+  cwd,
 }: {
   readonly entry: HistoryEntry;
+  readonly cwd: string;
 }) {
-  const content = renderHistoryEntryContent(entry);
+  const content = renderHistoryEntryContent(entry, cwd);
   return (
     <Box key={entry.id} marginBottom={1}>
       {content}
@@ -26,7 +28,7 @@ export function HistoryEntryRenderer({
   );
 }
 
-function renderHistoryEntryContent(entry: HistoryEntry) {
+function renderHistoryEntryContent(entry: HistoryEntry, cwd: string) {
   switch (entry.kind) {
     case 'session_header':
       return <SessionHeader entry={entry} />;
@@ -51,7 +53,7 @@ function renderHistoryEntryContent(entry: HistoryEntry) {
         </Box>
       );
     case 'tool':
-      return <HistoryTool tool={entry.tool} />;
+      return <HistoryTool tool={entry.tool} cwd={cwd} />;
     case 'subagent':
       return <HistorySubagent run={entry.run} />;
     case 'separator':
@@ -103,8 +105,14 @@ function SessionHeader({
   );
 }
 
-function HistoryTool({ tool }: { readonly tool: ToolCallView }) {
-  const model = buildToolCardModel(tool);
+function HistoryTool({
+  tool,
+  cwd,
+}: {
+  readonly tool: ToolCallView;
+  readonly cwd: string;
+}) {
+  const model = buildToolCardModel(tool, { cwd });
   const color = toolStatusColor(tool.status);
   const prefix = tool.name === 'bash' ? '• ' : '  ';
   return (

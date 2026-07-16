@@ -775,8 +775,10 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
       <TerminalHistoryOutput
         entries={historyEntries}
         resetKey={historyResetKey}
+        cwd={runtimeConfig.cwd}
       />
       <AppShell
+        cwd={runtimeConfig.cwd}
         profile={`${profile} / ${primaryModel}`}
         approvalMode={runtimeConfig.approvalMode}
         liveAssistantText={state.live.assistantText}

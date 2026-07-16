@@ -6,6 +6,9 @@
  * - 尾部状态串优先级：denied/failed > exitCode > 耗时。
  * - 默认折叠：普通成功工具折叠；带 diff 或失败的工具默认展开（更需要被看到）。
  */
+import { homedir } from 'node:os';
+import path from 'node:path';
+
 import type { FileChange } from '../../tools/file-change.js';
 import type { ToolMetadata } from '../../tools/runtime/coding-tool.js';
 
@@ -39,6 +42,11 @@ export interface ToolCardModel {
   readonly defaultCollapsed: boolean;
 }
 
+export interface ToolCardDisplayOptions {
+  readonly cwd: string;
+  readonly homeDir?: string;
+}
+
 /** 从工具结果对象里取出 {@link ToolMetadata}（CodingToolResult.metadata）。 */
 export function readToolMetadata(output: unknown): ToolMetadata | undefined {
   if (typeof output !== 'object' || output === null) {
@@ -64,9 +72,14 @@ function text(value: unknown): string {
 }
 
 /** 输入里第一个可作摘要的字段。 */
-function summarize(input: unknown, metadata: ToolMetadata | undefined): string {
+function summarize(
+  input: unknown,
+  metadata: ToolMetadata | undefined,
+  options: ToolCardDisplayOptions,
+): string {
+  const metadataPath = displayMetadataPath(metadata, options);
   const fromMeta =
-    text(metadata?.path) ||
+    metadataPath ||
     text(metadata?.command) ||
     text(metadata?.url) ||
     text(metadata?.summary);
@@ -78,7 +91,7 @@ function summarize(input: unknown, metadata: ToolMetadata | undefined): string {
     for (const key of ['path', 'command', 'pattern', 'url', 'query']) {
       const value = record[key];
       if (typeof value === 'string' && value !== '') {
-        return value;
+        return key === 'path' ? formatToolPath(value, options) : value;
       }
     }
   }
@@ -147,6 +160,7 @@ function metricList(metadata: ToolMetadata | undefined): readonly string[] {
 function detailList(
   metadata: ToolMetadata | undefined,
   diff: string,
+  options: ToolCardDisplayOptions,
 ): readonly string[] {
   const out: string[] = [];
   const exitCode = num(metadata, 'exitCode');
@@ -167,7 +181,7 @@ function detailList(
   }
   const outputPath = text(metadata?.outputPath);
   if (outputPath !== '') {
-    out.push(`artifact ${outputPath}`);
+    out.push(`artifact ${formatToolPath(outputPath, options)}`);
   }
   return out;
 }
@@ -183,9 +197,10 @@ function headline(
   call: ToolCallView,
   metadata: ToolMetadata | undefined,
   diff: string,
+  options: ToolCardDisplayOptions,
 ): string {
   const kind = metadata?.kind;
-  const path = summarize(call.input, metadata);
+  const path = summarize(call.input, metadata, options);
   if (kind === 'edit' || call.name === 'edit' || call.name === 'write') {
     return `Edited${path !== '' ? ` ${path}` : ''}${diffSummarySuffix(diff)}`;
   }
@@ -196,10 +211,10 @@ function headline(
     return `Read${path !== '' ? ` ${path}` : ''}`;
   }
   if (call.name === 'grep') {
-    return `Search${searchTarget(call.input, metadata)}`;
+    return `Search${searchTarget(call.input, metadata, options)}`;
   }
   if (call.name === 'glob') {
-    return `Glob${searchTarget(call.input, metadata)}`;
+    return `Glob${searchTarget(call.input, metadata, options)}`;
   }
   if (kind === 'shell' || call.name === 'bash') {
     const command =
@@ -227,13 +242,15 @@ function diffSummarySuffix(diff: string): string {
 function searchTarget(
   input: unknown,
   metadata: ToolMetadata | undefined,
+  options: ToolCardDisplayOptions,
 ): string {
   const pattern = text(metadata?.pattern) || inputString(input, 'pattern');
-  const path = text(metadata?.path) || inputString(input, 'path');
+  const targetPath = text(metadata?.path) || inputString(input, 'path');
+  const displayPath = formatToolPath(targetPath, options);
   if (pattern === '') {
-    return path !== '' ? ` in ${path}` : '';
+    return displayPath !== '' ? ` in ${displayPath}` : '';
   }
-  return ` ${pattern}${path !== '' ? ` in ${path}` : ''}`;
+  return ` ${pattern}${displayPath !== '' ? ` in ${displayPath}` : ''}`;
 }
 
 function inputString(input: unknown, key: string): string {
@@ -266,11 +283,51 @@ function readOutputText(output: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+/**
+ * 工具真实参数保留绝对路径，只有 TUI 视图模型会缩短路径：
+ * `~/.ello` 下的文件使用波浪号，当前工作目录下的文件使用相对路径。
+ */
+export function formatToolPath(
+  value: string,
+  options: ToolCardDisplayOptions,
+): string {
+  if (value === '' || !path.isAbsolute(value)) {
+    return value;
+  }
+  const target = path.resolve(value);
+  const home = path.resolve(options.homeDir ?? homedir());
+  const elloHome = path.join(home, '.ello');
+  if (isWithin(elloHome, target)) {
+    const relative = path.relative(home, target);
+    return relative === '' ? '~' : `~/${relative}`;
+  }
+
+  const cwd = path.resolve(options.cwd);
+  if (isWithin(cwd, target)) {
+    return path.relative(cwd, target) || '.';
+  }
+  if (isWithin(home, target)) {
+    const relative = path.relative(home, target);
+    return relative === '' ? '~' : `~/${relative}`;
+  }
+  return value;
+}
+
 /** 构建 ToolCard 视图模型。 */
-export function buildToolCardModel(call: ToolCallView): ToolCardModel {
+export function buildToolCardModel(
+  call: ToolCallView,
+  options: ToolCardDisplayOptions,
+): ToolCardModel {
   const metadata = readToolMetadata(call.output);
-  const fileChanges = readFileChanges(metadata?.fileChanges);
-  const diff = unifiedDiffFromFileChanges(fileChanges);
+  const sourceFileChanges = readFileChanges(metadata?.fileChanges);
+  const fileChanges = sourceFileChanges.map((change) => ({
+    ...change,
+    path: formatToolPath(change.path, options),
+    ...(change.kind === 'modified' && change.movePath !== undefined
+      ? { movePath: formatToolPath(change.movePath, options) }
+      : {}),
+  }));
+  const diff = unifiedDiffFromFileChanges(sourceFileChanges);
   const hasDiff = diff !== '';
   const truncated = metadata?.truncated === true;
   const outputPath = text(metadata?.outputPath);
@@ -279,18 +336,18 @@ export function buildToolCardModel(call: ToolCallView): ToolCardModel {
     status: call.status,
     icon: statusIcon(call.status),
     name: formatName(call.name),
-    headline: headline(call, metadata, diff),
-    summary: summarize(call.input, metadata),
+    headline: headline(call, metadata, diff, options),
+    summary: summarize(call.input, metadata, options),
     metaRight: rightStatus(call, metadata),
     metrics: metricList(metadata),
-    details: detailList(metadata, diff),
+    details: detailList(metadata, diff, options),
     outputPreview:
       metadata?.kind === 'shell' || call.name === 'bash'
         ? outputPreview(call.output)
         : [],
     ...(truncated
       ? {
-          truncationNotice: `output truncated${outputPath !== '' ? `, full log: ${outputPath}` : ''}`,
+          truncationNotice: `output truncated${outputPath !== '' ? `, full log: ${formatToolPath(outputPath, options)}` : ''}`,
         }
       : {}),
     ...(hasDiff ? { diff } : {}),
@@ -299,4 +356,32 @@ export function buildToolCardModel(call: ToolCallView): ToolCardModel {
     // 默认折叠普通成功工具；diff / 失败默认展开。
     defaultCollapsed: !hasDiff && call.status !== 'fail',
   };
+}
+
+function displayMetadataPath(
+  metadata: ToolMetadata | undefined,
+  options: ToolCardDisplayOptions,
+): string {
+  const metadataPath = text(metadata?.path);
+  const metadataPaths = Array.isArray(metadata?.paths)
+    ? metadata.paths.filter(
+        (value): value is string => typeof value === 'string',
+      )
+    : [];
+  if (metadataPaths.length > 0 && metadataPath === metadataPaths.join(', ')) {
+    return metadataPaths
+      .map((value) => formatToolPath(value, options))
+      .join(', ');
+  }
+  return formatToolPath(metadataPath, options);
+}
+
+function isWithin(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  return (
+    relative === '' ||
+    (!relative.startsWith(`..${path.sep}`) &&
+      relative !== '..' &&
+      !path.isAbsolute(relative))
+  );
 }

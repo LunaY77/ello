@@ -8,12 +8,14 @@ import { tuiTokens } from './tokens.js';
 
 export function ToolRow({
   call,
+  cwd,
   indent = 0,
 }: {
   readonly call: ToolCallView;
+  readonly cwd: string;
   readonly indent?: number;
 }) {
-  const model = buildToolCardModel(call);
+  const model = buildToolCardModel(call, { cwd });
   return (
     <Box marginLeft={indent} gap={1}>
       <Text color={statusColor(call.status)}>{statusGlyph(call.status)}</Text>

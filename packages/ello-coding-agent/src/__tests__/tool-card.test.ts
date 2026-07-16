@@ -3,13 +3,21 @@ import { describe, expect, it } from 'vitest';
 import { createFileChange } from '../tools/file-change.js';
 import type { ToolCallView } from '../tui/store/history-entry.js';
 import {
-  buildToolCardModel,
+  buildToolCardModel as createToolCardModel,
   formatDuration,
+  formatToolPath,
   readToolMetadata,
 } from '../tui/store/tool-card.js';
 
 function call(over: Partial<ToolCallView>): ToolCallView {
   return { id: 't1', name: 'read', input: {}, status: 'ok', ...over };
+}
+
+function buildToolCardModel(
+  toolCall: ToolCallView,
+  options = { cwd: '/workspace', homeDir: '/home/alice' },
+) {
+  return createToolCardModel(toolCall, options);
 }
 
 describe('formatDuration', () => {
@@ -28,6 +36,39 @@ describe('readToolMetadata', () => {
     });
     expect(readToolMetadata('not-an-object')).toBeUndefined();
     expect(readToolMetadata({ metadata: null })).toBeUndefined();
+  });
+});
+
+describe('formatToolPath', () => {
+  const options = { cwd: '/home/alice/project', homeDir: '/home/alice' };
+
+  it('uses workspace-relative paths inside cwd', () => {
+    expect(formatToolPath('/home/alice/project/src/index.ts', options)).toBe(
+      'src/index.ts',
+    );
+    expect(formatToolPath('/home/alice/project', options)).toBe('.');
+  });
+
+  it('uses tilde paths for Ello artifacts and other home files', () => {
+    expect(
+      formatToolPath(
+        '/home/alice/.ello/sessions/s1/artifacts/read.txt',
+        options,
+      ),
+    ).toBe('~/.ello/sessions/s1/artifacts/read.txt');
+    expect(formatToolPath('/home/alice/notes/todo.md', options)).toBe(
+      '~/notes/todo.md',
+    );
+  });
+
+  it('keeps relative and external absolute paths unchanged', () => {
+    expect(formatToolPath('src/index.ts', options)).toBe('src/index.ts');
+    expect(formatToolPath('/var/log/ello.log', options)).toBe(
+      '/var/log/ello.log',
+    );
+    expect(formatToolPath('/home/alice/project-copy/a.ts', options)).toBe(
+      '~/project-copy/a.ts',
+    );
   });
 });
 
@@ -83,10 +124,11 @@ describe('buildToolCardModel', () => {
             totalLines: 12,
             matchCount: 3,
             truncated: true,
-            outputPath: '/tmp/log',
+            outputPath: '/home/alice/.ello/sessions/s1/read.txt',
           },
         },
       }),
+      { cwd: '/home/alice/project', homeDir: '/home/alice' },
     );
     expect(model.metrics).toContain('12 lines');
     expect(model.metrics).toContain('3 matches');
@@ -95,7 +137,32 @@ describe('buildToolCardModel', () => {
     expect(model.details).toContain('truncated');
     expect(model.details).not.toContain('id t1');
     expect(model.details).not.toContain('kind read');
-    expect(model.truncationNotice).toContain('/tmp/log');
+    expect(model.details).toContain('artifact ~/.ello/sessions/s1/read.txt');
+    expect(model.truncationNotice).toContain(
+      'full log: ~/.ello/sessions/s1/read.txt',
+    );
+  });
+
+  it('shortens absolute paths in headlines, summaries and diffs', () => {
+    const targetPath = '/home/alice/project/src/a.ts';
+    const model = buildToolCardModel(
+      call({
+        name: 'edit',
+        input: { path: targetPath },
+        output: {
+          metadata: {
+            kind: 'edit',
+            path: targetPath,
+            fileChanges: [createFileChange(targetPath, 'old\n', 'new\n')],
+          },
+        },
+      }),
+      { cwd: '/home/alice/project', homeDir: '/home/alice' },
+    );
+
+    expect(model.headline).toBe('Edited src/a.ts (+1 -1)');
+    expect(model.summary).toBe('src/a.ts');
+    expect(model.fileChanges?.[0]?.path).toBe('src/a.ts');
   });
 
   it('builds concise headlines and shell output previews', () => {

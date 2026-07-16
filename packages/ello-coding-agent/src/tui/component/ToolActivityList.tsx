@@ -8,16 +8,18 @@ import { useTheme, type TuiTheme } from '../theme/index.js';
 
 export function ToolActivityList({
   tools,
+  cwd,
   indent = 0,
 }: {
   readonly tools: readonly ToolCallView[];
+  readonly cwd: string;
   readonly indent?: number;
 }) {
   return (
     <Box flexDirection="column">
       {tools.map((tool) => (
         <Box key={tool.id} marginLeft={indent} marginBottom={1}>
-          <ToolCard call={tool} />
+          <ToolCard call={tool} cwd={cwd} />
         </Box>
       ))}
     </Box>
@@ -26,13 +28,15 @@ export function ToolActivityList({
 
 function ToolCard({
   call,
+  cwd,
   compact = false,
 }: {
   readonly call: ToolCallView;
+  readonly cwd: string;
   readonly compact?: boolean;
 }) {
   const theme = useTheme();
-  const model = buildToolCardModel(call);
+  const model = buildToolCardModel(call, { cwd });
   const presenter = presenterFor(call.name);
   const [collapsed] = useState(() => compact || model.defaultCollapsed);
   const color = statusColor(theme, model.status);

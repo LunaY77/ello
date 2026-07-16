@@ -10,6 +10,7 @@ import { BottomDock } from './BottomDock.js';
 import { LiveViewport } from './LiveViewport.js';
 
 export interface AppShellProps {
+  readonly cwd: string;
   readonly profile: string;
   readonly approvalMode: string;
   readonly liveAssistantText: string;
@@ -33,6 +34,7 @@ export function AppShell(props: AppShellProps) {
     <Box flexDirection="column" width="100%" paddingX={1}>
       <Box flexDirection="column" width={mainWidth}>
         <LiveViewport
+          cwd={props.cwd}
           assistantText={props.liveAssistantText}
           runningTools={props.runningTools}
           runningSubagents={props.runningSubagents}

@@ -11,6 +11,7 @@ describe('TerminalHistoryOutput', () => {
   it('renders the session header as committed history', () => {
     const output = renderToString(
       <TerminalHistoryOutput
+        cwd="/tmp/ello-workspace"
         resetKey={0}
         entries={[
           {
@@ -36,6 +37,7 @@ describe('TerminalHistoryOutput', () => {
   it('renders user, assistant and tool history outside AppShell', () => {
     const output = renderToString(
       <TerminalHistoryOutput
+        cwd="/workspace"
         resetKey={0}
         entries={[
           { kind: 'user', id: 'u1', text: 'hello' },
@@ -46,13 +48,15 @@ describe('TerminalHistoryOutput', () => {
             tool: {
               id: 'tool-1',
               name: 'edit',
-              input: { path: 'tmp.txt' },
+              input: { path: '/workspace/tmp.txt' },
               status: 'ok',
               output: {
                 metadata: {
                   kind: 'edit',
-                  path: 'tmp.txt',
-                  fileChanges: [createFileChange('tmp.txt', 'old\n', 'new\n')],
+                  path: '/workspace/tmp.txt',
+                  fileChanges: [
+                    createFileChange('/workspace/tmp.txt', 'old\n', 'new\n'),
+                  ],
                 },
               },
             },
@@ -104,6 +108,7 @@ describe('AppShell', () => {
   it('renders only live viewport and bottom dock', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         approvalMode="bypass"
         liveAssistantText=""
@@ -124,6 +129,7 @@ describe('AppShell', () => {
   it('shows running status in the live viewport', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         approvalMode="default"
         liveAssistantText="I am checking the parser"
@@ -144,6 +150,7 @@ describe('AppShell', () => {
   it('does not render blank assistant stream chunks as empty message lines', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         approvalMode="default"
         liveAssistantText={'\n\n   \n'}
@@ -164,6 +171,7 @@ describe('AppShell', () => {
   it('shows an interrupt notice when idle after abort', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         approvalMode="default"
         liveAssistantText=""
@@ -183,6 +191,7 @@ describe('AppShell', () => {
   it('shows queued steering above the composer', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         approvalMode="default"
         liveAssistantText=""
@@ -203,6 +212,7 @@ describe('AppShell', () => {
   it('renders running subagent status with nested tools', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         approvalMode="default"
         liveAssistantText=""
@@ -219,7 +229,7 @@ describe('AppShell', () => {
               {
                 id: 'read-1',
                 name: 'read',
-                input: { path: 'src/config.ts' },
+                input: { path: '/workspace/src/config.ts' },
                 status: 'running',
               },
             ],
@@ -237,6 +247,7 @@ describe('AppShell', () => {
     expect(output).toContain('inspect loader');
     expect(output).toContain('Read');
     expect(output).toContain('src/config.ts');
+    expect(output).not.toContain('/workspace/src/config.ts');
   });
 
   it('limits subagent tool activity to the latest four calls', () => {
@@ -249,6 +260,7 @@ describe('AppShell', () => {
     }));
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         approvalMode="default"
         liveAssistantText=""
