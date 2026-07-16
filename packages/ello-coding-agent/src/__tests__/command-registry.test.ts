@@ -43,7 +43,7 @@ describe('command registry', () => {
   it('groups commands while preserving first-seen group order', () => {
     const grouped = groupCommands(buildCommands());
     const groups = grouped.map((entry) => entry.group);
-    expect(groups[0]).toBe('General'); // help is first slash command
+    expect(groups[0]).toBe('Session'); // mode is first slash command
     expect(new Set(groups).size).toBe(groups.length);
   });
 });

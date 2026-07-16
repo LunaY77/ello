@@ -36,6 +36,19 @@ interface CommandMeta {
 
 /** slash 名 → UI 元数据。新增 slash 命令时在此补一行即可进入 palette。 */
 const META: Record<string, CommandMeta> = {
+  mode: {
+    id: 'session.mode',
+    group: 'Session',
+    title: 'Change mode',
+    keywords: ['plan', 'permissions'],
+    shortcut: 'shift+tab',
+  },
+  plan: {
+    id: 'session.plan',
+    group: 'Session',
+    title: 'Plan',
+    keywords: ['design', 'preview'],
+  },
   help: { id: 'help.open', group: 'General', title: 'Help', keywords: ['?'] },
   clear: {
     id: 'session.clear',

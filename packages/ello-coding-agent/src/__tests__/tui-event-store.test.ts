@@ -20,6 +20,31 @@ const runCompleted = {
 } as const;
 
 describe('tui-event-store', () => {
+  it('commits Plan mode changes and Plan task input to visible history', () => {
+    let state = reduceTuiEvent(initialTuiEventState, {
+      type: 'session.mode.changed',
+      state: {
+        mode: 'plan',
+        previousMode: 'default',
+        source: 'slash-command',
+        changedAt: '2026-07-16T00:00:00.000Z',
+      },
+    });
+    state = reduceTuiEvent(state, {
+      type: 'plan.input.submitted',
+      prompt: 'inspect the repository',
+    });
+
+    expect(state.mode.mode).toBe('plan');
+    expect(state.history).toEqual([
+      expect.objectContaining({ kind: 'system', text: 'mode: plan' }),
+      expect.objectContaining({
+        kind: 'user',
+        text: 'inspect the repository',
+      }),
+    ]);
+  });
+
   it('shows a validated goal objective as the real user submission', () => {
     const goal = {
       id: 'goal-1',

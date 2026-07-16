@@ -77,6 +77,12 @@ function registerToolCommands(program: Command, ctx: CliCommandContext): void {
           storage,
           taskBoardScope: { type: 'session', sessionId: 'cli-tools' },
           decide: () => 'auto',
+          mode: () => ({
+            mode: config.initialMode,
+            previousMode: null,
+            source: 'resume',
+            changedAt: new Date(0).toISOString(),
+          }),
         });
         ctx.io.stdout.write(`${describeCodingTools(tools)}\n`);
       } finally {
@@ -185,7 +191,7 @@ function registerPermissionCommands(
           config.json
             ? JSON.stringify(
                 {
-                  mode: config.approvalMode,
+                  initialMode: config.initialMode,
                   allowedPaths: config.allowedPaths,
                   rules: config.permissionRules,
                 },
@@ -193,7 +199,7 @@ function registerPermissionCommands(
                 2,
               )
             : [
-                `mode\t${config.approvalMode}`,
+                `initial mode\t${config.initialMode}`,
                 `allowedPaths\t${config.allowedPaths.join(', ')}`,
                 formatPermissionRules(config.permissionRules),
               ].join('\n')

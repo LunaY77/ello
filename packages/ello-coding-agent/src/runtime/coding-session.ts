@@ -78,6 +78,15 @@ import {
 } from '../permission/policy.js';
 import { RulesStore } from '../permission/rules-store.js';
 import {
+  createPlanTools,
+  readPlanArtifact,
+  writePlanArtifact,
+  type PlanCommandResult,
+  type PlanPreview,
+  type PlanRecord,
+  type PlanSlashCommand,
+} from '../plan/index.js';
+import {
   createProviderRegistry,
   modelSettingsFromRole,
   prepareModelInputForRuntimeModel,
@@ -113,6 +122,13 @@ import type {
   CodingEventListener,
   CodingSessionEvent,
 } from './intents.js';
+import {
+  cycleSessionMode,
+  PlanModeError,
+  type SessionMode,
+  type SessionModeSource,
+  type SessionModeState,
+} from './session-mode.js';
 
 /** 模型上下文窗口默认值，用于压缩触发判定。 */
 const DEFAULT_CONTEXT_WINDOW = 160_000;
@@ -316,6 +332,21 @@ export interface CodingSession {
     meta?: Record<string, unknown>,
   ): Promise<AgentRunResult>;
   steer(prompt: string): void;
+  mode(): SessionModeState;
+  cycleMode(direction: 'next' | 'previous'): Promise<SessionModeState>;
+  setMode(
+    mode: SessionMode,
+    source: SessionModeSource,
+  ): Promise<SessionModeState>;
+  handlePlanCommand(command: PlanSlashCommand): Promise<PlanCommandResult>;
+  previewPlan(): Promise<PlanPreview>;
+  requestPlanExit(): Promise<void>;
+  acceptPlan(
+    requestId: string,
+    contentHash: string,
+  ): Promise<{ executionSessionId: string }>;
+  chatAboutPlan(requestId: string, prompt: string): Promise<void>;
+  denyPlan(requestId: string, reason: string | null): Promise<void>;
   clear(): Promise<void>;
   approve(requestId: string, decision: ApprovalDecision): Promise<void>;
   abort(reason?: string): void;
@@ -472,6 +503,16 @@ class CodingSessionImpl implements CodingSession {
   private readonly approvalDecisions = new Map<string, ApprovalDecision>();
   private readonly sessionExternalPaths = new Set<string>();
   private readonly steerQueue: string[] = [];
+  private readonly planAcceptances = new Map<
+    string,
+    Promise<{ readonly executionSessionId: string }>
+  >();
+  private pendingPlanApprovalEvent:
+    | {
+        readonly plan: Extract<PlanRecord, { status: 'awaiting-approval' }>;
+        readonly preview: PlanPreview;
+      }
+    | undefined;
   private currentStream: AgentStream | undefined;
   private pendingRunMetadata: Record<string, unknown> | undefined;
   private continuationTask: Promise<void> | undefined;
@@ -484,6 +525,7 @@ class CodingSessionImpl implements CodingSession {
   private primaryRole: RuntimeRoleModel;
   private readonly toolResultBudget: ToolResultBudget;
   private activeAgentName: string;
+  private modeState: SessionModeState;
 
   constructor(
     public sessionId: string,
@@ -492,6 +534,12 @@ class CodingSessionImpl implements CodingSession {
   ) {
     this.config = config;
     this.activeAgentName = config.default_agent;
+    this.modeState = {
+      mode: config.initialMode,
+      previousMode: null,
+      source: 'config',
+      changedAt: new Date().toISOString(),
+    };
     this.providerRegistry = createProviderRegistry(config);
     this.checkpoints = new CheckpointStore(this.deps.storage.checkpoints);
     this.primaryRole = this.resolveRuntimeRole('primary');
@@ -528,6 +576,31 @@ class CodingSessionImpl implements CodingSession {
   }
 
   async initialize(): Promise<void> {
+    if (this.modeState.mode === 'bypass' && !this.config.bypassEnabled) {
+      throw this.planError(
+        'MODE_NOT_ALLOWED',
+        'Initial bypass mode requires bypass_enabled.',
+      );
+    }
+    const opened = await this.deps.sessionStore.repository.open(this.sessionId);
+    const persisted = await this.deps.sessionStore.repository.latestModeState(
+      this.sessionId,
+    );
+    if (persisted === null) {
+      // 只有本次刚创建的空 session 可以写入配置初始模式；恢复会话绝不从配置猜测。
+      if (opened.messages.length > 0 || this.config.sessionId !== null) {
+        throw this.planError(
+          'SESSION_PROTOCOL_INVALID',
+          `Session ${this.sessionId} has no mode event.`,
+        );
+      }
+      await this.deps.sessionStore.repository.appendModeState(
+        this.sessionId,
+        this.modeState,
+      );
+    } else {
+      this.modeState = { ...persisted, source: 'resume' };
+    }
     await this.goalService.load();
   }
 
@@ -562,6 +635,318 @@ class CodingSessionImpl implements CodingSession {
       return;
     }
     this.steerQueue.push(prompt);
+  }
+
+  mode(): SessionModeState {
+    return this.modeState;
+  }
+
+  /** 快捷键只提交方向，实际循环顺序和 bypass 可用性由引擎决定。 */
+  async cycleMode(direction: 'next' | 'previous'): Promise<SessionModeState> {
+    return this.setMode(
+      cycleSessionMode(
+        this.modeState.mode,
+        direction,
+        this.config.bypassEnabled,
+      ),
+      'shortcut',
+    );
+  }
+
+  async setMode(
+    mode: SessionMode,
+    source: SessionModeSource,
+  ): Promise<SessionModeState> {
+    // 运行中或存在工具审批时切模式会改变尚未执行工具的权限语义，因此直接拒绝。
+    if (this.currentStream !== undefined || this.approvalItems.size > 0) {
+      throw this.planError(
+        'MODE_CHANGE_WHILE_RUNNING',
+        'Cannot change mode while a turn is running.',
+      );
+    }
+    const plan = await this.deps.sessionStore.repository.latestPlanState(
+      this.sessionId,
+    );
+    // Plan 审批属于显式用户决策点，不能靠切换模式隐式跳过。
+    if (plan?.status === 'awaiting-approval') {
+      throw this.planError(
+        'MODE_CHANGE_WHILE_RUNNING',
+        'Resolve the pending plan approval before changing mode.',
+        plan.requestId,
+      );
+    }
+    if (mode === 'bypass' && !this.config.bypassEnabled) {
+      throw this.planError(
+        'MODE_NOT_ALLOWED',
+        'Bypass mode is disabled by bypass_enabled.',
+      );
+    }
+    if (mode === this.modeState.mode) return this.modeState;
+    const next: SessionModeState = {
+      mode,
+      previousMode: this.modeState.mode,
+      source,
+      changedAt: new Date().toISOString(),
+    };
+    await this.deps.sessionStore.repository.appendModeState(
+      this.sessionId,
+      next,
+    );
+    // 临时外部目录授权属于旧模式上下文；切换后必须清空并重建 agent/context。
+    this.modeState = next;
+    this.sessionExternalPaths.clear();
+    await this.rebuild();
+    this.emit({ type: 'session.mode.changed', state: next });
+    return next;
+  }
+
+  async handlePlanCommand(
+    command: PlanSlashCommand,
+  ): Promise<PlanCommandResult> {
+    // 保持命令分支穷举，新增 command kind 时 TypeScript 会迫使这里同步处理。
+    switch (command.kind) {
+      case 'without-input':
+        if (this.modeState.mode !== 'plan') {
+          throw this.planError('PLAN_TASK_REQUIRED', 'Usage: /plan <task>');
+        }
+        return { kind: 'previewed', preview: await this.previewPlan() };
+      case 'with-input': {
+        const prompt = command.input.trim();
+        if (prompt.length === 0) {
+          throw this.planError('PLAN_TASK_REQUIRED', 'Usage: /plan <task>');
+        }
+        if (this.modeState.mode !== 'plan') {
+          const mode = await this.setMode('plan', 'slash-command');
+          this.emit({ type: 'plan.input.submitted', prompt });
+          const result = await this.submit(prompt, { source: 'slash-command' });
+          return { kind: 'entered', mode, runId: result.id };
+        }
+        if (this.currentStream !== undefined) {
+          this.emit({ type: 'plan.input.submitted', prompt });
+          this.steer(prompt);
+          return { kind: 'steered', runId: 'active' };
+        }
+        this.emit({ type: 'plan.input.submitted', prompt });
+        const result = await this.submit(prompt, { source: 'slash-command' });
+        return { kind: 'submitted', runId: result.id };
+      }
+    }
+  }
+
+  async previewPlan(): Promise<PlanPreview> {
+    this.requirePlanMode();
+    const plan = await this.requirePlan();
+    const artifact = await readPlanArtifact(this.cwd, this.sessionId);
+    // Preview 也校验 hash，避免 UI 展示事件流未记录的磁盘内容。
+    if (artifact.contentHash !== plan.contentHash) {
+      throw this.planError(
+        'PLAN_HASH_MISMATCH',
+        'Plan artifact does not match persisted state.',
+      );
+    }
+    const preview = {
+      sessionId: this.sessionId,
+      ...artifact,
+      status: plan.status,
+    };
+    await this.deps.sessionStore.repository.appendPlanPreviewed(
+      this.sessionId,
+      plan.contentHash,
+    );
+    this.emit({ type: 'plan.previewed', preview });
+    return preview;
+  }
+
+  async requestPlanExit(): Promise<void> {
+    this.requirePlanMode();
+    const current = await this.requirePlan();
+    if (
+      current.status === 'awaiting-approval' ||
+      current.status === 'accepted'
+    ) {
+      throw this.planError(
+        'PLAN_STATE_INVALID',
+        `Cannot request approval from ${current.status}.`,
+      );
+    }
+    const artifact = await readPlanArtifact(this.cwd, this.sessionId);
+    if (artifact.contentHash !== current.contentHash) {
+      throw this.planError(
+        'PLAN_HASH_MISMATCH',
+        'Plan changed outside the plan writer.',
+      );
+    }
+    const plan: PlanRecord = {
+      status: 'awaiting-approval',
+      sessionId: this.sessionId,
+      contentHash: artifact.contentHash,
+      requestId: randomUUID(),
+      createdAt: current.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.deps.sessionStore.repository.appendPlanState(
+      this.sessionId,
+      'plan.approval.requested',
+      plan,
+    );
+    const preview = {
+      sessionId: this.sessionId,
+      ...artifact,
+      status: plan.status,
+    };
+    // 工具在模型 turn 内调用本方法；等 turn 收尾后再弹审批，防止用户过早 Accept
+    // 导致旧 Plan stream 与新 Execution Session 同时写入运行时。
+    if (this.currentStream === undefined) {
+      this.emit({ type: 'plan.approval.requested', plan, preview });
+    } else {
+      this.pendingPlanApprovalEvent = { plan, preview };
+    }
+  }
+
+  acceptPlan(
+    requestId: string,
+    contentHash: string,
+  ): Promise<{ executionSessionId: string }> {
+    // 同一个 requestId + hash 共用同一 Promise，双击和并发重试只创建一个新 session。
+    const key = `${requestId}:${contentHash}`;
+    const existing = this.planAcceptances.get(key);
+    if (existing !== undefined) return existing;
+    const acceptance = this.acceptPlanOnce(requestId, contentHash);
+    this.planAcceptances.set(key, acceptance);
+    // 可恢复错误不应永久污染幂等表；成功 Promise 则保留给后续重复请求复用。
+    void acceptance.catch(() => {
+      if (this.planAcceptances.get(key) === acceptance) {
+        this.planAcceptances.delete(key);
+      }
+    });
+    return acceptance;
+  }
+
+  private async acceptPlanOnce(
+    requestId: string,
+    contentHash: string,
+  ): Promise<{ executionSessionId: string }> {
+    this.requirePlanMode();
+    if (this.currentStream !== undefined) {
+      throw this.planError(
+        'MODE_CHANGE_WHILE_RUNNING',
+        'Cannot accept a plan while a turn is running.',
+        requestId,
+      );
+    }
+    const sourceSessionId = this.sessionId;
+    const current = await this.requirePlan();
+    // 已完成的 Accept 直接返回原 executionSessionId，不重复提交计划。
+    if (current.status === 'accepted' && current.contentHash === contentHash) {
+      return { executionSessionId: current.executionSessionId };
+    }
+    this.assertPlanRequest(current, requestId, contentHash);
+    const artifact = await readPlanArtifact(this.cwd, sourceSessionId);
+    if (artifact.contentHash !== contentHash) {
+      throw this.planError(
+        'PLAN_HASH_MISMATCH',
+        'Accepted plan hash does not match the artifact.',
+        requestId,
+      );
+    }
+    const executionSessionId = randomUUID();
+    const accepted: PlanRecord = {
+      status: 'accepted',
+      sessionId: sourceSessionId,
+      contentHash,
+      executionSessionId,
+      createdAt: current.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.deps.sessionStore.repository.appendPlanState(
+      sourceSessionId,
+      'plan.accepted',
+      accepted,
+    );
+    this.emit({ type: 'plan.accepted', plan: accepted });
+
+    // 执行必须发生在全新的 default session；原 Plan Session 保持只读、可恢复和可追溯。
+    this.sessionId = executionSessionId;
+    await this.deps.sessionStore.load(executionSessionId);
+    this.modeState = {
+      mode: 'default',
+      previousMode: null,
+      source: 'plan-accept',
+      changedAt: new Date().toISOString(),
+    };
+    await this.deps.sessionStore.repository.appendModeState(
+      executionSessionId,
+      this.modeState,
+    );
+    await this.deps.sessionStore.repository.appendPlanExecutionStarted(
+      executionSessionId,
+      sourceSessionId,
+      contentHash,
+    );
+    await this.goalService.load();
+    await this.rebuild();
+    this.emit({ type: 'session.switched', sessionId: executionSessionId });
+    this.emit({ type: 'session.mode.changed', state: this.modeState });
+    this.emit({
+      type: 'plan.execution.started',
+      executionSessionId,
+      sourcePlanSessionId: sourceSessionId,
+      sourcePlanHash: contentHash,
+    });
+    // 用户接受的是完整 Plan，因此不做截断，直接作为新会话首条 User Prompt 提交。
+    await this.submit(artifact.content, {
+      sourcePlanSessionId: sourceSessionId,
+      sourcePlanHash: contentHash,
+    });
+    return { executionSessionId };
+  }
+
+  async chatAboutPlan(requestId: string, prompt: string): Promise<void> {
+    this.requirePlanMode();
+    const current = await this.requirePlan();
+    this.assertPlanRequest(current, requestId, current.contentHash);
+    if (prompt.trim().length === 0)
+      throw this.planError(
+        'PLAN_STATE_INVALID',
+        'Chat prompt must not be empty.',
+        requestId,
+      );
+    const draft: PlanRecord = {
+      status: 'draft',
+      sessionId: this.sessionId,
+      contentHash: current.contentHash,
+      createdAt: current.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+    // Chat 不创建执行会话；先退回 draft，再复用当前 Plan Session 的正常 submit 管道。
+    await this.deps.sessionStore.repository.appendPlanState(
+      this.sessionId,
+      'plan.chat.requested',
+      draft,
+    );
+    this.emit({ type: 'plan.chat.requested', plan: draft });
+    await this.submit(prompt, { source: 'plan-chat' });
+  }
+
+  async denyPlan(requestId: string, reason: string | null): Promise<void> {
+    this.requirePlanMode();
+    const current = await this.requirePlan();
+    this.assertPlanRequest(current, requestId, current.contentHash);
+    const rejected: PlanRecord = {
+      status: 'rejected',
+      sessionId: this.sessionId,
+      contentHash: current.contentHash,
+      reason,
+      createdAt: current.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+    // rejected 仍是可继续编辑的 Plan 状态，后续 write_plan 会生成新的 draft/hash。
+    await this.deps.sessionStore.repository.appendPlanState(
+      this.sessionId,
+      'plan.rejected',
+      rejected,
+    );
+    this.emit({ type: 'plan.rejected', plan: rejected });
   }
 
   /** 清空当前可见上下文并切到新会话。 */
@@ -655,6 +1040,7 @@ class CodingSessionImpl implements CodingSession {
       }
     } finally {
       this.currentStream = undefined;
+      this.flushPlanApprovalEvent();
       await this.closeInvalidatedRuntime();
     }
     if (completed !== undefined) {
@@ -844,6 +1230,12 @@ class CodingSessionImpl implements CodingSession {
     readonly stdout: string;
     readonly stderr: string;
   }> {
+    if (this.modeState.mode === 'plan') {
+      throw this.planError(
+        'MODE_NOT_ALLOWED',
+        'Shell escape is disabled in Plan mode.',
+      );
+    }
     const environment = createSlashRuntimeEnvironment(this.config);
     try {
       const result = await environment.shell?.run(command, {
@@ -909,6 +1301,7 @@ class CodingSessionImpl implements CodingSession {
   /** 把当前 session 的 active path 历史推给前端。 */
   async loadHistory(): Promise<void> {
     await this.emitHistoryLoaded({ allowMissing: true });
+    this.emit({ type: 'session.mode.changed', state: this.modeState });
     const goal = this.goalService.current();
     if (goal !== null) this.emit({ type: 'goal.updated', goal });
   }
@@ -960,6 +1353,10 @@ class CodingSessionImpl implements CodingSession {
     reason = 'fork from TUI',
     targetEntryId?: string,
   ): Promise<string> {
+    const sourceSessionId = this.sessionId;
+    const sourceMode = this.modeState;
+    const sourcePlan =
+      await this.deps.sessionStore.repository.latestPlanState(sourceSessionId);
     const previousGoalId = this.goalService.current()?.id;
     if (this.currentStream !== undefined) {
       this.abort('fork requested from TUI');
@@ -981,6 +1378,37 @@ class CodingSessionImpl implements CodingSession {
     });
     this.sessionId = next.sessionId;
     await this.deps.sessionStore.load(this.sessionId);
+    this.modeState = {
+      mode: sourceMode.mode,
+      previousMode: null,
+      source: 'resume',
+      changedAt: new Date().toISOString(),
+    };
+    await this.deps.sessionStore.repository.appendModeState(
+      this.sessionId,
+      this.modeState,
+    );
+    if (sourcePlan !== null) {
+      const sourceArtifact = await readPlanArtifact(this.cwd, sourceSessionId);
+      const copied = await writePlanArtifact({
+        cwd: this.cwd,
+        sessionId: this.sessionId,
+        content: sourceArtifact.content,
+      });
+      const createdAt = new Date().toISOString();
+      const forkedPlan: PlanRecord = {
+        status: 'draft',
+        sessionId: this.sessionId,
+        contentHash: copied.contentHash,
+        createdAt,
+        updatedAt: createdAt,
+      };
+      await this.deps.sessionStore.repository.appendPlanState(
+        this.sessionId,
+        'plan.created',
+        forkedPlan,
+      );
+    }
     await this.goalService.load();
     this.emitGoalSnapshot(previousGoalId);
     await this.rebuild();
@@ -1024,6 +1452,20 @@ class CodingSessionImpl implements CodingSession {
   async newSession(): Promise<string> {
     const previousGoalId = this.goalService.current()?.id;
     this.sessionId = randomUUID();
+    this.approvalItems.clear();
+    this.approvalDecisions.clear();
+    this.pendingRunMetadata = undefined;
+    await this.deps.sessionStore.load(this.sessionId);
+    this.modeState = {
+      mode: this.config.initialMode,
+      previousMode: null,
+      source: 'config',
+      changedAt: new Date().toISOString(),
+    };
+    await this.deps.sessionStore.repository.appendModeState(
+      this.sessionId,
+      this.modeState,
+    );
     await this.goalService.load();
     if (previousGoalId !== undefined) {
       this.emit({ type: 'goal.cleared', goalId: previousGoalId });
@@ -1042,12 +1484,22 @@ class CodingSessionImpl implements CodingSession {
       : idOrPath;
     const previousGoalId = this.goalService.current()?.id;
     const loaded = await this.deps.sessionStore.repository.load(id);
+    const persistedMode =
+      await this.deps.sessionStore.repository.latestModeState(id);
+    if (persistedMode === null) {
+      throw this.planError(
+        'SESSION_PROTOCOL_INVALID',
+        `Session ${id} has no mode event.`,
+      );
+    }
     this.sessionId = id;
+    this.modeState = { ...persistedMode, source: 'resume' };
     await this.deps.sessionStore.load(id);
     await this.goalService.load();
     this.emitGoalSnapshot(previousGoalId);
     await this.rebuild();
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
+    this.emit({ type: 'session.mode.changed', state: this.modeState });
     this.emitHistoryLoadedFromMessages(loaded.messages, loaded.messageEntryIds);
     this.scheduleGoalContinuation();
   }
@@ -1160,6 +1612,7 @@ class CodingSessionImpl implements CodingSession {
       return result;
     } finally {
       this.currentStream = undefined;
+      this.flushPlanApprovalEvent();
       await this.closeInvalidatedRuntime();
     }
   }
@@ -1475,9 +1928,7 @@ class CodingSessionImpl implements CodingSession {
     }
     const config: CodingAgentConfig = {
       ...this.config,
-      ...(agentDef.approvalMode !== undefined
-        ? { approvalMode: agentDef.approvalMode }
-        : {}),
+      initialMode: this.modeState.mode,
     };
     const agentModel = this.resolveAgentModel(primaryRole);
     const observer = createCodingObserver(
@@ -1493,8 +1944,10 @@ class CodingSessionImpl implements CodingSession {
     };
     const contentReplacementTransform = (messages: readonly AgentMessage[]) =>
       this.deps.sessionStore.applyContentReplacements(this.sessionId, messages);
-    const decide = makeApprovalPolicy(config, () =>
-      this.deps.rulesStore.rules(),
+    const decide = makeApprovalPolicy(
+      config,
+      () => this.deps.rulesStore.rules(),
+      () => this.modeState,
     );
 
     const memory = this.deps.memory;
@@ -1520,10 +1973,11 @@ class CodingSessionImpl implements CodingSession {
       taskBoardScope: { type: 'session', sessionId: this.sessionId },
       rules: () => this.deps.rulesStore.rules(),
       decide,
+      mode: () => this.modeState,
     });
     const selectedTools = [
       ...selectToolsForAgent(codingTools, agentDef.tools),
-      ...memoryTools,
+      ...(this.modeState.mode === 'plan' ? [] : memoryTools),
     ];
     // goal 工具只在 active 状态加入候选集合；超过直连上限后通过 tool_search/call_tool 暴露。
     const goalActive = this.goalService.active() !== null;
@@ -1540,6 +1994,7 @@ class CodingSessionImpl implements CodingSession {
       storage: this.deps.storage,
       parentSessionId: () => this.sessionId,
       rules: () => this.deps.rulesStore.rules(),
+      mode: () => this.modeState,
       backgroundJobs: this.deps.backgroundJobs,
       ...(this.deps.tracing !== undefined
         ? { tracing: this.deps.tracing }
@@ -1562,9 +2017,18 @@ class CodingSessionImpl implements CodingSession {
     });
     const targetTools = [
       ...selectedTools,
-      ...goalTools,
-      ...skillTools,
+      ...(this.modeState.mode === 'plan' ? [] : goalTools),
+      ...(this.modeState.mode === 'plan' ? [] : skillTools),
       delegateTool,
+      ...(this.modeState.mode === 'plan'
+        ? createPlanTools({
+            write: (content) => this.writePlan(content),
+            requestExit: async () => {
+              await this.requestPlanExit();
+              return 'Plan approval requested.';
+            },
+          })
+        : []),
     ];
     const toolRuntime = createMetaToolRuntime(targetTools, config.tools);
 
@@ -1653,6 +2117,110 @@ class CodingSessionImpl implements CodingSession {
     for (const target of readApprovalExternalDirs(item)) {
       this.sessionExternalPaths.add(resolveAbsolute(this.config.cwd, target));
     }
+  }
+
+  private async writePlan(content: string): Promise<string> {
+    this.requirePlanMode();
+    const current = await this.deps.sessionStore.repository.latestPlanState(
+      this.sessionId,
+    );
+    if (
+      current?.status === 'awaiting-approval' ||
+      current?.status === 'accepted'
+    ) {
+      // 待审批版本必须冻结；先 Chat/Deny 回到可编辑状态才能产生新 hash。
+      throw this.planError(
+        'PLAN_STATE_INVALID',
+        `Cannot update a ${current.status} plan.`,
+      );
+    }
+    const artifact = await writePlanArtifact({
+      cwd: this.cwd,
+      sessionId: this.sessionId,
+      content,
+    });
+    const now = new Date().toISOString();
+    const plan: PlanRecord = {
+      status: 'draft',
+      sessionId: this.sessionId,
+      contentHash: artifact.contentHash,
+      createdAt: current?.createdAt ?? now,
+      updatedAt: now,
+    };
+    // created/updated 由是否已有记录决定，正文始终只有一个 session artifact。
+    await this.deps.sessionStore.repository.appendPlanState(
+      this.sessionId,
+      current === null ? 'plan.created' : 'plan.updated',
+      plan,
+    );
+    this.emit({ type: 'plan.updated', plan, path: artifact.path });
+    return `Plan written: ${artifact.path}\nsha256: ${artifact.contentHash}`;
+  }
+
+  private flushPlanApprovalEvent(): void {
+    const pending = this.pendingPlanApprovalEvent;
+    if (pending === undefined) return;
+    this.pendingPlanApprovalEvent = undefined;
+    this.emit({ type: 'plan.approval.requested', ...pending });
+  }
+
+  /** 内部工具和公共 API 共用同一模式守卫，防止从测试/RPC 绕过。 */
+  private requirePlanMode(): void {
+    if (this.modeState.mode !== 'plan') {
+      throw this.planError(
+        'PLAN_STATE_INVALID',
+        'This operation requires Plan mode.',
+      );
+    }
+  }
+
+  private async requirePlan(): Promise<PlanRecord> {
+    const plan = await this.deps.sessionStore.repository.latestPlanState(
+      this.sessionId,
+    );
+    if (plan === null) {
+      throw this.planError(
+        'PLAN_NOT_FOUND',
+        `No plan exists for session ${this.sessionId}.`,
+      );
+    }
+    return plan;
+  }
+
+  /** 同时校验 requestId 与 hash：前者防重复界面，后者防接受过期正文。 */
+  private assertPlanRequest(
+    plan: PlanRecord,
+    requestId: string,
+    contentHash: string,
+  ): asserts plan is Extract<PlanRecord, { status: 'awaiting-approval' }> {
+    if (plan.status !== 'awaiting-approval' || plan.requestId !== requestId) {
+      throw this.planError(
+        'PLAN_REQUEST_STALE',
+        'Plan approval request is stale.',
+        requestId,
+      );
+    }
+    if (plan.contentHash !== contentHash) {
+      throw this.planError(
+        'PLAN_HASH_MISMATCH',
+        'Plan approval hash does not match.',
+        requestId,
+      );
+    }
+  }
+
+  private planError(
+    code: ConstructorParameters<typeof PlanModeError>[0]['code'],
+    message: string,
+    requestId?: string,
+  ): PlanModeError {
+    return new PlanModeError({
+      code,
+      message,
+      sessionId: this.sessionId,
+      state: this.modeState,
+      ...(requestId !== undefined ? { requestId } : {}),
+    });
   }
 
   private activeAgentMaxTurns(): number {

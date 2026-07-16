@@ -215,7 +215,7 @@ export interface SubagentAgentDeps {
  * - 模型经 `definition.role` 解析（可被 `modelRef` 覆盖）。
  * - 工具集从全量 coding tools 按 `definition.tools` 白名单裁剪；缺省=全量。
  *   coding tools 不含 `delegate_to_subagent`，所以 child 天然无法递归委派。
- * - 工具审批走派生后的权限规则 + 定义的 approvalMode（覆盖全局 approvalMode）。
+ * - 工具审批走会话模式派生规则与 child 权限规则。
  * - 系统指令 = 基础 coding system prompt 追加该 agent 的 prompt。
  */
 export function createSubagentAgent(input: {
@@ -223,12 +223,7 @@ export function createSubagentAgent(input: {
   readonly deps: SubagentAgentDeps;
 }): Agent {
   const { definition, deps } = input;
-  const childConfig: CodingAgentConfig = {
-    ...deps.config,
-    ...(definition.approvalMode !== undefined
-      ? { approvalMode: definition.approvalMode }
-      : {}),
-  };
+  const childConfig = deps.config;
   const binding = resolveBinding(definition, deps);
   assertToolCallSupport(binding);
   const tools = selectTools(
@@ -237,6 +232,12 @@ export function createSubagentAgent(input: {
       storage: deps.storage,
       taskBoardScope: deps.taskBoardScope,
       rules: () => deps.permissionRules,
+      mode: () => ({
+        mode: childConfig.initialMode,
+        previousMode: null,
+        source: 'resume',
+        changedAt: new Date(0).toISOString(),
+      }),
     }),
     definition.tools,
   );

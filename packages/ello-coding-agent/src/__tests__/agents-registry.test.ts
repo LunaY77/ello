@@ -18,7 +18,7 @@ describe('AgentRegistry', () => {
   it('includes builtin agents', async () => {
     const registry = await makeRegistry();
     expect(registry.get('build').mode).toBe('primary');
-    expect(registry.get('plan').mode).toBe('primary');
+    expect(() => registry.get('plan')).toThrow('Unknown agent');
     expect(registry.get('explore').mode).toBe('subagent');
     expect(registry.get('explore').source).toBe('bundled');
     expect(registry.get('title').mode).toBe('internal');
@@ -35,7 +35,7 @@ describe('AgentRegistry', () => {
     const registry = await makeRegistry();
     const primaries = registry.selectablePrimaries();
     expect(primaries.some((d) => d.name === 'build')).toBe(true);
-    expect(primaries.some((d) => d.name === 'plan')).toBe(true);
+    expect(primaries.some((d) => d.name === 'plan')).toBe(false);
     expect(primaries.some((d) => d.name === 'compact')).toBe(false);
     expect(primaries.some((d) => d.name === 'explore')).toBe(false);
   });

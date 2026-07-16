@@ -376,7 +376,8 @@ describe('file memory', () => {
     return loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'bypass',
+      initialMode: 'bypass',
+      bypassEnabled: true,
       context: {
         memory: {
           enabled: true,

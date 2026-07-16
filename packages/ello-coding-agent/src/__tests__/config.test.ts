@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import type { AgentToolContext } from '@ello/agent';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -15,7 +16,10 @@ import {
   setConfigValue,
   setConfigValues,
 } from '../config/index.js';
+import { makeApprovalPolicy } from '../permission/policy.js';
 import { createProviderRegistry } from '../provider/index.js';
+import { createCodingStorage } from '../storage/index.js';
+import { createCodingTools } from '../tools/index.js';
 import { parseYamlConfig, stringifyYamlConfig } from '../utils/yaml.js';
 
 describe('loadCodingAgentConfig', () => {
@@ -237,9 +241,11 @@ describe('loadCodingAgentConfig', () => {
   it('解析并应用 tools 与顶层运行配置', async () => {
     await writeGlobalConfig({
       active_profile: 'main',
-      approvalMode: 'plan',
+      initial_mode: 'plan',
       tui: false,
       tools: {
+        disabled: ['grep'],
+        needApproval: ['bash'],
         routing_enabled: false,
         search: {
           result_limit: 4,
@@ -250,15 +256,69 @@ describe('loadCodingAgentConfig', () => {
 
     const config = await loadCodingAgentConfig({ cwd });
 
-    expect(config.approvalMode).toBe('plan');
+    expect(config.initialMode).toBe('plan');
     expect(config.tui).toBe(false);
     expect(config.tools).toEqual({
+      disabled: ['grep'],
+      needApproval: ['bash'],
       routing_enabled: false,
       search: {
         result_limit: 4,
         max_result_bytes: 12000,
       },
     });
+
+    const storage = createCodingStorage({ databasePath: ':memory:' });
+    try {
+      const tools = createCodingTools({
+        config,
+        storage,
+        taskBoardScope: { type: 'session', sessionId: 'config-test' },
+        mode: () => ({
+          mode: 'default',
+          previousMode: null,
+          source: 'resume',
+          changedAt: new Date(0).toISOString(),
+        }),
+      });
+      expect(tools.map((tool) => tool.name)).not.toContain('grep');
+    } finally {
+      storage.close();
+    }
+
+    const decide = makeApprovalPolicy(
+      config,
+      () => [
+        {
+          permission: 'bash',
+          pattern: '**',
+          action: 'allow',
+          scope: 'session',
+        },
+      ],
+      () => ({
+        mode: 'default',
+        previousMode: null,
+        source: 'resume',
+        changedAt: new Date(0).toISOString(),
+      }),
+    );
+    expect(
+      decide(
+        {
+          permission: 'bash',
+          patterns: ['echo ok'],
+          always: ['echo ok'],
+          metadata: {
+            kind: 'shell',
+            command: 'echo ok',
+            cwd,
+            risk: 'normal',
+          },
+        },
+        {} as AgentToolContext,
+      ),
+    ).toMatchObject({ action: 'required' });
   });
 
   it('tools 未配置时使用完整默认值', async () => {
@@ -267,6 +327,8 @@ describe('loadCodingAgentConfig', () => {
     const config = await loadCodingAgentConfig({ cwd });
 
     expect(config.tools).toEqual({
+      disabled: [],
+      needApproval: [],
       routing_enabled: true,
       search: { result_limit: 6, max_result_bytes: 24000 },
     });
@@ -314,6 +376,7 @@ describe('loadCodingAgentConfig', () => {
   });
 
   it('支持原子写入 active_profile 与完整 profile map', async () => {
+    await ensureGlobalConfig();
     const config = await setConfigValues(cwd, 'global', [
       { key: 'active_profile', value: 'deep' },
       {
@@ -463,12 +526,20 @@ describe('loadCodingAgentConfig', () => {
 
   async function writeGlobalConfig(value: Record<string, unknown>) {
     await mkdir(path.dirname(globalConfigPath()), { recursive: true });
-    await writeFile(globalConfigPath(), stringifyYamlConfig(value), 'utf8');
+    await writeFile(
+      globalConfigPath(),
+      stringifyYamlConfig({ initial_mode: 'default', ...value }),
+      'utf8',
+    );
   }
 
   async function writeGlobalText(lines: readonly string[]) {
     await mkdir(path.dirname(globalConfigPath()), { recursive: true });
-    await writeFile(globalConfigPath(), lines.join('\n'), 'utf8');
+    await writeFile(
+      globalConfigPath(),
+      ['initial_mode: default', ...lines].join('\n'),
+      'utf8',
+    );
   }
 });
 
