@@ -2,8 +2,6 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
-import { z } from 'zod';
-
 import { builtinProviderCatalog } from '../provider/catalog.js';
 import {
   deleteYamlConfigValues,
@@ -14,7 +12,6 @@ import {
 import { ensureBuiltinAssets, ensureGlobalConfig } from './initializer.js';
 import { globalConfigPath, globalHomeDir, projectConfigPath } from './paths.js';
 import {
-  ApprovalModeSchema,
   CodingAgentConfigSchema,
   type CodingAgentConfig,
   type CodingAgentConfigOverrides,
@@ -77,9 +74,12 @@ export async function loadCodingAgentConfig(
       ),
     },
   );
+  // 文件配置使用 snake_case，runtime override 使用 camelCase；归一化后只保留后者。
   const parsed = CodingAgentConfigSchema.parse({
     ...merged,
-    approvalMode: normalizeApprovalMode(merged.approvalMode ?? 'default'),
+    // 未迁移的旧全局配置仍可启动为安全的 default；显式 schema 解析仍要求该字段合法。
+    initialMode: merged.initialMode ?? merged.initial_mode ?? 'default',
+    bypassEnabled: merged.bypassEnabled ?? merged.bypass_enabled ?? false,
   });
   return {
     ...parsed,
@@ -164,6 +164,7 @@ export async function setConfigValues(
   source: WritableConfigSourceName,
   entries: readonly { readonly key: string; readonly value: unknown }[],
 ): Promise<CodingAgentConfig> {
+  if (source === 'global') await ensureGlobalConfig();
   const filePath =
     source === 'global' ? globalConfigPath() : projectConfigPath(cwd);
   const current = await readConfigText(filePath);
@@ -185,6 +186,7 @@ export async function deleteConfigValues(
   source: WritableConfigSourceName,
   keys: readonly string[],
 ): Promise<CodingAgentConfig> {
+  if (source === 'global') await ensureGlobalConfig();
   const filePath =
     source === 'global' ? globalConfigPath() : projectConfigPath(cwd);
   const current = await readConfigText(filePath);
@@ -318,15 +320,6 @@ function rejectProjectProfileConfig(
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-export function normalizeApprovalMode(
-  value: unknown,
-): z.infer<typeof ApprovalModeSchema> {
-  if (value === 'never') return 'dont-ask';
-  if (value === 'on-request') return 'default';
-  if (value === 'always') return 'bypass';
-  return ApprovalModeSchema.parse(value);
 }
 
 /** 解析 dotted key；引号内的点不作为层级分隔符。 */

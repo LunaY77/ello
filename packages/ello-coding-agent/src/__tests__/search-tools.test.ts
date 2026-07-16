@@ -41,7 +41,8 @@ describe('search tools', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir: await tempDir(),
-      approvalMode: 'bypass',
+      initialMode: 'bypass',
+      bypassEnabled: true,
     });
     const grep = createSearchTools(config, () => () => 'approved').find(
       (tool) => tool.name === 'grep',
@@ -65,7 +66,8 @@ describe('search tools', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir: await tempDir(),
-      approvalMode: 'bypass',
+      initialMode: 'bypass',
+      bypassEnabled: true,
     });
     const grep = createSearchTools(config, () => () => 'approved').find(
       (tool) => tool.name === 'grep',
@@ -89,7 +91,8 @@ describe('search tools', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir: await tempDir(),
-      approvalMode: 'bypass',
+      initialMode: 'bypass',
+      bypassEnabled: true,
     });
     const grep = createSearchTools(config, () => () => 'approved').find(
       (tool) => tool.name === 'grep',

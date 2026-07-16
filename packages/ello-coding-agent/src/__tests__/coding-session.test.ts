@@ -27,11 +27,14 @@ const dirs: string[] = [];
 function proxyAdapter(adapter: ModelAdapter): ModelAdapter {
   return {
     async generate(request) {
-      return proxyResponse(await adapter.generate(request));
+      const response = await adapter.generate(request);
+      return Object.hasOwn(request.tools, 'call_tool')
+        ? proxyResponse(response)
+        : response;
     },
     async *stream(request) {
       for await (const event of adapter.stream(request)) {
-        yield event.type === 'final'
+        yield event.type === 'final' && Object.hasOwn(request.tools, 'call_tool')
           ? { ...event, response: proxyResponse(event.response) }
           : event;
       }
@@ -149,7 +152,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -191,7 +194,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const adapter: ModelAdapter = {
       generate: (request) => new TextAdapter('final only').generate(request),
@@ -219,7 +222,7 @@ describe('createCodingSession', () => {
     expect(completed).not.toHaveProperty('result');
   });
 
-  it('把 primary agent 的专属指令放入稳定 system 前缀', async () => {
+  it('把 Plan mode 指令放入稳定 system 前缀', async () => {
     const cwd = await tempDir();
     const sessionDir = await tempDir();
     const config = await loadCodingAgentConfig({ cwd, sessionDir });
@@ -237,13 +240,27 @@ describe('createCodingSession', () => {
       config,
       modelAdapter: proxyAdapter(adapter),
     });
+    const events: CodingSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
 
-    await session.setAgent('plan');
-    await session.submit('inspect only');
+    await session.handlePlanCommand({
+      kind: 'with-input',
+      input: 'inspect only',
+    });
     await session.close();
 
+    expect(session.mode().mode).toBe('plan');
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'session.mode.changed',
+          state: expect.objectContaining({ mode: 'plan' }),
+        }),
+        { type: 'plan.input.submitted', prompt: 'inspect only' },
+      ]),
+    );
     expect(systems).toContainEqual(
-      expect.stringContaining('You are in plan mode'),
+      expect.stringContaining('<mode>plan</mode>'),
     );
   });
 
@@ -284,7 +301,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const seenModels: AgentModelRequest['model'][] = [];
     const adapter: ModelAdapter = {
@@ -323,7 +340,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -348,7 +365,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
 
     const target = path.join(cwd, 'note.txt');
@@ -464,7 +481,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const targets = [1, 2, 3].map((index) =>
       path.join(cwd, `note-${index}.txt`),
@@ -571,7 +588,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
 
     let turn = 0;
@@ -665,7 +682,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
 
     let turn = 0;
@@ -756,7 +773,14 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'bypass',
+      initialMode: 'bypass',
+      bypassEnabled: true,
+      tools: {
+        disabled: [],
+        needApproval: [],
+        routing_enabled: true,
+        search: { result_limit: 6, max_result_bytes: 24_000 },
+      },
     });
 
     let parentTurns = 0;
@@ -882,7 +906,8 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'bypass',
+      initialMode: 'bypass',
+      bypassEnabled: true,
       agent: {
         main: {
           mode: 'primary',
@@ -953,7 +978,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
       tool_output: {
         max_bytes: 20,
         max_lines: 3,
@@ -1048,7 +1073,7 @@ describe('createCodingSession', () => {
     const baseConfig = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
       tool_output: {
         max_bytes: 1000,
         max_lines: 100,
@@ -1136,7 +1161,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1166,7 +1191,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1202,7 +1227,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1233,7 +1258,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1258,7 +1283,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1313,7 +1338,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,
@@ -1335,7 +1360,7 @@ describe('createCodingSession', () => {
     const config = await loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'default',
+      initialMode: 'default',
     });
     const session = await createCodingSession({
       config,

@@ -376,7 +376,8 @@ describe('file memory', () => {
     return loadCodingAgentConfig({
       cwd,
       sessionDir,
-      approvalMode: 'bypass',
+      initialMode: 'bypass',
+      bypassEnabled: true,
       context: {
         memory: {
           enabled: true,
@@ -458,8 +459,7 @@ class MemoryScenarioAdapter implements ModelAdapter {
     }
     if (
       this.scenario === 'main-write' &&
-      system.includes('# Primary Agent Role') &&
-      Object.hasOwn(request.tools, 'call_tool')
+      system.includes('# Primary Agent Role')
     ) {
       return hasToolResult
         ? textResponse(request, 'Remembered.')

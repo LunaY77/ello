@@ -8,7 +8,8 @@
 
 - Interactive Ink/React TUI, plus non-interactive and JSON output
 - `run` and `resume` sessions
-- Permission and approval modes: `default`, `accept-edits`, `bypass`, `dont-ask`
+- Session modes: `plan`, `default`, `accept-edits`, and explicitly enabled `bypass`
+- Plan artifact preview and Accept / Chat about this / Deny workflow
 - Built-in tools, skills, subagents, task boards, goals, memory, and repository/workspace management
 - SQLite-backed sessions, checkpoints, artifacts, and migrations
 - OpenTelemetry/Langfuse observability hooks
@@ -37,7 +38,13 @@ ello task list
 ello skills list
 ```
 
-Global options include `--profile`, `--cwd`, `--allowed-path`, `--approval`, `--json`, and `--no-tui`. Provider/model settings are loaded from the project and user configuration layers; use `ello config path` to inspect their locations.
+Global options include `--profile`, `--cwd`, `--allowed-path`, `--mode`, `--json`, and `--no-tui`. Provider/model settings are loaded from the project and user configuration layers; use `ello config path` to inspect their locations.
+
+## Plan mode
+
+Press `Shift+Tab` to cycle safe modes, use `/mode <mode>` to select one, or run `/plan <task>` to enter Plan mode and submit a task. In Plan mode, `/plan` previews the latest complete plan and `/plan <feedback>` continues the planning conversation.
+
+Plan mode allows reads and searches while denying business-file edits, shell commands, and network access. The agent can only write `.ello/plans/<session-id>.md`. Accepting a plan creates a new Default-mode execution session and submits the complete plan as its first user message. `bypass` additionally requires `bypass_enabled: true`.
 
 ## Architecture
 

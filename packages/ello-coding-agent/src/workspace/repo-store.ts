@@ -228,9 +228,8 @@ export class RepoStore {
       '',
       mirrorPath,
     );
-    const commit = await gitWithInput(
+    const commit = await git(
       ['commit-tree', emptyTree, '-m', 'Initial commit'],
-      '',
       mirrorPath,
     );
     await git(['update-ref', REPOSITORY_BASELINE_REF, commit], mirrorPath);

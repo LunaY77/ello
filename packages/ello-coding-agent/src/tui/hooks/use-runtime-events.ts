@@ -19,39 +19,38 @@ export function useRuntimeEvents(session: CodingSession): {
   const [historyResetKey, setHistoryResetKey] = useState(0);
   const runStartedAt = useRef<number | undefined>(undefined);
 
-  useEffect(
-    () =>
-      session.subscribe((event) => {
-        if (event.type === 'ui.clear') {
-          clearTerminalScrollback();
-          setClearCount((current) => current + 1);
-          setHistoryResetKey((current) => current + 1);
-        }
-        if (event.type === 'session.history.loaded') {
-          clearTerminalScrollback();
-          setHistoryResetKey((current) => current + 1);
-        }
-        if (event.type === 'run.started') {
-          runStartedAt.current = Date.now();
-        }
-        dispatch(event as TuiEventInput);
-        if (
-          isRunFinishedEvent(event.type) &&
-          runStartedAt.current !== undefined
-        ) {
-          const elapsedSeconds = Math.max(
-            0,
-            Math.floor((Date.now() - runStartedAt.current) / 1000),
-          );
-          runStartedAt.current = undefined;
-          dispatch({
-            type: 'run.worked',
-            duration: formatRunDuration(elapsedSeconds),
-          });
-        }
-      }),
-    [session],
-  );
+  useEffect(() => {
+    dispatch({ type: 'session.mode.changed', state: session.mode() });
+    return session.subscribe((event) => {
+      if (event.type === 'ui.clear') {
+        clearTerminalScrollback();
+        setClearCount((current) => current + 1);
+        setHistoryResetKey((current) => current + 1);
+      }
+      if (event.type === 'session.history.loaded') {
+        clearTerminalScrollback();
+        setHistoryResetKey((current) => current + 1);
+      }
+      if (event.type === 'run.started') {
+        runStartedAt.current = Date.now();
+      }
+      dispatch(event as TuiEventInput);
+      if (
+        isRunFinishedEvent(event.type) &&
+        runStartedAt.current !== undefined
+      ) {
+        const elapsedSeconds = Math.max(
+          0,
+          Math.floor((Date.now() - runStartedAt.current) / 1000),
+        );
+        runStartedAt.current = undefined;
+        dispatch({
+          type: 'run.worked',
+          duration: formatRunDuration(elapsedSeconds),
+        });
+      }
+    });
+  }, [session]);
 
   const pushUser = useCallback(
     (text: string) => dispatch({ type: 'user.input', text }),

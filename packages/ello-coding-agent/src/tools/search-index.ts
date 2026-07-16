@@ -38,6 +38,8 @@ export interface ToolSearchResult extends ToolIndexDocument {
   readonly score: number;
 }
 
+export type ToolInventoryItem = Omit<ToolIndexDocument, 'inputSchema'>;
+
 /** 索引字段及其权重；name 权重最高，schema 只用于辅助匹配。 */
 interface IndexedField {
   readonly name: string;
@@ -102,15 +104,28 @@ export class ToolSearchIndex {
     );
   }
 
+  get size(): number {
+    return this.documents.length;
+  }
+
+  list(limit: number, offset = 0): ToolInventoryItem[] {
+    assertLimit(limit);
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error('Tool inventory offset must be a non-negative integer.');
+    }
+    return this.documents
+      .map(({ document }) => inventoryItem(document))
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .slice(offset, offset + limit);
+  }
+
   search(query: string, limit: number): ToolSearchResult[] {
     // 多 token 查询采用 OR 候选集，最终分数再按 token 覆盖率衰减。
     const queryTokens = tokenize(query);
     if (query.trim() === '' || queryTokens.length === 0) {
       throw new Error('Tool search query must contain searchable text.');
     }
-    if (!Number.isInteger(limit) || limit < 1 || limit > 8) {
-      throw new Error('Tool search limit must be an integer from 1 to 8.');
-    }
+    assertLimit(limit);
 
     const termMatches = queryTokens.map((queryToken) =>
       this.matchTerms(queryToken),
@@ -242,6 +257,17 @@ export class ToolSearchIndex {
       score: Number(score.toFixed(6)),
     };
   }
+}
+
+function assertLimit(limit: number): void {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 8) {
+    throw new Error('Tool search limit must be an integer from 1 to 8.');
+  }
+}
+
+function inventoryItem(document: ToolIndexDocument): ToolInventoryItem {
+  const { inputSchema: _inputSchema, ...item } = document;
+  return item;
 }
 
 export function createToolSearchIndex(

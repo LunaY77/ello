@@ -12,6 +12,8 @@ import path from 'node:path';
 import type { AgentFinishReason, AgentMessage, AgentUsage } from '@ello/agent';
 
 import type { GoalState } from '../goal/types.js';
+import type { PlanRecord } from '../plan/types.js';
+import type { SessionModeState } from '../runtime/session-mode.js';
 
 import { SessionCatalog, type SessionCatalogRecord } from './catalog.js';
 import { parseSessionRecord } from './schema.js';
@@ -141,6 +143,31 @@ export type SessionRecord =
   | {
       readonly kind: 'goal-cleared';
       readonly goalId: string;
+      readonly createdAt: string;
+    }
+  | ({ readonly kind: 'session.mode.changed' } & SessionModeState)
+  | {
+      readonly kind: 'plan.state';
+      readonly plan: PlanRecord;
+      readonly event:
+        | 'plan.created'
+        | 'plan.updated'
+        | 'plan.approval.requested'
+        | 'plan.accepted'
+        | 'plan.chat.requested'
+        | 'plan.rejected';
+      readonly createdAt: string;
+    }
+  | {
+      readonly kind: 'plan.previewed';
+      readonly sessionId: string;
+      readonly contentHash: string;
+      readonly createdAt: string;
+    }
+  | {
+      readonly kind: 'plan.execution.started';
+      readonly sourcePlanSessionId: string;
+      readonly sourcePlanHash: string;
       readonly createdAt: string;
     };
 
@@ -461,6 +488,73 @@ export class JsonlSessionRepository {
       {
         kind: 'run-marker',
         ...marker,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  }
+
+  async appendModeState(
+    sessionId: string,
+    state: SessionModeState,
+  ): Promise<void> {
+    await this.appendRecords(sessionId, [
+      { kind: 'session.mode.changed', ...state },
+    ]);
+  }
+
+  /** latest-wins 重放模式事件；缺失时由 CodingSession 判定协议非法。 */
+  async latestModeState(sessionId: string): Promise<SessionModeState | null> {
+    const record = [...(await this.readRecords(sessionId))]
+      .reverse()
+      .find((item) => item.kind === 'session.mode.changed');
+    if (record === undefined || record.kind !== 'session.mode.changed')
+      return null;
+    const { kind: _kind, ...state } = record;
+    return state;
+  }
+
+  async appendPlanState(
+    sessionId: string,
+    event: Extract<SessionRecord, { kind: 'plan.state' }>['event'],
+    plan: PlanRecord,
+  ): Promise<void> {
+    await this.appendRecords(sessionId, [
+      { kind: 'plan.state', event, plan, createdAt: new Date().toISOString() },
+    ]);
+  }
+
+  /** Plan 正文在 artifact 文件中，这里只重放可校验的状态和 hash。 */
+  async latestPlanState(sessionId: string): Promise<PlanRecord | null> {
+    const record = [...(await this.readRecords(sessionId))]
+      .reverse()
+      .find((item) => item.kind === 'plan.state');
+    return record?.kind === 'plan.state' ? record.plan : null;
+  }
+
+  async appendPlanPreviewed(
+    sessionId: string,
+    contentHash: string,
+  ): Promise<void> {
+    await this.appendRecords(sessionId, [
+      {
+        kind: 'plan.previewed',
+        sessionId,
+        contentHash,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+  }
+
+  async appendPlanExecutionStarted(
+    executionSessionId: string,
+    sourcePlanSessionId: string,
+    sourcePlanHash: string,
+  ): Promise<void> {
+    await this.appendRecords(executionSessionId, [
+      {
+        kind: 'plan.execution.started',
+        sourcePlanSessionId,
+        sourcePlanHash,
         createdAt: new Date().toISOString(),
       },
     ]);

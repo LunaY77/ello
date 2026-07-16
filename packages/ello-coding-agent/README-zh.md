@@ -8,7 +8,8 @@
 
 - Ink/React 交互式 TUI，同时支持非交互和 JSON 输出
 - `run`、`resume` 会话执行
-- `default`、`accept-edits`、`bypass`、`dont-ask` 四种审批模式
+- 会话级 `plan`、`default`、`accept-edits`、`bypass` 四种模式
+- Plan artifact 预览及 Accept / Chat about this / Deny 审批流程
 - 内置工具、技能、子代理、任务板、目标、记忆，以及仓库/工作区管理
 - SQLite 会话、检查点、产物和迁移
 - OpenTelemetry/Langfuse 可观测性钩子
@@ -37,7 +38,13 @@ ello task list
 ello skills list
 ```
 
-全局选项包括 `--profile`、`--cwd`、`--allowed-path`、`--approval`、`--json` 和 `--no-tui`。provider/model 设置来自用户和项目配置层；使用 `ello config path` 查看配置位置。
+全局选项包括 `--profile`、`--cwd`、`--allowed-path`、`--mode`、`--json` 和 `--no-tui`。provider/model 设置来自用户和项目配置层；使用 `ello config path` 查看配置位置。
+
+## Plan 模式
+
+使用 `Shift+Tab` 循环安全模式，或用 `/mode <模式>` 精确切换。`/plan <任务>` 会进入 Plan 模式并提交任务；Plan 模式中的 `/plan` 预览最新的完整计划，`/plan <反馈>` 则继续讨论和修改。
+
+Plan 模式只允许读取与搜索，业务文件编辑、shell 和网络访问会被稳定拒绝。Agent 只能写入 `.ello/plans/<session-id>.md`。接受计划后，ello 创建一个新的 Default 模式 Execution Session，并以完整计划作为首条用户消息开始执行。`bypass` 还必须通过 `bypass_enabled: true` 显式启用。
 
 ## 架构
 

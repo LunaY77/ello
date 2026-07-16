@@ -2,9 +2,9 @@ import { Command } from 'commander';
 
 import {
   loadCodingAgentConfig,
-  normalizeApprovalMode,
   type CodingAgentConfig,
 } from '../config/index.js';
+import { SessionModeSchema } from '../runtime/session-mode.js';
 import { createBootProfile } from '../utils/boot-profile.js';
 
 import { registerCommands } from './commands/index.js';
@@ -36,8 +36,8 @@ export async function resolveConfig(
     ...(opts.allowedPath !== undefined && opts.allowedPath.length > 0
       ? { allowedPaths: opts.allowedPath }
       : {}),
-    ...(opts.approval !== undefined
-      ? { approvalMode: normalizeApprovalMode(opts.approval) }
+    ...(opts.mode !== undefined
+      ? { initialMode: SessionModeSchema.parse(opts.mode) }
       : {}),
     ...(opts.json !== undefined ? { json: opts.json } : {}),
     ...(opts.tui !== undefined ? { tui: opts.tui } : {}),
@@ -60,7 +60,7 @@ export function buildProgram(io: CliIo = defaultIo): Command {
     .option('--profile <name>', 'profile suite name')
     .option('--cwd <path>', 'working directory')
     .option('--allowed-path <path...>', 'extra allowed roots')
-    .option('--approval <mode>', 'default | accept-edits | bypass | dont-ask')
+    .option('--mode <mode>', 'plan | default | accept-edits | bypass')
     .option('--json', 'machine-readable output')
     .option('--no-tui', 'disable TUI for run/resume');
 
@@ -123,7 +123,7 @@ export async function runCli(
 /**
  * 非交互运行一次 prompt：消费与 TUI 同一条事件流。
  *
- * 审批在非交互模式下完全由策略决定（bypass/accept-edits/dont-ask）；若策略判
+ * 审批在非交互模式下完全由会话模式和规则决定；若策略判
  * required 而无 UI，内核侧会按拒绝处理并把原因喂回模型。CLI 不实现任何业务逻辑。
  */
 async function runOnce(

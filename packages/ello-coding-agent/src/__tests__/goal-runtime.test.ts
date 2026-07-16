@@ -38,6 +38,13 @@ const usage = {
   toolCalls: 0,
 };
 
+const routedTools = {
+  disabled: [],
+  needApproval: [],
+  routing_enabled: true,
+  search: { result_limit: 6, max_result_bytes: 24_000 },
+} as const;
+
 function textResponse(
   request: AgentModelRequest,
   text: string,
@@ -150,7 +157,11 @@ describe('goal continuation runtime', () => {
         };
       },
     };
-    const config = await loadCodingAgentConfig({ cwd, sessionDir });
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      tools: routedTools,
+    });
     const session = await createCodingSession({
       config,
       modelAdapter: adapter,
@@ -245,7 +256,11 @@ describe('goal continuation runtime', () => {
         yield { type: 'final', response: await this.generate(request) };
       },
     };
-    const config = await loadCodingAgentConfig({ cwd, sessionDir });
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      tools: routedTools,
+    });
     const session = await createCodingSession({
       config,
       modelAdapter: adapter,

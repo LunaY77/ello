@@ -6,6 +6,7 @@ import { useState } from 'react';
 
 import type { CodingAgentDefinition } from '../../agents/index.js';
 import type { CodingAgentConfig } from '../../config/index.js';
+import type { PlanPreview, PlanRecord } from '../../plan/types.js';
 import type { ModelRole, RuntimeProfileSuite } from '../../provider/index.js';
 import type { ApprovalDecision } from '../../runtime/intents.js';
 import type { JsonlSessionSummary } from '../../session/repository.js';
@@ -32,6 +33,12 @@ import { InlineSelect, type SelectOption } from '../ui/List.js';
 export type OverlayState =
   | { readonly type: 'none' }
   | { readonly type: 'approval'; readonly request: ApprovalView }
+  | { readonly type: 'plan-preview'; readonly preview: PlanPreview }
+  | {
+      readonly type: 'plan-approval';
+      readonly plan: Extract<PlanRecord, { status: 'awaiting-approval' }>;
+      readonly preview: PlanPreview;
+    }
   | {
       readonly type: 'models';
       readonly title: string;
@@ -100,6 +107,10 @@ export interface OverlayHostProps {
   readonly marginTop?: number;
   /** 审批选择回调：把 UI 选项翻译成 {@link ApprovalDecision} 交回 App。 */
   onApprove(requestId: string, decision: ApprovalDecision): void;
+  onAcceptPlan(requestId: string, contentHash: string): void;
+  onChatAboutPlan(requestId: string, prompt: string): void;
+  onDenyPlan(requestId: string): void;
+  onClosePlanPreview(): void;
   /** 模型选择回调。 */
   onSelectModel(model: string): void;
   /** profile suite 选择回调。 */
@@ -135,6 +146,10 @@ export function OverlayHost({
   overlay,
   marginTop = 1,
   onApprove,
+  onAcceptPlan,
+  onChatAboutPlan,
+  onDenyPlan,
+  onClosePlanPreview,
   onSelectModel,
   onSelectProfile,
   onCreateProfile,
@@ -182,6 +197,31 @@ export function OverlayHost({
             }
           />
         </Box>
+      ) : null}
+      {overlay.type === 'plan-preview' ? (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor={theme.info}
+          paddingX={1}
+        >
+          <Text color={theme.accent}>Plan preview</Text>
+          <Text color={theme.textMuted}>{overlay.preview.path}</Text>
+          <Text>{overlay.preview.content}</Text>
+          <InlineSelect
+            options={[{ label: 'Close', value: 'close' }]}
+            onChange={onClosePlanPreview}
+          />
+        </Box>
+      ) : null}
+      {overlay.type === 'plan-approval' ? (
+        <PlanApprovalPanel
+          plan={overlay.plan}
+          preview={overlay.preview}
+          onAccept={onAcceptPlan}
+          onChat={onChatAboutPlan}
+          onDeny={onDenyPlan}
+        />
       ) : null}
       {overlay.type === 'models' ? (
         <Box
@@ -540,6 +580,62 @@ function SettingLine({
       <Text color={theme.textMuted}>{label.padEnd(10)}</Text>
       <Text color={theme.text}>{value}</Text>
     </Text>
+  );
+}
+
+function PlanApprovalPanel({
+  plan,
+  preview,
+  onAccept,
+  onChat,
+  onDeny,
+}: {
+  readonly plan: Extract<PlanRecord, { status: 'awaiting-approval' }>;
+  readonly preview: PlanPreview;
+  onAccept(requestId: string, contentHash: string): void;
+  onChat(requestId: string, prompt: string): void;
+  onDeny(requestId: string): void;
+}) {
+  const theme = useTheme();
+  const [chatting, setChatting] = useState(false);
+  const [prompt, setPrompt] = useState('');
+  // Chat 选项在同一高优先级浮层内收集输入，避免先关闭审批再丢失 requestId。
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={theme.warning}
+      paddingX={1}
+    >
+      <Text color={theme.warning}>Plan ready for approval</Text>
+      <Text color={theme.textMuted}>{preview.path}</Text>
+      <Text>{preview.content}</Text>
+      {chatting ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color={theme.accent}>Chat about this plan</Text>
+          <TextInput
+            value={prompt}
+            onChange={setPrompt}
+            onSubmit={(value) => {
+              if (value.trim() !== '') onChat(plan.requestId, value.trim());
+            }}
+          />
+        </Box>
+      ) : (
+        <InlineSelect
+          options={[
+            { label: 'Accept', value: 'accept' },
+            { label: 'Chat about this', value: 'chat' },
+            { label: 'Deny', value: 'deny' },
+          ]}
+          onChange={(value) => {
+            if (value === 'accept') onAccept(plan.requestId, plan.contentHash);
+            else if (value === 'chat') setChatting(true);
+            else onDeny(plan.requestId);
+          }}
+        />
+      )}
+    </Box>
   );
 }
 

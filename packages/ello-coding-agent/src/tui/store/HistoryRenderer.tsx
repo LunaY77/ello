@@ -94,10 +94,8 @@ function SessionHeader({
         <Text color={tuiTokens.color.text}>{entry.model}</Text>
       </Text>
       <Text>
-        <Text color={tuiTokens.color.muted}>permissions: </Text>
-        <Text color={tuiTokens.color.text}>
-          {formatPermission(entry.approvalMode)}
-        </Text>
+        <Text color={tuiTokens.color.muted}>mode: </Text>
+        <Text color={tuiTokens.color.text}>{formatPermission(entry.mode)}</Text>
       </Text>
     </Box>
   );
@@ -227,8 +225,6 @@ function formatPermission(mode: string): string {
   switch (mode) {
     case 'bypass':
       return 'YOLO mode';
-    case 'dont-ask':
-      return 'no prompts';
     case 'accept-edits':
       return 'auto-accept edits';
     default:

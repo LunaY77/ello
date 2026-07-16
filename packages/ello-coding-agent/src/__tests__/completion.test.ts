@@ -58,6 +58,11 @@ describe('TUI completion', () => {
 
     expect(suggestions).toEqual([
       {
+        value: '/mode',
+        label: '/mode',
+        description: 'Show or change the session mode',
+      },
+      {
         value: '/models',
         label: '/models',
         description: 'Browse model catalog',

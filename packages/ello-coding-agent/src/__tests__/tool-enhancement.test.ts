@@ -2,6 +2,7 @@ import { defineTool, type AgentToolContext } from '@ello/agent';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
+import { createPlanTools } from '../plan/tools.js';
 import { projectToolEvent } from '../tools/event-projection.js';
 import {
   createCallTool,
@@ -86,6 +87,60 @@ describe('meta tool activation', () => {
     expect(runtime.modelTools[0]?.description).toContain(
       'Returned names are not directly callable',
     );
+  });
+
+  it('lists the current inventory and discovers Plan-only tools in Plan mode', async () => {
+    const planTools = createPlanTools({
+      write: async () => 'written',
+      requestExit: async () => 'requested',
+    });
+    const runtime = createMetaToolRuntime([...tools, ...planTools], {
+      routing_enabled: true,
+      search: searchConfig,
+    });
+    const search = runtime.modelTools.find(
+      (tool) => tool.name === 'tool_search',
+    );
+    if (search === undefined) throw new Error('tool_search missing');
+
+    const inventory = await search.execute(
+      { query: 'all tools', limit: 6 },
+      context,
+    );
+    expect(inventory).toMatchObject({
+      inventory: true,
+      totalAvailableTools: 5,
+      offset: 0,
+      truncated: false,
+      results: expect.arrayContaining([
+        expect.objectContaining({ name: 'write_plan' }),
+        expect.objectContaining({ name: 'request_plan_exit' }),
+      ]),
+    });
+    const firstPage = await search.execute({ limit: 2 }, context);
+    expect(firstPage).toMatchObject({
+      inventory: true,
+      offset: 0,
+      truncated: true,
+      nextOffset: 2,
+      results: [
+        expect.not.objectContaining({ inputSchema: expect.anything() }),
+        expect.not.objectContaining({ inputSchema: expect.anything() }),
+      ],
+    });
+    const planSearch = await search.execute(
+      { query: 'plan', limit: 6 },
+      context,
+    );
+    expect(planSearch).toMatchObject({
+      inventory: false,
+      totalAvailableTools: 5,
+      offset: 0,
+      results: expect.arrayContaining([
+        expect.objectContaining({ name: 'write_plan' }),
+        expect.objectContaining({ name: 'request_plan_exit' }),
+      ]),
+    });
   });
 });
 

@@ -2,13 +2,10 @@ import { renderPromptTemplate } from '../context/prompts.js';
 
 import type { CodingAgentDefinition } from './schema.js';
 
-/** plan agent 的指令正文，配合 `approvalMode: 'plan'` 禁止落盘。 */
-const PLAN_PROMPT = `You are in plan mode. Investigate the codebase and produce a concrete, step-by-step implementation plan. Do NOT modify files, run mutating shell commands, or make network changes. Lead with the plan; ground each step in concrete files and symbols.`;
-
 /**
  * 内置 agent 定义。
  *
- * - build/plan 是 primary（可在 `/agent` 中选）。
+ * - build 是 primary。
  * - title/compact/summary/memory-extractor/dream 是 internal：系统专用。
  */
 export function builtinAgents(): readonly CodingAgentDefinition[] {
@@ -19,15 +16,6 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
       role: 'primary',
       source: 'builtin',
       description: 'Default coding agent.',
-    },
-    {
-      name: 'plan',
-      mode: 'primary',
-      role: 'primary',
-      source: 'builtin',
-      approvalMode: 'plan',
-      description: 'Plan without editing.',
-      prompt: PLAN_PROMPT,
     },
     {
       name: 'title',

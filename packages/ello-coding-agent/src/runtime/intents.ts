@@ -9,6 +9,9 @@ import type { ContextEvent } from '../context/source-registry.js';
 import type { GoalEvent } from '../goal/events.js';
 import type { MemoryEvent } from '../memory/events.js';
 import type { RuleScope } from '../permission/rules-store.js';
+import type { PlanPreview, PlanRecord } from '../plan/types.js';
+
+import type { SessionModeState } from './session-mode.js';
 
 /**
  * 审批决定。
@@ -42,6 +45,34 @@ export type CodingSessionEvent =
       readonly type: 'session.opened';
       readonly sessionId: string;
       readonly cwd: string;
+    }
+  | { readonly type: 'session.mode.changed'; readonly state: SessionModeState }
+  | { readonly type: 'plan.input.submitted'; readonly prompt: string }
+  | {
+      readonly type: 'plan.updated';
+      readonly plan: PlanRecord;
+      readonly path: string;
+    }
+  | { readonly type: 'plan.previewed'; readonly preview: PlanPreview }
+  | {
+      readonly type: 'plan.approval.requested';
+      readonly plan: Extract<PlanRecord, { status: 'awaiting-approval' }>;
+      readonly preview: PlanPreview;
+    }
+  | {
+      readonly type: 'plan.accepted';
+      readonly plan: Extract<PlanRecord, { status: 'accepted' }>;
+    }
+  | { readonly type: 'plan.chat.requested'; readonly plan: PlanRecord }
+  | {
+      readonly type: 'plan.rejected';
+      readonly plan: Extract<PlanRecord, { status: 'rejected' }>;
+    }
+  | {
+      readonly type: 'plan.execution.started';
+      readonly executionSessionId: string;
+      readonly sourcePlanSessionId: string;
+      readonly sourcePlanHash: string;
     }
   | { readonly type: 'session.switched'; readonly sessionId: string }
   | {

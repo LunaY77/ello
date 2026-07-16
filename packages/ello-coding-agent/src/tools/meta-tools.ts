@@ -17,6 +17,8 @@ export const TOOL_ROUTING_INSTRUCTIONS = `# Tool Routing Protocol
 - In this routing mode, only \`tool_search\` and \`call_tool\` are directly callable.
 - Never emit a native tool call using a target name such as \`bash\`, \`read\`, or \`write\`, even when the user explicitly requests that tool or you already know its name.
 - Use \`tool_search\` to discover unknown capabilities and obtain the exact target name and input schema.
+- Omit \`tool_search.query\`, or use a query such as \`all tools\`, to list lightweight summaries of the current mode's targets. Follow \`nextOffset\` while \`truncated\` is true, then search an exact tool name to get its input schema.
+- Tool discovery is mode-scoped. Plan-only targets such as \`write_plan\` and \`request_plan_exit\` appear only after the user enters Plan mode with \`/plan <task>\`.
 - To execute any target tool, always call \`call_tool\` with \`{"name":"<exact target name>","arguments":{...}}\`.
 - Names and schemas returned by \`tool_search\` are discovery data only; they do not become directly callable tools.
 - Never invent a target tool name or target arguments. \`call_tool.arguments\` must match the schema returned by \`tool_search\`.`;
@@ -76,16 +78,32 @@ export function createToolSearchTool(options: {
   return defineTool({
     name: 'tool_search',
     description:
-      'Discover target tool definitions by capability. Returned names are not directly callable; execute targets only through call_tool.',
+      'Search target tools by capability, or omit query to page through lightweight summaries of tools available in the current mode. Returned names are not directly callable; execute targets only through call_tool.',
     discovery: { aliases: ['find tool'], risk: 'readonly' },
     input: z
       .object({
-        query: z.string().trim().min(1),
+        query: z.string().trim().min(1).optional(),
         limit: z.number().int().min(1).max(options.resultLimit),
+        offset: z.number().int().min(0).default(0),
       })
       .strict(),
-    execute: ({ query, limit }) => {
-      const result = { results: options.index.search(query, limit) };
+    execute: ({ query, limit, offset = 0 }) => {
+      const inventory = query === undefined || isInventoryQuery(query);
+      if (!inventory && offset !== 0) {
+        throw new Error('tool_search offset is only valid for inventory mode.');
+      }
+      const results = inventory
+        ? options.index.list(limit, offset)
+        : options.index.search(query, limit);
+      const nextOffset = offset + results.length;
+      const result = {
+        results,
+        totalAvailableTools: options.index.size,
+        inventory,
+        offset,
+        truncated: inventory && nextOffset < options.index.size,
+        ...(inventory && nextOffset < options.index.size ? { nextOffset } : {}),
+      };
       const bytes = Buffer.byteLength(JSON.stringify(result));
       if (bytes > options.maxResultBytes) {
         throw new Error(
@@ -95,6 +113,12 @@ export function createToolSearchTool(options: {
       return result;
     },
   }) as AnyAgentTool;
+}
+
+function isInventoryQuery(query: string): boolean {
+  return /^(?:all|available|current|list|show)(?:\s+(?:all|available|current))?\s+tools?$/iu.test(
+    query.trim(),
+  );
 }
 
 export function createCallTool(
