@@ -3,13 +3,22 @@ import { describe, expect, it } from 'vitest';
 import { createFileChange } from '../tools/file-change.js';
 import type { ToolCallView } from '../tui/store/history-entry.js';
 import {
-  buildToolCardModel,
+  buildToolCardModel as createToolCardModel,
+  formatArtifactPath,
   formatDuration,
+  formatToolPath,
   readToolMetadata,
 } from '../tui/store/tool-card.js';
 
 function call(over: Partial<ToolCallView>): ToolCallView {
   return { id: 't1', name: 'read', input: {}, status: 'ok', ...over };
+}
+
+function buildToolCardModel(
+  toolCall: ToolCallView,
+  options = { cwd: '/workspace', homeDir: '/home/alice' },
+) {
+  return createToolCardModel(toolCall, options);
 }
 
 describe('formatDuration', () => {
@@ -28,6 +37,58 @@ describe('readToolMetadata', () => {
     });
     expect(readToolMetadata('not-an-object')).toBeUndefined();
     expect(readToolMetadata({ metadata: null })).toBeUndefined();
+  });
+});
+
+describe('formatToolPath', () => {
+  const options = { cwd: '/home/alice/project', homeDir: '/home/alice' };
+
+  it('uses workspace-relative paths inside cwd', () => {
+    expect(formatToolPath('/home/alice/project/src/index.ts', options)).toBe(
+      'src/index.ts',
+    );
+    expect(formatToolPath('/home/alice/project', options)).toBe('.');
+  });
+
+  it('uses tilde paths for Ello artifacts and other home files', () => {
+    expect(
+      formatToolPath(
+        '/home/alice/.ello/sessions/s1/artifacts/read.txt',
+        options,
+      ),
+    ).toBe('~/.ello/sessions/s1/artifacts/read.txt');
+    expect(formatToolPath('/home/alice/notes/todo.md', options)).toBe(
+      '~/notes/todo.md',
+    );
+  });
+
+  it('keeps relative and external absolute paths unchanged', () => {
+    expect(formatToolPath('src/index.ts', options)).toBe('src/index.ts');
+    expect(formatToolPath('/var/log/ello.log', options)).toBe(
+      '/var/log/ello.log',
+    );
+    expect(formatToolPath('/home/alice/project-copy/a.ts', options)).toBe(
+      '~/project-copy/a.ts',
+    );
+  });
+
+  it('keeps leading directories and the final directory and file', () => {
+    expect(
+      formatToolPath('src/modules/agent/runtime/provider/config/schema.ts', {
+        ...options,
+        maxPathLength: 40,
+      }),
+    ).toBe('src/modules/agent/…/config/schema.ts');
+  });
+});
+
+describe('formatArtifactPath', () => {
+  it('keeps only a compact artifact id and file name', () => {
+    expect(
+      formatArtifactPath(
+        '/home/alice/.ello/sessions/session/artifacts/run/877233fd-fb27-4dcb-adc3-5918b6a9f7b2/read.txt',
+      ),
+    ).toBe('877233fd…f7b2/read.txt');
   });
 });
 
@@ -74,7 +135,9 @@ describe('buildToolCardModel', () => {
     expect(timed.metaRight).toBe('1.5s');
   });
 
-  it('collects metrics and truncation notice', () => {
+  it('collects metrics and exposes a compact artifact view', () => {
+    const outputPath =
+      '/home/alice/.ello/sessions/session/artifacts/run/877233fd-fb27-4dcb-adc3-5918b6a9f7b2/read.txt';
     const model = buildToolCardModel(
       call({
         output: {
@@ -83,10 +146,11 @@ describe('buildToolCardModel', () => {
             totalLines: 12,
             matchCount: 3,
             truncated: true,
-            outputPath: '/tmp/log',
+            outputPath,
           },
         },
       }),
+      { cwd: '/home/alice/project', homeDir: '/home/alice' },
     );
     expect(model.metrics).toContain('12 lines');
     expect(model.metrics).toContain('3 matches');
@@ -95,7 +159,35 @@ describe('buildToolCardModel', () => {
     expect(model.details).toContain('truncated');
     expect(model.details).not.toContain('id t1');
     expect(model.details).not.toContain('kind read');
-    expect(model.truncationNotice).toContain('/tmp/log');
+    expect(model.details.some((detail) => detail.includes('artifact'))).toBe(
+      false,
+    );
+    expect(model.artifact).toEqual({
+      displayPath: '877233fd…f7b2/read.txt',
+      fullPath: outputPath,
+    });
+  });
+
+  it('shortens absolute paths in headlines, summaries and diffs', () => {
+    const targetPath = '/home/alice/project/src/a.ts';
+    const model = buildToolCardModel(
+      call({
+        name: 'edit',
+        input: { path: targetPath },
+        output: {
+          metadata: {
+            kind: 'edit',
+            path: targetPath,
+            fileChanges: [createFileChange(targetPath, 'old\n', 'new\n')],
+          },
+        },
+      }),
+      { cwd: '/home/alice/project', homeDir: '/home/alice' },
+    );
+
+    expect(model.headline).toBe('Edited src/a.ts (+1 -1)');
+    expect(model.summary).toBe('src/a.ts');
+    expect(model.fileChanges?.[0]?.path).toBe('src/a.ts');
   });
 
   it('builds concise headlines and shell output previews', () => {

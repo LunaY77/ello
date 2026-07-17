@@ -11,6 +11,7 @@ describe('TerminalHistoryOutput', () => {
   it('renders the session header as committed history', () => {
     const output = renderToString(
       <TerminalHistoryOutput
+        cwd="/tmp/ello-workspace"
         resetKey={0}
         entries={[
           {
@@ -36,6 +37,7 @@ describe('TerminalHistoryOutput', () => {
   it('renders user, assistant and tool history outside AppShell', () => {
     const output = renderToString(
       <TerminalHistoryOutput
+        cwd="/workspace"
         resetKey={0}
         entries={[
           { kind: 'user', id: 'u1', text: 'hello' },
@@ -46,13 +48,15 @@ describe('TerminalHistoryOutput', () => {
             tool: {
               id: 'tool-1',
               name: 'edit',
-              input: { path: 'tmp.txt' },
+              input: { path: '/workspace/tmp.txt' },
               status: 'ok',
               output: {
                 metadata: {
                   kind: 'edit',
-                  path: 'tmp.txt',
-                  fileChanges: [createFileChange('tmp.txt', 'old\n', 'new\n')],
+                  path: '/workspace/tmp.txt',
+                  fileChanges: [
+                    createFileChange('/workspace/tmp.txt', 'old\n', 'new\n'),
+                  ],
                 },
               },
             },
@@ -98,12 +102,59 @@ describe('TerminalHistoryOutput', () => {
       '  M tmp.txt',
     );
   });
+
+  it('renders truncated output with one compact artifact line', () => {
+    const fullPath =
+      '/home/alice/.ello/sessions/31ad2cbd-ebe6-456b-95a0-ae0766c40a2f/artifacts/877233fd-fb27-4dcb-adc3-5918b6a9f7b2/877233fd-fb27-4dcb-adc3-5918b6a9f7b2/read.txt';
+    const view = (
+      <TerminalHistoryOutput
+        cwd="/workspace"
+        resetKey={0}
+        entries={[
+          {
+            kind: 'tool',
+            id: 'read-1',
+            tool: {
+              id: 'read-1',
+              name: 'read',
+              input: { path: '/workspace/src/config/schema.ts' },
+              status: 'ok',
+              output: {
+                metadata: {
+                  kind: 'read',
+                  path: '/workspace/src/config/schema.ts',
+                  totalLines: 412,
+                  truncated: true,
+                  outputPath: fullPath,
+                },
+              },
+            },
+          },
+        ]}
+      />
+    );
+    const output = renderToString(view, { columns: 100 });
+
+    expect(output).toContain('Read src/config/schema.ts');
+    expect(output).toContain('412 lines · truncated');
+    expect(output).toContain('artifact  877233fd…f7b2/read.txt');
+    expect(output).not.toContain('~/.ello');
+    expect(output).not.toContain('full log');
+    expect(output.match(/877233fd…f7b2\/read\.txt/gu)).toHaveLength(1);
+
+    const narrowOutput = renderToString(view, { columns: 28 });
+    const artifactLine = narrowOutput
+      .split('\n')
+      .find((line) => line.includes('artifact'));
+    expect(artifactLine).toMatch(/^\s{2}artifact\s{2}.*…f7b2\/read\.txt$/u);
+  });
 });
 
 describe('AppShell', () => {
   it('renders only live viewport and bottom dock', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         mode={{
           mode: 'bypass',
@@ -129,6 +180,7 @@ describe('AppShell', () => {
   it('shows running status in the live viewport', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         mode={{
           mode: 'default',
@@ -154,6 +206,7 @@ describe('AppShell', () => {
   it('does not render blank assistant stream chunks as empty message lines', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         mode={{
           mode: 'default',
@@ -179,6 +232,7 @@ describe('AppShell', () => {
   it('shows an interrupt notice when idle after abort', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         mode={{
           mode: 'default',
@@ -203,6 +257,7 @@ describe('AppShell', () => {
   it('shows queued steering above the composer', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         mode={{
           mode: 'default',
@@ -228,6 +283,7 @@ describe('AppShell', () => {
   it('renders running subagent status with nested tools', () => {
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         mode={{
           mode: 'default',
@@ -249,7 +305,7 @@ describe('AppShell', () => {
               {
                 id: 'read-1',
                 name: 'read',
-                input: { path: 'src/config.ts' },
+                input: { path: '/workspace/src/config.ts' },
                 status: 'running',
               },
             ],
@@ -267,6 +323,7 @@ describe('AppShell', () => {
     expect(output).toContain('inspect loader');
     expect(output).toContain('Read');
     expect(output).toContain('src/config.ts');
+    expect(output).not.toContain('/workspace/src/config.ts');
   });
 
   it('limits subagent tool activity to the latest four calls', () => {
@@ -279,6 +336,7 @@ describe('AppShell', () => {
     }));
     const output = renderToString(
       <AppShell
+        cwd="/workspace"
         profile="main"
         mode={{
           mode: 'default',
