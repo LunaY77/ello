@@ -171,6 +171,7 @@ export function DiffPreview({
               key: `file:${index}:${row.path}`,
               bold: true,
               color: theme.text,
+              wrap: 'truncate-middle',
             },
             `${row.status} ${row.path}`,
           );

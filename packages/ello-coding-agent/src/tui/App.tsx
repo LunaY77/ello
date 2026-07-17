@@ -816,8 +816,10 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
       <TerminalHistoryOutput
         entries={historyEntries}
         resetKey={historyResetKey}
+        cwd={runtimeConfig.cwd}
       />
       <AppShell
+        cwd={runtimeConfig.cwd}
         profile={`${profile} / ${primaryModel}`}
         mode={state.mode}
         pendingPlanApproval={state.pendingPlanApproval !== undefined}

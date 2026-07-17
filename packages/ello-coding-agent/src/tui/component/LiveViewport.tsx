@@ -9,6 +9,7 @@ import { ToolActivityList } from './ToolActivityList.js';
 const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
 
 export function LiveViewport({
+  cwd,
   assistantText,
   runningTools,
   runningSubagents,
@@ -17,6 +18,7 @@ export function LiveViewport({
   interruptNotice,
   pendingSteers = [],
 }: {
+  readonly cwd: string;
   readonly assistantText: string;
   readonly runningTools: readonly ToolCallView[];
   readonly runningSubagents: readonly SubagentRunView[];
@@ -31,9 +33,9 @@ export function LiveViewport({
       {visibleAssistantText !== '' ? (
         <LiveAssistantText text={visibleAssistantText} />
       ) : null}
-      <ToolActivityList tools={runningTools} />
+      <ToolActivityList tools={runningTools} cwd={cwd} />
       {runningSubagents.map((run) => (
-        <SubagentActivity key={run.runId} run={run} />
+        <SubagentActivity key={run.runId} run={run} cwd={cwd} />
       ))}
       {pendingSteers.length > 0 ? (
         <PendingSteers prompts={pendingSteers} />
@@ -59,7 +61,13 @@ function LiveAssistantText({ text }: { readonly text: string }) {
   );
 }
 
-function SubagentActivity({ run }: { readonly run: SubagentRunView }) {
+function SubagentActivity({
+  run,
+  cwd,
+}: {
+  readonly run: SubagentRunView;
+  readonly cwd: string;
+}) {
   const hidden = Math.max(0, run.tools.length - SUBAGENT_VISIBLE_TOOL_LIMIT);
   const visibleTools = run.tools.slice(-SUBAGENT_VISIBLE_TOOL_LIMIT);
   return (
@@ -87,7 +95,7 @@ function SubagentActivity({ run }: { readonly run: SubagentRunView }) {
           color={tuiTokens.color.muted}
         >{`  +${hidden} earlier tool calls`}</Text>
       ) : null}
-      <ToolActivityList tools={visibleTools} indent={2} />
+      <ToolActivityList tools={visibleTools} cwd={cwd} indent={2} />
       {run.status === 'fail' && run.error !== undefined ? (
         <Text color={tuiTokens.color.danger}>{run.error}</Text>
       ) : null}
