@@ -160,6 +160,9 @@ export class AgentRunControl {
     if (item.kind === 'approval') {
       this.status = 'waiting_approval';
     }
+    if (item.kind === 'tool-call') {
+      this.status = 'waiting_tool_result';
+    }
     // 中断类延迟项保存中断现场并把运行置为已中断。
     if (item.kind === 'interrupted') {
       this.status = 'interrupted';
@@ -267,6 +270,10 @@ export class AgentRunControl {
     if (resume.deferred !== undefined) {
       this.deferredQueue.restore(resume.deferred);
     }
+    validateResumeToolResults(
+      this.deferredQueue.snapshot(),
+      resume.toolResults ?? {},
+    );
     const messages: AgentMessage[] = [];
     for (const item of this.deferredQueue.drain()) {
       if (item.kind === 'approval') {
@@ -324,6 +331,32 @@ export class AgentRunControl {
       messages.push(...item.messages);
     }
     return messages;
+  }
+}
+
+function validateResumeToolResults(
+  deferred: readonly DeferredRunItem[],
+  toolResults: Readonly<Record<string, unknown>>,
+): void {
+  const ids = new Set(
+    deferred
+      .filter((item) => item.kind === 'approval' || item.kind === 'tool-call')
+      .map((item) => item.toolCallId),
+  );
+  const unknown = Object.keys(toolResults).filter((id) => !ids.has(id));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Resume contains results for unknown tool calls: ${unknown.join(', ')}`,
+    );
+  }
+  const missing = deferred
+    .filter((item) => item.kind === 'tool-call')
+    .map((item) => item.toolCallId)
+    .filter((id) => !Object.hasOwn(toolResults, id));
+  if (missing.length > 0) {
+    throw new Error(
+      `Resume is missing deferred tool results: ${missing.join(', ')}`,
+    );
   }
 }
 

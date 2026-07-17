@@ -135,7 +135,10 @@ async function runOnce(
     import('../runtime/coding-session.js'),
     import('./render.js'),
   ]);
-  const session = await createCodingSession({ config });
+  const session = await createCodingSession({
+    config,
+    clientCapabilities: { requestUserInput: false },
+  });
   const unsubscribe = session.subscribe((event) => {
     io.stdout.write(renderEvent(event, config.json));
   });
@@ -159,13 +162,19 @@ async function resumeNonInteractive(
   io: CliIo,
 ): Promise<void> {
   const { createCodingSession } = await import('../runtime/coding-session.js');
-  const coding = await createCodingSession({ config });
+  const coding = await createCodingSession({
+    config,
+    clientCapabilities: { requestUserInput: false },
+  });
   try {
     if (session !== undefined && session.trim() !== '') {
       await coding.resumeSession(session.trim());
     }
+    const pending = coding.pendingUserInput();
     io.stdout.write(
-      `Resumed session ${coding.sessionId}. Use \`ello run <prompt>\` to continue.\n`,
+      pending === null
+        ? `Resumed session ${coding.sessionId}. Use \`ello run <prompt>\` to continue.\n`
+        : `Session ${coding.sessionId} is awaiting user input for ${pending.toolCallId}. Resume in the interactive TUI to answer.\n`,
     );
   } finally {
     await coding.close();

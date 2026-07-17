@@ -28,6 +28,10 @@ export function renderEvent(event: CodingSessionEvent, json: boolean): string {
     case 'approval.pending':
       // 非交互 CLI 无审批 UI；提示一句，实际放行/拒绝由策略决定。
       return dim(`(awaiting approval: ${event.toolName})\n`);
+    case 'user.input.requested':
+      return dim(
+        `(awaiting user input: ${event.pending.toolCallId}; resume in interactive TUI)\n`,
+      );
     case 'run.completed':
       return '\n';
     case 'run.failed':

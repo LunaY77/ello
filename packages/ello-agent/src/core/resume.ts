@@ -70,6 +70,7 @@ export async function prepareResume(
             input,
           }),
         onApprovalRequired: async () => {},
+        onToolDeferred: async () => {},
         onToolCompleted: (toolCallId, output) =>
           run.events.emit({
             type: 'tool.completed',

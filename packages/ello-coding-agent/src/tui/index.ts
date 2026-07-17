@@ -22,9 +22,15 @@ export async function launchTui(options: LaunchTuiOptions): Promise<void> {
   const session =
     options.profile !== undefined
       ? await options.profile.measure('session.create', () =>
-          createCodingSession({ config: options.config }),
+          createCodingSession({
+            config: options.config,
+            clientCapabilities: { requestUserInput: true },
+          }),
         )
-      : await createCodingSession({ config: options.config });
+      : await createCodingSession({
+          config: options.config,
+          clientCapabilities: { requestUserInput: true },
+        });
   if (options.config.sessionId !== null) {
     const sessionId = options.config.sessionId;
     if (options.profile !== undefined) {

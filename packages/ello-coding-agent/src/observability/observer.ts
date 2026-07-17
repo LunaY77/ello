@@ -47,6 +47,12 @@ export function createCodingObserver(
             toolCallId: event.request.toolCallId,
           });
           return;
+        case 'tool.deferred':
+          await log('tool.deferred', {
+            tool: event.item.toolName,
+            toolCallId: event.item.toolCallId,
+          });
+          return;
         case 'tool.completed':
           await log('tool.completed', {
             toolCallId: event.toolCallId,

@@ -109,6 +109,7 @@ export async function runInternalAgent(input: {
   });
   const toolRuntime = createMetaToolRuntime(
     [internalTarget as AnyAgentTool],
+    [],
     input.config.tools,
   );
   const agent = createAgent({
@@ -161,7 +162,11 @@ export async function runInternalToolAgent(input: {
   };
   const binding = resolveBinding(input.definition, deps);
   assertToolCallSupport(binding);
-  const toolRuntime = createMetaToolRuntime(input.tools, input.config.tools);
+  const toolRuntime = createMetaToolRuntime(
+    input.tools,
+    [],
+    input.config.tools,
+  );
   const agent = createAgent({
     name: `ello-${input.definition.name}`,
     model: resolveAgentModel(binding, deps),
@@ -245,7 +250,7 @@ export function createSubagentAgent(input: {
     definition.prompt !== undefined
       ? `${renderPromptTemplate('subagent', { model: binding.ref })}\n\n${definition.prompt}`
       : renderPromptTemplate('subagent', { model: binding.ref });
-  const toolRuntime = createMetaToolRuntime(tools, childConfig.tools);
+  const toolRuntime = createMetaToolRuntime(tools, [], childConfig.tools);
 
   return createAgent({
     name: `ello-${definition.name}`,

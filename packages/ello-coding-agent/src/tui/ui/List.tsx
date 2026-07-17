@@ -14,7 +14,11 @@ export interface InlineSelectProps {
   readonly isActive?: boolean;
   readonly label?: string;
   readonly visibleRows?: number;
+  readonly multiple?: boolean;
+  readonly selectedValues?: ReadonlySet<string>;
   onChange(value: string): void;
+  onToggle?(value: string): void;
+  onSubmit?(): void;
   onShortcut?(input: string, value: string): void;
 }
 
@@ -24,7 +28,11 @@ export function InlineSelect({
   isActive = true,
   label,
   visibleRows = options.length,
+  multiple = false,
+  selectedValues = new Set<string>(),
   onChange,
+  onToggle,
+  onSubmit,
   onShortcut,
 }: InlineSelectProps) {
   const theme = useTheme();
@@ -62,7 +70,16 @@ export function InlineSelect({
         setIndex(firstEnabledIndex(options));
       } else if (key.end || input === '\u001b[F') {
         setIndex(lastEnabledIndex(options));
+      } else if (multiple && input === ' ') {
+        const selected = options[selectedIndex];
+        if (selected !== undefined && selected.disabled !== true) {
+          onToggle?.(selected.value);
+        }
       } else if (key.return) {
+        if (multiple) {
+          onSubmit?.();
+          return;
+        }
         const selected = options[selectedIndex];
         if (selected !== undefined && selected.disabled !== true) {
           onChange(selected.value);
@@ -91,7 +108,7 @@ export function InlineSelect({
             key={option.value}
             color={colorForOption(theme, option, optionIndex === selectedIndex)}
           >
-            {`${optionIndex === selectedIndex && option.disabled !== true ? '›' : ' '} ${option.label}`}
+            {`${optionIndex === selectedIndex && option.disabled !== true ? '›' : ' '} ${multiple ? (selectedValues.has(option.value) ? '[x]' : '[ ]') : ''} ${option.label}`}
           </Text>
         );
       })}

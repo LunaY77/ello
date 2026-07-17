@@ -3,6 +3,7 @@ import type {
   AgentFinishReason,
   AgentUsage,
   DeferredApprovalItem,
+  DeferredToolCallItem,
 } from './agent.js';
 import type {
   AgentMessage,
@@ -105,6 +106,10 @@ export type AgentStreamEvent =
   | (AgentEventMetadata & {
       readonly type: 'approval.required';
       readonly item: DeferredApprovalItem;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'tool.deferred';
+      readonly item: DeferredToolCallItem;
     })
   | (AgentEventMetadata & {
       readonly type: 'tool.completed';

@@ -16,6 +16,7 @@ describe('@ello/agent public API', () => {
       'createLocalEnvironment',
       'createLocalShellEnvironment',
       'createSkillTools',
+      'defineDeferredTool',
       'defineTool',
       'skillIndexContext',
       'z',

@@ -19,3 +19,8 @@ export type {
   GoalStatus,
   GoalStatusView,
 } from '../goal/types.js';
+export type {
+  PendingUserInput,
+  UserInputRequest,
+  UserInputResolution,
+} from '../user-input/schema.js';
