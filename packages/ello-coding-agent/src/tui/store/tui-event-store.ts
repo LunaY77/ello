@@ -7,6 +7,7 @@ import type {
   CodingSessionState,
 } from '../../runtime/intents.js';
 import type { SessionModeState } from '../../runtime/session-mode.js';
+import type { PendingUserInput } from '../../user-input/schema.js';
 
 import {
   appendCommittedHistory,
@@ -32,6 +33,7 @@ export interface TuiEventState {
   readonly live: LiveRunState;
   readonly status: CodingSessionState;
   readonly pendingApproval?: ApprovalView;
+  readonly pendingUserInput?: PendingUserInput;
   readonly mode: SessionModeState;
   readonly pendingPlanApproval?: {
     readonly plan: Extract<PlanRecord, { status: 'awaiting-approval' }>;
@@ -101,7 +103,39 @@ export function reduceTuiEvent(
 
     case 'tool.approval_requested':
     case 'approval.required':
+    case 'tool.deferred':
       return state;
+
+    case 'user.input.requested': {
+      const exists = state.history.some(
+        (entry) =>
+          entry.kind === 'user_input' &&
+          entry.pending.toolCallId === event.pending.toolCallId,
+      );
+      const next = exists
+        ? state
+        : appendHistory(state, {
+            kind: 'user_input',
+            id: `user-input-${event.pending.toolCallId}`,
+            pending: event.pending,
+          });
+      return {
+        ...next,
+        status: 'awaiting_user_input',
+        pendingUserInput: event.pending,
+      };
+    }
+
+    case 'user.input.resolved': {
+      const history = state.history.map((entry) =>
+        entry.kind === 'user_input' &&
+        entry.pending.toolCallId === event.toolCallId
+          ? { ...entry, resolution: event.resolution }
+          : entry,
+      );
+      const { pendingUserInput: _pending, ...rest } = state;
+      return { ...rest, history, status: 'running' };
+    }
 
     case 'ui.message':
       return appendHistory(state, {
@@ -371,11 +405,18 @@ export function reduceTuiEvent(
       };
 
     case 'status':
-      if (event.state === 'awaiting_approval') {
+      if (
+        event.state === 'awaiting_approval' ||
+        event.state === 'awaiting_user_input'
+      ) {
         return { ...state, status: event.state };
       }
       {
-        const { pendingApproval: _cleared, ...rest } = state;
+        const {
+          pendingApproval: _cleared,
+          pendingUserInput: _userInput,
+          ...rest
+        } = state;
         return { ...rest, status: event.state };
       }
 
@@ -544,6 +585,7 @@ function updateSubagentEvent(
     case 'message.delta':
     case 'tool.approval_requested':
     case 'approval.required':
+    case 'tool.deferred':
     case 'turn.completed':
     case 'run.interrupted':
     case 'run.completed':

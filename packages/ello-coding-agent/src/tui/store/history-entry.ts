@@ -1,5 +1,10 @@
 import type { AgentError } from '@ello/agent';
 
+import type {
+  PendingUserInput,
+  UserInputResolution,
+} from '../../user-input/schema.js';
+
 export interface ToolCallView {
   readonly id: string;
   readonly name: string;
@@ -52,6 +57,12 @@ export type HistoryEntry =
       readonly text: string;
     }
   | { readonly kind: 'tool'; readonly id: string; readonly tool: ToolCallView }
+  | {
+      readonly kind: 'user_input';
+      readonly id: string;
+      readonly pending: PendingUserInput;
+      readonly resolution?: UserInputResolution;
+    }
   | {
       readonly kind: 'system';
       readonly id: string;

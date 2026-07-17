@@ -19,7 +19,7 @@ export type {
   AiSdkLanguageModelEndpoint,
   AiSdkProviderKind,
 } from './adapters/ai-sdk-provider.js';
-export { defineTool } from './public/tool.js';
+export { defineDeferredTool, defineTool } from './public/tool.js';
 export {
   activeSkillsContext,
   createSkillTools,
@@ -69,6 +69,7 @@ export type {
   AssistantMessage,
   CreateAgentOptions,
   DeferredApprovalItem,
+  DeferredAgentTool,
   DeferredRunItem,
   DeferredRunResults,
   DeferredToolCallItem,

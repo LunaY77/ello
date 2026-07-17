@@ -36,6 +36,7 @@ import {
   type RewindTarget,
 } from './component/OverlayHost.js';
 import { TerminalHistoryOutput } from './component/TerminalHistoryOutput.js';
+import { UserInputPanel } from './component/UserInputPanel.js';
 import { useRuntimeEvents } from './hooks/use-runtime-events.js';
 import {
   buildModelCatalogOptions,
@@ -837,7 +838,8 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         overlay={
           <OverlayHost
             overlay={
-              effectiveOverlay.type === 'approval'
+              effectiveOverlay.type === 'approval' ||
+              state.pendingUserInput !== undefined
                 ? { type: 'none' }
                 : effectiveOverlay
             }
@@ -880,7 +882,17 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
           />
         }
         composer={
-          effectiveOverlay.type === 'approval' ? (
+          state.pendingUserInput !== undefined ? (
+            <UserInputPanel
+              pending={state.pendingUserInput}
+              onResolve={(resolution) =>
+                session.resolveUserInput(
+                  state.pendingUserInput!.toolCallId,
+                  resolution,
+                )
+              }
+            />
+          ) : effectiveOverlay.type === 'approval' ? (
             <OverlayHost
               overlay={effectiveOverlay}
               marginTop={0}

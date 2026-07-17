@@ -15,6 +15,7 @@ import {
   createAgent as createBaseAgent,
   createLocalEnvironment,
   createLocalShellEnvironment,
+  defineDeferredTool,
   defineTool,
   z,
   type AgentModelEvent,
@@ -1224,6 +1225,86 @@ describe('createAgent', () => {
     expect(result.diagnostics?.resumeSource).toBe('options.resume');
     await firstAgent.close();
     await resumedAgent.close();
+  });
+
+  it('stops for a deferred tool and resumes with the matching result', async () => {
+    let modelCalls = 0;
+    const deferredTool = defineDeferredTool({
+      name: 'ask',
+      description: 'Ask the host',
+      discovery: { aliases: [], risk: 'readonly' },
+      input: z.object({ question: z.string() }).strict(),
+    });
+    const agent = createAgent({
+      model: 'test:model',
+      tools: [deferredTool],
+      modelAdapter: {
+        async generate(request) {
+          modelCalls += 1;
+          if (modelCalls === 1) {
+            const assistant = {
+              role: 'assistant' as const,
+              content: [
+                {
+                  type: 'tool-call' as const,
+                  toolCallId: 'ask-1',
+                  toolName: 'ask',
+                  input: { question: 'Choose?' },
+                },
+              ],
+            };
+            return {
+              text: '',
+              messages: [...request.messages, assistant],
+              newMessages: [assistant],
+              toolCalls: [
+                { id: 'ask-1', name: 'ask', input: { question: 'Choose?' } },
+              ],
+              usage: {
+                requests: 1,
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                toolCalls: 0,
+              },
+              finishReason: 'tool-calls',
+              provider: null,
+            };
+          }
+          expect(JSON.stringify(request.messages)).toContain('selected');
+          return new EchoAdapter().generate(request);
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+    const pending = await agent.run('ask');
+    expect(pending.finishReason).toBe('tool-result-required');
+    expect(pending.pending).toEqual([
+      expect.objectContaining({ kind: 'tool-call', toolCallId: 'ask-1' }),
+    ]);
+
+    const stream = agent.resume({
+      deferred: pending.pending,
+      toolResults: { 'ask-1': { selected: 'A' } },
+    });
+    for await (const _event of stream) {
+      // consume
+    }
+    expect((await stream.final).output).toBe('hello');
+
+    const invalid = agent.resume({
+      deferred: pending.pending,
+      toolResults: { wrong: 'answer' },
+    });
+    await expect(async () => {
+      for await (const _event of invalid) {
+        // consume
+      }
+    }).rejects.toThrow('unknown tool calls');
+    await agent.close();
   });
 
   it('resume denial emits a terminal tool failure without executing', async () => {

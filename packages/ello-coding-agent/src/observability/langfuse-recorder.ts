@@ -91,6 +91,8 @@ class LangfuseEventRecorder {
         );
         this.tools.delete(event.item.toolCallId);
         return;
+      case 'tool.deferred':
+        return;
       case 'tool.completed':
         this.completeTool(event);
         return;

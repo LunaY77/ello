@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink';
 
+import { summarizeUserInputResolution } from '../../user-input/recovery.js';
 import { DiffPreview } from '../presenters/index.js';
 import { glyphs } from '../ui/glyphs.js';
 import { tuiTokens } from '../ui/tokens.js';
@@ -54,6 +55,27 @@ function renderHistoryEntryContent(entry: HistoryEntry, cwd: string) {
       );
     case 'tool':
       return <HistoryTool tool={entry.tool} cwd={cwd} />;
+    case 'user_input':
+      return (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor={tuiTokens.color.accent}
+          paddingX={1}
+        >
+          <Text color={tuiTokens.color.accent}>Question</Text>
+          {entry.pending.request.questions.map((question) => (
+            <Text key={question.id} color={tuiTokens.color.text}>
+              {`${question.header}: ${question.question}`}
+            </Text>
+          ))}
+          <Text color={tuiTokens.color.muted}>
+            {entry.resolution === undefined
+              ? 'Awaiting your input'
+              : summarizeUserInputResolution(entry.resolution)}
+          </Text>
+        </Box>
+      );
     case 'subagent':
       return <HistorySubagent run={entry.run} />;
     case 'separator':

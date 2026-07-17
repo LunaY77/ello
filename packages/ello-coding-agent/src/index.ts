@@ -40,6 +40,13 @@ export type {
   CodingSessionEvent,
   CodingSessionState,
 } from './runtime/intents.js';
+export {
+  UserInputRequestSchema,
+  UserInputResolutionSchema,
+  type PendingUserInput,
+  type UserInputRequest,
+  type UserInputResolution,
+} from './user-input/index.js';
 
 export type {
   PermissionAction,

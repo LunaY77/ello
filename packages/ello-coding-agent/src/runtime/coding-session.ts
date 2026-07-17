@@ -24,6 +24,7 @@ import {
   type AgentStreamEvent,
   type AnyAgentTool,
   type DeferredApprovalItem,
+  type DeferredToolCallItem,
   type ModelAdapter,
   type CompactionPort,
 } from '@ello/agent';
@@ -111,6 +112,15 @@ import {
   createMetaToolRuntime,
   TOOL_ROUTING_INSTRUCTIONS,
 } from '../tools/meta-tools.js';
+import {
+  createRequestUserInputTool,
+  recoverPendingUserInput,
+  REQUEST_USER_INPUT_TOOL_NAME,
+  UserInputRequestSchema,
+  validateUserInputResolution,
+  type PendingUserInput,
+  type UserInputResolution,
+} from '../user-input/index.js';
 import { createBootProfile } from '../utils/boot-profile.js';
 
 import {
@@ -308,6 +318,9 @@ function cloneProfileConfig(profile: ProfileSuiteConfig): ProfileSuiteConfig {
 /** {@link createCodingSession} 的入参。 */
 export interface CreateCodingSessionOptions {
   readonly config: CodingAgentConfig;
+  readonly clientCapabilities: {
+    readonly requestUserInput: boolean;
+  };
   /** 测试可注入模型适配器，绕过真实 provider。 */
   readonly modelAdapter?: ModelAdapter;
 }
@@ -349,6 +362,11 @@ export interface CodingSession {
   denyPlan(requestId: string, reason: string | null): Promise<void>;
   clear(): Promise<void>;
   approve(requestId: string, decision: ApprovalDecision): Promise<void>;
+  resolveUserInput(
+    toolCallId: string,
+    resolution: UserInputResolution,
+  ): Promise<void>;
+  pendingUserInput(): PendingUserInput | null;
   abort(reason?: string): void;
   createGoal(objective: string, tokenBudget?: number): Promise<GoalState>;
   pauseGoal(): Promise<GoalState>;
@@ -411,6 +429,7 @@ interface SessionDeps {
   readonly tracing?: LangfuseTracingRuntime;
   readonly memory?: MemoryJobCoordinator;
   readonly modelAdapter?: ModelAdapter;
+  readonly clientCapabilities: CreateCodingSessionOptions['clientCapabilities'];
 }
 
 interface AgentRuntimeDeps {
@@ -474,6 +493,7 @@ export async function createCodingSession(
       ...(options.modelAdapter !== undefined
         ? { modelAdapter: options.modelAdapter }
         : {}),
+      clientCapabilities: options.clientCapabilities,
     });
     if (memory !== undefined) {
       await memory.start();
@@ -501,6 +521,10 @@ class CodingSessionImpl implements CodingSession {
   private readonly listeners = new Set<CodingEventListener>();
   private readonly approvalItems = new Map<string, DeferredApprovalItem>();
   private readonly approvalDecisions = new Map<string, ApprovalDecision>();
+  private pendingUserInputItem: PendingUserInput | null = null;
+  private userInputResolutionTask:
+    | { readonly toolCallId: string; readonly task: Promise<void> }
+    | undefined;
   private readonly sessionExternalPaths = new Set<string>();
   private readonly steerQueue: string[] = [];
   private readonly planAcceptances = new Map<
@@ -602,10 +626,17 @@ class CodingSessionImpl implements CodingSession {
       this.modeState = { ...persisted, source: 'resume' };
     }
     await this.goalService.load();
+    this.setRecoveredUserInput(opened.messages);
   }
 
   subscribe(listener: CodingEventListener): () => void {
     this.listeners.add(listener);
+    if (this.pendingUserInputItem !== null) {
+      listener({
+        type: 'user.input.requested',
+        pending: this.pendingUserInputItem,
+      });
+    }
     return () => this.listeners.delete(listener);
   }
 
@@ -614,6 +645,11 @@ class CodingSessionImpl implements CodingSession {
     prompt: string,
     meta?: Record<string, unknown>,
   ): Promise<AgentRunResult> {
+    if (this.pendingUserInputItem !== null) {
+      throw new Error(
+        `Cannot submit while user input ${this.pendingUserInputItem.toolCallId} is pending.`,
+      );
+    }
     // v1：把排队的 steer 输入并入本次提交（公共 API 暂无 run 内注入入口）。
     const drained = this.steerQueue.splice(0);
     const input =
@@ -658,7 +694,11 @@ class CodingSessionImpl implements CodingSession {
     source: SessionModeSource,
   ): Promise<SessionModeState> {
     // 运行中或存在工具审批时切模式会改变尚未执行工具的权限语义，因此直接拒绝。
-    if (this.currentStream !== undefined || this.approvalItems.size > 0) {
+    if (
+      this.currentStream !== undefined ||
+      this.approvalItems.size > 0 ||
+      this.pendingUserInputItem !== null
+    ) {
       throw this.planError(
         'MODE_CHANGE_WHILE_RUNNING',
         'Cannot change mode while a turn is running.',
@@ -1027,6 +1067,89 @@ class CodingSessionImpl implements CodingSession {
       const result = await driveRun({
         currentStream: this.currentStream,
         pendingApprovalCount: () => this.pendingApprovalCount(),
+        pendingUserInputCount: () =>
+          this.pendingUserInputItem === null ? 0 : 1,
+        emit: (event) => this.emit(event),
+        onEvent: (event) => this.forward(event),
+        checkpoints: this.checkpoints,
+      });
+      completed = result;
+      await this.recordGoalUsage(result, runMetadata);
+      if ((result.pending?.length ?? 0) === 0) {
+        this.pendingRunMetadata = undefined;
+        await this.ensureSessionTitle(this.sessionId, result.messages);
+        await this.maybeEnqueueMemoryExtraction(result, runMetadata);
+      }
+    } finally {
+      this.currentStream = undefined;
+      this.flushPlanApprovalEvent();
+      await this.closeInvalidatedRuntime();
+    }
+    if (completed !== undefined) {
+      this.scheduleGoalContinuation(completed);
+    }
+  }
+
+  pendingUserInput(): PendingUserInput | null {
+    return this.pendingUserInputItem;
+  }
+
+  resolveUserInput(
+    toolCallId: string,
+    resolution: UserInputResolution,
+  ): Promise<void> {
+    if (this.userInputResolutionTask?.toolCallId === toolCallId) {
+      return this.userInputResolutionTask.task;
+    }
+    const task = this.resolveUserInputOnce(toolCallId, resolution);
+    this.userInputResolutionTask = { toolCallId, task };
+    const clearTask = () => {
+      if (this.userInputResolutionTask?.task === task) {
+        this.userInputResolutionTask = undefined;
+      }
+    };
+    void task.then(clearTask, clearTask);
+    return task;
+  }
+
+  private async resolveUserInputOnce(
+    toolCallId: string,
+    value: UserInputResolution,
+  ): Promise<void> {
+    const pending = this.pendingUserInputItem;
+    if (pending === null || pending.toolCallId !== toolCallId) {
+      throw new Error(`Unknown or stale user input request: ${toolCallId}`);
+    }
+    if (this.approvalItems.size > 0) {
+      throw new Error('User input and approval cannot be pending together.');
+    }
+    const resolution = validateUserInputResolution(pending.request, value);
+    const runMetadata = this.pendingRunMetadata;
+    this.pendingUserInputItem = null;
+    this.emit({ type: 'user.input.resolved', toolCallId, resolution });
+    const deferred: DeferredToolCallItem = {
+      kind: 'tool-call',
+      toolCallId,
+      toolName: REQUEST_USER_INPUT_TOOL_NAME,
+      input: pending.request,
+    };
+    const runtime = await this.ensureAgentRuntime();
+    const resumed = runtime.agent.resume(
+      { deferred: [deferred], toolResults: { [toolCallId]: resolution } },
+      {
+        sessionId: this.sessionId,
+        maxTurns: this.activeAgentMaxTurns(),
+        ...(runMetadata !== undefined ? { metadata: runMetadata } : {}),
+      },
+    );
+    this.currentStream = resumed;
+    let completed: AgentRunResult | undefined;
+    try {
+      const result = await driveRun({
+        currentStream: resumed,
+        pendingApprovalCount: () => this.pendingApprovalCount(),
+        pendingUserInputCount: () =>
+          this.pendingUserInputItem === null ? 0 : 1,
         emit: (event) => this.emit(event),
         onEvent: (event) => this.forward(event),
         checkpoints: this.checkpoints,
@@ -1455,6 +1578,7 @@ class CodingSessionImpl implements CodingSession {
     this.approvalItems.clear();
     this.approvalDecisions.clear();
     this.pendingRunMetadata = undefined;
+    this.pendingUserInputItem = null;
     await this.deps.sessionStore.load(this.sessionId);
     this.modeState = {
       mode: this.config.initialMode,
@@ -1501,6 +1625,7 @@ class CodingSessionImpl implements CodingSession {
     this.emit({ type: 'session.switched', sessionId: this.sessionId });
     this.emit({ type: 'session.mode.changed', state: this.modeState });
     this.emitHistoryLoadedFromMessages(loaded.messages, loaded.messageEntryIds);
+    this.setRecoveredUserInput(loaded.messages);
     this.scheduleGoalContinuation();
   }
 
@@ -1552,7 +1677,38 @@ class CodingSessionImpl implements CodingSession {
       this.emitPendingApproval(event.item);
       return;
     }
+    if (event.type === 'tool.deferred') {
+      if (event.item.toolName !== REQUEST_USER_INPUT_TOOL_NAME) {
+        throw new Error(`Unsupported deferred tool: ${event.item.toolName}`);
+      }
+      if (this.approvalItems.size > 0 || this.pendingUserInputItem !== null) {
+        throw new Error(
+          'A run produced conflicting pending interaction states.',
+        );
+      }
+      const pending = {
+        toolCallId: event.item.toolCallId,
+        request: UserInputRequestSchema.parse(event.item.input),
+      };
+      this.pendingUserInputItem = pending;
+      this.emit({ type: 'user.input.requested', pending });
+      return;
+    }
     this.emit(projectToolEvent(event));
+  }
+
+  private setRecoveredUserInput(messages: readonly AgentMessage[]): void {
+    const pending = recoverPendingUserInput(messages, this.sessionId);
+    if (pending !== null && this.approvalItems.size > 0) {
+      throw new Error(
+        `Session ${this.sessionId} has pending approval and user input ${pending.toolCallId}.`,
+      );
+    }
+    this.pendingUserInputItem = pending;
+    if (pending !== null && this.listeners.size > 0) {
+      this.emit({ type: 'user.input.requested', pending });
+      this.emit({ type: 'status', state: 'awaiting_user_input' });
+    }
   }
 
   private pendingApprovalCount(): number {
@@ -1596,6 +1752,8 @@ class CodingSessionImpl implements CodingSession {
       const result = await driveRun({
         currentStream: this.currentStream,
         pendingApprovalCount: () => this.pendingApprovalCount(),
+        pendingUserInputCount: () =>
+          this.pendingUserInputItem === null ? 0 : 1,
         emit: (event) => this.emit(event),
         onEvent: (event) => this.forward(event),
         checkpoints: this.checkpoints,
@@ -2030,7 +2188,16 @@ class CodingSessionImpl implements CodingSession {
           })
         : []),
     ];
-    const toolRuntime = createMetaToolRuntime(targetTools, config.tools);
+    const directTools =
+      this.deps.clientCapabilities.requestUserInput &&
+      !config.tools.disabled.includes(REQUEST_USER_INPUT_TOOL_NAME)
+        ? [createRequestUserInputTool()]
+        : [];
+    const toolRuntime = createMetaToolRuntime(
+      targetTools,
+      directTools,
+      config.tools,
+    );
 
     const sections = [
       skillIndexContext({
@@ -2501,6 +2668,7 @@ function makeCompactCheckpointGenerator(
 async function driveRun(options: {
   readonly currentStream: AgentStream;
   readonly pendingApprovalCount: () => number;
+  readonly pendingUserInputCount: () => number;
   readonly emit: (event: CodingSessionEvent) => void;
   readonly onEvent: (event: AgentStreamEvent) => Promise<void>;
   readonly checkpoints: CheckpointStore;
@@ -2509,6 +2677,7 @@ async function driveRun(options: {
   const {
     currentStream,
     pendingApprovalCount,
+    pendingUserInputCount,
     emit,
     onEvent,
     checkpoints,
@@ -2534,7 +2703,12 @@ async function driveRun(options: {
   await checkpoints.seal(result.id, checkpointLabel);
   emit({
     type: 'status',
-    state: pendingApprovalCount() > 0 ? 'awaiting_approval' : 'idle',
+    state:
+      pendingApprovalCount() > 0
+        ? 'awaiting_approval'
+        : pendingUserInputCount() > 0
+          ? 'awaiting_user_input'
+          : 'idle',
   });
   return result;
 }

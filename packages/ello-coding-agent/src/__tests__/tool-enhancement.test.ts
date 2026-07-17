@@ -11,6 +11,7 @@ import {
   TOOL_ROUTING_INSTRUCTIONS,
 } from '../tools/meta-tools.js';
 import { createToolSearchIndex } from '../tools/search-index.js';
+import { createRequestUserInputTool } from '../user-input/tool.js';
 
 function target(name: string, description: string, alias: string) {
   return defineTool({
@@ -43,7 +44,7 @@ describe('meta tool activation', () => {
 
   it('forbids direct target calls throughout routing mode', () => {
     expect(TOOL_ROUTING_INSTRUCTIONS).toContain(
-      'only `tool_search` and `call_tool` are directly callable',
+      '`tool_search`, `call_tool`, and any explicitly listed direct interaction tools are directly callable',
     );
     expect(TOOL_ROUTING_INSTRUCTIONS).toContain(
       'even when the user explicitly requests that tool',
@@ -52,7 +53,7 @@ describe('meta tool activation', () => {
   });
 
   it('exposes target tools directly when routing is disabled', () => {
-    const runtime = createMetaToolRuntime(tools, {
+    const runtime = createMetaToolRuntime(tools, [], {
       routing_enabled: false,
       search: searchConfig,
     });
@@ -67,7 +68,7 @@ describe('meta tool activation', () => {
   });
 
   it('exposes tool_search and call_tool when routing is enabled', () => {
-    const runtime = createMetaToolRuntime(tools, {
+    const runtime = createMetaToolRuntime(tools, [], {
       routing_enabled: true,
       search: searchConfig,
     });
@@ -94,7 +95,7 @@ describe('meta tool activation', () => {
       write: async () => 'written',
       requestExit: async () => 'requested',
     });
-    const runtime = createMetaToolRuntime([...tools, ...planTools], {
+    const runtime = createMetaToolRuntime([...tools, ...planTools], [], {
       routing_enabled: true,
       search: searchConfig,
     });
@@ -141,6 +142,25 @@ describe('meta tool activation', () => {
         expect.objectContaining({ name: 'request_plan_exit' }),
       ]),
     });
+  });
+
+  it('keeps direct interaction tools outside search and call_tool targets', () => {
+    const runtime = createMetaToolRuntime(
+      tools,
+      [createRequestUserInputTool()],
+      { routing_enabled: true, search: searchConfig },
+    );
+    expect(runtime.modelTools.map((tool) => tool.name)).toEqual([
+      'tool_search',
+      'call_tool',
+      'request_user_input',
+    ]);
+    expect(runtime.executionTools.map((tool) => tool.name)).toContain(
+      'request_user_input',
+    );
+    expect(() => createCallTool([createRequestUserInputTool()])).toThrow(
+      'cannot be deferred',
+    );
   });
 });
 

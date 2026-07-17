@@ -146,6 +146,15 @@ function toTraceEvent(
         toolCallId: event.item.toolCallId,
         toolName: event.item.toolName,
       };
+    case 'tool.deferred':
+      return {
+        type: event.type,
+        runId: event.runId,
+        sequence: event.sequence,
+        occurredAt: event.occurredAt,
+        toolCallId: event.item.toolCallId,
+        toolName: event.item.toolName,
+      };
     case 'tool.completed':
       return {
         type: event.type,
@@ -232,6 +241,9 @@ async function emitSingleObserverEvent(
   }
   if (event.type === 'approval.required') {
     await observer.onToolApprovalRequired?.(event.item, ctx);
+    return;
+  }
+  if (event.type === 'tool.deferred') {
     return;
   }
   if (event.type === 'tool.completed') {

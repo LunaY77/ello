@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ToolScheduler } from '../core/tool-scheduler.js';
-import { defineTool, z } from '../index.js';
+import { defineDeferredTool, defineTool, z } from '../index.js';
 
 describe('ToolScheduler', () => {
   it('normalizes approval errors into a tool failure', async () => {
@@ -38,6 +38,9 @@ describe('ToolScheduler', () => {
         onApprovalRequired: async () => {
           events.push('approval');
         },
+        onToolDeferred: async () => {
+          events.push('deferred');
+        },
         onToolCompleted: async () => {
           events.push('completed');
         },
@@ -54,5 +57,88 @@ describe('ToolScheduler', () => {
     });
     expect(result.messages).toHaveLength(1);
     expect(events).toEqual(['started', 'failed:Patch file name is missing.']);
+  });
+
+  it('defers one deferred call without executing it', async () => {
+    const tool = defineDeferredTool({
+      name: 'ask',
+      description: 'Ask',
+      discovery: { aliases: [], risk: 'readonly' },
+      input: z.object({ question: z.string() }).strict(),
+    });
+    const scheduler = new ToolScheduler({
+      runId: 'run-1',
+      turnIndex: () => 0,
+      tools: [tool],
+      callableToolNames: new Set([tool.name]),
+      environment: {},
+      metadata: {},
+      signal: new AbortController().signal,
+    });
+    const deferred: string[] = [];
+    const result = await scheduler.schedule(
+      [{ id: 'call-1', name: 'ask', input: { question: 'Choose?' } }],
+      {
+        onToolStarted: async () => {},
+        onApprovalRequired: async () => {},
+        onToolDeferred: async (item) => deferred.push(item.toolCallId),
+        onToolCompleted: async () => {},
+        onToolFailed: async () => {},
+      },
+    );
+    expect(result.messages).toEqual([]);
+    expect(result.pending).toEqual([
+      {
+        kind: 'tool-call',
+        toolCallId: 'call-1',
+        toolName: 'ask',
+        input: { question: 'Choose?' },
+      },
+    ]);
+    expect(deferred).toEqual(['call-1']);
+  });
+
+  it('rejects a mixed deferred batch before side effects execute', async () => {
+    let executions = 0;
+    const immediate = defineTool({
+      name: 'write',
+      description: 'Write',
+      discovery: { aliases: [], risk: 'workspace-write' },
+      input: z.object({}).strict(),
+      execute: () => {
+        executions += 1;
+      },
+    });
+    const deferred = defineDeferredTool({
+      name: 'ask',
+      description: 'Ask',
+      discovery: { aliases: [], risk: 'readonly' },
+      input: z.object({}).strict(),
+    });
+    const scheduler = new ToolScheduler({
+      runId: 'run-1',
+      turnIndex: () => 0,
+      tools: [immediate, deferred],
+      callableToolNames: new Set(['write', 'ask']),
+      environment: {},
+      metadata: {},
+      signal: new AbortController().signal,
+    });
+    const result = await scheduler.schedule(
+      [
+        { id: 'call-1', name: 'write', input: {} },
+        { id: 'call-2', name: 'ask', input: {} },
+      ],
+      {
+        onToolStarted: async () => {},
+        onApprovalRequired: async () => {},
+        onToolDeferred: async () => {},
+        onToolCompleted: async () => {},
+        onToolFailed: async () => {},
+      },
+    );
+    expect(executions).toBe(0);
+    expect(result.pending).toEqual([]);
+    expect(result.messages).toHaveLength(2);
   });
 });
