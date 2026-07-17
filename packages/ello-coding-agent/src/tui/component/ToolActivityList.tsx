@@ -45,13 +45,17 @@ function ToolCard({
     <Box flexDirection="column">
       <Box gap={1}>
         <Text color={color}>{toolStatusLabel(call.status)}</Text>
-        <Text color={color}>{model.headline}</Text>
+        <Text color={color} wrap="truncate-middle">
+          {model.headline}
+        </Text>
         {model.metaRight !== '' ? (
           <Text color={theme.textMuted}>{model.metaRight}</Text>
         ) : null}
       </Box>
       {model.details.length > 0 ? (
-        <Text color={theme.textMuted}>{`  ${model.details.join(' · ')}`}</Text>
+        <Text color={theme.textMuted} wrap="truncate">
+          {`  ${model.details.join(' · ')}`}
+        </Text>
       ) : null}
       {model.outputPreview.length > 0 ? (
         <Box flexDirection="column">
@@ -67,8 +71,13 @@ function ToolCard({
           ))}
         </Box>
       ) : null}
-      {model.truncationNotice !== undefined ? (
-        <Text color={theme.warning}>{`  ${model.truncationNotice}`}</Text>
+      {model.artifact !== undefined ? (
+        <Box marginLeft={2} gap={2}>
+          <Text color={theme.warning}>artifact</Text>
+          <Text color={theme.warning} wrap="truncate-middle">
+            {model.artifact.displayPath}
+          </Text>
+        </Box>
       ) : null}
       {call.status === 'running' ? (
         <Text color={theme.warning}> working</Text>

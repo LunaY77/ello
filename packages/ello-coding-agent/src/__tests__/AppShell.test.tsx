@@ -102,6 +102,52 @@ describe('TerminalHistoryOutput', () => {
       '  M tmp.txt',
     );
   });
+
+  it('renders truncated output with one compact artifact line', () => {
+    const fullPath =
+      '/home/alice/.ello/sessions/31ad2cbd-ebe6-456b-95a0-ae0766c40a2f/artifacts/877233fd-fb27-4dcb-adc3-5918b6a9f7b2/877233fd-fb27-4dcb-adc3-5918b6a9f7b2/read.txt';
+    const view = (
+      <TerminalHistoryOutput
+        cwd="/workspace"
+        resetKey={0}
+        entries={[
+          {
+            kind: 'tool',
+            id: 'read-1',
+            tool: {
+              id: 'read-1',
+              name: 'read',
+              input: { path: '/workspace/src/config/schema.ts' },
+              status: 'ok',
+              output: {
+                metadata: {
+                  kind: 'read',
+                  path: '/workspace/src/config/schema.ts',
+                  totalLines: 412,
+                  truncated: true,
+                  outputPath: fullPath,
+                },
+              },
+            },
+          },
+        ]}
+      />
+    );
+    const output = renderToString(view, { columns: 100 });
+
+    expect(output).toContain('Read src/config/schema.ts');
+    expect(output).toContain('412 lines · truncated');
+    expect(output).toContain('artifact  877233fd…f7b2/read.txt');
+    expect(output).not.toContain('~/.ello');
+    expect(output).not.toContain('full log');
+    expect(output.match(/877233fd…f7b2\/read\.txt/gu)).toHaveLength(1);
+
+    const narrowOutput = renderToString(view, { columns: 28 });
+    const artifactLine = narrowOutput
+      .split('\n')
+      .find((line) => line.includes('artifact'));
+    expect(artifactLine).toMatch(/^\s{2}artifact\s{2}.*…f7b2\/read\.txt$/u);
+  });
 });
 
 describe('AppShell', () => {

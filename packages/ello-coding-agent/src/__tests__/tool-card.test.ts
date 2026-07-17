@@ -4,6 +4,7 @@ import { createFileChange } from '../tools/file-change.js';
 import type { ToolCallView } from '../tui/store/history-entry.js';
 import {
   buildToolCardModel as createToolCardModel,
+  formatArtifactPath,
   formatDuration,
   formatToolPath,
   readToolMetadata,
@@ -70,6 +71,25 @@ describe('formatToolPath', () => {
       '~/project-copy/a.ts',
     );
   });
+
+  it('keeps leading directories and the final directory and file', () => {
+    expect(
+      formatToolPath('src/modules/agent/runtime/provider/config/schema.ts', {
+        ...options,
+        maxPathLength: 40,
+      }),
+    ).toBe('src/modules/agent/…/config/schema.ts');
+  });
+});
+
+describe('formatArtifactPath', () => {
+  it('keeps only a compact artifact id and file name', () => {
+    expect(
+      formatArtifactPath(
+        '/home/alice/.ello/sessions/session/artifacts/run/877233fd-fb27-4dcb-adc3-5918b6a9f7b2/read.txt',
+      ),
+    ).toBe('877233fd…f7b2/read.txt');
+  });
 });
 
 describe('buildToolCardModel', () => {
@@ -115,7 +135,9 @@ describe('buildToolCardModel', () => {
     expect(timed.metaRight).toBe('1.5s');
   });
 
-  it('collects metrics and truncation notice', () => {
+  it('collects metrics and exposes a compact artifact view', () => {
+    const outputPath =
+      '/home/alice/.ello/sessions/session/artifacts/run/877233fd-fb27-4dcb-adc3-5918b6a9f7b2/read.txt';
     const model = buildToolCardModel(
       call({
         output: {
@@ -124,7 +146,7 @@ describe('buildToolCardModel', () => {
             totalLines: 12,
             matchCount: 3,
             truncated: true,
-            outputPath: '/home/alice/.ello/sessions/s1/read.txt',
+            outputPath,
           },
         },
       }),
@@ -137,10 +159,13 @@ describe('buildToolCardModel', () => {
     expect(model.details).toContain('truncated');
     expect(model.details).not.toContain('id t1');
     expect(model.details).not.toContain('kind read');
-    expect(model.details).toContain('artifact ~/.ello/sessions/s1/read.txt');
-    expect(model.truncationNotice).toContain(
-      'full log: ~/.ello/sessions/s1/read.txt',
+    expect(model.details.some((detail) => detail.includes('artifact'))).toBe(
+      false,
     );
+    expect(model.artifact).toEqual({
+      displayPath: '877233fd…f7b2/read.txt',
+      fullPath: outputPath,
+    });
   });
 
   it('shortens absolute paths in headlines, summaries and diffs', () => {

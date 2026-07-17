@@ -21,7 +21,9 @@ export function ToolRow({
       <Text color={statusColor(call.status)}>{statusGlyph(call.status)}</Text>
       <Text color={statusColor(call.status)}>{model.name}</Text>
       {model.summary !== '' ? (
-        <Text color={tuiTokens.color.muted}>{model.summary}</Text>
+        <Text color={tuiTokens.color.muted} wrap="truncate-middle">
+          {model.summary}
+        </Text>
       ) : null}
       {model.metaRight !== '' ? (
         <Text color={tuiTokens.color.muted}>{model.metaRight}</Text>

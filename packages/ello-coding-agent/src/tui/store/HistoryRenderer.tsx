@@ -115,12 +115,13 @@ function HistoryTool({
   const prefix = tool.name === 'bash' ? '• ' : '  ';
   return (
     <Box flexDirection="column">
-      <Text color={color} wrap="wrap">
+      <Text color={color} wrap="truncate-middle">
         {`${prefix}${tool.status === 'fail' ? 'Failed ' : ''}${model.headline}${model.metaRight !== '' ? `  ${model.metaRight}` : ''}`}
       </Text>
       {model.details.length > 0 ? (
         <Text
           color={tuiTokens.color.muted}
+          wrap="truncate"
         >{`  ${model.details.join(' · ')}`}</Text>
       ) : null}
       {model.outputPreview.length > 0 ? (
@@ -137,10 +138,13 @@ function HistoryTool({
           ))}
         </Box>
       ) : null}
-      {model.truncationNotice !== undefined ? (
-        <Text
-          color={tuiTokens.color.warning}
-        >{`  ${model.truncationNotice}`}</Text>
+      {model.artifact !== undefined ? (
+        <Box marginLeft={2} gap={2}>
+          <Text color={tuiTokens.color.warning}>artifact</Text>
+          <Text color={tuiTokens.color.warning} wrap="truncate-middle">
+            {model.artifact.displayPath}
+          </Text>
+        </Box>
       ) : null}
       {model.diff !== undefined ? (
         <DiffPreview
