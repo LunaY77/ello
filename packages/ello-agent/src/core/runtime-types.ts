@@ -36,6 +36,12 @@ export type AgentTraceEvent =
       readonly toolName: string;
     })
   | (AgentEventMetadata & {
+      readonly type: 'tool.deferred';
+      readonly runId: string;
+      readonly toolCallId: string;
+      readonly toolName: string;
+    })
+  | (AgentEventMetadata & {
       readonly type: 'tool.completed';
       readonly toolCallId: string;
     })
@@ -85,6 +91,7 @@ export interface AgentMessageQueue<T = AgentMessage> {
 export type AgentRunControlStatus =
   | 'running'
   | 'waiting_approval'
+  | 'waiting_tool_result'
   | 'interrupted'
   | 'completed'
   | 'failed';

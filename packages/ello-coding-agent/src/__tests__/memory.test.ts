@@ -23,8 +23,20 @@ import { createCodingSystemPromptSection } from '../context/prompts.js';
 import { MemoryIndexLoader } from '../memory/index-loader.js';
 import { memoryRoots } from '../memory/paths.js';
 import { MemoryRepository } from '../memory/repository.js';
-import { createCodingSession } from '../runtime/coding-session.js';
+import {
+  createCodingSession as createCodingSessionRuntime,
+  type CreateCodingSessionOptions,
+} from '../runtime/coding-session.js';
 import type { CodingSessionEvent } from '../runtime/intents.js';
+
+function createCodingSession(
+  options: Omit<CreateCodingSessionOptions, 'clientCapabilities'>,
+) {
+  return createCodingSessionRuntime({
+    ...options,
+    clientCapabilities: { requestUserInput: false },
+  });
+}
 
 describe('file memory', () => {
   let previousHome: string | undefined;

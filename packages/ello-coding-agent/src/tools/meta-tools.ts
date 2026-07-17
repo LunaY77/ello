@@ -2,6 +2,7 @@ import {
   defineTool,
   type AgentApprovalDecision,
   type AgentMessage,
+  type AgentTool,
   type AnyAgentTool,
 } from '@ello/agent';
 import { z, ZodError } from 'zod';
@@ -14,7 +15,7 @@ const META_TOOL_NAMES = new Set(['tool_search', 'call_tool']);
 
 export const TOOL_ROUTING_INSTRUCTIONS = `# Tool Routing Protocol
 
-- In this routing mode, only \`tool_search\` and \`call_tool\` are directly callable.
+- In this routing mode, \`tool_search\`, \`call_tool\`, and any explicitly listed direct interaction tools are directly callable.
 - Never emit a native tool call using a target name such as \`bash\`, \`read\`, or \`write\`, even when the user explicitly requests that tool or you already know its name.
 - Use \`tool_search\` to discover unknown capabilities and obtain the exact target name and input schema.
 - Omit \`tool_search.query\`, or use a query such as \`all tools\`, to list lightweight summaries of the current mode's targets. Follow \`nextOffset\` while \`truncated\` is true, then search an exact tool name to get its input schema.
@@ -26,6 +27,7 @@ export const TOOL_ROUTING_INSTRUCTIONS = `# Tool Routing Protocol
 /** 为当前目标工具集合创建“执行全集”和“模型可见集合”。 */
 export function createMetaToolRuntime(
   targetTools: readonly AnyAgentTool[],
+  directTools: readonly AnyAgentTool[],
   config: {
     readonly routing_enabled: boolean;
     readonly search: {
@@ -39,9 +41,11 @@ export function createMetaToolRuntime(
   readonly usesToolRouting: boolean;
 } {
   if (!config.routing_enabled) {
+    const tools =
+      directTools.length === 0 ? targetTools : [...targetTools, ...directTools];
     return {
-      executionTools: targetTools,
-      modelTools: targetTools,
+      executionTools: tools,
+      modelTools: tools,
       usesToolRouting: false,
     };
   }
@@ -51,9 +55,9 @@ export function createMetaToolRuntime(
     maxResultBytes: config.search.max_result_bytes,
   });
   const callTool = createCallTool(targetTools);
-  const modelTools = [toolSearch, callTool];
+  const modelTools = [toolSearch, callTool, ...directTools];
   return {
-    executionTools: [...targetTools, ...modelTools],
+    executionTools: [...targetTools, toolSearch, callTool, ...directTools],
     modelTools,
     usesToolRouting: true,
   };
@@ -63,7 +67,7 @@ export function createToolSearchTool(options: {
   readonly index: ToolSearchIndex;
   readonly resultLimit: number;
   readonly maxResultBytes: number;
-}): AnyAgentTool {
+}): AgentTool<unknown, unknown> {
   // limit 控制单次返回数量，字节上限防止 schema 结果撑爆上下文。
   if (
     !Number.isInteger(options.resultLimit) ||
@@ -112,7 +116,7 @@ export function createToolSearchTool(options: {
       }
       return result;
     },
-  }) as AnyAgentTool;
+  });
 }
 
 function isInventoryQuery(query: string): boolean {
@@ -123,10 +127,13 @@ function isInventoryQuery(query: string): boolean {
 
 export function createCallTool(
   targetTools: readonly AnyAgentTool[],
-): AnyAgentTool {
+): AgentTool<unknown, unknown> {
   // 目标表只在 runtime 构建时生成，调用期间不再按名称猜测或补全工具。
-  const targets = new Map<string, AnyAgentTool>();
+  const targets = new Map<string, AgentTool<unknown, unknown>>();
   for (const tool of targetTools) {
+    if (tool.execution !== 'immediate') {
+      throw new Error(`call_tool target cannot be deferred: ${tool.name}`);
+    }
     if (META_TOOL_NAMES.has(tool.name)) {
       throw new Error(`call_tool target cannot be a meta tool: ${tool.name}`);
     }
@@ -196,7 +203,7 @@ export function createCallTool(
       const resolved = resolveTargetCall(input);
       return resolved.target.execute(resolved.input, context);
     },
-  }) as AnyAgentTool;
+  });
 }
 
 function proxyApprovalDecision(

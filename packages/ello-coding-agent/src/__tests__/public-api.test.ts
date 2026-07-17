@@ -9,6 +9,8 @@ describe('@ello/coding-agent public API', () => {
       'PermissionRuleSchema',
       'PlanModeError',
       'SessionModeSchema',
+      'UserInputRequestSchema',
+      'UserInputResolutionSchema',
       'buildProgram',
       'createCodingSession',
       'getProjectConfigPath',

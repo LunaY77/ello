@@ -128,6 +128,9 @@ export function finishReasonForStop(
   if (stopReason === 'waiting-approval') {
     return 'approval-required';
   }
+  if (stopReason === 'waiting-tool-result') {
+    return 'tool-result-required';
+  }
   if (stopReason === 'interrupted') {
     return 'interrupted';
   }

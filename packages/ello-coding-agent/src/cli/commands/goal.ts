@@ -47,6 +47,7 @@ export const goalCommands: CliCommandModule = {
               ...config,
               sessionId: options.session ?? null,
             },
+            clientCapabilities: { requestUserInput: false },
           });
           const unsubscribe = session.subscribe((event) => {
             ctx.io.stdout.write(renderEvent(event, config.json));

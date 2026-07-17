@@ -66,6 +66,7 @@ export type AgentFinishReason =
   | 'length'
   | 'tool-calls'
   | 'approval-required'
+  | 'tool-result-required'
   | 'interrupted'
   | 'no-progress'
   | 'content-filter'

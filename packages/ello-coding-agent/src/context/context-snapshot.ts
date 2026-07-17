@@ -164,12 +164,12 @@ function modeGuidance(mode: CodingAgentConfig['initialMode']): string {
   // 提示词只解释行为边界；真正的安全约束仍由 permission policy 强制执行。
   const guidance: Record<CodingAgentConfig['initialMode'], string> = {
     default:
-      'File edits and command execution require explicit user approval each time.',
-    plan: 'Investigate first. Only write the session plan with write_plan, then call request_plan_exit. Business files, shell commands, and network access are denied.',
+      'File edits and command execution require explicit user approval each time. Inspect available context first; use request_user_input only for user-owned ambiguity that materially changes the implementation.',
+    plan: 'Investigate first. If a key architecture, scope, or preference choice can only be answered by the user, call request_user_input with a recommended option. Only write the session plan with write_plan, then call request_plan_exit; never use request_user_input to approve Plan Mode exit. Business files, shell commands, and network access are denied.',
     'accept-edits':
-      'File edits are auto-approved; higher-risk actions still need approval.',
+      'File edits are auto-approved; higher-risk actions still need approval. Inspect available context first; use request_user_input only for user-owned ambiguity that materially changes the implementation.',
     bypass:
-      'All approvals are bypassed; act carefully because changes apply without a prompt.',
+      'All approvals are bypassed; act carefully because changes apply without a prompt. Inspect available context first; use request_user_input only for user-owned ambiguity that materially changes the implementation.',
   };
   return guidance[mode];
 }

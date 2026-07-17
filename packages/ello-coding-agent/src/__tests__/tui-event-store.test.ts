@@ -20,6 +20,44 @@ const runCompleted = {
 } as const;
 
 describe('tui-event-store', () => {
+  it('projects pending and resolved user input into dedicated state and history', () => {
+    const pending = {
+      toolCallId: 'ask-1',
+      request: {
+        questions: [
+          {
+            id: 'choice',
+            header: 'Choice',
+            question: 'Choose one?',
+            options: [
+              { label: 'A', description: 'Recommended.' },
+              { label: 'B', description: 'Alternative.' },
+            ],
+            multiSelect: false,
+          },
+        ],
+      },
+    } as const;
+    let state = reduceTuiEvent(initialTuiEventState, {
+      type: 'user.input.requested',
+      pending,
+    });
+    expect(state.status).toBe('awaiting_user_input');
+    expect(state.pendingUserInput).toEqual(pending);
+    expect(state.history.at(-1)).toMatchObject({ kind: 'user_input', pending });
+
+    state = reduceTuiEvent(state, {
+      type: 'user.input.resolved',
+      toolCallId: 'ask-1',
+      resolution: { status: 'denied' },
+    });
+    expect(state.pendingUserInput).toBeUndefined();
+    expect(state.history.at(-1)).toMatchObject({
+      kind: 'user_input',
+      resolution: { status: 'denied' },
+    });
+  });
+
   it('commits Plan mode changes and Plan task input to visible history', () => {
     let state = reduceTuiEvent(initialTuiEventState, {
       type: 'session.mode.changed',

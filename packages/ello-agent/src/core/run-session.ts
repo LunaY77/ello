@@ -62,6 +62,7 @@ import { addUsage, createEmptyUsage } from './usage.js';
  * - `natural-completed`：模型给出最终回答，自然结束；
  * - `max-turns`：达到回合上限；
  * - `waiting-approval`：有工具调用待审批，运行挂起等待恢复；
+ * - `waiting-tool-result`：deferred 工具等待宿主回填结果；
  * - `interrupted`：被中断信号终止；
  * - `no-progress`：本回合未产生新进展（防止空转死循环）；
  * - `error`：运行过程中出错。
@@ -70,6 +71,7 @@ export type LoopStopReason =
   | 'natural-completed'
   | 'max-turns'
   | 'waiting-approval'
+  | 'waiting-tool-result'
   | 'interrupted'
   | 'no-progress'
   | 'error';
@@ -366,7 +368,10 @@ export class RunSession {
     if (stopReason !== undefined) {
       this.stopReason = stopReason;
     } else if (toolResults.pendingCount > 0) {
-      this.stopReason = 'waiting-approval';
+      this.stopReason =
+        this.runControl.status === 'waiting_tool_result'
+          ? 'waiting-tool-result'
+          : 'waiting-approval';
     }
     this.turns.push(
       createTurnDiagnostics({
@@ -398,6 +403,10 @@ export class RunSession {
     // 待审批：有工具调用挂起，等待外部恢复。
     if (this.runControl.status === 'waiting_approval') {
       this.stopReason = 'waiting-approval';
+      return true;
+    }
+    if (this.runControl.status === 'waiting_tool_result') {
+      this.stopReason = 'waiting-tool-result';
       return true;
     }
     // 达到回合上限。

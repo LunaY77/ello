@@ -11,10 +11,22 @@ import {
   evaluatePermission,
 } from '../permission/engine.js';
 import { writePlanArtifact } from '../plan/artifact.js';
-import { createCodingSession } from '../runtime/coding-session.js';
+import {
+  createCodingSession as createCodingSessionRuntime,
+  type CreateCodingSessionOptions,
+} from '../runtime/coding-session.js';
 import { cycleSessionMode, PlanModeError } from '../runtime/session-mode.js';
 import { JsonlSessionRepository } from '../session/repository.js';
 import { handleSlashCommand } from '../slash-commands.js';
+
+function createCodingSession(
+  options: Omit<CreateCodingSessionOptions, 'clientCapabilities'>,
+) {
+  return createCodingSessionRuntime({
+    ...options,
+    clientCapabilities: { requestUserInput: false },
+  });
+}
 
 const usage = {
   requests: 1,

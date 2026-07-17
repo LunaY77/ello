@@ -78,6 +78,19 @@ export async function executeToolCalls(
         });
       }
     },
+    onToolDeferred: async (item) => {
+      const alreadyPending = run.runControl.deferredQueue
+        .snapshot()
+        .some(
+          (pending) =>
+            pending.kind === 'tool-call' &&
+            pending.toolCallId === item.toolCallId,
+        );
+      if (!alreadyPending) {
+        run.runControl.pushDeferred(item);
+        await run.events.emit({ type: 'tool.deferred', item });
+      }
+    },
     onToolCompleted: (toolCallId, output) =>
       run.events.emit({
         type: 'tool.completed',

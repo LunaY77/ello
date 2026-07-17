@@ -120,6 +120,7 @@ const RunCompletedRecordSchema = z
       'content-filter',
       'tool-calls',
       'approval-required',
+      'tool-result-required',
       'interrupted',
       'no-progress',
       'error',

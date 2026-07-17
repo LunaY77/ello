@@ -35,6 +35,7 @@ export type AgentApprovalPolicy<TInput = unknown> = (
 ) => MaybePromise<AgentApprovalDecision>;
 
 export interface AgentTool<TInput = unknown, TOutput = unknown> {
+  readonly execution: 'immediate';
   readonly name: string;
   readonly description: string;
   /** 工具发现信息必须随工具定义声明，不能由名称或独立 registry 推断。 */
@@ -48,7 +49,18 @@ export interface AgentTool<TInput = unknown, TOutput = unknown> {
   readonly inherit?: boolean;
 }
 
-export type AnyAgentTool = AgentTool<unknown, unknown>;
+export interface DeferredAgentTool<TInput = unknown> {
+  readonly execution: 'deferred';
+  readonly name: string;
+  readonly description: string;
+  readonly discovery: AgentToolDiscovery;
+  readonly input: z.ZodType<TInput>;
+  readonly inherit?: boolean;
+}
+
+export type AnyAgentTool =
+  | AgentTool<unknown, unknown>
+  | DeferredAgentTool<unknown>;
 
 export interface AgentToolContext {
   readonly runId: string;
@@ -111,6 +123,7 @@ export function defineTool<TInput, TOutput>(
   options: DefineToolOptions<TInput, TOutput>,
 ): AgentTool<TInput, TOutput> {
   return {
+    execution: 'immediate',
     name: options.name,
     description: options.description,
     discovery: options.discovery,
@@ -118,4 +131,18 @@ export function defineTool<TInput, TOutput>(
     execute: options.execute,
     ...(options.approval !== undefined ? { approval: options.approval } : {}),
   };
+}
+
+export interface DefineDeferredToolOptions<TInput> {
+  readonly name: string;
+  readonly description: string;
+  readonly discovery: AgentToolDiscovery;
+  readonly input: z.ZodType<TInput>;
+}
+
+/** 定义由宿主回填结果、不会在 Agent 进程内执行的工具。 */
+export function defineDeferredTool<TInput>(
+  options: DefineDeferredToolOptions<TInput>,
+): DeferredAgentTool<TInput> {
+  return { execution: 'deferred', ...options };
 }

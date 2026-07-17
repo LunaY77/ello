@@ -10,6 +10,10 @@ import type { GoalEvent } from '../goal/events.js';
 import type { MemoryEvent } from '../memory/events.js';
 import type { RuleScope } from '../permission/rules-store.js';
 import type { PlanPreview, PlanRecord } from '../plan/types.js';
+import type {
+  PendingUserInput,
+  UserInputResolution,
+} from '../user-input/schema.js';
 
 import type { SessionModeState } from './session-mode.js';
 
@@ -28,7 +32,11 @@ export interface ApprovalDecision {
 }
 
 /** 运行时状态机的三个对外状态。 */
-export type CodingSessionState = 'idle' | 'running' | 'awaiting_approval';
+export type CodingSessionState =
+  | 'idle'
+  | 'running'
+  | 'awaiting_approval'
+  | 'awaiting_user_input';
 
 /**
  * 转发给前端的事件 = `@ello/agent` 原生事件 + 少量产品级事件。
@@ -99,6 +107,15 @@ export type CodingSessionEvent =
     }
   | { readonly type: 'model.changed'; readonly model: string }
   | { readonly type: 'status'; readonly state: CodingSessionState }
+  | {
+      readonly type: 'user.input.requested';
+      readonly pending: PendingUserInput;
+    }
+  | {
+      readonly type: 'user.input.resolved';
+      readonly toolCallId: string;
+      readonly resolution: UserInputResolution;
+    }
   | { readonly type: 'ui.message'; readonly text: string }
   | { readonly type: 'ui.clear' }
   | { readonly type: 'ui.interrupted'; readonly reason: string }

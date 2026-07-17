@@ -11,7 +11,19 @@ import type {
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadCodingAgentConfig } from '../config/index.js';
-import { createCodingSession } from '../runtime/coding-session.js';
+import {
+  createCodingSession as createCodingSessionRuntime,
+  type CreateCodingSessionOptions,
+} from '../runtime/coding-session.js';
+
+function createCodingSession(
+  options: Omit<CreateCodingSessionOptions, 'clientCapabilities'>,
+) {
+  return createCodingSessionRuntime({
+    ...options,
+    clientCapabilities: { requestUserInput: false },
+  });
+}
 
 const directories: string[] = [];
 

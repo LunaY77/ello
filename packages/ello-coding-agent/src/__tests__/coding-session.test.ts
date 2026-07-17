@@ -18,11 +18,26 @@ import type {
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadCodingAgentConfig } from '../config/index.js';
-import { createCodingSession } from '../runtime/coding-session.js';
+import {
+  createCodingSession as createCodingSessionRuntime,
+  type CreateCodingSessionOptions,
+} from '../runtime/coding-session.js';
 import type { CodingSessionEvent } from '../runtime/intents.js';
 import { JsonlSessionRepository } from '../session/repository.js';
 
 const dirs: string[] = [];
+
+function createCodingSession(
+  options: Omit<CreateCodingSessionOptions, 'clientCapabilities'> &
+    Partial<Pick<CreateCodingSessionOptions, 'clientCapabilities'>>,
+) {
+  return createCodingSessionRuntime({
+    ...options,
+    clientCapabilities: options.clientCapabilities ?? {
+      requestUserInput: false,
+    },
+  });
+}
 
 function proxyAdapter(adapter: ModelAdapter): ModelAdapter {
   return {
@@ -34,7 +49,8 @@ function proxyAdapter(adapter: ModelAdapter): ModelAdapter {
     },
     async *stream(request) {
       for await (const event of adapter.stream(request)) {
-        yield event.type === 'final' && Object.hasOwn(request.tools, 'call_tool')
+        yield event.type === 'final' &&
+        Object.hasOwn(request.tools, 'call_tool')
           ? { ...event, response: proxyResponse(event.response) }
           : event;
       }
@@ -1380,5 +1396,95 @@ describe('createCodingSession', () => {
     await session.close();
 
     expect(loaded.at(-1)).toBeGreaterThan(0);
+  });
+
+  it('persists, recovers, and resolves request_user_input by tool call id', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      initialMode: 'default',
+    });
+    const request = {
+      questions: [
+        {
+          id: 'storage',
+          header: 'Storage',
+          question: 'Which storage should be used?',
+          options: [
+            { label: 'SQLite', description: 'Local and transactional.' },
+            { label: 'JSONL', description: 'Simple append-only records.' },
+          ],
+          multiSelect: false,
+        },
+      ],
+    };
+    const askingAdapter: ModelAdapter = {
+      async generate(modelRequest) {
+        expect(modelRequest.tools).toHaveProperty('request_user_input');
+        const assistant = {
+          role: 'assistant' as const,
+          content: [
+            {
+              type: 'tool-call' as const,
+              toolCallId: 'ask-1',
+              toolName: 'request_user_input',
+              input: request,
+            },
+          ],
+        };
+        return {
+          text: '',
+          messages: [...modelRequest.messages, assistant],
+          newMessages: [assistant],
+          toolCalls: [
+            { id: 'ask-1', name: 'request_user_input', input: request },
+          ],
+          usage,
+          finishReason: 'tool-calls',
+          provider: null,
+        };
+      },
+      async *stream(modelRequest) {
+        yield { type: 'final', response: await this.generate(modelRequest) };
+      },
+    };
+    const first = await createCodingSession({
+      config,
+      clientCapabilities: { requestUserInput: true },
+      modelAdapter: askingAdapter,
+    });
+    const result = await first.submit('ask me');
+    expect(result.finishReason).toBe('tool-result-required');
+    expect(first.pendingUserInput()?.toolCallId).toBe('ask-1');
+    const sessionId = first.sessionId;
+    await first.close();
+
+    const resumedRequests: AgentModelRequest[] = [];
+    const resumed = await createCodingSession({
+      config: { ...config, sessionId },
+      clientCapabilities: { requestUserInput: true },
+      modelAdapter: {
+        async generate(modelRequest) {
+          resumedRequests.push(modelRequest);
+          return new TextAdapter('continued').generate(modelRequest);
+        },
+        async *stream(modelRequest) {
+          yield { type: 'final', response: await this.generate(modelRequest) };
+        },
+      },
+    });
+    expect(resumed.pendingUserInput()?.toolCallId).toBe('ask-1');
+    await resumed.resolveUserInput('ask-1', {
+      status: 'submitted',
+      answers: [{ questionId: 'storage', selected: ['SQLite'] }],
+    });
+    expect(resumed.pendingUserInput()).toBeNull();
+    expect(JSON.stringify(resumedRequests[0]?.messages)).toContain('SQLite');
+    await expect(
+      resumed.resolveUserInput('ask-1', { status: 'denied' }),
+    ).rejects.toThrow('Unknown or stale');
+    await resumed.close();
   });
 });

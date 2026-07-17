@@ -15,6 +15,8 @@ import type {
   AgentToolCall,
   AgentToolContext,
   AnyAgentTool,
+  DeferredApprovalItem,
+  DeferredToolCallItem,
 } from '../public/types.js';
 
 import { createToolResultMessage } from './tool-messages.js';
@@ -52,6 +54,8 @@ export interface ToolSchedulerEventSink {
     readonly reason?: string;
     readonly metadata?: Record<string, unknown>;
   }): Promise<void>;
+  /** deferred 工具已持久化调用，等待宿主回填结果。 */
+  onToolDeferred(item: DeferredToolCallItem): Promise<void>;
   /** 某个工具执行成功时触发，携带其输出。 */
   onToolCompleted(toolCallId: string, output: unknown): Promise<void>;
   /** 某个工具执行失败时触发，携带错误。 */
@@ -65,14 +69,7 @@ export interface ToolScheduleResult {
   /** 已执行工具的 tool call 记录（含输出或归一化错误）。 */
   readonly toolCalls: AgentToolCall[];
   /** 因需要审批而挂起、尚未执行的工具项。 */
-  readonly pending: Array<{
-    readonly kind: 'approval';
-    readonly toolCallId: string;
-    readonly toolName: string;
-    readonly input?: unknown;
-    readonly reason?: string;
-    readonly metadata?: Record<string, unknown>;
-  }>;
+  readonly pending: Array<DeferredApprovalItem | DeferredToolCallItem>;
 }
 
 /**
@@ -103,6 +100,57 @@ export class ToolScheduler {
     const messages: AgentMessage[] = [];
     const toolCalls: AgentToolCall[] = [];
     const pending: ToolScheduleResult['pending'] = [];
+    const deferredCalls = calls.filter((call) => {
+      const tool = this.options.callableToolNames.has(call.name)
+        ? this.byName.get(call.name)
+        : undefined;
+      return tool?.execution === 'deferred';
+    });
+    if (deferredCalls.length > 0 && calls.length !== 1) {
+      const error = new Error(
+        'Deferred tools must be the only tool call in a model response; no calls in this batch were executed.',
+      );
+      for (const call of calls) {
+        await sink.onToolStarted(call.id, call.name, call.input);
+        await sink.onToolFailed(call.id, error);
+        toolCalls.push({ ...call, error: normalizeAgentError(error) });
+        messages.push(
+          createToolResultMessage(call, { error: error.message }, 'error'),
+        );
+      }
+      return { messages, toolCalls, pending };
+    }
+    if (deferredCalls.length === 1) {
+      const call = deferredCalls[0]!;
+      const tool = this.byName.get(call.name);
+      if (tool === undefined || tool.execution !== 'deferred') {
+        throw new Error(`Deferred tool registry mismatch: ${call.name}`);
+      }
+      let input: unknown;
+      try {
+        input = tool.input.parse(call.input);
+      } catch (error) {
+        const normalized =
+          error instanceof Error ? error : new Error(String(error));
+        await sink.onToolStarted(call.id, call.name, call.input);
+        await sink.onToolFailed(call.id, normalized);
+        toolCalls.push({ ...call, error: normalizeAgentError(normalized) });
+        messages.push(
+          createToolResultMessage(call, { error: normalized.message }, 'error'),
+        );
+        return { messages, toolCalls, pending };
+      }
+      const item: DeferredToolCallItem = {
+        kind: 'tool-call',
+        toolCallId: call.id,
+        toolName: call.name,
+        input,
+      };
+      pending.push(item);
+      toolCalls.push({ ...call, input });
+      await sink.onToolDeferred(item);
+      return { messages, toolCalls, pending };
+    }
     for (const call of calls) {
       const tool = this.options.callableToolNames.has(call.name)
         ? this.byName.get(call.name)
@@ -117,6 +165,9 @@ export class ToolScheduler {
           createToolResultMessage(call, { error: error.message }, 'error'),
         );
         continue;
+      }
+      if (tool.execution !== 'immediate') {
+        throw new Error(`Deferred tool escaped batch preflight: ${call.name}`);
       }
       const ctx = this.createContext(call.id);
       // 执行前先跑工具自带的审批策略（若有），据其结果决定拒绝 / 挂起 / 放行。
@@ -205,6 +256,13 @@ export class ToolScheduler {
       : undefined;
     if (tool === undefined) {
       const error = new Error(`Unknown tool: ${call.name}`);
+      await sink.onToolFailed(call.id, error);
+      return { ...call, error: normalizeAgentError(error) };
+    }
+    if (tool.execution !== 'immediate') {
+      const error = new Error(
+        `Deferred tool '${call.name}' cannot be executed as an approved tool.`,
+      );
       await sink.onToolFailed(call.id, error);
       return { ...call, error: normalizeAgentError(error) };
     }

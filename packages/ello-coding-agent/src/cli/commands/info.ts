@@ -298,7 +298,10 @@ async function reloadMemory(config: CodingAgentConfig) {
 
 async function runDream(config: CodingAgentConfig): Promise<DreamResult> {
   const { createCodingSession } = await import('../../runtime/index.js');
-  const session = await createCodingSession({ config });
+  const session = await createCodingSession({
+    config,
+    clientCapabilities: { requestUserInput: false },
+  });
   const completion = waitForDream(session);
   try {
     const job = await session.dream();

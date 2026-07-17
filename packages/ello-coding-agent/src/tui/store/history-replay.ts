@@ -1,6 +1,11 @@
 import type { AgentMessage } from '@ello/agent';
 
 import { logicalToolCall } from '../../tools/meta-tools.js';
+import {
+  REQUEST_USER_INPUT_TOOL_NAME,
+  UserInputRequestSchema,
+  UserInputResolutionSchema,
+} from '../../user-input/index.js';
 
 import type { HistoryEntry, ToolCallView } from './history-entry.js';
 
@@ -13,11 +18,26 @@ export function messagesToHistoryEntries(
     string,
     { readonly id: string; readonly name: string; readonly input: unknown }
   >();
+  const userInputEntryIndexes = new Map<string, number>();
 
   messages.forEach((message, index) => {
     const calls = readToolCalls(message);
     for (const call of calls) {
       toolCalls.set(call.id, call);
+      if (call.name === REQUEST_USER_INPUT_TOOL_NAME) {
+        const parsed = UserInputRequestSchema.safeParse(call.input);
+        if (!parsed.success) continue;
+        const pending = {
+          toolCallId: call.id,
+          request: parsed.data,
+        };
+        userInputEntryIndexes.set(call.id, entries.length);
+        entries.push({
+          kind: 'user_input',
+          id: `history-user-input-${call.id}`,
+          pending,
+        });
+      }
     }
     const results = readToolResults(message);
     if (results.length > 0) {
@@ -27,6 +47,32 @@ export function messagesToHistoryEntries(
           throw new Error(
             `Tool result without tool call: message=${index} toolCallId=${result.id}`,
           );
+        }
+        if (call.name === REQUEST_USER_INPUT_TOOL_NAME) {
+          const entryIndex = userInputEntryIndexes.get(result.id);
+          const resolution = UserInputResolutionSchema.safeParse(result.output);
+          if (entryIndex !== undefined) {
+            const entry = entries[entryIndex];
+            if (entry === undefined || entry.kind !== 'user_input') {
+              throw new Error(`Invalid user input history entry: ${result.id}`);
+            }
+            entries[entryIndex] = resolution.success
+              ? { ...entry, resolution: resolution.data }
+              : {
+                  kind: 'tool',
+                  id: `history-tool-${index}-${result.id}`,
+                  tool: {
+                    id: result.id,
+                    name: call.name,
+                    input: call.input,
+                    status: result.status,
+                    ...(result.output !== undefined
+                      ? { output: result.output }
+                      : {}),
+                  },
+                };
+            continue;
+          }
         }
         entries.push({
           kind: 'tool',
