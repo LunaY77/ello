@@ -1,6 +1,6 @@
 # Workspace lifecycle
 
-- Create: `feature` and `fix` development checkouts share the `<kind>/<name>` branch; `explore` development checkouts are detached. Development repositories live under `repos/`; `references/`, `tmp/`, and `docs/` start empty. Only an active or missing record blocks the selector.
+- Create: `feature`, `fix`, and `refactor` development checkouts share the `<kind>/<name>` branch; `explore` development checkouts are detached. Development repositories live under `repos/`; `references/`, `tmp/`, and `docs/` start empty. Only an active or missing record blocks the selector.
 - Reuse selector: archived and deleted records do not block create. A new workspace ID and active root are created, the repository set may differ, and every archived generation remains a detached snapshot under its unique timestamp/ID path.
 - Add development repository: run from the exact workspace root or pass `--workspace <kind/name>`. The checkout under `repos/` adopts the existing shared branch or the explore workspace's detached mode.
 - Add reference repository: pass `--detached`. The checkout uses the registered repository's default branch commit in detached HEAD state under `references/`, independently of the workspace development branch.

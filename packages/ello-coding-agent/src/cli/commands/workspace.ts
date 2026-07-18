@@ -187,7 +187,10 @@ function registerWorkspaceCommands(
 
   workspace
     .command('create')
-    .argument('<selector>', 'feature/name | fix/name | explore/name')
+    .argument(
+      '<selector>',
+      'feature/name | fix/name | refactor/name | explore/name',
+    )
     .argument('<repo...>', 'registered repository keys')
     .option('--tmux [name]', 'create and bind a tmux session')
     .description('create a workspace')

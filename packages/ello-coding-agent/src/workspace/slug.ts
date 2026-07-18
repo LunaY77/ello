@@ -20,7 +20,12 @@ export function validateRepoKey(value: string): string {
 
 /** 校验 workspace 类型。 */
 export function validateKind(value: string): WorkspaceKind {
-  if (value === 'feature' || value === 'fix' || value === 'explore') {
+  if (
+    value === 'feature' ||
+    value === 'fix' ||
+    value === 'refactor' ||
+    value === 'explore'
+  ) {
     return value;
   }
   throw new Error(`Invalid workspace kind: ${value}`);

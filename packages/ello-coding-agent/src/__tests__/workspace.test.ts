@@ -67,6 +67,7 @@ describe('workspace', () => {
     );
     expect(validateKind('feature')).toBe('feature');
     expect(validateKind('fix')).toBe('fix');
+    expect(validateKind('refactor')).toBe('refactor');
     expect(validateKind('explore')).toBe('explore');
     expect(() => validateKind('other')).toThrow('Invalid workspace kind');
     expect(slugify('Add Settings Rewrite')).toBe('add-settings-rewrite');
@@ -354,6 +355,29 @@ describe('workspace', () => {
     expect(await git(['rev-parse', 'HEAD'], workspace.repos[0]!.path)).toBe(
       baselineCommit,
     );
+  });
+
+  it('refactor selector 创建同名开发分支', async () => {
+    await initializeSourceRepo(sourceRepo);
+    await repos.add(sourceRepo, 'demo');
+
+    const workspace = await workspaces.create('refactor', 'Workspace Layout', [
+      'demo',
+    ]);
+
+    expect(workspace).toMatchObject({
+      kind: 'refactor',
+      name: 'workspace-layout',
+      rootPath: path.join(mount, 'workspace', 'refactor', 'workspace-layout'),
+      branch: 'refactor/workspace-layout',
+    });
+    expect(workspace.repos[0]).toMatchObject({
+      checkoutMode: 'branch',
+      branch: 'refactor/workspace-layout',
+    });
+    expect(
+      await git(['symbolic-ref', '--short', 'HEAD'], workspace.repos[0]!.path),
+    ).toBe('refactor/workspace-layout');
   });
 
   it('创建受管新 repo 后加入现有 workspace', async () => {

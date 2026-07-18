@@ -3,14 +3,14 @@
  * Git 提交和分支保存在 RepoStore 管理的 bare mirror 中；Workspace 保存任务目录、
  * 工作目录位置和生命周期状态。
  *
- * 创建 `feature/name` 或 `fix/name` 时：校验 selector 和 repo key，从 SQLite 找到
- * Repository，确认每个仓库都有 Workspace 起点，创建 `repos/references/docs/tmp` 目录，
- * 从 Workspace 起点创建或复用同名分支，为每个仓库挂载工作目录，清除隐式 upstream，
- * 最后写入 Workspace 和各 checkout 的结构化记录。
+ * 创建 `feature/name`、`fix/name` 或 `refactor/name` 时：校验 selector 和 repo key，
+ * 从 SQLite 找到 Repository，确认每个仓库都有 Workspace 起点，创建
+ * `repos/references/docs/tmp` 目录，从 Workspace 起点创建或复用同名分支，为每个仓库
+ * 挂载工作目录，清除隐式 upstream，最后写入 Workspace 和各 checkout 的结构化记录。
  *
- * 跨仓库任务使用同名的 `feature/name` 或 `fix/name` 分支，分支默认不绑定 upstream，
- * 远端发布由用户显式执行，系统不创建远端分支。`explore/name` 从 Workspace 起点
- * 挂载 detached 工作目录，不占用任务分支。
+ * 跨仓库任务使用与 selector 同名的 `feature/name`、`fix/name` 或 `refactor/name`
+ * 分支，分支默认不绑定 upstream，远端发布由用户显式执行，系统不创建远端分支。
+ * `explore/name` 从 Workspace 起点挂载 detached 工作目录，不占用任务分支。
  *
  * `addRepos` 和 `removeRepos` 修改任务中的仓库集合；`rename` 移动任务目录并修复
  * worktree 连接；`archive` 保存完整任务现场、释放工作分支并允许同名任务创建新代；
