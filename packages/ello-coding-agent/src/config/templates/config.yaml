@@ -138,7 +138,8 @@ bypass_enabled: false
 #     release: ello-ts-local
 #     content: metadata # metadata 或 full
 
-# 工具配置。disabled 表示完全不注册，needApproval 表示在非 Plan 模式下始终询问；
+# 工具配置。disabled 表示完全不注册；needApproval 在 Default/Accept edits 下要求审批，
+# 但 Accept edits 会自动放行 edit 类工具，Bypass 会跳过全部审批。
 # routing_enabled=true 时模型只直接看到 tool_search/call_tool。
 # tools:
 #   disabled: []
