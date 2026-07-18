@@ -20,8 +20,6 @@ import type { ContextBundle, ContextEvent } from './source-registry.js';
 
 /** prompt 模板渲染时需要的动态 context 依赖。 */
 export interface ContextDeps {
-  /** 当前激活技能名列表的读取器。 */
-  readonly activeSkills?: () => Promise<readonly string[]> | readonly string[];
   /** context pipeline 事件接收器，供 JSONL/TUI 观察 source 加载。 */
   readonly onContextEvent?: (event: ContextEvent) => void;
   readonly memoryIndexLoader?: MemoryIndexLoader;
@@ -30,7 +28,6 @@ export interface ContextDeps {
 export interface CodingSystemPromptRuntime {
   readonly model: string;
   readonly profile?: string;
-  readonly activeSkills?: ContextDeps['activeSkills'];
   readonly onContextEvent?: (event: ContextEvent) => void;
   readonly memoryIndexLoader?: MemoryIndexLoader;
 }
@@ -77,9 +74,6 @@ export function createCodingSystemPromptSection(
   return async (run: AgentRunContext) => {
     const profile = resolvePromptProfile(config, runtime);
     const contextDeps: ContextSnapshotDeps = {
-      ...(runtime.activeSkills !== undefined
-        ? { activeSkills: runtime.activeSkills }
-        : {}),
       ...(runtime.onContextEvent !== undefined
         ? { onContextEvent: runtime.onContextEvent }
         : {}),

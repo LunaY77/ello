@@ -222,6 +222,8 @@ suggestion：
 - slash command suggestion 来自 `completion.ts` 和 `commands/registry.ts`。
 - `/profiles <query>` 使用 profile 列表补全。
 - `@path` file suggestion 来自 `App.tsx` 的文件扫描和 `store/autocomplete.ts` 排序。
+- `$skill-name` suggestion 来自会话级 Skill Catalog，只在 token 边界触发；接受候选时只替换当前 token 并补一个空格。
+- `/` 仅包含静态 Slash Commands，动态 Skills 不进入 `/` 候选。
 
 ## 8. Overlay
 

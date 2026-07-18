@@ -10,7 +10,7 @@
 - `run` and `resume` sessions
 - Session modes: `plan`, `default`, `accept-edits`, and explicitly enabled `bypass`
 - Plan artifact preview and Accept / Chat about this / Deny workflow
-- Built-in tools, skills, subagents, task boards, goals, memory, and repository/workspace management
+- Built-in tools and subagents plus file-first global/project skills, task boards, goals, memory, and repository/workspace management
 - SQLite-backed sessions, checkpoints, artifacts, and migrations
 - OpenTelemetry/Langfuse observability hooks
 
@@ -39,6 +39,8 @@ ello skills list
 ```
 
 Global options include `--profile`, `--cwd`, `--allowed-path`, `--mode`, `--json`, and `--no-tui`. Provider/model settings are loaded from the project and user configuration layers; use `ello config path` to inspect their locations.
+
+Skills are not shipped in this npm package. Install or link the standalone `ello-skills` release into `~/.ello/skills`, or add project skills under `<cwd>/.ello/skills`. `$skill-name [arguments]` explicitly asks the model to invoke the same `activate_skill` tool it uses for autonomous Skill selection. `/skills` opens the catalog browser.
 
 ## Plan mode
 

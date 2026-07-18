@@ -29,7 +29,11 @@ export interface ComposerProps {
   readonly suggestions?: readonly ComposerSuggestion[];
   readonly history?: readonly string[];
   readonly value?: string;
-  onChange?(value: string): void;
+  onChange?(
+    value: string,
+    cursor: { readonly line: number; readonly column: number },
+  ): void;
+  onSuggestionAccepted?(suggestion: ComposerSuggestion): void;
   onSubmit(value: string): void;
   onCancel(): void;
   onEscape(): void;
@@ -41,6 +45,9 @@ export type ComposerSuggestion =
       readonly value: string;
       readonly label: string;
       readonly description?: string;
+      readonly replaceFrom?: number;
+      readonly replaceTo?: number;
+      readonly appendSpace?: boolean;
     };
 
 export function Composer(props: ComposerProps) {
@@ -56,7 +63,7 @@ export function Composer(props: ComposerProps) {
     (next: ComposerBuffer): void => {
       bufferRef.current = next;
       setBuffer(next);
-      onChange?.(toText(next));
+      onChange?.(toText(next), next.cursor);
     },
     [onChange],
   );
@@ -97,8 +104,9 @@ export function Composer(props: ComposerProps) {
     if (suggestion === undefined) {
       return;
     }
-    const next = typeof suggestion === 'string' ? suggestion : suggestion.value;
-    replaceBuffer(applySuggestion(bufferRef.current, next));
+    // 技能候选可能位于行中间，应用替换后再通知 App 记 frecency。
+    replaceBuffer(applySuggestion(bufferRef.current, suggestion));
+    props.onSuggestionAccepted?.(suggestion);
   };
 
   const moveHistory = (delta: number): void => {
@@ -359,17 +367,32 @@ function dropTrailingLineContinuation(buffer: ComposerBuffer): ComposerBuffer {
 
 function applySuggestion(
   buffer: ComposerBuffer,
-  suggestion: string,
+  suggestion: ComposerSuggestion,
 ): ComposerBuffer {
   const { line, column } = buffer.cursor;
   const current = buffer.lines[line] ?? '';
-  const start = completionStart(current.slice(0, column), suggestion);
-  const nextLine = `${current.slice(0, start)}${suggestion}${current.slice(column)}`;
+  const value = typeof suggestion === 'string' ? suggestion : suggestion.value;
+  const start =
+    typeof suggestion === 'string' || suggestion.replaceFrom === undefined
+      ? completionStart(current.slice(0, column), value)
+      : suggestion.replaceFrom;
+  const end =
+    typeof suggestion === 'string' || suggestion.replaceTo === undefined
+      ? column
+      : suggestion.replaceTo;
+  const inserted = `${value}${typeof suggestion !== 'string' && suggestion.appendSpace === true ? ' ' : ''}`;
+  const suffixStart =
+    typeof suggestion !== 'string' &&
+    suggestion.appendSpace === true &&
+    /\s/u.test(current[end] ?? '')
+      ? end + 1
+      : end;
+  const nextLine = `${current.slice(0, start)}${inserted}${current.slice(suffixStart)}`;
   const lines = [...buffer.lines];
   lines[line] = nextLine;
   return {
     lines,
-    cursor: { line, column: start + suggestion.length },
+    cursor: { line, column: start + inserted.length },
   };
 }
 
@@ -394,7 +417,7 @@ function completionStart(textBeforeCursor: string, suggestion: string): number {
 
 function tokenStart(
   textBeforeCursor: string,
-  symbol: '@' | '#',
+  symbol: '@' | '#' | '$',
 ): number | undefined {
   for (let index = textBeforeCursor.length - 1; index >= 0; index -= 1) {
     const char = textBeforeCursor[index];
