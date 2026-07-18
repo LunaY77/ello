@@ -425,9 +425,7 @@ export function OverlayHost({
             overlay.skills.slice(0, 12).map((skill) => (
               <Text key={skill.name} color={theme.text}>
                 <Text color={theme.textMuted}>{skill.name.padEnd(16)}</Text>
-                <Text color={theme.accent}>
-                  {(skill.source ?? 'global').padEnd(9)}
-                </Text>
+                <Text color={theme.accent}>{skill.source.padEnd(9)}</Text>
                 <Text>{clip(skill.description, 58)}</Text>
               </Text>
             ))

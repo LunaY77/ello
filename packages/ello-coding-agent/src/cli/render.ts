@@ -25,6 +25,8 @@ export function renderEvent(event: CodingSessionEvent, json: boolean): string {
       return `${dim(summarizeOutput(event.output))}\n`;
     case 'tool.failed':
       return red(`✗ ${event.error.message}\n`);
+    case 'skill.activated':
+      return `loaded [${event.name}]\n`;
     case 'approval.pending':
       // 非交互 CLI 无审批 UI；提示一句，实际放行/拒绝由策略决定。
       return dim(`(awaiting approval: ${event.toolName})\n`);

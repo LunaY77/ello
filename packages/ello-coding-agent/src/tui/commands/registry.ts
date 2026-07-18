@@ -87,24 +87,6 @@ const META: Record<string, CommandMeta> = {
     keywords: ['todo'],
   },
   skills: { id: 'skill.list', group: 'Skills', title: 'Skills', keywords: [] },
-  skill: {
-    id: 'skill.invoke',
-    group: 'Skills',
-    title: 'Invoke skill',
-    keywords: ['run'],
-  },
-  'skill-search': {
-    id: 'skill.search',
-    group: 'Skills',
-    title: 'Search skills',
-    keywords: [],
-  },
-  'skill-create': {
-    id: 'skill.create',
-    group: 'Skills',
-    title: 'Create skill',
-    keywords: ['new'],
-  },
   goal: {
     id: 'session.goal',
     group: 'Session',

@@ -82,27 +82,13 @@ export interface AgentToolCall {
 
 export interface AgentSkill {
   readonly name: string;
-  readonly displayName?: string | undefined;
   readonly description: string;
-  readonly whenToUse?: string | undefined;
-  readonly argumentHint?: string | undefined;
-  readonly allowedTools?: readonly string[] | undefined;
-  readonly context?: 'inline' | 'fork' | undefined;
-  readonly model?: string | undefined;
-  readonly effort?: 'low' | 'medium' | 'high' | 'xhigh' | number | undefined;
-  readonly userInvocable?: boolean | undefined;
-  readonly disableModelInvocation?: boolean | undefined;
-  readonly source?:
-    | 'bundled'
-    | 'global'
-    | 'project'
-    | 'shared'
-    | 'mcp'
-    | undefined;
-  readonly baseDir?: string | undefined;
-  readonly contentHash?: string | undefined;
+  readonly source: 'global' | 'project';
+  readonly baseDir: string;
+  readonly realPath: string;
+  readonly skillPath: string;
+  readonly contentHash: string;
   readonly instructions: string;
-  readonly tools?: readonly AnyAgentTool[];
   readonly metadata?: Record<string, unknown>;
 }
 

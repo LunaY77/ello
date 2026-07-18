@@ -12,9 +12,6 @@ const distDir =
     : path.resolve(process.env.ELLO_DIST_DIR);
 const requiredAssets = [
   'context/prompts/core-behavior.md',
-  'skills/bundled/code-review/SKILL.md',
-  'skills/bundled/skill-creator/SKILL.md',
-  'skills/bundled/workspace/SKILL.md',
   'agents/bundled/explore.md',
   'agents/bundled/implement.md',
   'agents/bundled/review.md',

@@ -128,6 +128,14 @@ export type CodingSessionEvent =
     }
   | { readonly type: 'usage'; readonly usage: AgentRunResult['usage'] }
   | {
+      readonly type: 'skill.activated';
+      readonly toolCallId: string;
+      readonly name: string;
+      readonly source: 'global' | 'project';
+      readonly trigger: 'model';
+      readonly contentHash: string;
+    }
+  | {
       readonly type: 'subagent.started';
       readonly runId: string;
       readonly agentName: string;

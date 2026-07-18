@@ -36,6 +36,8 @@ export interface AgentRunOptions {
   readonly messages?: AgentMessage[];
   readonly sessionId?: string;
   readonly context?: unknown;
+  /** 仅参与当前 run 的 system 输入，不写入 transcript 或后续 session history。 */
+  readonly ephemeralInstructions?: string;
   readonly resume?: DeferredRunResults;
 }
 

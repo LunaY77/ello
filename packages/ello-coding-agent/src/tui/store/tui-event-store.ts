@@ -237,6 +237,13 @@ export function reduceTuiEvent(
         text: `model: ${event.model}`,
       });
 
+    case 'skill.activated':
+      return appendHistory(state, {
+        kind: 'skill',
+        id: `skill-${event.toolCallId}`,
+        name: event.name,
+      });
+
     case 'context.source.loaded':
       return state;
 
@@ -331,6 +338,7 @@ export function reduceTuiEvent(
       };
 
     case 'tool.started': {
+      if (event.name === 'activate_skill') return state;
       // assistant 前言属于工具调用之前的时间线。若不先提交，它会继续留在
       // 动态区域，而已完成的工具会进入上方静态历史，视觉顺序因此反转。
       const flushed = flushAssistant(state);
@@ -343,12 +351,23 @@ export function reduceTuiEvent(
     }
 
     case 'tool.completed':
+      if (
+        state.live.runningTools.get(event.toolCallId)?.name === 'activate_skill'
+      )
+        return state;
       return sealTool(state, event.toolCallId, {
         status: 'ok',
         output: event.output,
       });
 
     case 'tool.failed':
+      if (!state.live.runningTools.has(event.toolCallId)) {
+        return appendHistory(state, {
+          kind: 'diagnostic',
+          id: `tool-failed-${event.toolCallId}`,
+          text: event.error.message,
+        });
+      }
       return sealTool(state, event.toolCallId, {
         status: 'fail',
         error: event.error,

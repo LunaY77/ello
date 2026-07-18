@@ -1,5 +1,6 @@
 import { exec } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -7,8 +8,6 @@ import { promisify } from 'node:util';
 import {
   createAgent,
   createLocalShellEnvironment,
-  createSkillTools,
-  activeSkillsContext,
   skillIndexContext,
   type Agent,
   type AgentEnvironment,
@@ -100,7 +99,9 @@ import type {
   JsonlSessionSummary,
   SessionTreeView,
 } from '../session/repository.js';
-import { loadCodingSkills } from '../skills/index.js';
+import { SkillActivationService } from '../skills/activation.js';
+import { SkillCatalog } from '../skills/index.js';
+import { createActivateSkillTool } from '../skills/tool.js';
 import { createCodingStorage, type CodingStorage } from '../storage/index.js';
 import { createTaskService, type Task } from '../tasks/index.js';
 import {
@@ -164,15 +165,21 @@ function createRuntimeEnvironment(
     action: string;
   }[],
   sessionExternalPaths: () => readonly string[],
+  skillReadRoots: () => readonly string[],
 ): AgentEnvironment {
   const environment = createLocalShellEnvironment({
     cwd: config.cwd,
     allowedPaths: [config.cwd],
   });
-  const resolveAllowedPaths = () =>
+  const resolveWritePaths = () =>
     runtimeAllowedPaths(config.cwd, rules(), sessionExternalPaths());
-  const fileSystem = createPolicyFileSystem(config.cwd, resolveAllowedPaths);
-  const shell = createPolicyShell(config.cwd, resolveAllowedPaths);
+  const resolveReadPaths = () => [...resolveWritePaths(), ...skillReadRoots()];
+  const fileSystem = createPolicyFileSystem(
+    config.cwd,
+    resolveReadPaths,
+    resolveWritePaths,
+  );
+  const shell = createPolicyShell(config.cwd, resolveWritePaths);
   const resources = environment.resources;
   const wrapped: AgentEnvironment = {
     ...environment,
@@ -197,36 +204,37 @@ function runtimeAllowedPaths(
       roots.push(resolveAbsolute(cwd, rule.pattern));
     }
   }
-  return [...new Set(roots.map((root) => path.resolve(root)))];
+  return [...new Set(roots.map((root) => canonicalTarget(path.resolve(root))))];
 }
 
 /** 文件系统边界由 resolveAllowedTarget 统一校验，读写列目录共享同一判断。 */
 function createPolicyFileSystem(
   cwd: string,
-  allowedPaths: () => readonly string[],
+  readPaths: () => readonly string[],
+  writePaths: () => readonly string[],
 ): PolicyFileSystem {
   return {
     resolvePath(targetPath): string {
-      return resolveAllowedTarget(cwd, targetPath, allowedPaths());
+      return resolveAllowedTarget(cwd, targetPath, readPaths());
     },
     readText(targetPath): Promise<string> {
       return readFile(
-        resolveAllowedTarget(cwd, targetPath, allowedPaths()),
+        resolveAllowedTarget(cwd, targetPath, readPaths()),
         'utf8',
       );
     },
     async writeText(targetPath, content): Promise<void> {
-      const resolved = resolveAllowedTarget(cwd, targetPath, allowedPaths());
+      const resolved = resolveAllowedTarget(cwd, targetPath, writePaths());
       await mkdir(path.dirname(resolved), { recursive: true });
       await writeFile(resolved, content, 'utf8');
     },
     async listDir(targetPath): Promise<string[]> {
       return (
-        await readdir(resolveAllowedTarget(cwd, targetPath, allowedPaths()))
+        await readdir(resolveAllowedTarget(cwd, targetPath, readPaths()))
       ).sort();
     },
     async stat(targetPath) {
-      return stat(resolveAllowedTarget(cwd, targetPath, allowedPaths()));
+      return stat(resolveAllowedTarget(cwd, targetPath, readPaths()));
     },
   };
 }
@@ -280,13 +288,24 @@ function resolveAllowedTarget(
   target: string,
   allowedPaths: readonly string[],
 ): string {
-  const resolved = resolveAbsolute(cwd, target);
+  const lexical = resolveAbsolute(cwd, target);
+  const resolved = canonicalTarget(lexical);
   if (
     !allowedPaths.some((allowedPath) => isPathInside(allowedPath, resolved))
   ) {
     throw new Error(`Path not allowed: ${resolved}`);
   }
   return resolved;
+}
+
+function canonicalTarget(target: string): string {
+  if (existsSync(target)) return realpathSync(target);
+  let parent = path.dirname(target);
+  while (!existsSync(parent) && path.dirname(parent) !== parent) {
+    parent = path.dirname(parent);
+  }
+  const canonicalParent = realpathSync(parent);
+  return path.join(canonicalParent, path.relative(parent, target));
 }
 
 /** TUI `!cmd` 是用户直接操作，仍使用显式配置的 allowedPaths。 */
@@ -338,6 +357,8 @@ export interface CodingSession {
   readonly cwd: string;
   /** 本会话的检查点存储，供 CLI/TUI 做 /undo 与改动视图。 */
   readonly checkpoints: CheckpointStore;
+  listSkills(): readonly AgentSkill[];
+  reloadSkills(): Promise<readonly AgentSkill[]>;
 
   subscribe(listener: CodingEventListener): () => void;
   submit(
@@ -516,10 +537,11 @@ class CodingSessionImpl implements CodingSession {
 
   private runtime: AgentRuntimeDeps | undefined;
   private runtimeTask: Promise<AgentRuntimeDeps> | undefined;
-  /** 当前激活技能名集合，被 skill 工具与 section 共享。 */
-  private readonly activeSkills = new Set<string>();
+  private readonly skillCatalog: SkillCatalog;
+  private readonly skillActivation: SkillActivationService;
   private readonly listeners = new Set<CodingEventListener>();
   private readonly approvalItems = new Map<string, DeferredApprovalItem>();
+  private readonly activatingSkillToolCalls = new Set<string>();
   private readonly approvalDecisions = new Map<string, ApprovalDecision>();
   private pendingUserInputItem: PendingUserInput | null = null;
   private userInputResolutionTask:
@@ -539,6 +561,9 @@ class CodingSessionImpl implements CodingSession {
     | undefined;
   private currentStream: AgentStream | undefined;
   private pendingRunMetadata: Record<string, unknown> | undefined;
+  /** Skill 去重状态跟随 run；暂停恢复必须复用原 runId，完成或中断后立即释放。 */
+  private activeRunId: string | undefined;
+  private pendingRunId: string | undefined;
   private continuationTask: Promise<void> | undefined;
   /** goal active 状态变化后延迟重建，避免当前工具调用关闭自己的 runtime。 */
   private runtimeInvalidated = false;
@@ -557,6 +582,8 @@ class CodingSessionImpl implements CodingSession {
     private readonly deps: SessionDeps,
   ) {
     this.config = config;
+    this.skillCatalog = new SkillCatalog(config);
+    this.skillActivation = new SkillActivationService(this.skillCatalog);
     this.activeAgentName = config.default_agent;
     this.modeState = {
       mode: config.initialMode,
@@ -625,8 +652,21 @@ class CodingSessionImpl implements CodingSession {
     } else {
       this.modeState = { ...persisted, source: 'resume' };
     }
-    await this.goalService.load();
+    await Promise.all([
+      this.goalService.load(),
+      this.skillCatalog.initialize(),
+    ]);
     this.setRecoveredUserInput(opened.messages);
+  }
+
+  listSkills(): readonly AgentSkill[] {
+    return this.skillCatalog.list();
+  }
+
+  async reloadSkills(): Promise<readonly AgentSkill[]> {
+    const skills = await this.skillCatalog.reload();
+    await this.rebuild();
+    return skills;
   }
 
   subscribe(listener: CodingEventListener): () => void {
@@ -650,16 +690,24 @@ class CodingSessionImpl implements CodingSession {
         `Cannot submit while user input ${this.pendingUserInputItem.toolCallId} is pending.`,
       );
     }
-    // v1：把排队的 steer 输入并入本次提交（公共 API 暂无 run 内注入入口）。
     const drained = this.steerQueue.splice(0);
-    const input =
-      drained.length > 0 ? [...drained, prompt].join('\n\n') : prompt;
+    const runId = randomUUID();
+    const inputMessages: AgentMessage[] = [...drained, prompt].map((turn) => ({
+      role: 'user',
+      content: turn,
+    }));
     const goal = this.goalService.active();
+    const baseMetadata = meta;
     const runMetadata =
-      goal !== null && meta?.goalId === undefined
-        ? { ...meta, goalId: goal.id, goalUserRun: true }
-        : meta;
-    const result = await this.runInput(input, runMetadata, prompt.slice(0, 80));
+      goal !== null && baseMetadata?.goalId === undefined
+        ? { ...baseMetadata, goalId: goal.id, goalUserRun: true }
+        : baseMetadata;
+    const result = await this.runInput(
+      inputMessages,
+      runMetadata,
+      prompt.slice(0, 80),
+      runId,
+    );
     this.scheduleGoalContinuation(result);
     return result;
   }
@@ -1050,6 +1098,7 @@ class CodingSessionImpl implements CodingSession {
 
     const runtime = await this.ensureAgentRuntime();
     const runMetadata = this.pendingRunMetadata;
+    const runId = this.pendingRunId ?? randomUUID();
     const resumed = runtime.agent.resume(
       {
         deferred,
@@ -1061,6 +1110,7 @@ class CodingSessionImpl implements CodingSession {
         ...(runMetadata !== undefined ? { metadata: runMetadata } : {}),
       },
     );
+    this.activeRunId = runId;
     this.currentStream = resumed;
     let completed: AgentRunResult | undefined;
     try {
@@ -1077,11 +1127,15 @@ class CodingSessionImpl implements CodingSession {
       await this.recordGoalUsage(result, runMetadata);
       if ((result.pending?.length ?? 0) === 0) {
         this.pendingRunMetadata = undefined;
+        this.pendingRunId = undefined;
+        this.skillActivation.release(runId);
         await this.ensureSessionTitle(this.sessionId, result.messages);
         await this.maybeEnqueueMemoryExtraction(result, runMetadata);
       }
     } finally {
       this.currentStream = undefined;
+      if (this.pendingRunId !== runId) this.skillActivation.release(runId);
+      this.activeRunId = undefined;
       this.flushPlanApprovalEvent();
       await this.closeInvalidatedRuntime();
     }
@@ -1125,6 +1179,7 @@ class CodingSessionImpl implements CodingSession {
     }
     const resolution = validateUserInputResolution(pending.request, value);
     const runMetadata = this.pendingRunMetadata;
+    const runId = this.pendingRunId ?? randomUUID();
     this.pendingUserInputItem = null;
     this.emit({ type: 'user.input.resolved', toolCallId, resolution });
     const deferred: DeferredToolCallItem = {
@@ -1142,6 +1197,7 @@ class CodingSessionImpl implements CodingSession {
         ...(runMetadata !== undefined ? { metadata: runMetadata } : {}),
       },
     );
+    this.activeRunId = runId;
     this.currentStream = resumed;
     let completed: AgentRunResult | undefined;
     try {
@@ -1158,11 +1214,15 @@ class CodingSessionImpl implements CodingSession {
       await this.recordGoalUsage(result, runMetadata);
       if ((result.pending?.length ?? 0) === 0) {
         this.pendingRunMetadata = undefined;
+        this.pendingRunId = undefined;
+        this.skillActivation.release(runId);
         await this.ensureSessionTitle(this.sessionId, result.messages);
         await this.maybeEnqueueMemoryExtraction(result, runMetadata);
       }
     } finally {
       this.currentStream = undefined;
+      if (this.pendingRunId !== runId) this.skillActivation.release(runId);
+      this.activeRunId = undefined;
       this.flushPlanApprovalEvent();
       await this.closeInvalidatedRuntime();
     }
@@ -1632,6 +1692,10 @@ class CodingSessionImpl implements CodingSession {
   async close(): Promise<void> {
     this.closing = true;
     this.currentStream?.abort('coding session closed');
+    if (this.activeRunId !== undefined)
+      this.skillActivation.release(this.activeRunId);
+    if (this.pendingRunId !== undefined)
+      this.skillActivation.release(this.pendingRunId);
     await this.continuationTask;
     await this.deps.backgroundJobs.stopAll('coding session closed');
     await this.closeAgentRuntime();
@@ -1671,6 +1735,18 @@ class CodingSessionImpl implements CodingSession {
 
   /** 原样转发内核事件，并截获 approval 维护交互状态。 */
   private async forward(event: AgentStreamEvent): Promise<void> {
+    // activate_skill 使用产品事件展示 loaded 行，隐藏通用工具开始/成功事件以避免重复。
+    if (event.type === 'tool.started' && event.name === 'activate_skill') {
+      this.activatingSkillToolCalls.add(event.toolCallId);
+      return;
+    }
+    if (
+      (event.type === 'tool.completed' || event.type === 'tool.failed') &&
+      this.activatingSkillToolCalls.delete(event.toolCallId)
+    ) {
+      if (event.type === 'tool.failed') this.emit(projectToolEvent(event));
+      return;
+    }
     if (event.type === 'approval.required') {
       this.approvalItems.set(event.item.toolCallId, event.item);
       this.emit(projectToolEvent(event));
@@ -1738,13 +1814,17 @@ class CodingSessionImpl implements CodingSession {
     input: AgentInput,
     metadata?: Record<string, unknown>,
     checkpointLabel?: string,
+    runId?: string,
   ): Promise<AgentRunResult> {
     if (this.currentStream !== undefined) {
       throw new Error('Cannot start a run while another run is active.');
     }
     const runtime = await this.ensureAgentRuntime();
+    const effectiveRunId = runId ?? randomUUID();
+    this.activeRunId = effectiveRunId;
     this.currentStream = runtime.agent.stream(input, {
       sessionId: this.sessionId,
+      runId: effectiveRunId,
       maxTurns: this.activeAgentMaxTurns(),
       ...(metadata !== undefined ? { metadata } : {}),
     });
@@ -1766,10 +1846,15 @@ class CodingSessionImpl implements CodingSession {
         await this.maybeEnqueueMemoryExtraction(result, metadata);
       } else {
         this.pendingRunMetadata = metadata;
+        this.pendingRunId = effectiveRunId;
       }
       return result;
     } finally {
       this.currentStream = undefined;
+      if (this.pendingRunId !== effectiveRunId) {
+        this.skillActivation.release(effectiveRunId);
+      }
+      this.activeRunId = undefined;
       this.flushPlanApprovalEvent();
       await this.closeInvalidatedRuntime();
     }
@@ -1886,8 +1971,10 @@ class CodingSessionImpl implements CodingSession {
   /** 大 tool 输出在下一次模型输入前替换成 artifact stub。 */
   private async maybeBudgetToolResult(
     toolCallId: string,
+    toolName: string,
     output: unknown,
   ): Promise<void> {
+    if (toolName === 'activate_skill') return;
     const text = extractToolOutputText(output);
     if (text === null) {
       return;
@@ -1992,9 +2079,7 @@ class CodingSessionImpl implements CodingSession {
 
   private async createAgentRuntime(): Promise<AgentRuntimeDeps> {
     const profile = createBootProfile('agent-runtime');
-    const skills = await profile.measure('skills.load', () =>
-      loadCodingSkills(this.config),
-    );
+    const skills = this.skillCatalog.list();
     const compaction = createCompactionPort({
       contextWindow: DEFAULT_CONTEXT_WINDOW,
       port: this.deps.sessionStore,
@@ -2097,7 +2182,7 @@ class CodingSessionImpl implements CodingSession {
     const runtimeObserver: AgentObserver = {
       onToolCompleted: async (call) => {
         this.maybeRecordChange(call.id, call.output);
-        await this.maybeBudgetToolResult(call.id, call.output);
+        await this.maybeBudgetToolResult(call.id, call.name, call.output);
       },
     };
     const contentReplacementTransform = (messages: readonly AgentMessage[]) =>
@@ -2106,6 +2191,7 @@ class CodingSessionImpl implements CodingSession {
       config,
       () => this.deps.rulesStore.rules(),
       () => this.modeState,
+      () => runtime.skills.flatMap((skill) => [skill.baseDir, skill.realPath]),
     );
 
     const memory = this.deps.memory;
@@ -2132,6 +2218,8 @@ class CodingSessionImpl implements CodingSession {
       rules: () => this.deps.rulesStore.rules(),
       decide,
       mode: () => this.modeState,
+      readRoots: () =>
+        runtime.skills.flatMap((skill) => [skill.baseDir, skill.realPath]),
     });
     const selectedTools = [
       ...selectToolsForAgent(codingTools, agentDef.tools),
@@ -2140,10 +2228,6 @@ class CodingSessionImpl implements CodingSession {
     // goal 工具只在 active 状态加入候选集合；超过直连上限后通过 tool_search/call_tool 暴露。
     const goalActive = this.goalService.active() !== null;
     const goalTools = goalActive ? createGoalTools(this.goalService) : [];
-    const skillTools = createSkillTools({
-      skills: runtime.skills,
-      active: this.activeSkills,
-    });
     const delegateTool = createDelegateTool({
       registry: this.deps.registry,
       config,
@@ -2176,7 +2260,6 @@ class CodingSessionImpl implements CodingSession {
     const targetTools = [
       ...selectedTools,
       ...(this.modeState.mode === 'plan' ? [] : goalTools),
-      ...(this.modeState.mode === 'plan' ? [] : skillTools),
       delegateTool,
       ...(this.modeState.mode === 'plan'
         ? createPlanTools({
@@ -2188,11 +2271,18 @@ class CodingSessionImpl implements CodingSession {
           })
         : []),
     ];
-    const directTools =
-      this.deps.clientCapabilities.requestUserInput &&
+    // Skill 激活始终直接暴露给模型，不进入 tool_search/call_tool 的目标集合。
+    const activateSkillTool = createActivateSkillTool({
+      service: this.skillActivation,
+      onActivated: (event) => this.emit({ type: 'skill.activated', ...event }),
+    });
+    const directTools = [
+      activateSkillTool,
+      ...(this.deps.clientCapabilities.requestUserInput &&
       !config.tools.disabled.includes(REQUEST_USER_INPUT_TOOL_NAME)
         ? [createRequestUserInputTool()]
-        : [];
+        : []),
+    ];
     const toolRuntime = createMetaToolRuntime(
       targetTools,
       directTools,
@@ -2206,7 +2296,6 @@ class CodingSessionImpl implements CodingSession {
       }),
       createCodingSystemPromptSection(config, {
         model: primaryRole.ref,
-        activeSkills: () => [...this.activeSkills],
         onContextEvent: (event) => this.emit(event),
         ...(this.deps.memory !== undefined
           ? { memoryIndexLoader: this.deps.memory.indexLoader }
@@ -2215,13 +2304,6 @@ class CodingSessionImpl implements CodingSession {
       ...(toolRuntime.usesToolRouting
         ? [dynamicSystemSection(() => TOOL_ROUTING_INSTRUCTIONS)]
         : []),
-      dynamicSystemSection(
-        activeSkillsContext({
-          skills: runtime.skills,
-          active: this.activeSkills,
-          activation: 'activated',
-        }),
-      ),
       ...(goalActive
         ? [dynamicSystemSection(createGoalSystemSection(this.goalService))]
         : []),
@@ -2238,6 +2320,8 @@ class CodingSessionImpl implements CodingSession {
         config,
         () => this.deps.rulesStore.rules(),
         () => [...this.sessionExternalPaths],
+        () =>
+          runtime.skills.flatMap((skill) => [skill.baseDir, skill.realPath]),
       ),
       executionTools: toolRuntime.executionTools,
       modelTools: toolRuntime.modelTools,
@@ -2282,7 +2366,9 @@ class CodingSessionImpl implements CodingSession {
 
   private addSessionExternalPaths(item: DeferredApprovalItem): void {
     for (const target of readApprovalExternalDirs(item)) {
-      this.sessionExternalPaths.add(resolveAbsolute(this.config.cwd, target));
+      this.sessionExternalPaths.add(
+        canonicalTarget(resolveAbsolute(this.config.cwd, target)),
+      );
     }
   }
 

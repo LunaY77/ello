@@ -5,7 +5,7 @@
  * exact prefix > frecency > fuzzy > path depth，最近选过的项加权。逻辑全为纯函数，
  * 真正的文件/命令清单由 App 注入，便于单测排序行为。
  */
-export type TriggerKind = 'command' | 'file' | 'mention';
+export type TriggerKind = 'command' | 'file' | 'mention' | 'skill';
 
 export interface Trigger {
   readonly kind: TriggerKind;
@@ -26,7 +26,8 @@ export function detectTrigger(lineBeforeCursor: string): Trigger | undefined {
   }
   const at = lastTokenStart(lineBeforeCursor, '@');
   const hash = lastTokenStart(lineBeforeCursor, '#');
-  const start = Math.max(at, hash);
+  const dollar = lastTokenStart(lineBeforeCursor, '$');
+  const start = Math.max(at, hash, dollar);
   if (start < 0) {
     return undefined;
   }
@@ -36,7 +37,7 @@ export function detectTrigger(lineBeforeCursor: string): Trigger | undefined {
     return undefined;
   }
   return {
-    kind: symbol === '@' ? 'file' : 'mention',
+    kind: symbol === '@' ? 'file' : symbol === '#' ? 'mention' : 'skill',
     query,
     tokenStart: start,
   };

@@ -142,41 +142,6 @@ export const slashCommands: readonly SlashCommand[] = [
     run: () => ({ type: 'open-overlay', overlay: 'skills' }),
   },
   {
-    name: 'skill',
-    description: 'Invoke a skill',
-    run: (_ctx, args) => {
-      const [name, ...rest] = args;
-      if (name === undefined) {
-        return { type: 'open-overlay', overlay: 'skills' };
-      }
-      return {
-        type: 'submit',
-        prompt: [
-          `Invoke skill \`${name}\`.`,
-          rest.length > 0 ? `Arguments: ${rest.join(' ')}` : '',
-        ]
-          .filter(Boolean)
-          .join('\n'),
-      };
-    },
-  },
-  {
-    name: 'skill-search',
-    description: 'Search skills',
-    run: (_ctx, args) => ({
-      type: 'submit',
-      prompt: `Search available skills for: ${args.join(' ')}`,
-    }),
-  },
-  {
-    name: 'skill-create',
-    description: 'Create a skill package',
-    run: (_ctx, args) => ({
-      type: 'submit',
-      prompt: `Invoke skill \`skill-creator\` to create: ${args.join(' ')}`,
-    }),
-  },
-  {
     name: 'goal',
     description: 'Create or manage the session goal',
     run: (_ctx, args) => ({ type: 'runtime-action', action: 'goal', args }),

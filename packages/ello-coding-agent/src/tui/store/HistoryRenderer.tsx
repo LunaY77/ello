@@ -53,6 +53,10 @@ function renderHistoryEntryContent(entry: HistoryEntry, cwd: string) {
           ))}
         </Box>
       );
+    case 'skill':
+      return (
+        <Text color={tuiTokens.color.accent}>{`loaded [${entry.name}]`}</Text>
+      );
     case 'tool':
       return <HistoryTool tool={entry.tool} cwd={cwd} />;
     case 'user_input':

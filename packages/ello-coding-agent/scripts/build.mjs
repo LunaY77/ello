@@ -17,7 +17,6 @@ const previousDir = path.join(packageDir, `.dist-previous-${process.pid}`);
 const assetDirectories = [
   ['src/config/templates', 'config/templates'],
   ['src/context/prompts', 'context/prompts'],
-  ['src/skills/bundled', 'skills/bundled'],
   ['src/agents/bundled', 'agents/bundled'],
   ['src/storage/migrations', 'storage/migrations'],
 ];

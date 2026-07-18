@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -19,16 +19,11 @@ describe('skill loader', () => {
 
   it('解析并校验 SKILL.md frontmatter', async () => {
     await writeSkill(
-      'review',
+      'code-review',
       [
         '---',
         'name: code-review',
         'description: Review code changes.',
-        'when_to_use: User asks for review.',
-        'allowed-tools:',
-        '  - read',
-        '  - grep',
-        'context: fork',
         '---',
         '',
         '# Code Review',
@@ -40,9 +35,6 @@ describe('skill loader', () => {
       {
         name: 'code-review',
         description: 'Review code changes.',
-        whenToUse: 'User asks for review.',
-        allowedTools: ['read', 'grep'],
-        context: 'fork',
         source: 'project',
       },
     ]);
@@ -57,9 +49,42 @@ describe('skill loader', () => {
     await expect(loadSkillsFromDir(dir, 'project')).rejects.toThrow();
   });
 
+  it('跟随目录 symlink 并保留 link/real path', async () => {
+    const sourceRoot = await mkdtemp(path.join(tmpdir(), 'ello-skill-source-'));
+    await writeSkillAt(sourceRoot, 'linked');
+    await symlink(
+      path.join(sourceRoot, 'linked'),
+      path.join(dir, 'linked'),
+      'dir',
+    );
+    await expect(loadSkillsFromDir(dir, 'global')).resolves.toMatchObject([
+      {
+        name: 'linked',
+        baseDir: path.join(dir, 'linked'),
+        realPath: path.join(sourceRoot, 'linked'),
+      },
+    ]);
+    await rm(sourceRoot, { recursive: true, force: true });
+  });
+
+  it('broken symlink 使整个加载失败', async () => {
+    await symlink(path.join(dir, 'missing'), path.join(dir, 'broken'), 'dir');
+    await expect(loadSkillsFromDir(dir, 'global')).rejects.toThrow(/broken/u);
+  });
+
   async function writeSkill(name: string, content: string): Promise<void> {
     const skillDir = path.join(dir, name);
     await mkdir(skillDir, { recursive: true });
     await writeFile(path.join(skillDir, 'SKILL.md'), `${content}\n`, 'utf8');
+  }
+
+  async function writeSkillAt(root: string, name: string): Promise<void> {
+    const skillDir = path.join(root, name);
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: Test.\n---\n\nBody.\n`,
+      'utf8',
+    );
   }
 });

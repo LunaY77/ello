@@ -15,7 +15,6 @@ import {
 } from './source-registry.js';
 
 export interface ContextSnapshotDeps {
-  readonly activeSkills?: () => Promise<readonly string[]> | readonly string[];
   readonly onContextEvent?: (event: ContextEvent) => void;
   readonly memoryIndexLoader?: MemoryIndexLoader;
 }
@@ -27,11 +26,10 @@ export interface ContextSnapshotView extends ContextBundle {
 }
 
 /**
- * 单个 user run 的上下文快照。环境与 instruction 只加载一次，技能段按回合刷新。
+ * 单个 user run 的上下文快照。环境与 instruction 只加载一次。
  */
 export class ContextSnapshot {
   private stableBundle: Promise<ContextBundle> | undefined;
-  private activeSkillFingerprint: string | undefined;
 
   constructor(
     private readonly config: CodingAgentConfig,
@@ -43,12 +41,10 @@ export class ContextSnapshot {
 
   async render(): Promise<ContextSnapshotView> {
     const stable = await this.loadStableBundle();
-    const active = await loadActiveSkillsSource(this.deps);
-    const sources = [...stable.sources, ...active.sources].sort(compareSource);
+    const sources = [...stable.sources].sort(compareSource);
     const stableSystem = renderContextSources(stable.sources);
-    const dynamicSystem = renderContextSources(active.sources);
-    const diagnostics = [...stable.diagnostics, ...(active.diagnostics ?? [])];
-    this.emitActiveSkillChange(active.sources);
+    const dynamicSystem = '';
+    const diagnostics = [...stable.diagnostics];
     return {
       sources,
       system: [stableSystem, dynamicSystem].filter(Boolean).join('\n\n'),
@@ -79,17 +75,6 @@ export class ContextSnapshot {
       this.stableBundle = loadContextBundle(loaders, this.deps.onContextEvent);
     }
     return this.stableBundle;
-  }
-
-  private emitActiveSkillChange(sources: readonly ContextSource[]): void {
-    const fingerprint = snapshotFingerprint({ sources });
-    if (fingerprint === this.activeSkillFingerprint) {
-      return;
-    }
-    this.activeSkillFingerprint = fingerprint;
-    for (const source of sources) {
-      this.deps.onContextEvent?.({ type: 'context.source.loaded', source });
-    }
   }
 }
 
@@ -128,29 +113,6 @@ async function loadEnvironmentSource(
         tokensEstimate: estimateTextTokens(content),
       },
     ],
-  };
-}
-
-async function loadActiveSkillsSource(
-  deps: ContextSnapshotDeps,
-): Promise<ContextSourceLoadResult> {
-  const skills =
-    deps.activeSkills === undefined ? [] : [...(await deps.activeSkills())];
-  const content = skills.map((skill) => `- ${skill}`).join('\n');
-  return {
-    sources:
-      content.length === 0
-        ? []
-        : [
-            {
-              id: 'skills:active',
-              type: 'skill',
-              title: 'Active skills',
-              priority: 300,
-              content,
-              tokensEstimate: estimateTextTokens(content),
-            },
-          ],
   };
 }
 

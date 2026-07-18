@@ -10,7 +10,7 @@
 - `run`、`resume` 会话执行
 - 会话级 `plan`、`default`、`accept-edits`、`bypass` 四种模式
 - Plan artifact 预览及 Accept / Chat about this / Deny 审批流程
-- 内置工具、技能、子代理、任务板、目标、记忆，以及仓库/工作区管理
+- 内置工具和子代理，以及文件优先的全局/项目 Skills、任务板、目标、记忆与仓库/工作区管理
 - SQLite 会话、检查点、产物和迁移
 - OpenTelemetry/Langfuse 可观测性钩子
 
@@ -39,6 +39,8 @@ ello skills list
 ```
 
 全局选项包括 `--profile`、`--cwd`、`--allowed-path`、`--mode`、`--json` 和 `--no-tui`。provider/model 设置来自用户和项目配置层；使用 `ello config path` 查看配置位置。
+
+Skills 不随本 npm 包发布。请把独立 `ello-skills` release 安装或链接到 `~/.ello/skills`，或放入 `<cwd>/.ello/skills`。`$skill-name [参数]` 会明确要求模型调用 `activate_skill`；自然语言任务也由模型自主判断是否调用同一工具。`/skills` 只打开浏览界面。
 
 ## Plan 模式
 

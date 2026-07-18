@@ -31,6 +31,19 @@ describe('detectTrigger', () => {
   it('ignores @ in the middle of a word (e.g. email)', () => {
     expect(detectTrigger('mail me@host')).toBeUndefined();
   });
+
+  it('detects $skill only at a token boundary', () => {
+    expect(detectTrigger('$skill-cre')).toMatchObject({
+      kind: 'skill',
+      query: 'skill-cre',
+      tokenStart: 0,
+    });
+    expect(detectTrigger('use $workspace')).toMatchObject({
+      kind: 'skill',
+      query: 'workspace',
+    });
+    expect(detectTrigger('price$100')).toBeUndefined();
+  });
 });
 
 describe('scoreCandidate', () => {

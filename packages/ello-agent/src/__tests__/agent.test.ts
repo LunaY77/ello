@@ -19,6 +19,7 @@ import {
   defineTool,
   z,
   type AgentModelEvent,
+  type AgentMessage,
   type AgentModelRequest,
   type AgentModelResponse,
   type AgentStreamEvent,
@@ -108,6 +109,61 @@ describe('createAgent', () => {
       usage: final.usage,
     });
     expect(completed).not.toHaveProperty('result');
+    await agent.close();
+  });
+
+  it('adds ephemeral run instructions to system without persisting them', async () => {
+    let request: AgentModelRequest | undefined;
+    const appended: AgentMessage[] = [];
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(input) {
+          request = input;
+          return {
+            text: 'done',
+            messages: [
+              ...input.messages,
+              { role: 'assistant', content: 'done' },
+            ],
+            newMessages: [{ role: 'assistant', content: 'done' }],
+            usage: {
+              requests: 1,
+              inputTokens: 1,
+              outputTokens: 1,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: 'stop',
+            provider: {},
+          };
+        },
+        async *stream(input) {
+          yield { type: 'final', response: await this.generate(input) };
+        },
+      },
+      transcript: {
+        async load() {
+          return [];
+        },
+        async append(_sessionId, messages) {
+          appended.push(...messages);
+        },
+      },
+    });
+    await agent.run('task', {
+      sessionId: 'session',
+      ephemeralInstructions: 'temporary skill instructions',
+    });
+    expect(request?.system).toBe('temporary skill instructions');
+    expect(request?.messages).not.toContainEqual(
+      expect.objectContaining({ role: 'system' }),
+    );
+    expect(appended).not.toContainEqual({
+      role: 'system',
+      content: 'temporary skill instructions',
+    });
     await agent.close();
   });
 

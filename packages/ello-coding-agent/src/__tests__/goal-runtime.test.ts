@@ -195,7 +195,9 @@ describe('goal continuation runtime', () => {
     expect(searchResults[1]).toContain('update_goal');
     expect(searchResults[1]).toContain('get_goal');
     expect(searchResults[2]).not.toContain('update_goal');
-    expect(toolsets).toEqual(toolsets.map(() => ['call_tool', 'tool_search']));
+    expect(toolsets).toEqual(
+      toolsets.map(() => ['activate_skill', 'call_tool', 'tool_search']),
+    );
     expect(fingerprints.size).toBe(1);
   });
 

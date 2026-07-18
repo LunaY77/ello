@@ -175,11 +175,11 @@ export class AiSdkModelAdapter implements ModelAdapter {
         throw part.error;
       }
     }
+    const textIsToolCallMirror = isToolCallMirrorText(text, toolCalls);
     const newMessages =
       toolCalls.length > 0
-        ? [createToolCallMessageGroup(toolCalls) as ModelMessage]
-        : normalizeResponseMessages([], text);
-    const textIsToolCallMirror = isToolCallMirrorText(text, toolCalls);
+        ? createStreamToolCallMessages(await result.responseMessages, toolCalls)
+        : normalizeResponseMessages(await result.responseMessages, text);
     if (!textIsToolCallMirror && pendingMirrorText.length > 0) {
       for (const delta of pendingMirrorText) {
         yield { type: 'text-delta', text: delta };
@@ -209,6 +209,46 @@ export class AiSdkModelAdapter implements ModelAdapter {
       anthropicProvider: this.anthropicProvider,
     });
   }
+}
+
+function createStreamToolCallMessages(
+  responseMessages: readonly unknown[],
+  calls: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly input: unknown;
+  }[],
+): ModelMessage[] {
+  const reasoningParts = responseMessages.flatMap((message) => {
+    if (
+      typeof message !== 'object' ||
+      message === null ||
+      (message as { role?: unknown }).role !== 'assistant'
+    ) {
+      return [];
+    }
+    const content = (message as { content?: unknown }).content;
+    return Array.isArray(content)
+      ? content.filter(
+          (part) =>
+            typeof part === 'object' &&
+            part !== null &&
+            (part as { type?: unknown }).type === 'reasoning',
+        )
+      : [];
+  });
+  const toolCallParts = calls.flatMap((call) => {
+    const message = createToolCallMessage(call) as {
+      readonly content?: unknown;
+    };
+    return Array.isArray(message.content) ? message.content : [];
+  });
+  return [
+    {
+      role: 'assistant',
+      content: [...reasoningParts, ...toolCallParts],
+    } as ModelMessage,
+  ];
 }
 
 /**
@@ -267,22 +307,6 @@ export function resolveLanguageModel(
     return anthropicProvider(modelName as Parameters<typeof anthropic>[0]);
   }
   return openaiProvider(model as Parameters<typeof openai>[0]);
-}
-
-function createToolCallMessageGroup(
-  calls: readonly {
-    readonly id: string;
-    readonly name: string;
-    readonly input: unknown;
-  }[],
-): ModelMessage {
-  const parts = calls.flatMap((call) => {
-    const message = createToolCallMessage(call) as {
-      readonly content?: unknown;
-    };
-    return Array.isArray(message.content) ? message.content : [];
-  });
-  return { role: 'assistant', content: parts } as ModelMessage;
 }
 
 function readToolCall(value: unknown): {

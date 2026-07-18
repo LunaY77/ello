@@ -20,11 +20,7 @@ export type {
   AiSdkProviderKind,
 } from './adapters/ai-sdk-provider.js';
 export { defineDeferredTool, defineTool } from './public/tool.js';
-export {
-  activeSkillsContext,
-  createSkillTools,
-  skillIndexContext,
-} from './core/skills.js';
+export { skillIndexContext } from './core/skills.js';
 export {
   createLocalEnvironment,
   createLocalShellEnvironment,
