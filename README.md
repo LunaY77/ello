@@ -2,12 +2,12 @@
 
 ![ello TUI](docs/assets/ello-coding-agent-tui.png)
 
-ello is a TypeScript workspace for building reliable, extensible AI agents. It is split into a provider-agnostic agent runtime and a batteries-included coding-agent product with a terminal UI (TUI).
+ello is a TypeScript workspace for a process-isolated coding agent. `@ello/agent` owns the App Server and `@ello/tui` owns the JSON-RPC client, CLI, and terminal UI.
 
 ## Packages
 
-- [`@ello/agent`](packages/ello-agent/README.md) — framework SDK: agent runs, streaming, tools, environments, sessions, observers, and model adapters.
-- [`@ello/coding-agent`](packages/ello-coding-agent/README.md) — coding-agent application: CLI/TUI, permissions, workspaces, skills, subagents, goals, memory, persistence, and observability.
+- [`@ello/agent`](packages/ello-agent/README.md) — Server: model execution, tools, permissions, storage, workspace, skills, memory, and protocol.
+- [`@ello/tui`](packages/ello-tui/README.md) — Client: CLI, Ink TUI, local stdio launcher, WebSocket, and Unix transports.
 
 ## Architecture
 
@@ -15,13 +15,13 @@ ello is a TypeScript workspace for building reliable, extensible AI agents. It i
 flowchart TD
   User[Developer] --> CLI[ello CLI]
   CLI --> TUI[TUI / non-interactive renderer]
-  TUI --> Product[Coding Agent product layer]
-  Product --> Runtime["@ello/agent runtime"]
+  TUI --> Server["@ello/agent App Server"]
+  Server --> Runtime[Thread / Turn / Item runtime]
   Runtime --> Model[AI SDK model adapter]
   Runtime --> Tools[Tools and skills]
   Runtime --> Env[Filesystem / shell / resources]
-  Product --> Storage[(SQLite sessions, tasks, memory)]
-  Product --> Telemetry[OpenTelemetry / Langfuse]
+  Server --> Storage[(SQLite threads, tasks, memory)]
+  Server --> Telemetry[OpenTelemetry / Langfuse]
 ```
 
 ## Quick start
@@ -31,25 +31,30 @@ Requirements: Node.js 22+, pnpm 10+.
 ```bash
 pnpm install
 pnpm build
-pnpm --filter @ello/coding-agent run ello --help
-pnpm --filter @ello/coding-agent run ello
+pnpm --filter @ello/tui run ello --help
+pnpm --filter @ello/tui run ello
 ```
 
 Run one prompt without the TUI:
 
 ```bash
-pnpm --filter @ello/coding-agent run ello --no-tui run "Explain the changes in this repository"
+pnpm --filter @ello/tui run ello --no-tui run "Explain the changes in this repository"
 ```
 
 To expose the local `ello` binary globally while developing:
 
 ```bash
-pnpm --filter @ello/coding-agent build
-cd packages/ello-coding-agent
-pnpm link --global
+pnpm --filter @ello/tui build
+cd packages/ello-tui
+pnpm add -g .
 ```
 
 After that, `ello --help` is available from shells where pnpm's global bin directory is on `PATH`.
+
+## Documentation
+
+- [Client/server breaking rewrite plan](docs/ello-agent-client-server-refactor-plan.md)
+- [Client/server test samples](docs/ello-agent-client-server-test-samples.md)
 
 ## Development
 

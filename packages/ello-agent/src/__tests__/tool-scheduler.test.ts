@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { ToolScheduler } from '../core/tool-scheduler.js';
-import { defineDeferredTool, defineTool, z } from '../index.js';
+import { ToolScheduler } from '../agent/engine/core/tool-scheduler.js';
+import {
+  defineDeferredTool,
+  defineTool,
+  z,
+} from '../agent/engine/index.js';
 
 describe('ToolScheduler', () => {
   it('normalizes approval errors into a tool failure', async () => {

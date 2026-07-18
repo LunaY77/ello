@@ -1,10 +1,10 @@
 # ello Coding Agent TUI 设计稿
 
-本文档固化 `@ello/coding-agent` 当前 TUI 实现。当计划文字与当前代码有出入时，以后续代码为准，本文档记录当前可接受的产品设计和实现契约。
+本文档固化 `@ello/tui` 当前 TUI 实现。视觉、布局和交互契约来自历史 TUI 设计；运行时边界以 `docs/ello-agent-client-server-refactor-plan.md` 为准，所有 Server 能力通过 `ThreadClient` 和 typed JSON-RPC 访问。
 
 ## 1. 设计结论
 
-- TUI 属于 `packages/ello-coding-agent/src/tui/`，不再有独立 `@ello/tui` 产品边界。
+- TUI 属于 `@ello/tui` 的 `packages/ello-tui/src/tui/`；长期 runtime、配置、工具和持久化全部属于 `@ello/agent`，UI 不直接 import Server implementation。
 - 主屏采用 **shell scrollback + live viewport + bottom dock**。
 - 已提交历史只进入 shell scrollback；`AppShell` 不接收完整 transcript。
 - session header 是第一条历史记录，由 `TerminalHistoryOutput` 输出，不是固定 header。
@@ -20,7 +20,7 @@
 当前 TUI 目录：
 
 ```text
-packages/ello-coding-agent/src/tui/
+packages/ello-tui/src/tui/
   App.tsx
   index.ts
   completion.ts
@@ -124,7 +124,7 @@ bottom dock
 
 - 用 Ink `Static` 输出已提交历史。
 - `resetKey` 变化时重挂 `Static`，用于 session resume / rewind / clear 后按 active path 重放。
-- `useRuntimeEvents` 在 `ui.clear` 和 `session.history.loaded` 到达时清 terminal screen + scrollback，然后递增 `historyResetKey`。
+- `useRuntimeEvents` 在 Client snapshot 替换时清 terminal screen + scrollback，然后递增 `historyResetKey`。
 
 ## 4. History Entry
 
@@ -270,8 +270,8 @@ session 和 rewind：
 - session label 为 `YYYY-MM-DD HH:mm  title`；缺标题时使用 lastUserText，仍缺则 `Untitled session`。
 - `/rewind` 无参数时打开 `rewind-selector`，显示 6 行可 rewind user entry。
 - rewind label 为 `<short-entry-id> <index> <prompt preview>`。
-- `/rewind <entryId>` 仍保留直接 runtime action 路径。
-- 选择 rewind target 后调用 `session.rewind(entryId)`，返回 prompt 写回 composer。
+- `/rewind <entryId>` 解析到目标 user item 所属 turn，由 `ThreadClient.fork(lastTurnId)` 创建新 thread，再把 prompt 写回 composer。
+- 选择 rewind target 后必须先 fork，再切换到新的 `ThreadClient`；不得修改原 thread 的历史。
 
 ## 9. Tool 展示
 
@@ -398,20 +398,20 @@ syntaxString     #9ece6a
 
 ## 11. Runtime Event 到 TUI State
 
-`hooks/use-runtime-events.ts` 订阅 `CodingSession`：
+`hooks/use-runtime-events.ts` 订阅 `ThreadClient`：
 
-- runtime event 进入 `reduceTuiEvent()`。
-- `run.started` 记录起始时间。
-- run finished 后追加 `run.worked` separator。
-- `ui.clear`：
+- Server notification 进入 `reduceTuiEvent()`。
+- `turn/started` 记录起始时间。
+- `turn/completed` 后追加 worked separator。
+- Client snapshot 替换：
   - 清 terminal screen + scrollback；
   - 递增 `clearCount`；
   - 递增 `historyResetKey`；
   - reducer 回到 `initialTuiEventState`。
-- `session.history.loaded`：
+- `thread/read` 或 `thread/resume` 返回的 snapshot：
   - 清 terminal screen + scrollback；
   - 递增 `historyResetKey`；
-  - reducer 用 `messagesToHistoryEntries()` 替换 committed history。
+  - reducer 用 `snapshotToHistoryEntries()` 替换 committed history。
 
 `store/tui-event-store.ts` 约束：
 
@@ -419,8 +419,8 @@ syntaxString     #9ece6a
 - completed tool 必须先有 started tool，否则抛错。
 - subagent event 必须先有 subagent started，否则抛错。
 - subagent 内部 tool completed 必须先有对应 tool started，否则抛错。
-- `session.history.loaded` 替换 history，不追加。
-- `session.rewound` 在替换后的 history 后追加 `rewound to <entryId>` system entry。
+- snapshot 替换 history，不追加旧 connection 的增量。
+- fork 后在新的 thread 上追加 `rewound to <entryId>` system entry。
 
 ## 12. Slash Command 和 Command Registry
 
@@ -442,16 +442,16 @@ slash command 的事实源仍是 `src/slash-commands.ts`。
 
 `App.tsx` 负责产品输入语义：
 
-- `!cmd`：调用 `session.runShell()`，结果作为 system message 展示。
-- `@path`：由 `prompt-parts.ts` 解析并读取文件内容，序列化进模型输入。
-- 普通输入：提交给 `session.submit()`。
-- running 时普通输入变成 `session.steer()`，并在 live viewport 中显示 queued steer。
+- `!cmd`：调用 `ThreadClient.request('thread/shellCommand')`，结果作为 system message 展示。
+- `@path`：先调用 `ThreadClient.request('fs/search')`，只把 Server 返回的文件引用放入模型输入。
+- 普通输入：调用 `ThreadClient.submit()`，最终走 `turn/start`。
+- running 时普通输入变成 `ThreadClient.steer()`，并在 live viewport 中显示 queued steer。
 
 文件补全：
 
 - 只在当前行触发 `@` token 时启用。
 - 路径必须在 `runtimeConfig.cwd` 内。
-- 候选来自 `readdir()`，再经 `rankCandidates()` 排序。
+- 候选来自 Server 的 `fs/search`，再经 `rankCandidates()` 排序；Client 不直接 `readdir()`。
 - 目录候选追加 `/`。
 
 ## 14. 当前验收测试

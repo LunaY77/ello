@@ -4,11 +4,11 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { trimMessages } from '../core/input-transforms.js';
+import { trimMessages } from '../agent/engine/core/input-transforms.js';
 import {
   AgentRunControl,
   DefaultAgentMessageQueue,
-} from '../core/run-control.js';
+} from '../agent/engine/core/run-control.js';
 import {
   AgentStreamBackpressureError,
   ModelAdapterProtocolError,
@@ -22,11 +22,11 @@ import {
   type AgentMessage,
   type AgentModelRequest,
   type AgentModelResponse,
-  type AgentStreamEvent,
+  type EngineEvent,
   type AnyAgentTool,
   type CreateAgentOptions,
   type ModelAdapter,
-} from '../index.js';
+} from '../agent/engine/index.js';
 
 const testTool = defineTool({
   name: 'test_noop',
@@ -93,7 +93,7 @@ describe('createAgent', () => {
     });
     const result = await agent.run('hi');
     const stream = agent.stream('hi');
-    const events: AgentStreamEvent[] = [];
+    const events: EngineEvent[] = [];
     for await (const event of stream) {
       events.push(event);
     }
@@ -1395,7 +1395,7 @@ describe('createAgent', () => {
         },
       },
     });
-    const events: AgentStreamEvent[] = [];
+    const events: EngineEvent[] = [];
     for await (const event of stream) {
       events.push(event);
     }

@@ -1,8 +1,8 @@
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 
-import { AiSdkModelAdapter } from '../adapters/ai-sdk.js';
-import type { AgentModelEvent, AgentModelRequest } from '../public/types.js';
+import type { AgentModelEvent, AgentModelRequest } from '../agent/engine/api/types.js';
+import { AiSdkModelAdapter } from '../agent/providers/ai-sdk/ai-sdk.js';
 
 describe('AiSdkModelAdapter', () => {
   it('does not emit text deltas for provider tool-call mirror JSON', async () => {

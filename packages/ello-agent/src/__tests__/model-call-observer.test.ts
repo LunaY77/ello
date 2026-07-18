@@ -4,12 +4,16 @@ import type {
   AgentEventRecorder,
   AgentModelRequest,
   AgentModelResponse,
-  AgentStreamEvent,
+  EngineEvent,
   ModelAdapter,
   AnyAgentTool,
   CreateAgentOptions,
-} from '../index.js';
-import { createAgent as createBaseAgent, defineTool, z } from '../index.js';
+} from '../agent/engine/index.js';
+import {
+  createAgent as createBaseAgent,
+  defineTool,
+  z,
+} from '../agent/engine/index.js';
 
 const testTool = defineTool({
   name: 'test_noop',
@@ -62,7 +66,7 @@ class FinalAdapter implements ModelAdapter {
 
 describe('model-call lifecycle', () => {
   it('上报安全的 model-call usage 与 fingerprint', async () => {
-    const calls: Extract<AgentStreamEvent, { type: 'model.completed' }>[] = [];
+    const calls: Extract<EngineEvent, { type: 'model.completed' }>[] = [];
     const recorder: AgentEventRecorder = {
       record: (event) => {
         if (event.type === 'model.completed') calls.push(event);

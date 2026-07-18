@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { skillIndexContext } from '../core/skills.js';
+import { skillIndexContext } from '../agent/engine/core/skills.js';
 
 describe('skills', () => {
   it('技能索引按预算输出摘要', () => {

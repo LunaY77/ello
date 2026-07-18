@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapAiSdkUsage } from '../core/usage.js';
+import { mapAiSdkUsage } from '../agent/engine/core/usage.js';
 
 describe('AI SDK usage mapping', () => {
   it('读取 inputTokenDetails 中的 cache token', () => {
