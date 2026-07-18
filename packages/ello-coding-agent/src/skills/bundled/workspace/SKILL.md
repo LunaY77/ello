@@ -1,6 +1,6 @@
 ---
 name: workspace
-description: Manage Ello multi-repository workspaces through the installed ello CLI. Use when the user asks to register or synchronize local/remote Git repositories, create feature/fix/explore workspaces, reuse a selector after archive, list or delete archived generations, repair filesystem/SQLite drift, keep one branch name across repositories, create a new repository inside a workspace, manage workspace-bound tmux lifecycle, or export/import the repo registry, including Chinese requests such as 创建工作空间、多仓开发、本地仓库没有远端、给工作空间加仓库、归档工作空间、删除归档、修复工作空间、迁移仓库列表.
+description: Manage Ello multi-repository workspaces through the installed ello CLI. Use when the user asks to register or synchronize local/remote Git repositories, create feature/fix/refactor/explore workspaces, reuse a selector after archive, list or delete archived generations, repair filesystem/SQLite drift, keep one branch name across repositories, create a new repository inside a workspace, manage workspace-bound tmux lifecycle, or export/import the repo registry, including Chinese requests such as 创建工作空间、多仓开发、本地仓库没有远端、给工作空间加仓库、归档工作空间、删除归档、修复工作空间、迁移仓库列表.
 ---
 
 # Ello Workspace
@@ -24,7 +24,7 @@ Do not call `git worktree`, `git clone --mirror`, or `tmux` directly for managed
 - Existing local repository with commits: `ello repo add <path>`.
 - Existing remote URL: `ello repo add <url>`.
 - New project inside the current workspace: `ello workspace repo create <key>`.
-- Multi-repository feature or fix: register repositories first, then create one workspace; every checkout shares the workspace branch.
+- Multi-repository feature, fix, or refactor: register repositories first, then create one workspace; every checkout shares the workspace branch.
 - Read-only context repository: `ello workspace repo add <key> --detached`; it checks out the default branch commit under `references/` without creating a workspace branch.
 - Reusing an archived selector: run the same `workspace create`; Ello creates a new active generation while retaining archived generations as detached snapshots.
 - Move repository registry state between machines: use `ello repo export` and `ello repo import`.

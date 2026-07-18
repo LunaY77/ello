@@ -1,4 +1,4 @@
-export type WorkspaceKind = 'feature' | 'fix' | 'explore';
+export type WorkspaceKind = 'feature' | 'fix' | 'refactor' | 'explore';
 export type WorkspaceStatus = 'active' | 'archived' | 'missing' | 'deleted';
 export type CheckoutMode = 'branch' | 'detached';
 export type WorkspaceRepoRole = 'development' | 'reference';
