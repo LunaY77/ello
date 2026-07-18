@@ -36,22 +36,33 @@ export function makeApprovalPolicy(
   return (descriptor: PermissionDescriptor): AgentApprovalDecision => {
     assertDescriptor(descriptor);
     const currentMode = mode().mode;
+    // Bypass 是显式开启的会话级安全边界，不能再被配置或历史规则降级成审批。
+    if (currentMode === 'bypass') {
+      return 'auto';
+    }
     // Plan 规则是安全边界而非默认偏好，因此不能被配置或历史审批规则覆盖。
+    // Accept edits 会忽略 edit 类 needApproval，并在下方把普通 ask 提升为 allow；
+    // 显式 deny 和 external_directory 仍保留，避免自动编辑扩大禁止项或路径边界。
+    const needApprovalRules = config.tools.needApproval
+      .map(toolNeedApprovalRule)
+      .filter(
+        (rule) => currentMode !== 'accept-edits' || rule.permission !== 'edit',
+      );
     const rules: PermissionRule[] = [
       ...defaultRulesetForMode(currentMode),
       ...(currentMode === 'plan'
         ? []
-        : [
-            ...config.permissionRules,
-            ...dynamicRules(),
-            ...config.tools.needApproval.map(toolNeedApprovalRule),
-          ]),
+        : [...config.permissionRules, ...dynamicRules(), ...needApprovalRules]),
     ];
 
     let needsApproval = false;
     // 先判断工具自身声明；任一 pattern 被拒绝即可短路整次调用。
     for (const pattern of descriptor.patterns) {
-      const action = evaluatePermission(rules, descriptor.permission, pattern);
+      const action = applyModeToAction(
+        currentMode,
+        descriptor.permission,
+        evaluatePermission(rules, descriptor.permission, pattern),
+      );
       if (action === 'deny') {
         return buildDecision(
           'denied',
@@ -101,6 +112,16 @@ export function makeApprovalPolicy(
     }
     return 'auto';
   };
+}
+
+function applyModeToAction(
+  mode: SessionModeState['mode'],
+  permission: string,
+  action: PermissionRule['action'],
+): PermissionRule['action'] {
+  return mode === 'accept-edits' && permission === 'edit' && action === 'ask'
+    ? 'allow'
+    : action;
 }
 
 /** 给通用工具提供最小 descriptor，使它们进入同一套权限引擎。 */
@@ -172,7 +193,7 @@ function assertDescriptor(descriptor: PermissionDescriptor): void {
   }
 }
 
-/** tools.needApproval 在运行期规则之后追加，保证非 Plan 模式下始终询问。 */
+/** tools.needApproval 在运行期规则之后追加，保证普通模式下优先进入审批。 */
 function toolNeedApprovalRule(toolName: string): PermissionRule {
   return {
     permission: derivePermission(toolName),

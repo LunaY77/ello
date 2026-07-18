@@ -1,8 +1,8 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import type { ModelAdapter } from '@ello/agent';
+import type { AgentToolContext, ModelAdapter } from '@ello/agent';
 import { describe, expect, it } from 'vitest';
 
 import { loadCodingAgentConfig } from '../config/index.js';
@@ -10,6 +10,7 @@ import {
   defaultRulesetForMode,
   evaluatePermission,
 } from '../permission/engine.js';
+import { makeApprovalPolicy } from '../permission/policy.js';
 import { writePlanArtifact } from '../plan/artifact.js';
 import {
   createCodingSession as createCodingSessionRuntime,
@@ -67,6 +68,61 @@ describe('Plan mode', () => {
     expect(evaluatePermission(rules, 'edit', '**')).toBe('deny');
     expect(evaluatePermission(rules, 'bash', '**')).toBe('deny');
     expect(evaluatePermission(rules, 'web_fetch', '**')).toBe('deny');
+  });
+
+  it('applies the current session mode as the permission boundary', async () => {
+    const cwd = await tempDir();
+    const config = await loadCodingAgentConfig({
+      cwd,
+      tools: {
+        disabled: [],
+        needApproval: ['write', 'bash'],
+        routing_enabled: false,
+        search: { result_limit: 6, max_result_bytes: 24_000 },
+      },
+    });
+    let mode = config.initialMode;
+    const decide = makeApprovalPolicy(
+      config,
+      () => [],
+      () => ({
+        mode,
+        previousMode: null,
+        source: 'shortcut',
+        changedAt: new Date(0).toISOString(),
+      }),
+    );
+    const edit = {
+      permission: 'edit',
+      patterns: ['note.txt'],
+      always: ['note.txt'],
+      metadata: {
+        kind: 'edit' as const,
+        path: path.join(cwd, 'note.txt'),
+        fileChanges: [],
+      },
+    };
+    const bash = {
+      permission: 'bash',
+      patterns: ['echo ok'],
+      always: ['echo ok'],
+      metadata: {
+        kind: 'shell' as const,
+        command: 'echo ok',
+        cwd,
+      },
+    };
+    const context = {} as AgentToolContext;
+
+    expect(decide(edit, context)).toMatchObject({ action: 'required' });
+    mode = 'accept-edits';
+    expect(decide(edit, context)).toBe('auto');
+    expect(decide(bash, context)).toMatchObject({ action: 'required' });
+    mode = 'plan';
+    expect(decide(edit, context)).toMatchObject({ action: 'denied' });
+    mode = 'bypass';
+    expect(decide(edit, context)).toBe('auto');
+    expect(decide(bash, context)).toBe('auto');
   });
 
   it('preserves raw slash command input', async () => {
@@ -142,6 +198,76 @@ describe('Plan mode', () => {
       code: 'MODE_NOT_ALLOWED',
       sessionId: session.sessionId,
     });
+    await session.close();
+  });
+
+  it('stops requesting approvals after the session switches to bypass', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const target = path.join(cwd, 'bypass.txt');
+    let turn = 0;
+    const bypassAdapter: ModelAdapter = {
+      async generate(request) {
+        turn += 1;
+        if (turn === 1) {
+          const toolCall = {
+            id: 'call_write',
+            name: 'write',
+            input: { path: target, content: 'bypassed' },
+          };
+          const toolCallMessage = {
+            role: 'assistant' as const,
+            content: [
+              {
+                type: 'tool-call' as const,
+                toolCallId: toolCall.id,
+                toolName: toolCall.name,
+                input: toolCall.input,
+              },
+            ],
+          };
+          return {
+            text: '',
+            messages: [...request.messages, toolCallMessage],
+            newMessages: [toolCallMessage],
+            toolCalls: [toolCall],
+            usage,
+            finishReason: 'tool-calls' as const,
+            provider: null,
+          };
+        }
+        return adapter.generate(request);
+      },
+      async *stream(request) {
+        yield { type: 'final', response: await this.generate(request) };
+      },
+    };
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      bypassEnabled: true,
+      tools: {
+        disabled: [],
+        needApproval: ['write'],
+        routing_enabled: false,
+        search: { result_limit: 6, max_result_bytes: 24_000 },
+      },
+    });
+    const session = await createCodingSession({
+      config,
+      modelAdapter: bypassAdapter,
+    });
+    let approvals = 0;
+    session.subscribe((event) => {
+      if (event.type === 'approval.pending') approvals += 1;
+    });
+
+    await session.setMode('bypass', 'shortcut');
+    await session.submit('write without approval');
+
+    expect(session.mode().mode).toBe('bypass');
+    expect(approvals).toBe(0);
+    expect(await readFile(target, 'utf8')).toBe('bypassed');
     await session.close();
   });
 });
