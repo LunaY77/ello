@@ -2,8 +2,11 @@ import { lstat } from 'node:fs/promises';
 
 import type { AgentSkill } from '@ello/agent';
 
-import type { CodingAgentConfig } from '../config/index.js';
-import { globalSkillsDir, projectSkillsDir } from '../session/paths.js';
+import {
+  globalSkillsDir,
+  projectSkillsDir,
+  type CodingAgentConfig,
+} from '../config/index.js';
 
 import { loadSkillsFromDir } from './loader.js';
 import { SkillSearchIndex } from './search-index.js';
