@@ -74,6 +74,36 @@ export function messagesToHistoryEntries(
             continue;
           }
         }
+        if (call.name === 'activate_skill') {
+          const name = readSkillName(call.input);
+          const output = result.output;
+          const xmlName =
+            typeof output === 'string'
+              ? /^<activated_skill\s+[^>]*\bname="([^"<>&]+)"/iu.exec(
+                  output,
+                )?.[1]
+              : undefined;
+          const validXml =
+            typeof output === 'string' &&
+            /^<activated_skill\b[^>]*><!\[CDATA\[/iu.test(output) &&
+            /\]\]><\/activated_skill>$/u.test(output);
+          if (
+            name === undefined ||
+            xmlName !== name ||
+            typeof output !== 'string' ||
+            !validXml
+          ) {
+            throw new Error(
+              `Invalid activated skill history result: ${result.id}`,
+            );
+          }
+          entries.push({
+            kind: 'skill',
+            id: `history-skill-${index}-${result.id}`,
+            name,
+          });
+          continue;
+        }
         entries.push({
           kind: 'tool',
           id: `history-tool-${index}-${result.id}`,
@@ -125,6 +155,16 @@ export function messagesToHistoryEntries(
     });
   });
   return entries;
+}
+
+function readSkillName(input: unknown): string | undefined {
+  if (
+    !isRecord(input) ||
+    typeof input.name !== 'string' ||
+    input.name.trim() === ''
+  )
+    return undefined;
+  return input.name;
 }
 
 export function messageContentText(message: AgentMessage): string {

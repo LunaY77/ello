@@ -98,6 +98,9 @@ async function buildSystem(
       sections.push(text);
     }
   }
+  if (run.options.ephemeralInstructions) {
+    sections.push(run.options.ephemeralInstructions);
+  }
   return {
     ...(sections.length > 0 ? { system: sections.join('\n\n') } : {}),
     sectionCount: sections.length,

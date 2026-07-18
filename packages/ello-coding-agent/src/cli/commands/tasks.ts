@@ -6,7 +6,6 @@ import type { CliCommandContext, CliCommandModule } from '../types.js';
 export const taskCommands: CliCommandModule = {
   register(program, ctx) {
     registerTaskCommands(program, ctx);
-    registerSkillCommands(program, ctx);
   },
 };
 
@@ -175,57 +174,4 @@ function taskBoardName(cmd: Command): string {
     throw new Error('Missing required task board name.');
   }
   return board;
-}
-
-function registerSkillCommands(program: Command, ctx: CliCommandContext): void {
-  const skillsCmd = program.command('skills').description('inspect skills');
-  skillsCmd
-    .command('list')
-    .description('list skills')
-    .action(async (_opts: unknown, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { loadCodingSkills, formatSkillList } =
-        await import('../../skills/index.js');
-      const skills = await loadCodingSkills(config);
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(skills, null, 2) : formatSkillList(skills)}\n`,
-      );
-    });
-  skillsCmd
-    .command('get')
-    .argument('<name>', 'skill name')
-    .description('show one skill')
-    .action(async (name: string, _opts: unknown, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { loadCodingSkills, formatSkill } =
-        await import('../../skills/index.js');
-      const skill = (await loadCodingSkills(config)).find(
-        (item) => item.name === name,
-      );
-      if (skill === undefined) {
-        throw new Error(`Unknown skill: ${name}`);
-      }
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(skill, null, 2) : formatSkill(skill)}\n`,
-      );
-    });
-  skillsCmd
-    .command('search')
-    .argument('<query...>', 'search query')
-    .description('search skills')
-    .action(async (queryParts: string[], _opts: unknown, cmd: Command) => {
-      const config = await ctx.resolveConfig(cmd.optsWithGlobals());
-      const { loadCodingSkills, formatSkillList } =
-        await import('../../skills/index.js');
-      const query = queryParts.join(' ').toLowerCase();
-      const skills = (await loadCodingSkills(config)).filter((skill) =>
-        [skill.name, skill.description, skill.whenToUse ?? '']
-          .join('\n')
-          .toLowerCase()
-          .includes(query),
-      );
-      ctx.io.stdout.write(
-        `${config.json ? JSON.stringify(skills, null, 2) : formatSkillList(skills)}\n`,
-      );
-    });
 }

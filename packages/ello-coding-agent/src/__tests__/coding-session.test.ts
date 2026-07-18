@@ -1,5 +1,6 @@
 import {
   access,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -236,6 +237,114 @@ describe('createCodingSession', () => {
     ).toMatchObject({ text: 'final only' });
     const completed = events.find((event) => event.type === 'run.completed');
     expect(completed).not.toHaveProperty('result');
+  });
+
+  it('由模型调用 activate_skill 加载显式引用的 Skill', async () => {
+    const cwd = await tempDir();
+    const sessionDir = await tempDir();
+    const skillDir = path.join(cwd, '.ello', 'skills', 'workspace');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      path.join(skillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: workspace',
+        'description: Manage the current workspace.',
+        '---',
+        '',
+        '# Workspace',
+        'Follow the workspace instructions for this run.',
+      ].join('\n'),
+      'utf8',
+    );
+    const config = await loadCodingAgentConfig({
+      cwd,
+      sessionDir,
+      initialMode: 'default',
+    });
+    const requests: AgentModelRequest[] = [];
+    let turn = 0;
+    const adapter: ModelAdapter = {
+      async generate(modelRequest) {
+        requests.push(modelRequest);
+        turn += 1;
+        if (turn === 1) {
+          const toolCallMessage = {
+            role: 'assistant' as const,
+            content: [
+              {
+                type: 'tool-call' as const,
+                toolCallId: 'call_activate_workspace',
+                toolName: 'activate_skill',
+                input: {
+                  name: 'workspace',
+                  arguments: 'inspect the repository',
+                },
+              },
+            ],
+          };
+          return {
+            text: '',
+            messages: [...modelRequest.messages, toolCallMessage],
+            newMessages: [toolCallMessage],
+            toolCalls: [
+              {
+                id: 'call_activate_workspace',
+                name: 'activate_skill',
+                input: {
+                  name: 'workspace',
+                  arguments: 'inspect the repository',
+                },
+              },
+            ],
+            usage,
+            finishReason: 'tool-calls' as const,
+            provider: null,
+          };
+        }
+        return new TextAdapter('OK').generate(modelRequest);
+      },
+      async *stream(modelRequest) {
+        yield { type: 'final', response: await this.generate(modelRequest) };
+      },
+    };
+    const session = await createCodingSession({
+      config,
+      modelAdapter: adapter,
+    });
+    const events: CodingSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    await session.submit('$workspace inspect the repository');
+    const sessionId = session.sessionId;
+    await session.close();
+
+    const firstRequest = requests[0];
+    expect(firstRequest?.system).not.toContain(
+      'Follow the workspace instructions for this run.',
+    );
+    expect(JSON.stringify(firstRequest?.messages)).toContain(
+      '$workspace inspect the repository',
+    );
+    expect(JSON.stringify(firstRequest?.messages)).not.toContain(
+      '<activated_skill',
+    );
+    const secondRequest = requests[1];
+    expect(
+      secondRequest?.messages.some((message) =>
+        JSON.stringify(message).includes('<activated_skill'),
+      ),
+    ).toBe(true);
+    expect(
+      await readFile(path.join(sessionDir, `${sessionId}.jsonl`), 'utf8'),
+    ).toContain('Follow the workspace instructions for this run.');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'skill.activated',
+        name: 'workspace',
+        trigger: 'model',
+      }),
+    );
   });
 
   it('把 Plan mode 指令放入稳定 system 前缀', async () => {

@@ -34,6 +34,7 @@ export interface CreateCodingToolsOptions {
   readonly rules?: () => readonly PermissionRule[];
   readonly decide?: DecideApproval;
   readonly mode: () => SessionModeState;
+  readonly readRoots?: () => readonly string[];
 }
 
 /**
@@ -47,7 +48,12 @@ export function createCodingTools(
   const { config } = options;
   const decide =
     options.decide ??
-    makeApprovalPolicy(config, options.rules ?? (() => []), options.mode);
+    makeApprovalPolicy(
+      config,
+      options.rules ?? (() => []),
+      options.mode,
+      options.readRoots ?? (() => []),
+    );
   const approval: ApprovalFor = genericApprovalFor(decide);
   const disabled = new Set(config.tools.disabled);
   const outputStore = new SessionToolOutputStore(config.sessionDir);

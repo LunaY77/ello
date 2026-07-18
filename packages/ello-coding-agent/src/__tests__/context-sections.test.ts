@@ -8,12 +8,10 @@ import {
   loadCodingAgentConfig,
   type CodingAgentConfig,
 } from '../config/index.js';
-import { splitSystemCacheSegments } from '../context/cache-layout.js';
 import { ContextSnapshot } from '../context/context-snapshot.js';
 import {
   buildCodingSystemPrompt,
   buildContextBundle,
-  createCodingSystemPromptSection,
 } from '../context/prompts.js';
 
 const dirs: string[] = [];
@@ -113,49 +111,6 @@ describe('context sections', () => {
     expect(sameRun.system).toContain('first rule');
     expect(sameRun.system).not.toContain('second rule');
     expect(nextRun.system).toContain('second rule');
-  });
-
-  it('同一 snapshot 只更新 active skill section', async () => {
-    const cwd = await tempDir();
-    const config = await loadCodingAgentConfig({ cwd });
-    let activeSkills = ['review'];
-    const snapshot = new ContextSnapshot(
-      config,
-      { activeSkills: () => activeSkills },
-      'coding',
-      'base-hash',
-    );
-    const first = await snapshot.render();
-    activeSkills = ['verify'];
-    const second = await snapshot.render();
-
-    expect(first.system).toContain('- review');
-    expect(second.system).toContain('- verify');
-    expect(second.system).not.toContain('- review');
-    expect(second.stableSystem).toBe(first.stableSystem);
-    expect(first.dynamicSystem).toContain('- review');
-    expect(second.dynamicSystem).toContain('- verify');
-  });
-
-  it('动态 skill 变化不会改写稳定 prompt 与 instruction 前缀', async () => {
-    const cwd = await tempDir();
-    await writeFile(path.join(cwd, 'AGENTS.md'), 'stable project rule', 'utf8');
-    const config = await loadCodingAgentConfig({ cwd });
-    let activeSkills = ['review'];
-    const section = createCodingSystemPromptSection(config, {
-      model: 'openai/gpt-5.4',
-      activeSkills: () => activeSkills,
-    });
-    const run = {} as never;
-
-    const first = splitSystemCacheSegments((await section(run))!);
-    activeSkills = ['verify'];
-    const second = splitSystemCacheSegments((await section(run))!);
-
-    expect(first.stable).toBe(second.stable);
-    expect(first.stable).toContain('stable project rule');
-    expect(first.dynamic).toContain('- review');
-    expect(second.dynamic).toContain('- verify');
   });
 
   it('URL TTL cache hit 保持 fresh 且 fingerprint 不变', async () => {

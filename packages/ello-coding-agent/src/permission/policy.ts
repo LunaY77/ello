@@ -7,6 +7,8 @@ import {
   defaultRulesetForMode,
   evaluatePermission,
   isExternalPath,
+  isPathInside,
+  resolveAbsolute,
 } from './engine.js';
 import type {
   PermissionDescriptor,
@@ -29,6 +31,7 @@ export function makeApprovalPolicy(
   config: CodingAgentConfig,
   dynamicRules: () => readonly PermissionRule[],
   mode: () => SessionModeState,
+  readRoots: () => readonly string[] = () => [],
 ): DecideApproval {
   return (descriptor: PermissionDescriptor): AgentApprovalDecision => {
     assertDescriptor(descriptor);
@@ -64,8 +67,14 @@ export function makeApprovalPolicy(
       }
     }
 
-    const externalDirs = externalPaths(config.cwd, descriptor.paths ?? []);
-    // 路径越界是独立权限维度，即使 read/edit 本身允许也必须再次检查。
+    const externalDirs = externalPaths(
+      config.cwd,
+      descriptor.paths ?? [],
+      descriptor.permission === 'read' || descriptor.permission === 'search'
+        ? readRoots()
+        : [],
+    );
+    // 路径越界是独立权限维度；Skill 根目录只放行只读和搜索，不扩大写权限。
     for (const externalDir of externalDirs) {
       const action = evaluatePermission(
         rules,
@@ -187,8 +196,22 @@ function derivePermission(toolName: string): string {
 }
 
 /** 只返回 workspace 外路径，具体是否允许交给 external_directory 规则判定。 */
-function externalPaths(cwd: string, targets: readonly string[]): string[] {
-  return [...new Set(targets.filter((target) => isExternalPath(cwd, target)))];
+function externalPaths(
+  cwd: string,
+  targets: readonly string[],
+  readRoots: readonly string[],
+): string[] {
+  return [
+    ...new Set(
+      targets.filter(
+        (target) =>
+          isExternalPath(cwd, target) &&
+          !readRoots.some((root) =>
+            isPathInside(root, resolveAbsolute(cwd, target)),
+          ),
+      ),
+    ),
+  ];
 }
 
 function previewInput(input: unknown): string {

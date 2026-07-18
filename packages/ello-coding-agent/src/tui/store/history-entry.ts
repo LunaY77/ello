@@ -56,6 +56,11 @@ export type HistoryEntry =
       readonly entryId?: string | undefined;
       readonly text: string;
     }
+  | {
+      readonly kind: 'skill';
+      readonly id: string;
+      readonly name: string;
+    }
   | { readonly kind: 'tool'; readonly id: string; readonly tool: ToolCallView }
   | {
       readonly kind: 'user_input';

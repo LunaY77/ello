@@ -42,8 +42,12 @@ import {
   buildModelCatalogOptions,
   buildProfileSelectorOptions,
 } from './model-selectors.js';
-import { loadSkillsOverlay, loadTasksOverlay } from './overlay-loaders.js';
-import { detectTrigger, rankCandidates } from './store/autocomplete.js';
+import { loadTasksOverlay } from './overlay-loaders.js';
+import {
+  bumpFrecency,
+  detectTrigger,
+  rankCandidates,
+} from './store/autocomplete.js';
 import type { HistoryEntry } from './store/history-entry.js';
 import {
   hasFileParts,
@@ -76,6 +80,10 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   const [runtimeConfig, setRuntimeConfig] = useState(config);
   const [overlay, setOverlay] = useState<OverlayState>({ type: 'none' });
   const [input, setInput] = useState('');
+  const [inputCursor, setInputCursor] = useState({ line: 0, column: 0 });
+  const [skillFrecency, setSkillFrecency] = useState<
+    ReadonlyMap<string, number>
+  >(new Map());
   const [themeName, setThemeName] = useState<ThemeName>(defaultThemeName);
   const [profile, setProfile] = useState(runtimeConfig.active_profile);
   const [primaryModel, setPrimaryModel] = useState(() =>
@@ -86,7 +94,9 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   const [inputHistory, setInputHistory] = useState<readonly string[]>([]);
   const [pendingSteers, setPendingSteers] = useState<readonly string[]>([]);
   const [dismissedPlanRequest, setDismissedPlanRequest] = useState<string>();
-  const activeTrigger = detectTrigger(currentLineBeforeCursor(input));
+  const activeTrigger = detectTrigger(
+    currentLineBeforeCursor(input, inputCursor),
+  );
   const fileQuery =
     activeTrigger?.kind === 'file' ? activeTrigger.query : undefined;
   const profileOptions = useMemo(
@@ -213,7 +223,7 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
         } else if (command.overlay === 'tasks') {
           void loadTasksOverlay(session).then(setOverlay);
         } else if (command.overlay === 'skills') {
-          void loadSkillsOverlay(runtimeConfig).then(setOverlay);
+          setOverlay({ type: 'skills', skills: session.listSkills() });
         } else if (command.overlay === 'session-selector') {
           void session
             .listSessions()
@@ -416,7 +426,11 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
           })
         : prompt;
       pushUser(prompt);
-      void session.submit(expanded);
+      void session.submit(expanded).catch((error) => {
+        session.notify(
+          `Skill invocation failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
     } catch (error) {
       session.notify(
         `Failed to attach file: ${error instanceof Error ? error.message : String(error)}`,
@@ -794,8 +808,23 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
   );
 
   const suggestions = useMemo(
-    () => completeInput(input, profileSelections, fileSuggestions),
-    [fileSuggestions, input, profileSelections],
+    () =>
+      completeInput(
+        input,
+        profileSelections,
+        fileSuggestions,
+        session.listSkills(),
+        inputCursor,
+        skillFrecency,
+      ),
+    [
+      fileSuggestions,
+      input,
+      inputCursor,
+      profileSelections,
+      session,
+      skillFrecency,
+    ],
   );
   const historyEntries = useMemo<readonly HistoryEntry[]>(
     () => [
@@ -940,13 +969,22 @@ export function CodingAgentApp({ session, config }: CodingAgentAppProps) {
               history={inputHistory}
               value={input}
               {...(suggestions !== undefined ? { suggestions } : {})}
-              onChange={(value) => {
+              onChange={(value, cursor) => {
                 setInput(value);
+                setInputCursor(cursor);
                 if (
-                  detectTrigger(currentLineBeforeCursor(value))?.kind !== 'file'
+                  detectTrigger(currentLineBeforeCursor(value, cursor))
+                    ?.kind !== 'file'
                 ) {
                   setFileSuggestions([]);
                 }
+              }}
+              onSuggestionAccepted={(suggestion) => {
+                if (typeof suggestion === 'string') return;
+                if (!suggestion.value.startsWith('$')) return;
+                setSkillFrecency((current) =>
+                  bumpFrecency(current, suggestion.value.slice(1)),
+                );
               }}
               onSubmit={onSubmit}
               onCancel={cancelOrExit}
@@ -1087,8 +1125,11 @@ async function completeFiles(
   });
 }
 
-function currentLineBeforeCursor(input: string): string {
-  return input.split('\n').at(-1) ?? '';
+function currentLineBeforeCursor(
+  input: string,
+  cursor: { readonly line: number; readonly column: number },
+): string {
+  return (input.split('\n')[cursor.line] ?? '').slice(0, cursor.column);
 }
 
 function resolvePromptPath(cwd: string, relative: string): string {
