@@ -73,10 +73,7 @@ export interface UsageSummaryRow {
   readonly uncachedInputTokens: number;
 }
 
-type CompletedModelCall = Extract<
-  EngineEvent,
-  { type: 'model.completed' }
->;
+type CompletedModelCall = Extract<EngineEvent, { type: 'model.completed' }>;
 
 export interface UsageModelCallRecord {
   readonly id: string;
@@ -115,6 +112,7 @@ export class UsageRepository {
   constructor(private readonly db: CodingDatabase) {}
 
   recordModelCall(input: CompletedModelCall): UsageModelCallRecord {
+    assertUsage(input.response.usage);
     const durationMs =
       Date.parse(input.occurredAt) - Date.parse(input.startedAt);
     if (!Number.isFinite(durationMs) || durationMs < 0) {
@@ -231,6 +229,13 @@ export class UsageRepository {
       );
     }
     const usage = input.usage ?? zeroUsage();
+    assertUsage(usage);
+    if (
+      input.estimatedCostUsd !== undefined &&
+      (!Number.isFinite(input.estimatedCostUsd) || input.estimatedCostUsd < 0)
+    ) {
+      throw new Error('Usage estimatedCostUsd must be a non-negative number.');
+    }
     const row = {
       id: randomUUID(),
       runId: input.runId ?? null,
@@ -357,6 +362,20 @@ function zeroUsage(): AgentUsage {
     cacheWriteTokens: 0,
     toolCalls: 0,
   };
+}
+
+function assertUsage(usage: AgentUsage): void {
+  const counters = Object.entries(usage) as Array<
+    [keyof AgentUsage, AgentUsage[keyof AgentUsage]]
+  >;
+  for (const [name, value] of counters) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`Usage ${name} must be a non-negative safe integer.`);
+    }
+  }
+  if (usage.cacheReadTokens > usage.inputTokens) {
+    throw new Error('Usage cacheReadTokens must not exceed inputTokens.');
+  }
 }
 
 function buildUsageFilter(filter: UsageFilter) {

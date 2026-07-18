@@ -27,7 +27,10 @@ export function completeInput(
         score:
           Math.max(
             scoreCandidate(trigger.query, skill.name),
-            scoreCandidate(trigger.query, skill.description ?? skill.title ?? '') - 100,
+            scoreCandidate(
+              trigger.query,
+              skill.description ?? skill.title ?? '',
+            ) - 100,
           ) + (skillFrecency.get(skill.name) ?? 0),
       }))
       .filter((item) => Number.isFinite(item.score))

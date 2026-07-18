@@ -1,4 +1,3 @@
-
 import type { ContextSourceLoadResult } from '../context/source-registry.js';
 import { estimateTextTokens } from '../context/source-registry.js';
 import type { AgentInput } from '../engine/index.js';

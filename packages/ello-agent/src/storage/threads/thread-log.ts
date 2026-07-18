@@ -255,7 +255,8 @@ export class ThreadLogRepository {
     const lines = content.slice(0, -1).split('\n');
     const records: ThreadRecord[] = [];
     for (const [lineIndex, line] of lines.entries()) {
-      if (line.trim() === '') throw corrupt(path, `line ${lineIndex + 1} is empty`);
+      if (line.trim() === '')
+        throw corrupt(path, `line ${lineIndex + 1} is empty`);
       let value: unknown;
       try {
         value = JSON.parse(line);
@@ -301,7 +302,11 @@ function requiresFlush(record: ThreadRecord): boolean {
   ].includes(record.kind);
 }
 
-function corrupt(path: string, reason: string, cause?: unknown): AppServerError {
+function corrupt(
+  path: string,
+  reason: string,
+  cause?: unknown,
+): AppServerError {
   return new AppServerError({
     type: 'storageCorrupt',
     message: `Thread log ${path} is corrupt: ${reason}.`,
@@ -310,7 +315,10 @@ function corrupt(path: string, reason: string, cause?: unknown): AppServerError 
   });
 }
 
-function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
+function isNodeError(
+  error: unknown,
+  code: string,
+): error is NodeJS.ErrnoException {
   return (
     error instanceof Error &&
     'code' in error &&

@@ -18,7 +18,10 @@ export class WebSocketTransport implements AppServerTransport {
   private readonly closeTimeoutMs: number;
   private closed = false;
 
-  constructor(private readonly socket: WebSocket, options: WebSocketTransportOptions = {}) {
+  constructor(
+    private readonly socket: WebSocket,
+    options: WebSocketTransportOptions = {},
+  ) {
     this.connectionId = options.connectionId ?? createEntityId('watch');
     this.closeTimeoutMs = options.closeTimeoutMs ?? 1_000;
     socket.on('message', (data) => this.incoming.push(toBytes(data)));
@@ -26,7 +29,9 @@ export class WebSocketTransport implements AppServerTransport {
     socket.once('error', (error) => this.incoming.fail(error));
   }
 
-  messages(): AsyncIterable<Uint8Array> { return this.incoming; }
+  messages(): AsyncIterable<Uint8Array> {
+    return this.incoming;
+  }
 
   send(message: Uint8Array): Promise<void> {
     if (this.closed || this.socket.readyState !== this.socket.OPEN) {

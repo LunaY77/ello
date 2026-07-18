@@ -14,12 +14,15 @@ export class AsyncByteQueue implements AsyncIterable<Uint8Array> {
     const waiter = this.waiters.shift();
     if (waiter === undefined) {
       if (this.values.length >= this.maxLength) {
-        this.fail(new Error(`Transport inbound queue exceeds ${this.maxLength} messages.`));
+        this.fail(
+          new Error(
+            `Transport inbound queue exceeds ${this.maxLength} messages.`,
+          ),
+        );
         return;
       }
       this.values.push(value);
-    }
-    else waiter.resolve({ done: false, value });
+    } else waiter.resolve({ done: false, value });
   }
 
   end(): void {
@@ -43,7 +46,8 @@ export class AsyncByteQueue implements AsyncIterable<Uint8Array> {
         const value = this.values.shift();
         if (value !== undefined) return Promise.resolve({ done: false, value });
         if (this.failure !== undefined) return Promise.reject(this.failure);
-        if (this.ended) return Promise.resolve({ done: true, value: undefined });
+        if (this.ended)
+          return Promise.resolve({ done: true, value: undefined });
         return new Promise((resolve, reject) => {
           this.waiters.push({ resolve, reject });
         });

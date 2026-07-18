@@ -7,6 +7,8 @@ import type {
   TurnExecutor,
   TurnExecutorFactory,
 } from '../../domain/ports/turn-executor.js';
+import type { SessionModeState } from '../../domain/thread/session-mode.js';
+import { createTurnTracing } from '../../observability/turn-tracing.js';
 import type {
   ApprovalDecision,
   PendingServerRequest,
@@ -25,6 +27,8 @@ import {
 import type { CodingStorage } from '../../storage/database/index.js';
 import { ThreadLogRepository } from '../../storage/threads/thread-log.js';
 import { ThreadTranscriptStore } from '../../storage/threads/transcript-store.js';
+import { CheckpointStore } from '../change/checkpoint.js';
+import { recordCheckpointChanges } from '../change/recording.js';
 import { dynamicSystemSection } from '../context/cache-layout.js';
 import { createCodingSystemPromptSection } from '../context/prompts.js';
 import type {
@@ -44,8 +48,9 @@ import {
   skillIndexContext,
   z,
 } from '../engine/index.js';
+import { createThreadGoalRuntime } from '../goals/runtime-tools.js';
 import { RulesStore } from '../permissions/rules-store.js';
-import { writePlanArtifact } from '../plans/artifact.js';
+import { readPlanArtifact, writePlanArtifact } from '../plans/artifact.js';
 import {
   createProviderRegistry,
   modelSettingsFromRole,
@@ -61,11 +66,11 @@ import {
   projectApprovalItem,
   projectToolEvent,
 } from '../tools/event-projection.js';
-import { createCodingTools } from '../tools/index.js';
 import {
   createMetaToolRuntime,
   TOOL_ROUTING_INSTRUCTIONS,
 } from '../tools/meta-tools.js';
+import { createProductionToolRuntime } from '../tools/production.js';
 import type {
   CodingToolResult,
   ToolMetadata,
@@ -131,16 +136,21 @@ class AgentTurnExecutor implements TurnExecutor {
     });
     const handle = new AgentExecutionHandle({
       agent: composition.agent,
+      checkpoints: new CheckpointStore(this.options.storage.checkpoints),
       rules: this.rules,
+      externalPaths: this.externalPaths,
+      acceptPlan: composition.acceptPlan,
+      closeAgent: composition.close,
       thread: input.thread,
       turn: input.turn,
       input: input.userInput,
       maxTurns: composition.maxTurns,
     });
     this.active = handle;
-    void handle.final.finally(() => {
+    const clearActive = () => {
       if (this.active === handle) this.active = undefined;
-    });
+    };
+    void handle.final.then(clearActive, clearActive);
     return handle;
   }
 
@@ -158,7 +168,12 @@ async function composeAgent(input: {
   readonly storage: CodingStorage;
   readonly rules: RulesStore;
   readonly externalPaths: ReadonlySet<string>;
-}): Promise<{ readonly agent: Agent; readonly maxTurns: number }> {
+}): Promise<{
+  readonly agent: Agent;
+  readonly maxTurns: number;
+  acceptPlan(): void;
+  close(): Promise<void>;
+}> {
   const settings = input.thread.settings;
   const config = await loadCodingAgentConfig({
     cwd: input.thread.thread.cwd,
@@ -194,13 +209,13 @@ async function composeAgent(input: {
   const skills = new SkillCatalog(config);
   await skills.initialize();
   const activation = new SkillActivationService(skills);
-  const modeState = {
+  let modeState: SessionModeState = {
     mode: settings.mode,
     previousMode: null,
-    source: 'resume' as const,
+    source: 'resume',
     changedAt: new Date().toISOString(),
   };
-  const codingTools = createCodingTools({
+  const productionTools = createProductionToolRuntime({
     config,
     storage: input.storage,
     taskBoardScope: {
@@ -212,10 +227,13 @@ async function composeAgent(input: {
     readRoots: () =>
       skills.list().flatMap((skill) => [skill.baseDir, skill.realPath]),
   });
-  const selected = selectTools(codingTools, definition.tools);
+  await productionTools.initialize();
+  const selected = selectTools(productionTools.tools, definition.tools);
+  const goalRuntime = createThreadGoalRuntime(input.thread.goal);
   const directTools: AnyAgentTool[] = [
     createActivateSkillTool({ service: activation }),
     createRequestUserInputTool(),
+    ...goalRuntime.tools,
   ];
   if (settings.mode === 'plan') {
     directTools.push(
@@ -261,14 +279,24 @@ async function composeAgent(input: {
       skills: skills.list(),
       contextWindow: binding.model.limit.context,
     }),
-    createCodingSystemPromptSection(config, { model: binding.ref }),
+    createCodingSystemPromptSection(config, {
+      model: binding.ref,
+      ...(productionTools.memoryIndexLoader === undefined
+        ? {}
+        : { memoryIndexLoader: productionTools.memoryIndexLoader }),
+    }),
+    dynamicSystemSection(goalRuntime.systemSection),
     ...(toolRuntime.usesToolRouting
       ? [dynamicSystemSection(() => TOOL_ROUTING_INSTRUCTIONS)]
       : []),
   ];
-  return {
-    maxTurns: definition.maxTurns ?? 100,
-    agent: createAgent({
+  const tracing = createTurnTracing(
+    config.observability?.langfuse,
+    input.thread.thread.id,
+  );
+  let agent: Agent;
+  try {
+    agent = createAgent({
       name: `ello-${definition.name}`,
       model: providerRegistry.resolveLanguageModel(
         binding.ref,
@@ -287,6 +315,9 @@ async function composeAgent(input: {
       executionTools: toolRuntime.executionTools,
       modelTools: toolRuntime.modelTools,
       transcript: new ThreadTranscriptStore(input.logs),
+      ...(tracing.eventRecorder === undefined
+        ? {}
+        : { eventRecorder: tracing.eventRecorder }),
       sessionWindow: { maxMessages: 200 },
       modelInputBudget: {
         maxInputTokens: config.context.max_input_tokens,
@@ -302,13 +333,39 @@ async function composeAgent(input: {
           }),
       },
       metadata: { threadId: input.thread.thread.id, cwd: config.cwd },
-    }),
+    });
+  } catch (error) {
+    await tracing.close();
+    throw error;
+  }
+  return {
+    agent,
+    maxTurns: definition.maxTurns ?? 100,
+    acceptPlan: () => {
+      modeState = {
+        mode: 'ask-before-changes',
+        previousMode: modeState.mode,
+        source: 'plan-accept',
+        changedAt: new Date().toISOString(),
+      };
+    },
+    close: async () => {
+      try {
+        await agent.close();
+      } finally {
+        await tracing.close();
+      }
+    },
   };
 }
 
 interface AgentExecutionHandleOptions {
   readonly agent: Agent;
+  readonly checkpoints: CheckpointStore;
   readonly rules: RulesStore;
+  readonly externalPaths: Set<string>;
+  acceptPlan(): void;
+  closeAgent(): Promise<void>;
   readonly thread: ThreadSnapshot;
   readonly turn: Turn;
   readonly input: readonly UserInput[];
@@ -376,6 +433,7 @@ class AgentExecutionHandle implements TurnExecutionHandle {
   }
 
   private async drive(): Promise<TurnExecutionResult> {
+    let usage = emptyUsage();
     try {
       let stream = this.options.agent.stream(
         { prompt: this.options.input.map(formatUserInput).join('\n') },
@@ -385,6 +443,8 @@ class AgentExecutionHandle implements TurnExecutionHandle {
         this.activeStream = stream;
         for await (const event of stream) await this.project(event);
         const result = await stream.final;
+        usage = addUsage(usage, result.usage);
+        await this.options.checkpoints.seal(result.id);
         await this.completeOpenItems();
         if (
           this.interruptReason !== undefined ||
@@ -393,7 +453,7 @@ class AgentExecutionHandle implements TurnExecutionHandle {
           this.queue.end();
           return {
             status: 'interrupted',
-            usage: result.usage,
+            usage,
             reason: this.interruptReason ?? 'agent interrupted',
           };
         }
@@ -403,14 +463,14 @@ class AgentExecutionHandle implements TurnExecutionHandle {
           if (isFailure(result)) {
             return {
               status: 'failed',
-              usage: result.usage,
+              usage,
               error: {
                 code: 'AGENT_RUN_FAILED',
                 message: `Agent finished with ${result.finishReason}.`,
               },
             };
           }
-          return { status: 'completed', usage: result.usage };
+          return { status: 'completed', usage };
         }
         const resolution = await this.resolveDeferred(pending);
         stream = this.options.agent.resume(
@@ -426,7 +486,7 @@ class AgentExecutionHandle implements TurnExecutionHandle {
       this.queue.fail(error);
       return {
         status: this.interruptReason === undefined ? 'failed' : 'interrupted',
-        usage: emptyUsage(),
+        usage,
         ...(this.interruptReason === undefined
           ? {
               error: {
@@ -438,7 +498,7 @@ class AgentExecutionHandle implements TurnExecutionHandle {
       } as TurnExecutionResult;
     } finally {
       this.activeStream = undefined;
-      await this.options.agent.close();
+      await this.options.closeAgent();
     }
   }
 
@@ -506,6 +566,12 @@ class AgentExecutionHandle implements TurnExecutionHandle {
         return;
       }
       case 'tool.completed': {
+        recordCheckpointChanges({
+          checkpoints: this.options.checkpoints,
+          cwd: this.options.thread.thread.cwd,
+          toolCallId: event.toolCallId,
+          output: event.output,
+        });
         const current = this.items.get(event.toolCallId);
         if (current !== undefined) {
           const item = completedToolItem(
@@ -520,6 +586,10 @@ class AgentExecutionHandle implements TurnExecutionHandle {
         if (plan !== undefined) {
           this.currentPlan = plan;
           this.queue.push({ type: 'planUpdated', plan });
+        }
+        const goal = writtenGoal(event.output);
+        if (goal !== undefined) {
+          this.queue.push({ type: 'goalUpdated', goal });
         }
         return;
       }
@@ -556,7 +626,7 @@ class AgentExecutionHandle implements TurnExecutionHandle {
         return;
       }
       case 'run.completed':
-        this.queue.push({ type: 'usage', usage: event.usage });
+        // 一个 Turn 可能因审批或 deferred tool 产生多个 Engine run；最终统一发布累加值。
         return;
       case 'run.failed': {
         const item: ThreadItem = {
@@ -653,6 +723,12 @@ class AgentExecutionHandle implements TurnExecutionHandle {
       const plan = this.currentPlan;
       if (plan === null)
         throw new Error('Plan approval requested before a plan exists.');
+      this.currentPlan = {
+        ...plan,
+        status: 'awaitingApproval',
+        updatedAt: new Date().toISOString(),
+      };
+      this.queue.push({ type: 'planUpdated', plan: this.currentPlan });
       this.registerInteraction(
         requestId,
         deferred,
@@ -663,8 +739,8 @@ class AgentExecutionHandle implements TurnExecutionHandle {
           itemId: deferred.toolCallId,
           reason: 'Approve the current plan.',
           availableDecisions: ['accept', 'decline', 'cancel'],
-          contentHash: plan.contentHash,
-          preview: plan.content.slice(0, 4_000),
+          contentHash: this.currentPlan.contentHash,
+          preview: this.currentPlan.content.slice(0, 4_000),
         },
         createdAt,
       );
@@ -741,6 +817,14 @@ class AgentExecutionHandle implements TurnExecutionHandle {
         if (decision.decision === 'acceptForSession') {
           await this.options.rules.addAllowRule(item, 'session');
         }
+        if (
+          decision.decision === 'accept' ||
+          decision.decision === 'acceptForSession'
+        ) {
+          for (const externalDir of approvalExternalDirs(item)) {
+            this.options.externalPaths.add(externalDir);
+          }
+        }
         approvals[item.toolCallId] = {
           approved:
             decision.decision === 'accept' ||
@@ -759,6 +843,22 @@ class AgentExecutionHandle implements TurnExecutionHandle {
           );
         } else {
           const decision = readApprovalDecision(result);
+          if (
+            decision.decision === 'accept' ||
+            decision.decision === 'acceptForSession'
+          ) {
+            const plan = this.currentPlan;
+            if (plan === null) {
+              throw new Error('Plan disappeared before approval.');
+            }
+            const artifact = await readPlanArtifact(
+              this.options.thread.thread.cwd,
+              this.options.thread.thread.id,
+            );
+            if (artifact.contentHash !== plan.contentHash) {
+              throw new Error('Plan content hash is stale.');
+            }
+          }
           toolResults[item.toolCallId] = planResult(decision);
           if (this.currentPlan !== null) {
             this.currentPlan = {
@@ -771,6 +871,16 @@ class AgentExecutionHandle implements TurnExecutionHandle {
               updatedAt: new Date().toISOString(),
             };
             this.queue.push({ type: 'planUpdated', plan: this.currentPlan });
+            if (this.currentPlan.status === 'accepted') {
+              this.options.acceptPlan();
+              this.queue.push({
+                type: 'settingsUpdated',
+                settings: {
+                  ...this.options.thread.settings,
+                  mode: 'ask-before-changes',
+                },
+              });
+            }
           }
         }
       }
@@ -939,6 +1049,19 @@ function writtenPlan(
   return (value as { readonly plan: NonNullable<ThreadSnapshot['plan']> }).plan;
 }
 
+function writtenGoal(
+  value: unknown,
+): NonNullable<ThreadSnapshot['goal']> | undefined {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    (value as { readonly kind?: unknown }).kind !== 'thread-goal-updated'
+  ) {
+    return undefined;
+  }
+  return (value as { readonly goal: NonNullable<ThreadSnapshot['goal']> }).goal;
+}
+
 function fileChanges(metadata: ToolMetadata | undefined) {
   const changes = metadata?.fileChanges;
   if (!Array.isArray(changes)) return [];
@@ -1006,10 +1129,24 @@ function readApprovalDecision(value: unknown): ApprovalDecision {
   return value as ApprovalDecision;
 }
 
+function approvalExternalDirs(item: DeferredApprovalItem): readonly string[] {
+  const externalDirs = item.metadata?.externalDirs;
+  if (externalDirs === undefined) return [];
+  if (
+    !Array.isArray(externalDirs) ||
+    externalDirs.some(
+      (entry) => typeof entry !== 'string' || entry.length === 0,
+    )
+  ) {
+    throw new Error('Approval externalDirs metadata must be a string array.');
+  }
+  return externalDirs as readonly string[];
+}
+
 function planResult(decision: ApprovalDecision): string {
   return decision.decision === 'accept' ||
     decision.decision === 'acceptForSession'
-    ? 'Plan accepted.'
+    ? 'Plan accepted. Continue by executing the approved plan.'
     : decision.decision === 'decline'
       ? 'Plan declined.'
       : 'Plan approval cancelled.';
@@ -1051,6 +1188,20 @@ function emptyUsage() {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     toolCalls: 0,
+  };
+}
+
+function addUsage(
+  left: ReturnType<typeof emptyUsage>,
+  right: ReturnType<typeof emptyUsage>,
+): ReturnType<typeof emptyUsage> {
+  return {
+    requests: left.requests + right.requests,
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
+    cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
+    toolCalls: left.toolCalls + right.toolCalls,
   };
 }
 

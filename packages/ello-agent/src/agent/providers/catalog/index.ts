@@ -1,6 +1,10 @@
 export { builtinProviderCatalog } from './catalog.js';
 export { modelSettingsFromRole } from './model-settings.js';
-export { createProviderRegistry, normalizeModelRef } from './registry.js';
+export {
+  createProviderRegistry,
+  normalizeModelRef,
+  validateProviderCatalog,
+} from './registry.js';
 export {
   prepareModelInputForRuntimeModel,
   providerOptionsForRole,

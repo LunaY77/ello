@@ -186,6 +186,18 @@ export const CLIENT_REQUEST_SCHEMAS = {
       format: z.enum(['jsonl', 'html', 'markdown']),
     })
     .strict(),
+  'artifact/read': z
+    .object({
+      artifactId: OpaqueIdSchema,
+      offset: z.number().int().nonnegative().default(0),
+      maxBytes: z
+        .number()
+        .int()
+        .min(1)
+        .max(1024 * 1024)
+        .default(256 * 1024),
+    })
+    .strict(),
   'thread/compact/start': ThreadIdParamsSchema,
   'thread/shellCommand': z
     .object({
@@ -218,7 +230,7 @@ export const CLIENT_REQUEST_SCHEMAS = {
   'thread/goal/set': z
     .object({
       threadId: OpaqueIdSchema,
-      objective: z.string().min(1),
+      objective: z.string().trim().min(1).max(4_000),
       tokenBudget: z.number().int().positive().optional(),
       status: z.enum(['active', 'paused', 'blocked', 'complete']).optional(),
     })
@@ -287,7 +299,12 @@ export const CLIENT_REQUEST_SCHEMAS = {
     .object({
       cwd: z.string().min(1),
       path: z.string().min(1),
-      maxBytes: z.number().int().positive().optional(),
+      maxBytes: z
+        .number()
+        .int()
+        .positive()
+        .max(1024 * 1024)
+        .optional(),
     })
     .strict(),
   'fs/readDirectory': z

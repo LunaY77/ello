@@ -1,5 +1,9 @@
 import { chmod, unlink } from 'node:fs/promises';
-import { createServer, type IncomingMessage, type Server as HttpServer } from 'node:http';
+import {
+  createServer,
+  type IncomingMessage,
+  type Server as HttpServer,
+} from 'node:http';
 
 import { WebSocketServer } from 'ws';
 
@@ -20,8 +24,13 @@ export interface ServerListener {
   close(): Promise<void>;
 }
 
-export async function listenEndpoint(options: ListenerOptions): Promise<ServerListener> {
-  if (options.endpoint.startsWith('ws://') || options.endpoint.startsWith('wss://')) {
+export async function listenEndpoint(
+  options: ListenerOptions,
+): Promise<ServerListener> {
+  if (
+    options.endpoint.startsWith('ws://') ||
+    options.endpoint.startsWith('wss://')
+  ) {
     return listenWebSocket(options);
   }
   if (options.endpoint.startsWith('unix://')) {
@@ -30,16 +39,24 @@ export async function listenEndpoint(options: ListenerOptions): Promise<ServerLi
   throw new Error(`Unsupported listen endpoint: ${options.endpoint}`);
 }
 
-async function listenWebSocket(options: ListenerOptions): Promise<ServerListener> {
+async function listenWebSocket(
+  options: ListenerOptions,
+): Promise<ServerListener> {
   const url = new URL(options.endpoint);
-  if (url.protocol !== 'ws:') throw new Error('wss:// server endpoints require TLS configuration and are not enabled.');
-  if (!isLoopbackHost(url.hostname)) throw new Error('ws:// listeners may only bind to a loopback address.');
+  if (url.protocol !== 'ws:')
+    throw new Error(
+      'wss:// server endpoints require TLS configuration and are not enabled.',
+    );
+  if (!isLoopbackHost(url.hostname))
+    throw new Error('ws:// listeners may only bind to a loopback address.');
   const httpServer = createServer((request, response) => {
     if (request.url === '/healthz' || request.url === '/readyz') {
       const ready = options.server.state === 'ready';
       response.statusCode = ready ? 200 : 503;
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ status: ready ? 'ready' : options.server.state }));
+      response.end(
+        JSON.stringify({ status: ready ? 'ready' : options.server.state }),
+      );
       return;
     }
     response.statusCode = 404;
@@ -84,14 +101,19 @@ async function listenWebSocket(options: ListenerOptions): Promise<ServerListener
 }
 
 async function listenUnix(options: ListenerOptions): Promise<ServerListener> {
-  const socketPath = decodeURIComponent(options.endpoint.slice('unix://'.length));
-  if (socketPath === '') throw new Error('unix:// endpoint requires a socket path.');
+  const socketPath = decodeURIComponent(
+    options.endpoint.slice('unix://'.length),
+  );
+  if (socketPath === '')
+    throw new Error('unix:// endpoint requires a socket path.');
   const httpServer = createServer((request, response) => {
     if (request.url === '/healthz' || request.url === '/readyz') {
       const ready = options.server.state === 'ready';
       response.statusCode = ready ? 200 : 503;
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ status: ready ? 'ready' : options.server.state }));
+      response.end(
+        JSON.stringify({ status: ready ? 'ready' : options.server.state }),
+      );
       return;
     }
     response.statusCode = 404;
@@ -102,9 +124,11 @@ async function listenUnix(options: ListenerOptions): Promise<ServerListener> {
   const connections = new Set<Promise<void>>();
   httpServer.on('upgrade', (request, socket, head) => {
     if (!authorizeUnix(request, options.authToken)) {
-      socket.write(options.authToken === undefined
-        ? 'HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'
-        : 'HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+      socket.write(
+        options.authToken === undefined
+          ? 'HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'
+          : 'HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n',
+      );
       socket.destroy();
       return;
     }
@@ -162,21 +186,33 @@ async function closeTransports(
   await Promise.allSettled([...connections]);
 }
 
-function authorize(request: IncomingMessage, authToken: string | undefined): boolean {
+function authorize(
+  request: IncomingMessage,
+  authToken: string | undefined,
+): boolean {
   const remote = request.socket.remoteAddress;
-  const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+  const loopback =
+    remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
   if (authToken === undefined && !loopback) return false;
   if (authToken === undefined) return true;
   return request.headers.authorization === `Bearer ${authToken}`;
 }
 
-function authorizeUnix(request: IncomingMessage, authToken: string | undefined): boolean {
+function authorizeUnix(
+  request: IncomingMessage,
+  authToken: string | undefined,
+): boolean {
   if (authToken === undefined) return true;
   return request.headers.authorization === `Bearer ${authToken}`;
 }
 
 function isLoopbackHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '[::1]' ||
+    hostname === '::1'
+  );
 }
 
 function closeHttpServer(server: HttpServer): Promise<void> {

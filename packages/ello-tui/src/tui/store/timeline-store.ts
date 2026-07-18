@@ -7,16 +7,25 @@ export interface TimelineEntry {
   readonly item: ThreadItem;
 }
 
-export function timelineFromSnapshot(snapshot: ThreadSnapshot): readonly TimelineEntry[] {
+export function timelineFromSnapshot(
+  snapshot: ThreadSnapshot,
+): readonly TimelineEntry[] {
   return snapshot.turns.flatMap((turn) =>
-    turn.items.map((item) => ({ id: item.id, turnId: turn.id, kind: item.type, item })),
+    turn.items.map((item) => ({
+      id: item.id,
+      turnId: turn.id,
+      kind: item.type,
+      item,
+    })),
   );
 }
 
 export class TimelineStore {
   private current: readonly TimelineEntry[] = [];
 
-  get entries(): readonly TimelineEntry[] { return this.current; }
+  get entries(): readonly TimelineEntry[] {
+    return this.current;
+  }
 
   replace(snapshot: ThreadSnapshot): readonly TimelineEntry[] {
     this.current = timelineFromSnapshot(snapshot);

@@ -1,9 +1,5 @@
-import type {
-  UserInputResolution,
-} from '../../api/protocol-types.js';
-import type {
-  ClientServerRequest,
-} from '../../api/server-requests.js';
+import type { UserInputResolution } from '../../api/protocol-types.js';
+import type { ClientServerRequest } from '../../api/server-requests.js';
 
 export interface ToolCallView {
   readonly id: string;
@@ -77,7 +73,11 @@ export type HistoryEntry =
       readonly entryId?: string;
       readonly text: string;
     }
-  | { readonly kind: 'subagent'; readonly id: string; readonly run: SubagentRunView }
+  | {
+      readonly kind: 'subagent';
+      readonly id: string;
+      readonly run: SubagentRunView;
+    }
   | { readonly kind: 'separator'; readonly id: string; readonly text: string }
   | { readonly kind: 'diagnostic'; readonly id: string; readonly text: string };
 

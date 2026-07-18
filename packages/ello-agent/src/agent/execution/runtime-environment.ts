@@ -11,10 +11,7 @@ import type {
   AgentShell,
 } from '../engine/index.js';
 import { createLocalShellEnvironment } from '../environment/index.js';
-import {
-  isPathInside,
-  resolveAbsolute,
-} from '../permissions/engine.js';
+import { isPathInside, resolveAbsolute } from '../permissions/engine.js';
 
 const execAsync = promisify(exec);
 
@@ -44,11 +41,7 @@ export function createRuntimeEnvironment(
   const writePaths = () =>
     runtimeAllowedPaths(config.cwd, rules(), threadExternalPaths());
   const readPaths = () => [...writePaths(), ...skillReadRoots()];
-  const fileSystem = createPolicyFileSystem(
-    config.cwd,
-    readPaths,
-    writePaths,
-  );
+  const fileSystem = createPolicyFileSystem(config.cwd, readPaths, writePaths);
   const shell = createPolicyShell(config.cwd, writePaths);
   const environment: AgentEnvironment = {
     ...base,
@@ -88,7 +81,10 @@ function createPolicyFileSystem(
       return resolveAllowedTarget(cwd, targetPath, readPaths());
     },
     readText(targetPath) {
-      return readFile(resolveAllowedTarget(cwd, targetPath, readPaths()), 'utf8');
+      return readFile(
+        resolveAllowedTarget(cwd, targetPath, readPaths()),
+        'utf8',
+      );
     },
     async writeText(targetPath, content) {
       const resolved = resolveAllowedTarget(cwd, targetPath, writePaths());
@@ -158,7 +154,9 @@ function resolveAllowedTarget(
   allowedPaths: readonly string[],
 ): string {
   const resolved = canonicalTarget(resolveAbsolute(cwd, target));
-  if (!allowedPaths.some((allowedPath) => isPathInside(allowedPath, resolved))) {
+  if (
+    !allowedPaths.some((allowedPath) => isPathInside(allowedPath, resolved))
+  ) {
     throw new Error(`Path not allowed: ${resolved}`);
   }
   return resolved;

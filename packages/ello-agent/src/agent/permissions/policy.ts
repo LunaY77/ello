@@ -1,7 +1,9 @@
-
 import type { CodingAgentConfig } from '../../config/index.js';
 import type { SessionModeState } from '../../domain/thread/session-mode.js';
-import type { AgentApprovalDecision, AgentToolContext } from '../engine/index.js';
+import type {
+  AgentApprovalDecision,
+  AgentToolContext,
+} from '../engine/index.js';
 
 import {
   defaultRulesetForMode,
@@ -52,7 +54,11 @@ export function makeApprovalPolicy(
       ...defaultRulesetForMode(currentMode),
       ...(currentMode === 'plan'
         ? []
-        : [...config.permission_rules, ...dynamicRules(), ...needApprovalRules]),
+        : [
+            ...config.permission_rules,
+            ...dynamicRules(),
+            ...needApprovalRules,
+          ]),
     ];
 
     let needsApproval = false;
@@ -208,7 +214,11 @@ function toolNeedApprovalRule(toolName: string): PermissionRule {
 function derivePermission(toolName: string): string {
   if (toolName === 'read' || toolName === 'ls') return 'read';
   if (toolName === 'grep' || toolName === 'glob') return 'search';
+  if (toolName === 'memory_read' || toolName === 'memory_list') return 'read';
+  if (toolName === 'memory_search') return 'search';
   if (toolName === 'write' || toolName === 'edit' || toolName === 'apply_patch')
+    return 'edit';
+  if (toolName === 'memory_write' || toolName === 'memory_delete')
     return 'edit';
   if (toolName === 'bash') return 'bash';
   if (toolName === 'web_fetch') return 'web_fetch';

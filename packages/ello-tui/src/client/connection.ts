@@ -32,9 +32,16 @@ export interface ClientConnection {
   close(): Promise<void>;
 }
 
-export async function connectClient(options: ClientConnectionOptions = {}): Promise<ClientConnection> {
+export async function connectClient(
+  options: ClientConnectionOptions = {},
+): Promise<ClientConnection> {
   const transport = await createTransport(options);
-  const client = new AppServerClient({ transport, ...(options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: options.requestTimeoutMs }) });
+  const client = new AppServerClient({
+    transport,
+    ...(options.requestTimeoutMs === undefined
+      ? {}
+      : { requestTimeoutMs: options.requestTimeoutMs }),
+  });
   await client.connect();
   const initialize = await client.initialize(initializeParams(options));
   return {
@@ -45,18 +52,24 @@ export async function connectClient(options: ClientConnectionOptions = {}): Prom
   };
 }
 
-export async function createTransport(options: ClientConnectionOptions): Promise<ClientTransport> {
+export async function createTransport(
+  options: ClientConnectionOptions,
+): Promise<ClientTransport> {
   const endpoint = options.endpoint ?? 'stdio://';
   if (endpoint === 'stdio://') {
     const entryPath = options.serverEntry ?? resolveServerEntry();
-    return new StdioChildTransport({ entryPath, ...(options.root === undefined ? {} : { root: options.root }) });
+    return new StdioChildTransport({
+      entryPath,
+      ...(options.root === undefined ? {} : { root: options.root }),
+    });
   }
   if (endpoint.startsWith('ws://') || endpoint.startsWith('wss://')) {
     return WebSocketTransport.connect(endpoint, options.authToken);
   }
   if (endpoint.startsWith('unix://')) {
     const socketPath = decodeURIComponent(endpoint.slice('unix://'.length));
-    if (socketPath === '') throw new Error('unix:// endpoint requires a socket path.');
+    if (socketPath === '')
+      throw new Error('unix:// endpoint requires a socket path.');
     return UnixTransport.connect(socketPath, options.authToken);
   }
   throw new Error(`Unsupported App Server endpoint ${endpoint}.`);

@@ -11,7 +11,10 @@ export class JsonlFramer {
 
   push(chunk: Uint8Array): void {
     this.buffered = Buffer.concat([this.buffered, Buffer.from(chunk)]);
-    if (this.buffered.byteLength > this.maxBytes && !this.buffered.includes(10)) {
+    if (
+      this.buffered.byteLength > this.maxBytes &&
+      !this.buffered.includes(10)
+    ) {
       this.fail(new Error(`JSON-RPC line exceeds ${this.maxBytes} bytes.`));
       return;
     }

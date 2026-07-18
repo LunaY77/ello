@@ -63,7 +63,12 @@ export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
         ? undefined
         : { kind: 'system', id: item.id, text: `reasoning: ${item.summary}` };
     case 'plan':
-      return { kind: 'assistant', id: item.id, entryId: item.id, text: item.text };
+      return {
+        kind: 'assistant',
+        id: item.id,
+        entryId: item.id,
+        text: item.text,
+      };
     case 'commandExecution':
     case 'fileChange':
     case 'toolCall':
@@ -71,16 +76,27 @@ export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
     case 'subagent':
       return { kind: 'subagent', id: item.id, run: itemToSubagentView(item) };
     case 'contextCompaction':
-      return { kind: 'system', id: item.id, text: `context compacted: ${item.summary}` };
+      return {
+        kind: 'system',
+        id: item.id,
+        text: `context compacted: ${item.summary}`,
+      };
     case 'notice':
       return { kind: 'system', id: item.id, text: item.message };
     case 'error':
-      return { kind: 'diagnostic', id: item.id, text: `${item.code}: ${item.message}` };
+      return {
+        kind: 'diagnostic',
+        id: item.id,
+        text: `${item.code}: ${item.message}`,
+      };
   }
 }
 
 export function itemToToolView(
-  item: Extract<ThreadItem, { type: 'commandExecution' | 'fileChange' | 'toolCall' }>,
+  item: Extract<
+    ThreadItem,
+    { type: 'commandExecution' | 'fileChange' | 'toolCall' }
+  >,
 ): ToolCallView {
   if (item.type === 'commandExecution') {
     return {
@@ -95,11 +111,17 @@ export function itemToToolView(
           command: item.command,
           path: item.cwd,
           ...(item.exitCode === undefined ? {} : { exitCode: item.exitCode }),
-          ...(item.durationMs === undefined ? {} : { durationMs: item.durationMs }),
-          ...(item.artifactId === undefined ? {} : { outputPath: item.artifactId }),
+          ...(item.durationMs === undefined
+            ? {}
+            : { durationMs: item.durationMs }),
+          ...(item.artifactId === undefined
+            ? {}
+            : { outputPath: item.artifactId }),
         },
       },
-      ...(item.status === 'failed' ? { error: { message: 'Command failed.' } } : {}),
+      ...(item.status === 'failed'
+        ? { error: { message: 'Command failed.' } }
+        : {}),
     };
   }
   if (item.type === 'fileChange') {
@@ -116,7 +138,14 @@ export function itemToToolView(
         },
       },
       ...(item.status === 'failed' || item.status === 'declined'
-        ? { error: { message: item.status === 'declined' ? 'Permission denied.' : 'File change failed.' } }
+        ? {
+            error: {
+              message:
+                item.status === 'declined'
+                  ? 'Permission denied.'
+                  : 'File change failed.',
+            },
+          }
         : {}),
     };
   }
@@ -129,11 +158,18 @@ export function itemToToolView(
       output: item.outputPreview ?? '',
       metadata: {
         ...(item.metadata ?? {}),
-        ...(item.artifactId === undefined ? {} : { outputPath: item.artifactId }),
+        ...(item.artifactId === undefined
+          ? {}
+          : { outputPath: item.artifactId }),
       },
     },
     ...(item.status === 'failed' || item.status === 'declined'
-      ? { error: { message: item.status === 'declined' ? 'Permission denied.' : item.headline } }
+      ? {
+          error: {
+            message:
+              item.status === 'declined' ? 'Permission denied.' : item.headline,
+          },
+        }
       : {}),
   };
 }
@@ -146,22 +182,38 @@ export function itemToSubagentView(
     agentName: item.agentName,
     description: item.description,
     background: item.background,
-    status: item.status === 'inProgress' ? 'running' : item.status === 'completed' ? 'completed' : 'fail',
+    status:
+      item.status === 'inProgress'
+        ? 'running'
+        : item.status === 'completed'
+          ? 'completed'
+          : 'fail',
     startedAt: item.createdAt,
     tools: [],
     ...(item.status === 'inProgress' ? {} : { completedAt: item.createdAt }),
     ...(item.output === undefined ? {} : { output: item.output }),
-    ...(item.status === 'failed' || item.status === 'declined' ? { error: item.output ?? item.description } : {}),
+    ...(item.status === 'failed' || item.status === 'declined'
+      ? { error: item.output ?? item.description }
+      : {}),
   };
 }
 
-function itemStatus(status: 'inProgress' | 'completed' | 'failed' | 'declined'): ToolCallView['status'] {
-  return status === 'inProgress' ? 'running' : status === 'completed' ? 'ok' : 'fail';
+function itemStatus(
+  status: 'inProgress' | 'completed' | 'failed' | 'declined',
+): ToolCallView['status'] {
+  return status === 'inProgress'
+    ? 'running'
+    : status === 'completed'
+      ? 'ok'
+      : 'fail';
 }
 
 function workedLabel(turn: Turn): string {
   if (turn.completedAt === undefined) return `Turn ${turn.status}`;
-  const durationMs = Math.max(0, Date.parse(turn.completedAt) - Date.parse(turn.startedAt));
+  const durationMs = Math.max(
+    0,
+    Date.parse(turn.completedAt) - Date.parse(turn.startedAt),
+  );
   const seconds = Math.round(durationMs / 1000);
   return turn.status === 'completed'
     ? `Worked for ${seconds}s`

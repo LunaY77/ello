@@ -5,7 +5,6 @@ import type {
 } from '../../../config/schema.js';
 import type { AgentModel, AiSdkProviderKind } from '../../engine/index.js';
 
-
 export type ModelRole = 'primary' | 'small' | 'compact' | 'title' | 'review';
 
 export const MODEL_ROLES: readonly ModelRole[] = [

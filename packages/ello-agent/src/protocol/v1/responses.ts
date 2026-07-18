@@ -8,10 +8,7 @@ import {
   OpaqueIdSchema,
   ProtocolVersionSchema,
 } from './common.js';
-import {
-  CLIENT_REQUEST_SCHEMAS,
-  type ClientMethod,
-} from './requests.js';
+import { CLIENT_REQUEST_SCHEMAS, type ClientMethod } from './requests.js';
 import {
   GoalSchema,
   PlanSchema,
@@ -30,9 +27,7 @@ export const InitializeResultSchema = z
       .strict(),
     serverCapabilities: z
       .object({
-        transports: z
-          .array(z.enum(['stdio', 'websocket', 'unix']))
-          .readonly(),
+        transports: z.array(z.enum(['stdio', 'websocket', 'unix'])).readonly(),
         methods: z.array(z.string().min(1)).readonly(),
         notifications: z.array(z.string().min(1)).readonly(),
         serverRequests: z.array(z.string().min(1)).readonly(),
@@ -195,6 +190,18 @@ export const CLIENT_RESPONSE_SCHEMAS = {
       })
       .strict(),
   ]),
+  'artifact/read': z
+    .object({
+      artifactId: OpaqueIdSchema,
+      contentType: z.string().min(1),
+      content: z.string(),
+      encoding: z.literal('base64'),
+      byteCount: NonNegativeIntegerSchema,
+      offset: NonNegativeIntegerSchema,
+      readByteCount: NonNegativeIntegerSchema,
+      eof: z.boolean(),
+    })
+    .strict(),
   'thread/compact/start': z.object({ jobId: OpaqueIdSchema }).strict(),
   'thread/shellCommand': z
     .object({

@@ -56,9 +56,9 @@ export interface IncomingServerRequest<M extends ServerRequestMethod> {
 }
 
 type NotificationListener = (notification: ServerNotification) => void;
-type ServerRequestListener = (request: IncomingServerRequest<ServerRequestMethod>) =>
-  | void
-  | Promise<void>;
+type ServerRequestListener = (
+  request: IncomingServerRequest<ServerRequestMethod>,
+) => void | Promise<void>;
 
 interface PendingRequest {
   readonly method: ClientMethod;
@@ -117,7 +117,9 @@ export class AppServerClient {
       );
     }
     if (params.protocolVersion !== ELLO_PROTOCOL_VERSION) {
-      throw new ClientProtocolError('Client protocol version is not supported.');
+      throw new ClientProtocolError(
+        'Client protocol version is not supported.',
+      );
     }
     this.currentState = 'initializing';
     try {
@@ -195,15 +197,18 @@ export class AppServerClient {
         reject,
         timer,
       });
-      void this.send({ jsonrpc: '2.0', id, method, params: parsedParams }).catch(
-        (error: unknown) => {
-          const pending = this.pending.get(id);
-          if (pending === undefined) return;
-          this.pending.delete(id);
-          clearTimeout(pending.timer);
-          reject(error);
-        },
-      );
+      void this.send({
+        jsonrpc: '2.0',
+        id,
+        method,
+        params: parsedParams,
+      }).catch((error: unknown) => {
+        const pending = this.pending.get(id);
+        if (pending === undefined) return;
+        this.pending.delete(id);
+        clearTimeout(pending.timer);
+        reject(error);
+      });
     });
   }
 
@@ -215,7 +220,9 @@ export class AppServerClient {
     await this.send({ jsonrpc: '2.0', method, params: parsedParams });
   }
 
-  private async send(message: Readonly<Record<string, unknown>>): Promise<void> {
+  private async send(
+    message: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
     if (this.currentState === 'closed' || this.closeError !== undefined) {
       throw this.closeError ?? new TransportClosedError();
     }
@@ -235,18 +242,25 @@ export class AppServerClient {
       }
       const message = RpcMessageSchema.safeParse(value);
       if (!message.success) {
-        throw new ClientProtocolError('Server sent an invalid JSON-RPC message.', {
-          cause: message.error,
-        });
+        throw new ClientProtocolError(
+          'Server sent an invalid JSON-RPC message.',
+          {
+            cause: message.error,
+          },
+        );
       }
       await this.dispatch(message.data);
     }
     if (this.currentState !== 'closed') {
-      throw new TransportClosedError('App Server transport ended unexpectedly.');
+      throw new TransportClosedError(
+        'App Server transport ended unexpectedly.',
+      );
     }
   }
 
-  private async dispatch(message: z.output<typeof RpcMessageSchema>): Promise<void> {
+  private async dispatch(
+    message: z.output<typeof RpcMessageSchema>,
+  ): Promise<void> {
     if ('id' in message && !('method' in message)) {
       this.handleResponse(message);
       return;
@@ -300,7 +314,10 @@ export class AppServerClient {
       await this.send({
         jsonrpc: '2.0',
         id: message.id,
-        error: { code: -32601, message: `Unknown Server Request ${message.method}.` },
+        error: {
+          code: -32601,
+          message: `Unknown Server Request ${message.method}.`,
+        },
       });
       return;
     }

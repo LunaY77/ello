@@ -40,6 +40,22 @@ export interface CompactMessagesOptions {
 export function compactMessages(
   options: CompactMessagesOptions,
 ): MessageTransform {
+  if (
+    !Number.isSafeInteger(options.maxInputTokens) ||
+    options.maxInputTokens < 1
+  ) {
+    throw new Error('maxInputTokens must be a positive safe integer.');
+  }
+  const reserved = options.reservedOutputTokens ?? 0;
+  if (
+    !Number.isSafeInteger(reserved) ||
+    reserved < 0 ||
+    reserved >= options.maxInputTokens
+  ) {
+    throw new Error(
+      'reservedOutputTokens must be a non-negative safe integer below maxInputTokens.',
+    );
+  }
   return async (messages) => applyTokenBudget(messages, options);
 }
 

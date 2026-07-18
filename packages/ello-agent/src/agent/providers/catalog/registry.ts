@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
-
 import type { CodingAgentConfig } from '../../../config/index.js';
 import type {
   ModelCatalogEntryConfig,
@@ -39,7 +38,7 @@ class DefaultProviderRegistry implements ProviderRegistry {
   private readonly profiles: Map<string, RuntimeProfileSuite>;
 
   constructor(config: CodingAgentConfig) {
-    this.providers = buildProviders(config);
+    this.providers = buildProviders(config, true);
     this.models = buildModels(config, this.providers);
     this.profiles = buildProfiles(config, this.models);
   }
@@ -125,8 +124,16 @@ class DefaultProviderRegistry implements ProviderRegistry {
   }
 }
 
+/** 校验 provider/model/profile 引用，但不读取凭证文件或环境变量。 */
+export function validateProviderCatalog(config: CodingAgentConfig): void {
+  const providers = buildProviders(config, false);
+  const models = buildModels(config, providers);
+  buildProfiles(config, models);
+}
+
 function buildProviders(
   config: CodingAgentConfig,
+  resolveCredentials: boolean,
 ): Map<string, RuntimeProvider> {
   const providers = new Map<string, RuntimeProvider>();
   for (const [id, provider] of Object.entries({
@@ -139,6 +146,7 @@ function buildProviders(
         id,
         provider,
         id in config.provider ? 'config' : 'builtin',
+        resolveCredentials,
       ),
     );
   }
@@ -149,8 +157,9 @@ function runtimeProvider(
   id: string,
   provider: ProviderConnectionConfig,
   source: RuntimeProvider['source'],
+  resolveCredentials: boolean,
 ): RuntimeProvider {
-  const apiKey = resolveApiKey(provider);
+  const apiKey = resolveCredentials ? resolveApiKey(provider) : undefined;
   return {
     id,
     name: provider.name ?? id,

@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const packageDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+);
 const distDir = path.join(packageDir, 'dist');
 const buildDir = path.join(packageDir, `.dist-build-${process.pid}`);
 const previousDir = path.join(packageDir, `.dist-previous-${process.pid}`);

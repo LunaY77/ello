@@ -182,6 +182,7 @@ export function OverlayHost({
         <PlanApprovalPanel
           request={overlay.request}
           plan={overlay.plan}
+          submitting={resolvingRequestId === overlay.request.id}
           onAccept={onAcceptPlan}
           onChat={onChatAboutPlan}
           onDeny={onDenyPlan}
@@ -435,12 +436,14 @@ function UserInputPanel({
 function PlanApprovalPanel({
   request,
   plan,
+  submitting,
   onAccept,
   onChat,
   onDeny,
 }: {
   readonly request: ApprovalServerRequest;
   readonly plan: Plan;
+  readonly submitting: boolean;
   readonly onAccept: OverlayHostProps['onAcceptPlan'];
   readonly onChat: OverlayHostProps['onChatAboutPlan'];
   readonly onDeny: OverlayHostProps['onDenyPlan'];
@@ -463,13 +466,15 @@ function PlanApprovalPanel({
       if (!key.ctrl && !key.meta && input.length > 0)
         setPrompt((value) => value + input);
     },
-    { isActive: chatting },
+    { isActive: chatting && !submitting },
   );
   return (
     <Panel title="Plan ready for approval" color={theme.warning}>
       <Text color={theme.textMuted}>{plan.path}</Text>
       <Text wrap="wrap">{plan.content}</Text>
-      {chatting ? (
+      {submitting ? (
+        <Text color={theme.textMuted}>Submitting decision…</Text>
+      ) : chatting ? (
         <Text color={theme.accent}>{`Chat: ${prompt}_`}</Text>
       ) : (
         <InlineSelect

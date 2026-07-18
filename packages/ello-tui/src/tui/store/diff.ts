@@ -15,7 +15,11 @@ export interface DiffSummary {
 }
 
 export type PatchDiffRow =
-  | { readonly kind: 'file'; readonly status: 'A' | 'D' | 'M' | 'R'; readonly path: string }
+  | {
+      readonly kind: 'file';
+      readonly status: 'A' | 'D' | 'M' | 'R';
+      readonly path: string;
+    }
   | { readonly kind: 'hunk'; readonly text: string }
   | {
       readonly kind: 'line';
@@ -56,7 +60,12 @@ export function parseUnifiedDiff(diff: string): readonly DiffLine[] {
       lines.push({ kind: 'del', text: raw.slice(1), oldNo });
       oldNo += 1;
     } else {
-      lines.push({ kind: 'context', text: raw.startsWith(' ') ? raw.slice(1) : raw, oldNo, newNo });
+      lines.push({
+        kind: 'context',
+        text: raw.startsWith(' ') ? raw.slice(1) : raw,
+        oldNo,
+        newNo,
+      });
       oldNo += 1;
       newNo += 1;
     }
@@ -64,7 +73,9 @@ export function parseUnifiedDiff(diff: string): readonly DiffLine[] {
   return lines;
 }
 
-export function summarizeDiff(diff: string | readonly FileChange[]): DiffSummary {
+export function summarizeDiff(
+  diff: string | readonly FileChange[],
+): DiffSummary {
   if (typeof diff !== 'string') {
     return diff.reduce(
       (summary, change) => {
@@ -94,21 +105,42 @@ export function readFileChanges(value: unknown): readonly FileChange[] {
   });
 }
 
-export function unifiedDiffFromFileChanges(changes: readonly FileChange[]): string {
-  return changes.map((change) => change.diff ?? '').filter((diff) => diff !== '').join('\n');
+export function unifiedDiffFromFileChanges(
+  changes: readonly FileChange[],
+): string {
+  return changes
+    .map((change) => change.diff ?? '')
+    .filter((diff) => diff !== '')
+    .join('\n');
 }
 
-export function patchDiffRows(changes: readonly FileChange[]): readonly PatchDiffRow[] {
+export function patchDiffRows(
+  changes: readonly FileChange[],
+): readonly PatchDiffRow[] {
   const rows: PatchDiffRow[] = [];
   for (const change of changes) {
     rows.push({
       kind: 'file',
-      status: change.kind === 'add' ? 'A' : change.kind === 'delete' ? 'D' : change.kind === 'rename' ? 'R' : 'M',
-      path: change.kind === 'rename' && change.oldPath !== undefined ? `${change.oldPath} → ${change.path}` : change.path,
+      status:
+        change.kind === 'add'
+          ? 'A'
+          : change.kind === 'delete'
+            ? 'D'
+            : change.kind === 'rename'
+              ? 'R'
+              : 'M',
+      path:
+        change.kind === 'rename' && change.oldPath !== undefined
+          ? `${change.oldPath} → ${change.path}`
+          : change.path,
     });
     for (const line of parseUnifiedDiff(change.diff ?? '')) {
       if (line.kind === 'hunk') rows.push({ kind: 'hunk', text: line.text });
-      else if (line.kind === 'add' || line.kind === 'del' || line.kind === 'context') {
+      else if (
+        line.kind === 'add' ||
+        line.kind === 'del' ||
+        line.kind === 'context'
+      ) {
         rows.push({
           kind: 'line',
           lineKind: line.kind,
@@ -127,7 +159,10 @@ function isFileChange(value: unknown): value is FileChange {
   const record = value as Record<string, unknown>;
   return (
     typeof record.path === 'string' &&
-    (record.kind === 'add' || record.kind === 'modify' || record.kind === 'delete' || record.kind === 'rename') &&
+    (record.kind === 'add' ||
+      record.kind === 'modify' ||
+      record.kind === 'delete' ||
+      record.kind === 'rename') &&
     (record.oldPath === undefined || typeof record.oldPath === 'string') &&
     (record.diff === undefined || typeof record.diff === 'string')
   );

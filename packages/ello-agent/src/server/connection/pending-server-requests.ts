@@ -80,7 +80,9 @@ export class PendingServerRequests {
       return;
     }
     try {
-      pending.resolve(parseServerRequestResult(pending.method, response.result));
+      pending.resolve(
+        parseServerRequestResult(pending.method, response.result),
+      );
     } catch (error) {
       pending.reject(
         new AppServerError({

@@ -7,7 +7,6 @@ import {
 } from '../../config/index.js';
 import type { AgentSkill } from '../engine/index.js';
 
-
 import { loadSkillsFromDir } from './loader.js';
 import { SkillSearchIndex } from './search-index.js';
 

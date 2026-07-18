@@ -3,10 +3,15 @@ import { watch, type FSWatcher } from 'node:fs';
 import {
   access,
   lstat,
+  mkdir,
+  mkdtemp,
   readFile,
   readdir,
   realpath,
+  rm,
+  writeFile,
 } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -15,7 +20,7 @@ import { readPlanArtifact } from '../../agent/plans/artifact.js';
 import { createProviderRegistry } from '../../agent/providers/catalog/index.js';
 import { SkillCatalog } from '../../agent/skills/index.js';
 import { createAgentRegistry } from '../../agent/subagents/registry.js';
-import { createCodingTools } from '../../agent/tools/index.js';
+import { createProductionToolRuntime } from '../../agent/tools/production.js';
 import {
   ensureGlobalConfig,
   ensureProjectConfig,
@@ -25,6 +30,7 @@ import {
   projectConfigPath,
   writeConfigPath,
 } from '../../config/index.js';
+import { stringifyYamlConfig } from '../../config/yaml.js';
 import { createEntityId } from '../../domain/ids.js';
 import {
   AppServerError,
@@ -46,9 +52,12 @@ import { resolveWorkspaceMount } from '../../workspace/paths.js';
 import type { ServerConnection } from '../connection/server-connection.js';
 import { ThreadManager } from '../runtime/thread-manager.js';
 
+import { sanitizeConfigForResponse } from './config-response.js';
+
 const execAsync = promisify(exec);
 const INLINE_ARTIFACT_BYTES = 256 * 1024;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
+const ARTIFACT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface RpcServices {
   dispatch(
@@ -56,6 +65,7 @@ export interface RpcServices {
     method: ClientMethod,
     params: unknown,
   ): Promise<unknown>;
+  closeConnection?(connectionId: string): void;
   close(): Promise<void>;
 }
 
@@ -67,7 +77,11 @@ export interface ServerServicesOptions {
 
 /** 除核心 Thread/Turn 生命周期外，所有产品 RPC 的唯一实现表。 */
 export class ServerServices implements RpcServices {
-  private readonly watchers = new Map<string, FSWatcher>();
+  private readonly watchers = new Map<
+    string,
+    { readonly connectionId: string; readonly watcher: FSWatcher }
+  >();
+  private artifactGc: Promise<unknown> | undefined;
 
   constructor(private readonly options: ServerServicesOptions) {}
 
@@ -76,12 +90,20 @@ export class ServerServices implements RpcServices {
     method: ClientMethod,
     rawParams: unknown,
   ): Promise<unknown> {
+    await (this.artifactGc ??= this.collectExpiredArtifacts());
     switch (method) {
       case 'thread/export':
-        return this.exportThread(rawParams as ParsedClientParams<'thread/export'>);
+        return this.exportThread(
+          rawParams as ParsedClientParams<'thread/export'>,
+        );
+      case 'artifact/read':
+        return this.readArtifact(
+          rawParams as ParsedClientParams<'artifact/read'>,
+        );
       case 'thread/compact/start': {
-        const params = rawParams as ParsedClientParams<'thread/compact/start'>;
-        return { jobId: await this.options.threads.compact(params.threadId) };
+        throw invalid(
+          'Manual context compaction is unavailable because no production compaction runner is configured.',
+        );
       }
       case 'thread/shellCommand':
         return this.runThreadShell(
@@ -105,7 +127,9 @@ export class ServerServices implements RpcServices {
       }
       case 'thread/goal/clear': {
         const params = rawParams as ParsedClientParams<'thread/goal/clear'>;
-        return { goalId: await this.options.threads.clearGoal(params.threadId) };
+        return {
+          goalId: await this.options.threads.clearGoal(params.threadId),
+        };
       }
       case 'thread/plan/read': {
         const params = rawParams as ParsedClientParams<'thread/plan/read'>;
@@ -118,7 +142,9 @@ export class ServerServices implements RpcServices {
       case 'config/read':
         return this.readConfig(rawParams as ParsedClientParams<'config/read'>);
       case 'config/write':
-        return this.writeConfig(rawParams as ParsedClientParams<'config/write'>);
+        return this.writeConfig(
+          rawParams as ParsedClientParams<'config/write'>,
+        );
       case 'config/init':
         return this.initializeConfig(
           rawParams as ParsedClientParams<'config/init'>,
@@ -151,11 +177,12 @@ export class ServerServices implements RpcServices {
           rawParams as ParsedClientParams<'memory/status'>,
         );
       case 'memory/reload':
-        await this.reloadMemory(rawParams as ParsedClientParams<'memory/reload'>);
+        await this.reloadMemory(
+          rawParams as ParsedClientParams<'memory/reload'>,
+        );
         return { ok: true };
       case 'memory/dream/start':
         return this.startMemoryJob(
-          connection,
           rawParams as ParsedClientParams<'memory/dream/start'>,
         );
       case 'task/list':
@@ -190,7 +217,10 @@ export class ServerServices implements RpcServices {
           rawParams as ParsedClientParams<'fs/watch'>,
         );
       case 'fs/unwatch':
-        return this.unwatchFiles(rawParams as ParsedClientParams<'fs/unwatch'>);
+        return this.unwatchFiles(
+          connection,
+          rawParams as ParsedClientParams<'fs/unwatch'>,
+        );
       case 'repo/add':
       case 'repo/list':
       case 'repo/read':
@@ -248,13 +278,27 @@ export class ServerServices implements RpcServices {
   }
 
   async close(): Promise<void> {
-    for (const watcher of this.watchers.values()) watcher.close();
+    for (const { watcher } of this.watchers.values()) watcher.close();
     this.watchers.clear();
+    await this.artifactGc;
+    await this.collectExpiredArtifacts();
   }
 
-  private async exportThread(
-    params: ParsedClientParams<'thread/export'>,
-  ) {
+  closeConnection(connectionId: string): void {
+    for (const [watchId, owned] of this.watchers) {
+      if (owned.connectionId !== connectionId) continue;
+      owned.watcher.close();
+      this.watchers.delete(watchId);
+    }
+  }
+
+  private collectExpiredArtifacts() {
+    return this.options.storage.artifacts.deleteExpiredReferences(
+      new Date(Date.now() - ARTIFACT_RETENTION_MS).toISOString(),
+    );
+  }
+
+  private async exportThread(params: ParsedClientParams<'thread/export'>) {
     const snapshot = await this.options.threads.read({
       threadId: params.threadId,
       includeTurns: true,
@@ -293,6 +337,32 @@ export class ServerServices implements RpcServices {
       artifactId: artifact.id,
       byteCount: artifact.byteSize,
       mediaType,
+    };
+  }
+
+  private async readArtifact(params: ParsedClientParams<'artifact/read'>) {
+    const metadata = this.options.storage.artifacts.metadata(params.artifactId);
+    if (params.offset > metadata.byteSize) {
+      throw invalid(
+        `Artifact offset ${params.offset} exceeds byte size ${metadata.byteSize}.`,
+      );
+    }
+    const content = await this.options.storage.artifacts.read(
+      params.artifactId,
+    );
+    const chunk = content.subarray(
+      params.offset,
+      Math.min(metadata.byteSize, params.offset + params.maxBytes),
+    );
+    return {
+      artifactId: metadata.id,
+      contentType: metadata.contentType,
+      content: chunk.toString('base64'),
+      encoding: 'base64' as const,
+      byteCount: metadata.byteSize,
+      offset: params.offset,
+      readByteCount: chunk.byteLength,
+      eof: params.offset + chunk.byteLength >= metadata.byteSize,
     };
   }
 
@@ -336,7 +406,10 @@ export class ServerServices implements RpcServices {
             ? failure.code
             : 1;
       stdout = failure.stdout ?? '';
-      stderr = failure.killed === true ? 'timeout' : (failure.stderr ?? failure.message);
+      stderr =
+        failure.killed === true
+          ? 'timeout'
+          : (failure.stderr ?? failure.message);
     }
     const fullOutput = `${stdout}${stderr}`;
     const response = {
@@ -356,7 +429,12 @@ export class ServerServices implements RpcServices {
         relation: params.threadId,
       },
     });
-    return { ...response, artifactId: artifact.id };
+    return {
+      ...response,
+      stdout: utf8Prefix(stdout, INLINE_ARTIFACT_BYTES / 2),
+      stderr: utf8Prefix(stderr, INLINE_ARTIFACT_BYTES / 2),
+      artifactId: artifact.id,
+    };
   }
 
   private async previewPlan(params: ParsedClientParams<'thread/plan/preview'>) {
@@ -383,7 +461,9 @@ export class ServerServices implements RpcServices {
   }
 
   private async readConfig(params: ParsedClientParams<'config/read'>) {
-    const config = toJson(await loadCodingAgentConfig({ cwd: params.cwd }));
+    const config = sanitizeConfigForResponse(
+      toJson(await loadCodingAgentConfig({ cwd: params.cwd })),
+    );
     if (!params.includeSources) return { config };
     const sources = await loadConfigSources(params.cwd);
     return {
@@ -393,7 +473,7 @@ export class ServerServices implements RpcServices {
           name: source.name,
           path: source.path ?? null,
           exists: source.path === undefined ? true : await exists(source.path),
-          value: toJson(source.data),
+          value: sanitizeConfigForResponse(toJson(source.data)),
         })),
       ),
     };
@@ -408,7 +488,7 @@ export class ServerServices implements RpcServices {
         ? { type: 'set', value: params.value }
         : { type: 'delete' },
     );
-    return { config: toJson(config) };
+    return { config: sanitizeConfigForResponse(toJson(config)) };
   }
 
   private async initializeConfig(params: ParsedClientParams<'config/init'>) {
@@ -435,37 +515,41 @@ export class ServerServices implements RpcServices {
   private async listProviders(params: ParsedClientParams<'provider/list'>) {
     const config = await loadCodingAgentConfig({ cwd: params.cwd });
     return {
-      data: createProviderRegistry(config).listProviders().map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        enabled: provider.enabled,
-        metadata: {
-          kind: provider.kind,
-          source: provider.source,
-          apiKeyConfigured: provider.apiKey !== undefined,
-          baseUrlConfigured: provider.baseUrl !== undefined,
-        },
-      })),
+      data: createProviderRegistry(config)
+        .listProviders()
+        .map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          enabled: provider.enabled,
+          metadata: {
+            kind: provider.kind,
+            source: provider.source,
+            apiKeyConfigured: provider.apiKey !== undefined,
+            baseUrlConfigured: provider.baseUrl !== undefined,
+          },
+        })),
     };
   }
 
   private async listModels(params: ParsedClientParams<'model/list'>) {
     const config = await loadCodingAgentConfig({ cwd: params.cwd });
     return {
-      data: createProviderRegistry(config).listModels().map((model) => ({
-        id: model.ref,
-        name: model.name,
-        title: model.ref,
-        enabled: model.status === 'active',
-        metadata: {
-          provider: model.providerId,
-          status: model.status,
-          context: model.limit.context,
-          output: model.limit.output,
-          toolCall: model.capabilities.toolCall,
-          reasoning: model.capabilities.reasoning,
-        },
-      })),
+      data: createProviderRegistry(config)
+        .listModels()
+        .map((model) => ({
+          id: model.ref,
+          name: model.name,
+          title: model.ref,
+          enabled: model.status === 'active',
+          metadata: {
+            provider: model.providerId,
+            status: model.status,
+            context: model.limit.context,
+            output: model.limit.output,
+            toolCall: model.capabilities.toolCall,
+            reasoning: model.capabilities.reasoning,
+          },
+        })),
     };
   }
 
@@ -473,23 +557,33 @@ export class ServerServices implements RpcServices {
     const config = await loadCodingAgentConfig({ cwd: params.cwd });
     const registry = await createAgentRegistry(config);
     return {
-      data: registry.list().map((agent) => ({
-        id: agent.name,
-        name: agent.name,
-        description: agent.description,
-        enabled: agent.hidden !== true,
-        metadata: {
-          mode: agent.mode,
-          role: agent.role,
-          source: agent.source,
-        },
-      })),
+      data: registry.list().map((agent) => {
+        const primaryAvailable =
+          agent.hidden !== true &&
+          (agent.mode === 'primary' || agent.mode === 'all');
+        return {
+          id: agent.name,
+          name: agent.name,
+          description: agent.description,
+          enabled: primaryAvailable,
+          metadata: {
+            mode: agent.mode,
+            role: agent.role,
+            source: agent.source,
+            runtime: primaryAvailable
+              ? 'primary'
+              : agent.mode === 'subagent'
+                ? 'unavailable:no-delegation-runner'
+                : 'internal-only',
+          },
+        };
+      }),
     };
   }
 
   private async listTools(params: ParsedClientParams<'tool/list'>) {
     const config = await loadCodingAgentConfig({ cwd: params.cwd });
-    const tools = createCodingTools({
+    const runtime = createProductionToolRuntime({
       config,
       storage: this.options.storage,
       taskBoardScope: {
@@ -504,7 +598,7 @@ export class ServerServices implements RpcServices {
       }),
     });
     return {
-      data: tools.map((tool) => ({
+      data: runtime.tools.map((tool) => ({
         id: tool.name,
         name: tool.name,
         description: tool.description,
@@ -519,7 +613,9 @@ export class ServerServices implements RpcServices {
   }
 
   private async skillCatalog(
-    params: ParsedClientParams<'skills/list'> | ParsedClientParams<'skills/get'>,
+    params:
+      | ParsedClientParams<'skills/list'>
+      | ParsedClientParams<'skills/get'>,
   ) {
     const config = await loadCodingAgentConfig({ cwd: params.cwd });
     const catalog = new SkillCatalog(config);
@@ -549,7 +645,10 @@ export class ServerServices implements RpcServices {
     const skills = await catalog.reload();
     await connection.sendNotification({
       method: 'skills/changed',
-      params: { cwd: params.cwd, paths: skills.map((skill) => skill.skillPath) },
+      params: {
+        cwd: params.cwd,
+        paths: skills.map((skill) => skill.skillPath),
+      },
     });
     return { data: skills.map(skillEntry) };
   }
@@ -585,48 +684,23 @@ export class ServerServices implements RpcServices {
   }
 
   private async startMemoryJob(
-    connection: ServerConnection,
     params: ParsedClientParams<'memory/dream/start'>,
   ) {
-    const jobId = createEntityId('job');
-    void (async () => {
-      await connection.sendNotification({
-        method: 'memory/job/updated',
-        params: {
-          ...(params.threadId === undefined ? {} : { threadId: params.threadId }),
-          jobId,
-          status: 'running',
-        },
-      });
-      try {
-        await this.memoryRepository(params.cwd);
-        await connection.sendNotification({
-          method: 'memory/job/updated',
-          params: {
-            ...(params.threadId === undefined ? {} : { threadId: params.threadId }),
-            jobId,
-            status: 'completed',
-          },
-        });
-      } catch (error) {
-        await connection.sendNotification({
-          method: 'memory/job/updated',
-          params: {
-            ...(params.threadId === undefined ? {} : { threadId: params.threadId }),
-            jobId,
-            status: 'failed',
-            details: { message: errorMessage(error) },
-          },
-        });
-      }
-    })().catch(() => undefined);
-    return { jobId };
+    const config = await loadCodingAgentConfig({ cwd: params.cwd });
+    if (!config.context.memory.enabled) {
+      throw invalid('Memory is disabled by Server configuration.');
+    }
+    throw invalid(
+      'Memory dream is unavailable because no production dream runner is configured.',
+    );
   }
 
   private board(boardId: string) {
     const repository = this.options.storage.taskBoards;
     const board = repository.getBoardById(boardId);
-    return board ?? repository.getOrCreateBoard({ type: 'global', name: boardId });
+    return (
+      board ?? repository.getOrCreateBoard({ type: 'global', name: boardId })
+    );
   }
 
   private listTasks(params: ParsedClientParams<'task/list'>) {
@@ -656,7 +730,9 @@ export class ServerServices implements RpcServices {
     const task = this.options.storage.taskBoards.createTask(board.id, {
       subject: params.subject,
       description: params.description,
-      ...(params.activeForm === undefined ? {} : { activeForm: params.activeForm }),
+      ...(params.activeForm === undefined
+        ? {}
+        : { activeForm: params.activeForm }),
       ...(params.owner === undefined ? {} : { owner: params.owner }),
       blockedBy: params.blockedBy,
       metadata: toJson(params.metadata) as Record<string, unknown>,
@@ -695,7 +771,9 @@ export class ServerServices implements RpcServices {
 
   private deleteTask(params: ParsedClientParams<'task/delete'>) {
     const current = this.requireTask(params.id);
-    if (!this.options.storage.taskBoards.deleteTask(current.boardId, current.id)) {
+    if (
+      !this.options.storage.taskBoards.deleteTask(current.boardId, current.id)
+    ) {
       throw invalid(`Task ${params.id} was not deleted.`);
     }
     return { ok: true };
@@ -728,15 +806,24 @@ export class ServerServices implements RpcServices {
 
   private async readFile(params: ParsedClientParams<'fs/readFile'>) {
     const target = await existingPathInside(params.cwd, params.path);
-    const content = await readFile(target, 'utf8');
-    const byteCount = Buffer.byteLength(content);
+    const info = await lstat(target);
+    if (!info.isFile()) throw invalid(`Path is not a regular file: ${target}.`);
+    if (info.size > MAX_FILE_BYTES) {
+      throw invalid(`File exceeds the ${MAX_FILE_BYTES} byte read limit.`);
+    }
+    const contentBytes = await readFile(target);
+    if (contentBytes.byteLength > MAX_FILE_BYTES) {
+      throw invalid(`File exceeds the ${MAX_FILE_BYTES} byte read limit.`);
+    }
+    const content = decodeUtf8(contentBytes, target);
+    const byteCount = contentBytes.byteLength;
     const maxBytes = params.maxBytes ?? INLINE_ARTIFACT_BYTES;
     if (byteCount <= maxBytes) {
       return { path: target, content, byteCount, truncated: false };
     }
     const artifact = await this.options.storage.artifacts.put({
       kind: 'file-read',
-      content,
+      content: contentBytes,
       contentType: 'text/plain',
       owner: {
         kind: 'tool-result',
@@ -744,10 +831,9 @@ export class ServerServices implements RpcServices {
         relation: target,
       },
     });
-    const previewBuffer = Buffer.from(content).subarray(0, maxBytes);
     return {
       path: target,
-      content: previewBuffer.toString('utf8'),
+      content: utf8Prefix(content, maxBytes),
       byteCount,
       truncated: true,
       artifactId: artifact.id,
@@ -777,14 +863,19 @@ export class ServerServices implements RpcServices {
   private async fileMetadata(params: ParsedClientParams<'fs/getMetadata'>) {
     const target = lexicalPathInside(params.cwd, params.path);
     const info = await lstat(target);
-    if (info.isSymbolicLink()) await existingPathInside(params.cwd, params.path);
+    if (info.isSymbolicLink())
+      await existingPathInside(params.cwd, params.path);
     return metadata(target, info);
   }
 
   private async searchFiles(params: ParsedClientParams<'fs/search'>) {
     const root = await existingPathInside(params.cwd, '.');
     const query = params.query.toLocaleLowerCase();
-    const results: Array<{ name: string; path: string; kind: 'file' | 'directory' | 'symlink' }> = [];
+    const results: Array<{
+      name: string;
+      path: string;
+      kind: 'file' | 'directory' | 'symlink';
+    }> = [];
     const pending = [root];
     while (pending.length > 0 && results.length < params.limit) {
       const directory = pending.shift()!;
@@ -837,14 +928,22 @@ export class ServerServices implements RpcServices {
         for (const watcher of watchers) watcher.close();
       },
     } as FSWatcher;
-    this.watchers.set(watchId, combined);
+    this.watchers.set(watchId, {
+      connectionId: connection.id,
+      watcher: combined,
+    });
     return { watchId };
   }
 
-  private unwatchFiles(params: ParsedClientParams<'fs/unwatch'>) {
-    const watcher = this.watchers.get(params.watchId);
-    if (watcher === undefined) throw invalid(`Unknown watch ${params.watchId}.`);
-    watcher.close();
+  private unwatchFiles(
+    connection: ServerConnection,
+    params: ParsedClientParams<'fs/unwatch'>,
+  ) {
+    const owned = this.watchers.get(params.watchId);
+    if (owned === undefined || owned.connectionId !== connection.id) {
+      throw invalid(`Unknown watch ${params.watchId}.`);
+    }
+    owned.watcher.close();
     this.watchers.delete(params.watchId);
     return { ok: true };
   }
@@ -870,7 +969,11 @@ export class ServerServices implements RpcServices {
       }
       case 'repo/rename': {
         const params = rawParams as ParsedClientParams<'repo/rename'>;
-        return { repository: protocolRepository(store.rename(params.repo, params.name)) };
+        return {
+          repository: protocolRepository(
+            store.rename(params.repo, params.name),
+          ),
+        };
       }
       case 'repo/remove': {
         const params = rawParams as ParsedClientParams<'repo/remove'>;
@@ -886,12 +989,19 @@ export class ServerServices implements RpcServices {
       }
       case 'repo/fetchLocal': {
         const params = rawParams as ParsedClientParams<'repo/fetchLocal'>;
-        return { repository: protocolRepository(await store.fetchLocal(params.repo, params.path)) };
+        return {
+          repository: protocolRepository(
+            await store.fetchLocal(params.repo, params.path),
+          ),
+        };
       }
       case 'repo/remote/read': {
         const params = rawParams as ParsedClientParams<'repo/remote/read'>;
         const remote = store.remoteShow(params.repo);
-        return { remotes: remote.remoteUrl === null ? {} : { origin: remote.remoteUrl } };
+        return {
+          remotes:
+            remote.remoteUrl === null ? {} : { origin: remote.remoteUrl },
+        };
       }
       case 'repo/remote/add':
       case 'repo/remote/set': {
@@ -906,40 +1016,101 @@ export class ServerServices implements RpcServices {
       case 'repo/remote/remove': {
         const params = rawParams as ParsedClientParams<'repo/remote/remove'>;
         assertOrigin(params.name);
-        return { repository: protocolRepository(await store.remoteRemove(params.repo)) };
+        return {
+          repository: protocolRepository(await store.remoteRemove(params.repo)),
+        };
       }
       case 'repo/export': {
         const params = rawParams as ParsedClientParams<'repo/export'>;
-        const selected =
-          params.repos === undefined
-            ? store.list()
-            : params.repos.map((key) => {
-                const repository = store.show(key);
-                if (repository === null) throw invalid(`Unknown repo ${key}.`);
-                return repository;
-              });
-        return {
-          document: {
-            formatVersion: 1,
-            repositories: selected.map((repository) => ({
-              key: repository.key,
-              source: repository.remoteUrl,
-              defaultBranch: repository.defaultBranch,
-            })),
-          },
-        };
+        return this.exportRepositories(store, params.repos ?? []);
       }
       case 'repo/import': {
         const params = rawParams as ParsedClientParams<'repo/import'>;
-        const entries = readRepositoryImport(params.document);
-        const repositories = [];
-        for (const entry of entries) {
-          repositories.push(await store.add(entry.source, entry.key));
-        }
-        return { data: repositories.map(protocolRepository) };
+        return this.importRepositories(store, params.document);
       }
       default:
         throw invalid(`Invalid repo method ${method}.`);
+    }
+  }
+
+  private async exportRepositories(store: RepoStore, keys: readonly string[]) {
+    const temporaryRoot = await mkdtemp(
+      path.join(tmpdir(), 'ello-repo-export-'),
+    );
+    const outputDir = path.join(temporaryRoot, 'portable');
+    try {
+      const exported = await store.export(keys, outputDir);
+      return {
+        document: {
+          formatVersion: exported.formatVersion,
+          exportedAt: exported.exportedAt,
+          repositories: await Promise.all(
+            exported.repositories.map(async (repository) => ({
+              key: repository.key,
+              remoteUrl: repository.remoteUrl,
+              defaultBranch: repository.defaultBranch,
+              ...(repository.bundle === undefined
+                ? {}
+                : {
+                    bundle: {
+                      encoding: 'base64',
+                      data: await readFile(
+                        path.join(outputDir, repository.bundle),
+                        'base64',
+                      ),
+                    },
+                  }),
+            })),
+          ),
+        },
+      };
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  }
+
+  private async importRepositories(store: RepoStore, input: unknown) {
+    const document = readRepositoryImport(input);
+    const temporaryRoot = await mkdtemp(
+      path.join(tmpdir(), 'ello-repo-import-'),
+    );
+    const inputDir = path.join(temporaryRoot, 'portable');
+    try {
+      await mkdir(path.join(inputDir, 'bundles'), { recursive: true });
+      const repositories = [];
+      for (const [index, repository] of document.repositories.entries()) {
+        const bundle = repository.bundle;
+        const bundlePath =
+          bundle === undefined
+            ? undefined
+            : `bundles/repository-${index}.bundle`;
+        if (bundlePath !== undefined) {
+          await writeFile(
+            path.join(inputDir, bundlePath),
+            decodeBase64Bundle(bundle!.data),
+            { flag: 'wx' },
+          );
+        }
+        repositories.push({
+          key: repository.key,
+          remoteUrl: repository.remoteUrl,
+          defaultBranch: repository.defaultBranch,
+          ...(bundlePath === undefined ? {} : { bundle: bundlePath }),
+        });
+      }
+      await writeFile(
+        path.join(inputDir, 'repos.yaml'),
+        stringifyYamlConfig({
+          formatVersion: 1,
+          exportedAt: document.exportedAt,
+          repositories,
+        }),
+        'utf8',
+      );
+      const imported = await store.import(inputDir);
+      return { data: imported.map(protocolRepository) };
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
     }
   }
 
@@ -960,15 +1131,25 @@ export class ServerServices implements RpcServices {
     switch (method) {
       case 'workspace/create': {
         const params = rawParams as ParsedClientParams<'workspace/create'>;
-        return { workspace: protocolWorkspace(await store.create(params.kind, params.name, params.repos)) };
+        return {
+          workspace: protocolWorkspace(
+            await store.create(params.kind, params.name, params.repos),
+          ),
+        };
       }
       case 'workspace/list':
-        return { data: store.list({ status: 'active' }).map(protocolWorkspace) };
+        return {
+          data: store.list({ status: 'active' }).map(protocolWorkspace),
+        };
       case 'workspace/archived/list':
-        return { data: store.list({ status: 'archived' }).map(protocolWorkspace) };
+        return {
+          data: store.list({ status: 'archived' }).map(protocolWorkspace),
+        };
       case 'workspace/read': {
         const params = rawParams as ParsedClientParams<'workspace/read'>;
-        return { workspace: protocolWorkspace(openWorkspace(store, params.workspace)) };
+        return {
+          workspace: protocolWorkspace(openWorkspace(store, params.workspace)),
+        };
       }
       case 'workspace/path': {
         const params = rawParams as ParsedClientParams<'workspace/path'>;
@@ -976,14 +1157,19 @@ export class ServerServices implements RpcServices {
       }
       case 'workspace/status': {
         const params = rawParams as ParsedClientParams<'workspace/status'>;
-        const [status] = await store.status([openWorkspace(store, params.workspace)]);
-        if (status === undefined) throw invalid(`Unknown workspace ${params.workspace}.`);
+        const [status] = await store.status([
+          openWorkspace(store, params.workspace),
+        ]);
+        if (status === undefined)
+          throw invalid(`Unknown workspace ${params.workspace}.`);
         return { status: toJson(status) };
       }
       case 'workspace/repo/add': {
         const params = rawParams as ParsedClientParams<'workspace/repo/add'>;
         if (params.detached !== (params.role === 'reference')) {
-          throw invalid('detached must be true exactly for reference checkouts.');
+          throw invalid(
+            'detached must be true exactly for reference checkouts.',
+          );
         }
         const workspace = await store.addRepos(
           openWorkspace(store, params.workspace),
@@ -994,37 +1180,76 @@ export class ServerServices implements RpcServices {
       }
       case 'workspace/repo/create': {
         const params = rawParams as ParsedClientParams<'workspace/repo/create'>;
-        return { workspace: protocolWorkspace(await store.createRepo(openWorkspace(store, params.workspace), params.key)) };
+        return {
+          workspace: protocolWorkspace(
+            await store.createRepo(
+              openWorkspace(store, params.workspace),
+              params.key,
+            ),
+          ),
+        };
       }
       case 'workspace/repo/remove': {
         const params = rawParams as ParsedClientParams<'workspace/repo/remove'>;
-        return { workspace: protocolWorkspace(await store.removeRepos(openWorkspace(store, params.workspace), [params.repo], false)) };
+        return {
+          workspace: protocolWorkspace(
+            await store.removeRepos(
+              openWorkspace(store, params.workspace),
+              [params.repo],
+              false,
+            ),
+          ),
+        };
       }
       case 'workspace/rename': {
         const params = rawParams as ParsedClientParams<'workspace/rename'>;
-        return { workspace: protocolWorkspace(await store.rename(openWorkspace(store, params.workspace), params.name)) };
+        return {
+          workspace: protocolWorkspace(
+            await store.rename(
+              openWorkspace(store, params.workspace),
+              params.name,
+            ),
+          ),
+        };
       }
       case 'workspace/archive': {
         const params = rawParams as ParsedClientParams<'workspace/archive'>;
-        return { workspace: protocolWorkspace(await store.archive(openWorkspace(store, params.workspace))) };
+        return {
+          workspace: protocolWorkspace(
+            await store.archive(openWorkspace(store, params.workspace)),
+          ),
+        };
       }
       case 'workspace/delete': {
         const params = rawParams as ParsedClientParams<'workspace/delete'>;
-        await store.delete(openWorkspace(store, params.workspace), params.force);
+        await store.delete(
+          openWorkspace(store, params.workspace),
+          params.force,
+        );
         return { ok: true };
       }
       case 'workspace/reconcile': {
         const params = rawParams as ParsedClientParams<'workspace/reconcile'>;
-        return { result: toJson(await store.reconcile([openWorkspace(store, params.workspace)])) };
+        return {
+          result: toJson(
+            await store.reconcile([openWorkspace(store, params.workspace)]),
+          ),
+        };
       }
       case 'workspace/repair': {
         const params = rawParams as ParsedClientParams<'workspace/repair'>;
-        return { result: toJson(await store.repair([openWorkspace(store, params.workspace)])) };
+        return {
+          result: toJson(
+            await store.repair([openWorkspace(store, params.workspace)]),
+          ),
+        };
       }
       case 'workspace/tmux/new': {
         const params = rawParams as ParsedClientParams<'workspace/tmux/new'>;
         if (params.command !== undefined) {
-          throw invalid('workspace/tmux/new command is not supported by TmuxStore.');
+          throw invalid(
+            'workspace/tmux/new command is not supported by TmuxStore.',
+          );
         }
         const workspace = openWorkspace(store, params.workspace);
         const session = `${workspace.kind}-${workspace.name}`;
@@ -1077,7 +1302,9 @@ function protocolTaskStatus(status: Task['status']) {
   return status === 'in_progress' ? ('inProgress' as const) : status;
 }
 
-function storageTaskStatus(status: 'pending' | 'inProgress' | 'completed' | 'cancelled') {
+function storageTaskStatus(
+  status: 'pending' | 'inProgress' | 'completed' | 'cancelled',
+) {
   return status === 'inProgress' ? ('in_progress' as const) : status;
 }
 
@@ -1117,28 +1344,94 @@ function openWorkspace(store: WorkspaceStore, selector: string): Workspace {
   }
 }
 
-function readRepositoryImport(document: unknown) {
+function readRepositoryImport(document: unknown): {
+  readonly exportedAt: string;
+  readonly repositories: readonly {
+    readonly key: string;
+    readonly remoteUrl: string | null;
+    readonly defaultBranch: string;
+    readonly bundle?: { readonly encoding: 'base64'; readonly data: string };
+  }[];
+} {
   if (typeof document !== 'object' || document === null) {
     throw invalid('Repository import document must be an object.');
   }
-  const entries = (document as { readonly repositories?: unknown }).repositories;
-  if (!Array.isArray(entries)) throw invalid('Repository import document has no repositories.');
-  return entries.map((entry) => {
-    if (typeof entry !== 'object' || entry === null) throw invalid('Invalid repository import entry.');
+  const value = document as {
+    readonly formatVersion?: unknown;
+    readonly exportedAt?: unknown;
+    readonly repositories?: unknown;
+  };
+  if (value.formatVersion !== 1 || typeof value.exportedAt !== 'string') {
+    throw invalid('Repository import requires formatVersion 1 and exportedAt.');
+  }
+  const entries = value.repositories;
+  if (!Array.isArray(entries))
+    throw invalid('Repository import document has no repositories.');
+  const repositories = entries.map((entry) => {
+    if (typeof entry !== 'object' || entry === null)
+      throw invalid('Invalid repository import entry.');
     const key = (entry as { readonly key?: unknown }).key;
-    const source = (entry as { readonly source?: unknown }).source;
-    if (typeof key !== 'string' || typeof source !== 'string') {
-      throw invalid('Repository import entries require key and remote source.');
+    const remoteUrl = (entry as { readonly remoteUrl?: unknown }).remoteUrl;
+    const defaultBranch = (entry as { readonly defaultBranch?: unknown })
+      .defaultBranch;
+    const bundle = (entry as { readonly bundle?: unknown }).bundle;
+    if (
+      typeof key !== 'string' ||
+      (typeof remoteUrl !== 'string' && remoteUrl !== null) ||
+      typeof defaultBranch !== 'string'
+    ) {
+      throw invalid('Repository import entry fields are invalid.');
     }
-    return { key, source };
+    if (remoteUrl === null) {
+      if (
+        typeof bundle !== 'object' ||
+        bundle === null ||
+        (bundle as { readonly encoding?: unknown }).encoding !== 'base64' ||
+        typeof (bundle as { readonly data?: unknown }).data !== 'string'
+      ) {
+        throw invalid(`Local-only repository ${key} requires a base64 bundle.`);
+      }
+      return {
+        key,
+        remoteUrl,
+        defaultBranch,
+        bundle: bundle as {
+          readonly encoding: 'base64';
+          readonly data: string;
+        },
+      };
+    }
+    if (bundle !== undefined) {
+      throw invalid(`Remote repository ${key} must not contain a bundle.`);
+    }
+    return { key, remoteUrl, defaultBranch };
   });
+  return { exportedAt: value.exportedAt, repositories };
+}
+
+function decodeBase64Bundle(value: string): Buffer {
+  if (
+    value.length > 128 * 1024 * 1024 ||
+    !/^[A-Za-z0-9+/]*={0,2}$/u.test(value)
+  ) {
+    throw invalid('Repository bundle is not valid bounded base64.');
+  }
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.toString('base64') !== value) {
+    throw invalid('Repository bundle is not canonical base64.');
+  }
+  return decoded;
 }
 
 function assertOrigin(name: string): void {
-  if (name !== 'origin') throw invalid('Ello repositories expose only the origin remote.');
+  if (name !== 'origin')
+    throw invalid('Ello repositories expose only the origin remote.');
 }
 
-async function existingPathInside(cwd: string, target: string): Promise<string> {
+async function existingPathInside(
+  cwd: string,
+  target: string,
+): Promise<string> {
   const lexical = lexicalPathInside(cwd, target);
   const canonical = await realpath(lexical);
   assertPathInside(cwd, canonical);
@@ -1147,14 +1440,20 @@ async function existingPathInside(cwd: string, target: string): Promise<string> 
 
 function lexicalPathInside(cwd: string, target: string): string {
   const root = path.resolve(cwd);
-  const resolved = path.isAbsolute(target) ? path.resolve(target) : path.resolve(root, target);
+  const resolved = path.isAbsolute(target)
+    ? path.resolve(target)
+    : path.resolve(root, target);
   assertPathInside(root, resolved);
   return resolved;
 }
 
 function assertPathInside(cwd: string, target: string): void {
   const relative = path.relative(path.resolve(cwd), path.resolve(target));
-  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) return;
+  if (
+    relative === '' ||
+    (!relative.startsWith('..') && !path.isAbsolute(relative))
+  )
+    return;
   throw new AppServerError({
     type: 'pathOutsideWorkspace',
     message: `Path escapes Server workspace: ${target}.`,
@@ -1175,16 +1474,30 @@ function metadata(target: string, info: Awaited<ReturnType<typeof lstat>>) {
   };
 }
 
-function page<T>(values: readonly T[], cursor: string | undefined, limit: number) {
+function page<T>(
+  values: readonly T[],
+  cursor: string | undefined,
+  limit: number,
+) {
   const offset = cursor === undefined ? 0 : Number(cursor);
-  if (!Number.isSafeInteger(offset) || offset < 0) throw invalid(`Invalid cursor ${String(cursor)}.`);
+  if (!Number.isSafeInteger(offset) || offset < 0)
+    throw invalid(`Invalid cursor ${String(cursor)}.`);
   const data = values.slice(offset, offset + limit);
   const next = offset + data.length;
-  return { data, ...(next < values.length ? { nextCursor: String(next) } : {}) };
+  return {
+    data,
+    ...(next < values.length ? { nextCursor: String(next) } : {}),
+  };
 }
 
 function renderThreadMarkdown(snapshot: ThreadSnapshot): string {
-  const lines = [`# ${snapshot.thread.name || snapshot.thread.id}`, '', `- Thread: ${snapshot.thread.id}`, `- CWD: ${snapshot.thread.cwd}`, ''];
+  const lines = [
+    `# ${snapshot.thread.name || snapshot.thread.id}`,
+    '',
+    `- Thread: ${snapshot.thread.id}`,
+    `- CWD: ${snapshot.thread.cwd}`,
+    '',
+  ];
   for (const turn of snapshot.turns) {
     lines.push(`## Turn ${turn.id}`, '');
     for (const item of turn.items) lines.push(renderItem(item), '');
@@ -1221,7 +1534,11 @@ function renderItem(item: ThreadItem): string {
 }
 
 function escapeHtml(value: string): string {
-  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
 function invalid(message: string): AppServerError {
@@ -1242,6 +1559,28 @@ async function exists(target: string): Promise<boolean> {
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function utf8Prefix(value: string, maxBytes: number): string {
+  const content = Buffer.from(value, 'utf8');
+  if (content.byteLength <= maxBytes) return value;
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  for (let end = maxBytes; end > 0; end -= 1) {
+    try {
+      return decoder.decode(content.subarray(0, end));
+    } catch {
+      // UTF-8 code point 最多四字节，向前收缩直到落在完整字符边界。
+    }
+  }
+  return '';
+}
+
+function decodeUtf8(content: Buffer, target: string): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(content);
+  } catch (error) {
+    throw new AppServerError({
+      type: 'invalidParams',
+      message: `File is not valid UTF-8 text: ${target}.`,
+      cause: error,
+    });
+  }
 }

@@ -25,12 +25,15 @@ export function buildModelCatalogOptions(
   providers: readonly ProviderCatalogEntry[] = [],
 ): readonly SelectOption[] {
   const options: SelectOption[] = [];
-  const providerNames = new Map(providers.map((provider) => [provider.id, provider.name]));
+  const providerNames = new Map(
+    providers.map((provider) => [provider.id, provider.name]),
+  );
   const groups = new Map<string, ModelCatalogEntry[]>();
   for (const model of models) {
-    const provider = typeof model.metadata.provider === 'string'
-      ? model.metadata.provider
-      : 'Models';
+    const provider =
+      typeof model.metadata.provider === 'string'
+        ? model.metadata.provider
+        : 'Models';
     const group = groups.get(provider) ?? [];
     group.push(model);
     groups.set(provider, group);

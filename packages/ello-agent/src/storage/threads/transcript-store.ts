@@ -1,4 +1,7 @@
-import type { AgentMessage, TranscriptStore } from '../../agent/engine/index.js';
+import type {
+  AgentMessage,
+  TranscriptStore,
+} from '../../agent/engine/index.js';
 
 import { ThreadLogRepository } from './thread-log.js';
 

@@ -24,6 +24,96 @@ export interface RpcRouterOptions {
   readonly services: RpcServices;
 }
 
+/**
+ * Client method 的权限契约必须逐项声明。`initialize` 属于握手流程，不经过
+ * RpcRouter；其余方法缺少分类时会直接产生类型错误，禁止用前缀或 read 兜底。
+ */
+export const CLIENT_METHOD_CAPABILITIES = {
+  initialize: null,
+  'server/read': 'read',
+  'server/shutdown': 'admin',
+  'thread/start': 'write',
+  'thread/resume': 'write',
+  'thread/read': 'read',
+  'thread/list': 'read',
+  'thread/loaded/list': 'read',
+  'thread/fork': 'write',
+  'thread/unsubscribe': 'write',
+  'thread/archive': 'write',
+  'thread/unarchive': 'write',
+  'thread/delete': 'write',
+  'thread/turns/list': 'read',
+  'thread/items/list': 'read',
+  'thread/export': 'read',
+  'artifact/read': 'read',
+  'thread/compact/start': 'write',
+  'thread/shellCommand': 'write',
+  'thread/settings/update': 'write',
+  'turn/start': 'submit',
+  'turn/steer': 'submit',
+  'turn/interrupt': 'submit',
+  'thread/goal/get': 'read',
+  'thread/goal/set': 'write',
+  'thread/goal/clear': 'write',
+  'thread/plan/read': 'read',
+  'thread/plan/preview': 'read',
+  'config/read': 'read',
+  'config/write': 'write',
+  'config/init': 'write',
+  'config/sources': 'read',
+  'model/list': 'read',
+  'provider/list': 'read',
+  'agent/list': 'read',
+  'tool/list': 'read',
+  'skills/list': 'read',
+  'skills/get': 'read',
+  'skills/reload': 'write',
+  'memory/status': 'read',
+  'memory/reload': 'write',
+  'memory/dream/start': 'write',
+  'task/list': 'read',
+  'task/get': 'read',
+  'task/create': 'write',
+  'task/update': 'write',
+  'task/delete': 'write',
+  'task/claim': 'write',
+  'task/reset': 'write',
+  'fs/readFile': 'read',
+  'fs/readDirectory': 'read',
+  'fs/getMetadata': 'read',
+  'fs/search': 'read',
+  'fs/watch': 'write',
+  'fs/unwatch': 'write',
+  'repo/add': 'write',
+  'repo/list': 'read',
+  'repo/read': 'read',
+  'repo/rename': 'write',
+  'repo/remove': 'write',
+  'repo/fetch': 'write',
+  'repo/fetchLocal': 'write',
+  'repo/remote/read': 'read',
+  'repo/remote/add': 'write',
+  'repo/remote/set': 'write',
+  'repo/remote/remove': 'write',
+  'repo/export': 'read',
+  'repo/import': 'write',
+  'workspace/create': 'write',
+  'workspace/list': 'read',
+  'workspace/archived/list': 'read',
+  'workspace/read': 'read',
+  'workspace/path': 'read',
+  'workspace/status': 'read',
+  'workspace/repo/add': 'write',
+  'workspace/repo/create': 'write',
+  'workspace/repo/remove': 'write',
+  'workspace/rename': 'write',
+  'workspace/archive': 'write',
+  'workspace/delete': 'write',
+  'workspace/reconcile': 'write',
+  'workspace/repair': 'write',
+  'workspace/tmux/new': 'write',
+} as const satisfies Record<ClientMethod, Capability | null>;
+
 /** method handler 只接收已由共享 schema 验证过的 params。 */
 export class RpcRouter {
   private readonly threads: ThreadManager;
@@ -232,29 +322,14 @@ export function isClientMethod(method: string): method is ClientMethod {
   return method in CLIENT_REQUEST_SCHEMAS;
 }
 
-function capabilityFor(method: ClientMethod): Capability {
-  if (method === 'server/shutdown') return 'admin';
-  if (
-    method === 'turn/start' ||
-    method === 'turn/steer' ||
-    method === 'turn/interrupt'
-  ) {
-    return 'submit';
-  }
-  if (
-    method === 'config/write' ||
-    method === 'config/init' ||
-    method.startsWith('task/') ||
-    method.startsWith('repo/') ||
-    method.startsWith('workspace/') ||
-    method === 'thread/archive' ||
-    method === 'thread/unarchive' ||
-    method === 'thread/delete' ||
-    method === 'thread/settings/update'
-  ) {
-    return 'write';
-  }
-  return 'read';
+export function capabilityFor(method: ClientMethod): Capability {
+  const capability = CLIENT_METHOD_CAPABILITIES[method];
+  if (capability !== null) return capability;
+  throw new AppServerError({
+    type: 'internal',
+    message: `Method ${method} does not use RpcRouter capability checks.`,
+    details: { method },
+  });
 }
 
 function page<T>(

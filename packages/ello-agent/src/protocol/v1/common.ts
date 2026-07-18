@@ -3,7 +3,27 @@ import { z } from 'zod';
 import { ELLO_PROTOCOL_VERSION } from '../version.js';
 
 export const EmptyParamsSchema = z.object({}).strict();
-export const OpaqueIdSchema = z.string().min(1);
+/**
+ * Wire ID 允许 provider/model 常用的 `/`、`:`、`@` 等 opaque 字符，但拒绝
+ * 反斜杠、空路径段和 `.`/`..` 路径段。落盘代码仍必须做独立的文件名校验。
+ */
+export const OpaqueIdSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .regex(
+    /^[A-Za-z0-9_@+-][A-Za-z0-9._~:@/+\-=]*$/u,
+    'ID contains unsupported characters.',
+  )
+  .refine(
+    (value) =>
+      value
+        .split('/')
+        .every(
+          (segment) => segment !== '' && segment !== '.' && segment !== '..',
+        ),
+    'ID must not contain path traversal segments.',
+  );
 export const IsoDateTimeSchema = z.string().datetime({ offset: true });
 export const NonNegativeIntegerSchema = z.number().int().nonnegative();
 export const PositiveIntegerSchema = z.number().int().positive();

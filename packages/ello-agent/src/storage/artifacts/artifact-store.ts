@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt } from 'drizzle-orm';
 
 import { transaction, type CodingDatabase } from '../database/database.js';
 import { artifactReferences, artifacts } from '../database/schema.js';
@@ -25,6 +25,11 @@ export interface ArtifactRef {
 export interface ArtifactGcReport {
   readonly deleted: number;
   readonly bytesFreed: number;
+}
+
+export interface ArtifactMetadata extends ArtifactRef {
+  readonly kind: string;
+  readonly createdAt: string;
 }
 
 /**
@@ -122,6 +127,18 @@ export class ArtifactStore {
     return content;
   }
 
+  metadata(id: string): ArtifactMetadata {
+    const row = this.requireMetadata(id);
+    return {
+      id: row.id,
+      kind: row.kind,
+      sha256: row.sha256,
+      byteSize: row.byteSize,
+      contentType: requireContentType(row),
+      createdAt: row.createdAt,
+    };
+  }
+
   async verify(id: string): Promise<void> {
     await this.read(id);
   }
@@ -176,6 +193,25 @@ export class ArtifactStore {
       bytesFreed += row.byteSize;
     }
     return { deleted: rows.length, bytesFreed };
+  }
+
+  /** checkpoint 永久保留；仅清理超过保留期的临时输出和导出引用。 */
+  async deleteExpiredReferences(
+    createdBefore: string,
+  ): Promise<ArtifactGcReport> {
+    this.db
+      .delete(artifactReferences)
+      .where(
+        and(
+          inArray(artifactReferences.ownerKind, [
+            'tool-result',
+            'session-export',
+          ]),
+          lt(artifactReferences.createdAt, createdBefore),
+        ),
+      )
+      .run();
+    return this.deleteUnreferenced();
   }
 
   private async writeContent(
@@ -257,7 +293,15 @@ export class ArtifactStore {
         relation: owner.relation,
         createdAt,
       })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({
+        target: [
+          artifactReferences.artifactId,
+          artifactReferences.ownerKind,
+          artifactReferences.ownerId,
+          artifactReferences.relation,
+        ],
+        set: { createdAt },
+      })
       .run();
   }
 }

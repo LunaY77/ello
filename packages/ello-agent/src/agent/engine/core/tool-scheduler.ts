@@ -169,19 +169,35 @@ export class ToolScheduler {
       if (tool.execution !== 'immediate') {
         throw new Error(`Deferred tool escaped batch preflight: ${call.name}`);
       }
-      const ctx = this.createContext(call.id);
-      // 执行前先跑工具自带的审批策略（若有），据其结果决定拒绝 / 挂起 / 放行。
-      let decision: ReturnType<typeof normalizeApprovalDecision>;
+      let input: unknown;
       try {
-        decision = normalizeApprovalDecision(
-          await tool.approval?.(call.input, ctx),
-        );
+        input = tool.input.parse(call.input);
       } catch (error) {
         const normalized =
           error instanceof Error ? error : new Error(String(error));
         await sink.onToolStarted(call.id, call.name, call.input);
         await sink.onToolFailed(call.id, normalized);
         toolCalls.push({ ...call, error: normalizeAgentError(normalized) });
+        messages.push(
+          createToolResultMessage(call, { error: normalized.message }, 'error'),
+        );
+        continue;
+      }
+      const ctx = this.createContext(call.id);
+      // 执行前先跑工具自带的审批策略（若有），据其结果决定拒绝 / 挂起 / 放行。
+      let decision: ReturnType<typeof normalizeApprovalDecision>;
+      try {
+        decision = normalizeApprovalDecision(await tool.approval?.(input, ctx));
+      } catch (error) {
+        const normalized =
+          error instanceof Error ? error : new Error(String(error));
+        await sink.onToolStarted(call.id, call.name, call.input);
+        await sink.onToolFailed(call.id, normalized);
+        toolCalls.push({
+          ...call,
+          input,
+          error: normalizeAgentError(normalized),
+        });
         messages.push(
           createToolResultMessage(call, { error: normalized.message }, 'error'),
         );
@@ -194,7 +210,7 @@ export class ToolScheduler {
         );
         await sink.onToolStarted(call.id, call.name, call.input);
         await sink.onToolFailed(call.id, error);
-        toolCalls.push({ ...call, error: normalizeAgentError(error) });
+        toolCalls.push({ ...call, input, error: normalizeAgentError(error) });
         messages.push(
           createToolResultMessage(
             call,
@@ -210,29 +226,33 @@ export class ToolScheduler {
           kind: 'approval' as const,
           toolCallId: call.id,
           toolName: call.name,
-          input: call.input,
+          input,
           reason: decision.reason ?? `Tool '${call.name}' requires approval.`,
           ...(decision.metadata !== undefined
             ? { metadata: decision.metadata }
             : {}),
         };
         pending.push(item);
-        await sink.onToolStarted(call.id, call.name, call.input);
+        await sink.onToolStarted(call.id, call.name, input);
         await sink.onApprovalRequired(item);
         continue;
       }
       // 放行：正常执行工具，捕获异常并归一化，单个工具失败不影响整批其余调用。
-      await sink.onToolStarted(call.id, call.name, call.input);
+      await sink.onToolStarted(call.id, call.name, input);
       try {
-        const output = await tool.execute(call.input, ctx);
+        const output = await tool.execute(input, ctx);
         await sink.onToolCompleted(call.id, output);
-        toolCalls.push({ ...call, output });
+        toolCalls.push({ ...call, input, output });
         messages.push(createToolResultMessage(call, output));
       } catch (error) {
         const normalized =
           error instanceof Error ? error : new Error(String(error));
         await sink.onToolFailed(call.id, normalized);
-        toolCalls.push({ ...call, error: normalizeAgentError(normalized) });
+        toolCalls.push({
+          ...call,
+          input,
+          error: normalizeAgentError(normalized),
+        });
         messages.push(
           createToolResultMessage(call, { error: normalized.message }, 'error'),
         );
@@ -266,19 +286,26 @@ export class ToolScheduler {
       await sink.onToolFailed(call.id, error);
       return { ...call, error: normalizeAgentError(error) };
     }
-    await sink.onToolStarted(call.id, call.name, call.input);
+    let input: unknown;
     try {
-      const output = await tool.execute(
-        call.input,
-        this.createContext(call.id),
-      );
+      input = tool.input.parse(call.input);
+    } catch (error) {
+      const normalized =
+        error instanceof Error ? error : new Error(String(error));
+      await sink.onToolStarted(call.id, call.name, call.input);
+      await sink.onToolFailed(call.id, normalized);
+      return { ...call, error: normalizeAgentError(normalized) };
+    }
+    await sink.onToolStarted(call.id, call.name, input);
+    try {
+      const output = await tool.execute(input, this.createContext(call.id));
       await sink.onToolCompleted(call.id, output);
-      return { ...call, output };
+      return { ...call, input, output };
     } catch (error) {
       const normalized =
         error instanceof Error ? error : new Error(String(error));
       await sink.onToolFailed(call.id, normalized);
-      return { ...call, error: normalizeAgentError(normalized) };
+      return { ...call, input, error: normalizeAgentError(normalized) };
     }
   }
 

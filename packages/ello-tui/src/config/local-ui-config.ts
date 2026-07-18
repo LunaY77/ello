@@ -29,7 +29,12 @@ export function localUiConfigPath(
   home = homedir(),
 ): string {
   const root = environment.ELLO_HOME?.trim();
-  return path.join(root === undefined || root === '' ? path.join(home, '.ello') : path.resolve(root), 'tui.json');
+  return path.join(
+    root === undefined || root === ''
+      ? path.join(home, '.ello')
+      : path.resolve(root),
+    'tui.json',
+  );
 }
 
 export async function loadLocalUiConfig(

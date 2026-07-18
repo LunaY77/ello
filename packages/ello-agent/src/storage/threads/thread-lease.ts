@@ -1,8 +1,7 @@
 import { mkdir, open, readFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
 
 import { AppServerError } from '../../protocol/errors.js';
-import { serverRunDir } from '../paths.js';
+import { threadLeasePath, threadLocksDir } from '../paths.js';
 
 export interface ThreadLease {
   readonly threadId: string;
@@ -16,8 +15,8 @@ export class ThreadLeaseStore {
   constructor(private readonly root: string) {}
 
   async acquire(threadId: string): Promise<ThreadLease> {
-    const directory = join(serverRunDir(this.root), 'thread-locks');
-    const path = join(directory, `${threadId}.lock`);
+    const directory = threadLocksDir(this.root);
+    const path = threadLeasePath(threadId, this.root);
     await mkdir(directory, { recursive: true });
     try {
       return await this.create(path, threadId);

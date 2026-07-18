@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 
 import { and, asc, eq, or } from 'drizzle-orm';
 
-import { immediateTransaction, type CodingDatabase } from '../database/database.js';
+import {
+  immediateTransaction,
+  type CodingDatabase,
+} from '../database/database.js';
 import { taskBoards, taskDependencies, tasks } from '../database/schema.js';
 import type {
   ClaimResult,

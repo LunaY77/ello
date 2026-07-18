@@ -51,7 +51,11 @@ export interface TuiEventState {
 export type TuiEventInput =
   | ThreadClientEvent
   | { readonly type: 'steer.queued'; readonly text: string }
-  | { readonly type: 'ui.message'; readonly text: string; readonly level?: 'info' | 'error' }
+  | {
+      readonly type: 'ui.message';
+      readonly text: string;
+      readonly level?: 'info' | 'error';
+    }
   | {
       readonly type: 'interaction.resolved';
       readonly requestId: string;
@@ -63,7 +67,9 @@ export function createInitialTuiEventState(
   serverVersion?: string,
 ): TuiEventState {
   const live = liveStateFromSnapshot(snapshot);
-  const activeTurn = snapshot.turns.find((turn) => turn.status === 'inProgress');
+  const activeTurn = snapshot.turns.find(
+    (turn) => turn.status === 'inProgress',
+  );
   return {
     snapshot,
     history: snapshotToHistoryEntries(snapshot, serverVersion),
@@ -72,14 +78,22 @@ export function createInitialTuiEventState(
     settings: snapshot.settings,
     usage: snapshot.usage,
     ...(snapshot.goal === null ? {} : { goal: snapshot.goal }),
-    ...(activeTurn === undefined ? {} : { activeTurnId: activeTurn.id, runStartedAt: Date.parse(activeTurn.startedAt) }),
+    ...(activeTurn === undefined
+      ? {}
+      : {
+          activeTurnId: activeTurn.id,
+          runStartedAt: Date.parse(activeTurn.startedAt),
+        }),
     pendingSteers: [],
     stale: false,
     historyResetKey: 0,
   };
 }
 
-export function reduceTuiEvent(state: TuiEventState, event: TuiEventInput): TuiEventState {
+export function reduceTuiEvent(
+  state: TuiEventState,
+  event: TuiEventInput,
+): TuiEventState {
   switch (event.type) {
     case 'snapshot': {
       const replacement = createInitialTuiEventState(event.snapshot);
@@ -107,9 +121,8 @@ export function reduceTuiEvent(state: TuiEventState, event: TuiEventInput): TuiE
       });
     case 'interaction.resolved': {
       const request = state.pendingRequest;
-      const next = request?.id === event.requestId
-        ? omitPendingRequest(state)
-        : state;
+      const next =
+        request?.id === event.requestId ? omitPendingRequest(state) : state;
       if (
         request?.method === 'item/tool/requestUserInput' &&
         event.resolution !== undefined
@@ -130,7 +143,11 @@ function reduceServerNotification(
   state: TuiEventState,
   notification: ServerNotification,
 ): TuiEventState {
-  if (!('threadId' in notification.params) || notification.params.threadId !== state.snapshot.thread.id) return state;
+  if (
+    !('threadId' in notification.params) ||
+    notification.params.threadId !== state.snapshot.thread.id
+  )
+    return state;
   const before = state.snapshot;
   const snapshot = applyNotification(before, notification);
   const base: TuiEventState = {
@@ -140,25 +157,25 @@ function reduceServerNotification(
     settings: snapshot.settings,
     usage: snapshot.usage,
   };
-  let next: TuiEventState = snapshot.goal === null
-    ? omitGoal(base)
-    : { ...base, goal: snapshot.goal };
+  let next: TuiEventState =
+    snapshot.goal === null ? omitGoal(base) : { ...base, goal: snapshot.goal };
   switch (notification.method) {
-    case 'turn/started':
-      {
-        const { interruptNotice: _interruptNotice, ...withoutNotice } = next;
-        return {
+    case 'turn/started': {
+      const { interruptNotice: _interruptNotice, ...withoutNotice } = next;
+      return {
         ...withoutNotice,
         activeTurnId: notification.params.turnId,
         runStartedAt: Date.parse(notification.params.turn.startedAt),
         pendingSteers: [],
-        };
-      }
+      };
+    }
     case 'turn/completed': {
       const seconds = Math.max(
         0,
         Math.round(
-          (Date.parse(notification.params.turn.completedAt ?? new Date().toISOString()) -
+          (Date.parse(
+            notification.params.turn.completedAt ?? new Date().toISOString(),
+          ) -
             Date.parse(notification.params.turn.startedAt)) /
             1000,
         ),
@@ -179,12 +196,14 @@ function reduceServerNotification(
           ...withoutTurn
         } = next;
         return {
-        ...withoutTurn,
-        live: emptyLiveState(),
-        pendingSteers: [],
-        ...(notification.params.turn.status === 'interrupted'
-          ? { interruptNotice: `interrupted: ${notification.params.turn.errorCode ?? 'user request'}` }
-          : {}),
+          ...withoutTurn,
+          live: emptyLiveState(),
+          pendingSteers: [],
+          ...(notification.params.turn.status === 'interrupted'
+            ? {
+                interruptNotice: `interrupted: ${notification.params.turn.errorCode ?? 'user request'}`,
+              }
+            : {}),
         };
       }
     }
@@ -192,10 +211,19 @@ function reduceServerNotification(
       return startLiveItem(next, notification.params.item);
     case 'item/agentMessage/delta':
     case 'item/plan/delta':
-      return { ...next, live: { ...next.live, assistantText: next.live.assistantText + notification.params.delta } };
+      return {
+        ...next,
+        live: {
+          ...next.live,
+          assistantText: next.live.assistantText + notification.params.delta,
+        },
+      };
     case 'item/commandExecution/outputDelta': {
       const tool = next.live.runningTools.get(notification.params.itemId);
-      if (tool === undefined) throw new Error(`Command output without started item: ${notification.params.itemId}`);
+      if (tool === undefined)
+        throw new Error(
+          `Command output without started item: ${notification.params.itemId}`,
+        );
       const runningTools = new Map(next.live.runningTools);
       const previousOutput = readOutput(tool.output);
       runningTools.set(tool.id, {
@@ -209,7 +237,9 @@ function reduceServerNotification(
     }
     case 'item/completed': {
       if (findItem(before, notification.params.itemId) === undefined) {
-        throw new Error(`Completed item without started item: ${notification.params.itemId}`);
+        throw new Error(
+          `Completed item without started item: ${notification.params.itemId}`,
+        );
       }
       return completeItem(next, notification.params.item);
     }
@@ -251,7 +281,11 @@ function startLiveItem(state: TuiEventState, item: ThreadItem): TuiEventState {
   if (item.type === 'agentMessage' || item.type === 'plan') {
     return { ...state, live: { ...state.live, assistantText: item.text } };
   }
-  if (item.type === 'commandExecution' || item.type === 'fileChange' || item.type === 'toolCall') {
+  if (
+    item.type === 'commandExecution' ||
+    item.type === 'fileChange' ||
+    item.type === 'toolCall'
+  ) {
     const runningTools = new Map(state.live.runningTools);
     runningTools.set(item.id, itemToToolView(item));
     return { ...state, live: { ...state.live, runningTools } };
@@ -268,7 +302,11 @@ function completeItem(state: TuiEventState, item: ThreadItem): TuiEventState {
   let next = state;
   if (item.type === 'agentMessage' || item.type === 'plan') {
     next = { ...next, live: { ...next.live, assistantText: '' } };
-  } else if (item.type === 'commandExecution' || item.type === 'fileChange' || item.type === 'toolCall') {
+  } else if (
+    item.type === 'commandExecution' ||
+    item.type === 'fileChange' ||
+    item.type === 'toolCall'
+  ) {
     const runningTools = new Map(next.live.runningTools);
     runningTools.delete(item.id);
     next = { ...next, live: { ...next.live, runningTools } };
@@ -290,28 +328,48 @@ function liveStateFromSnapshot(snapshot: ThreadSnapshot): LiveRunState {
     if (turn.status !== 'inProgress') continue;
     for (const item of turn.items) {
       if (!('status' in item) || item.status !== 'inProgress') continue;
-      if (item.type === 'agentMessage' || item.type === 'plan') assistantText = item.text;
-      else if (item.type === 'commandExecution' || item.type === 'fileChange' || item.type === 'toolCall') runningTools.set(item.id, itemToToolView(item));
-      else if (item.type === 'subagent') runningSubagents.set(item.id, itemToSubagentView(item));
+      if (item.type === 'agentMessage' || item.type === 'plan')
+        assistantText = item.text;
+      else if (
+        item.type === 'commandExecution' ||
+        item.type === 'fileChange' ||
+        item.type === 'toolCall'
+      )
+        runningTools.set(item.id, itemToToolView(item));
+      else if (item.type === 'subagent')
+        runningSubagents.set(item.id, itemToSubagentView(item));
     }
   }
   return { ...live, assistantText, runningTools, runningSubagents };
 }
 
 function emptyLiveState(): LiveRunState {
-  return { assistantText: '', runningTools: new Map(), runningSubagents: new Map() };
+  return {
+    assistantText: '',
+    runningTools: new Map(),
+    runningSubagents: new Map(),
+  };
 }
 
-function appendHistory(state: TuiEventState, entry: HistoryEntry): TuiEventState {
-  if (state.history.some((candidate) => candidate.id === entry.id)) return state;
+function appendHistory(
+  state: TuiEventState,
+  entry: HistoryEntry,
+): TuiEventState {
+  if (state.history.some((candidate) => candidate.id === entry.id))
+    return state;
   return {
     ...state,
     history: appendCommittedHistory({ entries: state.history }, entry).entries,
   };
 }
 
-function findItem(snapshot: ThreadSnapshot, itemId: string): ThreadItem | undefined {
-  return snapshot.turns.flatMap((turn) => turn.items).find((item) => item.id === itemId);
+function findItem(
+  snapshot: ThreadSnapshot,
+  itemId: string,
+): ThreadItem | undefined {
+  return snapshot.turns
+    .flatMap((turn) => turn.items)
+    .find((item) => item.id === itemId);
 }
 
 function omitPendingRequest(state: TuiEventState): TuiEventState {
@@ -333,5 +391,7 @@ function readOutput(output: unknown): string {
 function readMetadata(output: unknown): Record<string, unknown> {
   if (typeof output !== 'object' || output === null) return {};
   const value = (output as { readonly metadata?: unknown }).metadata;
-  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : {};
 }

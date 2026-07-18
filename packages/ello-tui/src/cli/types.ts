@@ -7,9 +7,14 @@ export interface GlobalCliOptions {
   readonly timeout?: number;
 }
 
-export function authTokenFromOptions(options: GlobalCliOptions): string | undefined {
+export function authTokenFromOptions(
+  options: GlobalCliOptions,
+): string | undefined {
   if (options.remoteAuthTokenEnv === undefined) return undefined;
   const token = process.env[options.remoteAuthTokenEnv];
-  if (token === undefined || token === '') throw new Error(`Authentication token environment variable ${options.remoteAuthTokenEnv} is empty.`);
+  if (token === undefined || token === '')
+    throw new Error(
+      `Authentication token environment variable ${options.remoteAuthTokenEnv} is empty.`,
+    );
   return token;
 }

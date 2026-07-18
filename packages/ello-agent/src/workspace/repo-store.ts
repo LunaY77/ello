@@ -220,30 +220,34 @@ export class RepoStore {
     const id = randomUUID();
     const mirrorPath = repositoryMirrorPath(id);
     await mkdir(path.dirname(mirrorPath), { recursive: true });
-    await git(['init', '--bare', mirrorPath]);
-    await git(['config', 'user.name', name], mirrorPath);
-    await git(['config', 'user.email', email], mirrorPath);
-    const emptyTree = await gitWithInput(
-      ['hash-object', '-t', 'tree', '--stdin'],
-      '',
-      mirrorPath,
-    );
-    const commit = await git(
-      ['commit-tree', emptyTree, '-m', 'Initial commit'],
-      mirrorPath,
-    );
-    await git(['update-ref', REPOSITORY_BASELINE_REF, commit], mirrorPath);
-    await git(['symbolic-ref', 'HEAD', REPOSITORY_BASELINE_REF], mirrorPath);
-    const now = new Date().toISOString();
-    return this.repository.insert({
-      id,
-      key,
-      mirrorPath,
-      remoteUrl: null,
-      defaultBranch,
-      createdAt: now,
-      updatedAt: now,
-    });
+    try {
+      await git(['init', '--bare', mirrorPath]);
+      await git(['config', 'user.name', name], mirrorPath);
+      await git(['config', 'user.email', email], mirrorPath);
+      const emptyTree = await gitWithInput(
+        ['hash-object', '-t', 'tree', '--stdin'],
+        '',
+        mirrorPath,
+      );
+      const commit = await git(
+        ['commit-tree', emptyTree, '-m', 'Initial commit'],
+        mirrorPath,
+      );
+      await git(['update-ref', REPOSITORY_BASELINE_REF, commit], mirrorPath);
+      await git(['symbolic-ref', 'HEAD', REPOSITORY_BASELINE_REF], mirrorPath);
+      const now = new Date().toISOString();
+      return this.repository.insert({
+        id,
+        key,
+        mirrorPath,
+        remoteUrl: null,
+        defaultBranch,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (error) {
+      return cleanupFailedMirror(mirrorPath, error);
+    }
   }
 
   async export(
@@ -326,22 +330,41 @@ export class RepoStore {
       }
     }
     const imported: Repository[] = [];
-    for (const entry of document.repositories) {
-      const repo =
-        entry.remoteUrl === null
-          ? await this.importBundle(
-              resolveBundlePath(inputDir, entry.bundle!),
-              entry.key,
-              entry.defaultBranch,
-            )
-          : await this.importRemote(
-              entry.remoteUrl,
-              entry.key,
-              entry.defaultBranch,
-            );
-      imported.push(repo);
+    try {
+      for (const entry of document.repositories) {
+        const repo =
+          entry.remoteUrl === null
+            ? await this.importBundle(
+                resolveBundlePath(inputDir, entry.bundle!),
+                entry.key,
+                entry.defaultBranch,
+              )
+            : await this.importRemote(
+                entry.remoteUrl,
+                entry.key,
+                entry.defaultBranch,
+              );
+        imported.push(repo);
+      }
+      return imported;
+    } catch (error) {
+      const rollbackFailures: unknown[] = [];
+      for (const repository of imported.toReversed()) {
+        try {
+          await this.remove(repository.key);
+        } catch (rollbackError) {
+          rollbackFailures.push(rollbackError);
+        }
+      }
+      if (rollbackFailures.length > 0) {
+        throw new AggregateError(
+          [error, ...rollbackFailures],
+          'Repository import failed and rollback was incomplete.',
+          { cause: error },
+        );
+      }
+      throw error;
     }
-    return imported;
   }
 
   private async importLocal(source: string, key: string): Promise<Repository> {
@@ -351,10 +374,14 @@ export class RepoStore {
     const id = randomUUID();
     const mirrorPath = repositoryMirrorPath(id);
     await mkdir(path.dirname(mirrorPath), { recursive: true });
-    await git(['clone', '--mirror', source, mirrorPath]);
-    await git(['remote', 'remove', 'origin'], mirrorPath);
-    await updateBaseline(mirrorPath, `refs/heads/${defaultBranch}`);
-    return this.insertImported(id, key, mirrorPath, null, defaultBranch);
+    try {
+      await git(['clone', '--mirror', source, mirrorPath]);
+      await git(['remote', 'remove', 'origin'], mirrorPath);
+      await updateBaseline(mirrorPath, `refs/heads/${defaultBranch}`);
+      return this.insertImported(id, key, mirrorPath, null, defaultBranch);
+    } catch (error) {
+      return cleanupFailedMirror(mirrorPath, error);
+    }
   }
 
   private async importRemote(
@@ -389,8 +416,7 @@ export class RepoStore {
         updatedAt: now,
       });
     } catch (error) {
-      await rm(mirrorPath, { recursive: true, force: true }).catch(() => {});
-      throw error;
+      return cleanupFailedMirror(mirrorPath, error);
     }
   }
 
@@ -403,16 +429,20 @@ export class RepoStore {
     const mirrorPath = repositoryMirrorPath(id);
     await access(bundlePath);
     await mkdir(path.dirname(mirrorPath), { recursive: true });
-    await git(['clone', '--mirror', bundlePath, mirrorPath]);
-    await git(['remote', 'remove', 'origin'], mirrorPath);
-    await updateBaseline(mirrorPath, REPOSITORY_BASELINE_REF);
-    return this.insertImported(
-      id,
-      key,
-      mirrorPath,
-      null,
-      expectedDefaultBranch,
-    );
+    try {
+      await git(['clone', '--mirror', bundlePath, mirrorPath]);
+      await git(['remote', 'remove', 'origin'], mirrorPath);
+      await updateBaseline(mirrorPath, REPOSITORY_BASELINE_REF);
+      return this.insertImported(
+        id,
+        key,
+        mirrorPath,
+        null,
+        expectedDefaultBranch,
+      );
+    } catch (error) {
+      return cleanupFailedMirror(mirrorPath, error);
+    }
   }
 
   private async insertImported(
@@ -446,6 +476,22 @@ export class RepoStore {
       throw new Error(`Repo already exists: ${key}`);
     }
   }
+}
+
+async function cleanupFailedMirror(
+  mirrorPath: string,
+  originalError: unknown,
+): Promise<never> {
+  try {
+    await rm(mirrorPath, { recursive: true, force: true });
+  } catch (cleanupError) {
+    throw new AggregateError(
+      [originalError, cleanupError],
+      `Repository setup failed and mirror cleanup was incomplete: ${mirrorPath}`,
+      { cause: cleanupError },
+    );
+  }
+  throw originalError;
 }
 
 async function configureOrigin(mirrorPath: string): Promise<void> {

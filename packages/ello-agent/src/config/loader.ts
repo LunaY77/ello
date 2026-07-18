@@ -1,9 +1,11 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
 import { builtinProviderCatalog } from '../agent/providers/catalog/catalog.js';
+import { validateProviderCatalog } from '../agent/providers/catalog/registry.js';
 
+import { atomicWriteText } from './atomic-write.js';
 import { ensureBuiltinAssets, ensureGlobalConfig } from './initializer.js';
 import { globalConfigPath, globalHomeDir, projectConfigPath } from './paths.js';
 import {
@@ -54,10 +56,19 @@ export async function loadCodingAgentConfig(
   await ensureGlobalConfig();
   await ensureBuiltinAssets();
   const cwd = path.resolve(overrides.cwd ?? process.cwd());
-  const user = await readConfigFile(globalConfigPath());
-  const project = await readConfigFile(projectConfigPath(cwd));
-  const userConfig = user;
-  const projectConfig = project;
+  const [userConfig, projectConfig] = await Promise.all([
+    readConfigFile(globalConfigPath()),
+    readConfigFile(projectConfigPath(cwd)),
+  ]);
+  return resolveCodingAgentConfig(cwd, userConfig, projectConfig, overrides);
+}
+
+function resolveCodingAgentConfig(
+  cwd: string,
+  userConfig: Record<string, unknown>,
+  projectConfig: Record<string, unknown>,
+  overrides: CodingAgentConfigOverrides,
+): CodingAgentConfig {
   rejectProjectProfileConfig(projectConfig, projectConfigPath(cwd));
   const defaults = {
     provider: builtinProviderCatalog.provider,
@@ -97,7 +108,7 @@ export async function loadCodingAgentConfig(
     );
   }
   const parsed = result.data;
-  return {
+  const resolved = {
     ...parsed,
     context: {
       ...parsed.context,
@@ -116,6 +127,16 @@ export async function loadCodingAgentConfig(
       },
     },
   };
+  try {
+    validateProviderCatalog(resolved);
+  } catch (error) {
+    throw new ConfigValidationError(
+      `Coding agent provider catalog is invalid: ${errorMessage(error)}`,
+      [{ path: [], message: errorMessage(error), source: 'merged' }],
+      { cause: error },
+    );
+  }
+  return resolved;
 }
 
 /** 返回配置来源列表，供 `ello config sources` 展示和调试合并顺序。 */
@@ -180,7 +201,7 @@ export async function setConfigValues(
   source: WritableConfigSourceName,
   entries: readonly { readonly key: string; readonly value: unknown }[],
 ): Promise<CodingAgentConfig> {
-  if (source === 'global') await ensureGlobalConfig();
+  await ensureGlobalConfig();
   const filePath =
     source === 'global' ? globalConfigPath() : projectConfigPath(cwd);
   const current = await readConfigText(filePath);
@@ -191,9 +212,7 @@ export async function setConfigValues(
       value: entry.value,
     })),
   );
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, next, 'utf8');
-  return loadCodingAgentConfig({ cwd });
+  return validateAndCommitConfig(cwd, source, filePath, next);
 }
 
 /** 原子删除同一个配置文件中的多个 dotted key。 */
@@ -202,7 +221,7 @@ export async function deleteConfigValues(
   source: WritableConfigSourceName,
   keys: readonly string[],
 ): Promise<CodingAgentConfig> {
-  if (source === 'global') await ensureGlobalConfig();
+  await ensureGlobalConfig();
   const filePath =
     source === 'global' ? globalConfigPath() : projectConfigPath(cwd);
   const current = await readConfigText(filePath);
@@ -210,9 +229,7 @@ export async function deleteConfigValues(
     current,
     keys.map((key) => parseDottedKey(key)),
   );
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, next, 'utf8');
-  return loadCodingAgentConfig({ cwd });
+  return validateAndCommitConfig(cwd, source, filePath, next);
 }
 
 /** RPC 已经把 key 解析成 path segment；这里不再把带点的 segment 二次拆分。 */
@@ -227,7 +244,7 @@ export async function writeConfigPath(
   if (configPath.length === 0 || configPath.some((segment) => segment === '')) {
     throw new Error('Config path must contain non-empty segments.');
   }
-  if (source === 'global') await ensureGlobalConfig();
+  await ensureGlobalConfig();
   const filePath =
     source === 'global' ? globalConfigPath() : projectConfigPath(cwd);
   const current = await readConfigText(filePath);
@@ -237,9 +254,31 @@ export async function writeConfigPath(
           { path: configPath, value: operation.value },
         ])
       : deleteYamlConfigValues(current, [configPath]);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, next, 'utf8');
-  return loadCodingAgentConfig({ cwd });
+  return validateAndCommitConfig(cwd, source, filePath, next);
+}
+
+/** 先校验候选合并结果，再替换文件，避免失败请求把可用配置改成损坏状态。 */
+async function validateAndCommitConfig(
+  cwdInput: string,
+  source: WritableConfigSourceName,
+  filePath: string,
+  next: string,
+): Promise<CodingAgentConfig> {
+  const cwd = path.resolve(cwdInput);
+  const candidate = parseYamlConfig(next);
+  const [userConfig, projectConfig] = await Promise.all([
+    source === 'global'
+      ? Promise.resolve(candidate)
+      : readConfigFile(globalConfigPath()),
+    source === 'project'
+      ? Promise.resolve(candidate)
+      : readConfigFile(projectConfigPath(cwd)),
+  ]);
+  const config = resolveCodingAgentConfig(cwd, userConfig, projectConfig, {
+    cwd,
+  });
+  await atomicWriteText(filePath, next);
+  return config;
 }
 
 /** 不存在的配置文件按空对象处理，方便项目配置按需创建。 */

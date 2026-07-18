@@ -6,7 +6,6 @@ import {
 } from '../../context/cache-layout.js';
 import type { AgentMessage, ModelInput } from '../../engine/index.js';
 
-
 import type { ModelModality, RuntimeModel, RuntimeRoleModel } from './types.js';
 
 /** 根据模型 catalog 能力生成本轮 providerOptions。 */

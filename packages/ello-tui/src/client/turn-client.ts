@@ -9,18 +9,22 @@ export class TurnClient {
   ) {}
 
   steer(input: readonly UserInput[]): Promise<void> {
-    return this.client.request('turn/steer', {
-      threadId: this.threadId,
-      expectedTurnId: this.turnId,
-      input,
-    }).then(() => undefined);
+    return this.client
+      .request('turn/steer', {
+        threadId: this.threadId,
+        expectedTurnId: this.turnId,
+        input,
+      })
+      .then(() => undefined);
   }
 
   interrupt(reason?: string): Promise<void> {
-    return this.client.request('turn/interrupt', {
-      threadId: this.threadId,
-      turnId: this.turnId,
-      ...(reason === undefined ? {} : { reason }),
-    }).then(() => undefined);
+    return this.client
+      .request('turn/interrupt', {
+        threadId: this.threadId,
+        turnId: this.turnId,
+        ...(reason === undefined ? {} : { reason }),
+      })
+      .then(() => undefined);
   }
 }

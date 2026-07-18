@@ -275,9 +275,7 @@ class LangfuseEventRecorder {
     this.tools.delete(event.toolCallId);
   }
 
-  private failTool(
-    event: Extract<EngineEvent, { type: 'tool.failed' }>,
-  ): void {
+  private failTool(event: Extract<EngineEvent, { type: 'tool.failed' }>): void {
     const span = this.require(this.tools, event.toolCallId, 'tool');
     this.fail(span, event.error, event.occurredAt);
     this.tools.delete(event.toolCallId);

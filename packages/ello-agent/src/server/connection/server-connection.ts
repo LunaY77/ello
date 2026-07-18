@@ -82,7 +82,9 @@ export class ServerConnection {
    */
   holdUnsolicited(): () => Promise<void> {
     if (this.heldMessages !== undefined) {
-      throw new Error(`Connection ${this.id} already has an outbound response barrier.`);
+      throw new Error(
+        `Connection ${this.id} already has an outbound response barrier.`,
+      );
     }
     this.heldMessages = [];
     return async () => {
@@ -116,8 +118,12 @@ export class ServerConnection {
       this.transport.send(this.encoder.encode(JSON.stringify(message))),
     );
     this.sendQueue = operation.then(
-      () => { this.queuedSends -= 1; },
-      () => { this.queuedSends -= 1; },
+      () => {
+        this.queuedSends -= 1;
+      },
+      () => {
+        this.queuedSends -= 1;
+      },
     );
     return operation;
   }

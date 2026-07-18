@@ -10,7 +10,9 @@ export type ApprovalServerRequest = Exclude<
   { readonly method: 'item/tool/requestUserInput' }
 >;
 
-export function isApprovalRequest(request: ClientServerRequest): request is ApprovalServerRequest {
+export function isApprovalRequest(
+  request: ClientServerRequest,
+): request is ApprovalServerRequest {
   return request.method.endsWith('requestApproval');
 }
 

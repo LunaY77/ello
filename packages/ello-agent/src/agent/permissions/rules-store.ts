@@ -1,7 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 
-
+import { atomicWriteText } from '../../config/atomic-write.js';
 import {
   projectPermissionsFile,
   userPermissionsFile,
@@ -69,60 +68,52 @@ export class RulesStore {
   ): Promise<void> {
     const meta = extractPolicyMetadata(item);
     // always patterns 是工具声明的持久化匹配目标，不能从 input 反推。
-    for (const pattern of meta.always) {
-      await this.persistRule(
-        {
-          permission: meta.permission,
-          pattern,
-          action,
+    const rules: PermissionRule[] = meta.always.map((pattern) => ({
+      permission: meta.permission,
+      pattern,
+      action,
+      scope: scopeToPermissionScope(scope),
+      source: `approval:${meta.proxiedTool ?? item.toolName}`,
+    }));
+    if (action === 'allow' && meta.externalDirs !== undefined) {
+      rules.push(
+        ...meta.externalDirs.map((externalDir) => ({
+          permission: 'external_directory',
+          pattern: externalDir,
+          action: 'allow' as const,
           scope: scopeToPermissionScope(scope),
           source: `approval:${meta.proxiedTool ?? item.toolName}`,
-        },
-        scope,
+        })),
       );
     }
-    if (action === 'allow' && meta.externalDirs !== undefined) {
-      // 外部目录授权需要作为独立 permission 落规则，运行时边界据此放行。
-      for (const externalDir of meta.externalDirs) {
-        await this.persistRule(
-          {
-            permission: 'external_directory',
-            pattern: externalDir,
-            action: 'allow',
-            scope: scopeToPermissionScope(scope),
-            source: `approval:${meta.proxiedTool ?? item.toolName}`,
-          },
-          scope,
-        );
-      }
-    }
+    await this.persistRules(rules, scope);
   }
 
-  private async persistRule(
-    rule: PermissionRule,
+  private async persistRules(
+    rules: readonly PermissionRule[],
     scope: RuleScope,
   ): Promise<void> {
     switch (scope) {
       case 'session':
-        this.sessionRules.push(rule);
+        this.sessionRules.push(...rules);
         return;
       case 'project':
         await this.appendToFile(
           projectPermissionsFile(this.cwd),
-          rule,
+          rules,
           () => this.projectRules ?? [],
-          (rules) => {
-            this.projectRules = rules;
+          (next) => {
+            this.projectRules = next;
           },
         );
         return;
       case 'user':
         await this.appendToFile(
           userPermissionsFile(),
-          rule,
+          rules,
           () => this.userRules ?? [],
-          (rules) => {
-            this.userRules = rules;
+          (next) => {
+            this.userRules = next;
           },
         );
         return;
@@ -131,18 +122,17 @@ export class RulesStore {
 
   private async appendToFile(
     filePath: string,
-    rule: PermissionRule,
+    additions: readonly PermissionRule[],
     getCurrent: () => readonly PermissionRule[],
     setCurrent: (rules: PermissionRule[]) => void,
   ): Promise<void> {
-    const next = [...getCurrent(), rule];
-    setCurrent(next);
-    await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(
+    const next = [...getCurrent(), ...additions];
+    await atomicWriteText(
       filePath,
       stringifyYamlConfig({ rules: serializeRules(next) }),
-      'utf8',
     );
+    // 磁盘提交成功后再发布进程内快照，避免写盘失败留下仅当前进程可见的幽灵规则。
+    setCurrent(next);
   }
 }
 

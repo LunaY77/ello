@@ -1,8 +1,10 @@
-
 import type { CodingAgentConfig } from '../../config/index.js';
 import type { SessionModeState } from '../../domain/thread/session-mode.js';
 import type { CodingStorage } from '../../storage/database/index.js';
-import { createTaskService, type TaskBoardScope } from '../../storage/tasks/index.js';
+import {
+  createTaskService,
+  type TaskBoardScope,
+} from '../../storage/tasks/index.js';
 import type { AnyAgentTool } from '../engine/index.js';
 import {
   genericApprovalFor,

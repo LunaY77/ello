@@ -78,9 +78,7 @@ export const SERVER_NOTIFICATION_SCHEMAS = {
     .object({ ...ThreadSequenceShape, thread: ThreadSummarySchema })
     .strict(),
   'thread/deleted': z.object({ ...ThreadSequenceShape }).strict(),
-  'turn/started': z
-    .object({ ...TurnSequenceShape, turn: TurnSchema })
-    .strict(),
+  'turn/started': z.object({ ...TurnSequenceShape, turn: TurnSchema }).strict(),
   'turn/completed': z
     .object({ ...TurnSequenceShape, turn: TurnSchema })
     .strict(),

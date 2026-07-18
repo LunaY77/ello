@@ -17,9 +17,15 @@ export class UnixSocketTransport implements AppServerTransport {
     this.connectionId = this.delegate.connectionId;
   }
 
-  messages(): AsyncIterable<Uint8Array> { return this.delegate.messages(); }
+  messages(): AsyncIterable<Uint8Array> {
+    return this.delegate.messages();
+  }
 
-  send(message: Uint8Array): Promise<void> { return this.delegate.send(message); }
+  send(message: Uint8Array): Promise<void> {
+    return this.delegate.send(message);
+  }
 
-  close(reason?: string): Promise<void> { return this.delegate.close(reason); }
+  close(reason?: string): Promise<void> {
+    return this.delegate.close(reason);
+  }
 }

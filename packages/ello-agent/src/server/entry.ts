@@ -8,7 +8,9 @@ import { bootstrapAgentServer } from './bootstrap.js';
 import { listenEndpoint, type ServerListener } from './transport/listeners.js';
 import { StdioTransport } from './transport/stdio.js';
 
-export async function runServerEntry(argv = process.argv.slice(2)): Promise<void> {
+export async function runServerEntry(
+  argv = process.argv.slice(2),
+): Promise<void> {
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -22,17 +24,20 @@ export async function runServerEntry(argv = process.argv.slice(2)): Promise<void
   });
   const listen = values.listen;
   if (listen === undefined) throw new Error('--listen is required.');
-  const kind = listen === 'stdio://'
-    ? 'stdio'
-    : listen.startsWith('ws://') || listen.startsWith('wss://')
-      ? 'websocket'
-      : listen.startsWith('unix://')
-        ? 'unix'
-        : undefined;
-  if (kind === undefined) throw new Error(`Unsupported listen endpoint: ${listen}`);
-  const authToken = values['auth-token-env'] === undefined
-    ? undefined
-    : readAuthToken(values['auth-token-env']);
+  const kind =
+    listen === 'stdio://'
+      ? 'stdio'
+      : listen.startsWith('ws://') || listen.startsWith('wss://')
+        ? 'websocket'
+        : listen.startsWith('unix://')
+          ? 'unix'
+          : undefined;
+  if (kind === undefined)
+    throw new Error(`Unsupported listen endpoint: ${listen}`);
+  const authToken =
+    values['auth-token-env'] === undefined
+      ? undefined
+      : readAuthToken(values['auth-token-env']);
   const capabilities = parseCapabilities(values.capabilities);
   const server = await bootstrapAgentServer({
     transports: [kind],
@@ -79,10 +84,23 @@ export async function runServerEntry(argv = process.argv.slice(2)): Promise<void
 }
 
 function parseCapabilities(value: string | undefined): readonly Capability[] {
-  if (value === undefined) return ['read', 'submit', 'approve', 'write', 'admin'];
-  const allowed = new Set<Capability>(['read', 'submit', 'approve', 'write', 'admin']);
-  const capabilities = value.split(',').map((entry) => entry.trim()).filter((entry) => entry !== '');
-  if (capabilities.length === 0 || capabilities.some((entry) => !allowed.has(entry as Capability))) {
+  if (value === undefined)
+    return ['read', 'submit', 'approve', 'write', 'admin'];
+  const allowed = new Set<Capability>([
+    'read',
+    'submit',
+    'approve',
+    'write',
+    'admin',
+  ]);
+  const capabilities = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+  if (
+    capabilities.length === 0 ||
+    capabilities.some((entry) => !allowed.has(entry as Capability))
+  ) {
     throw new Error(`Invalid capability list ${value}.`);
   }
   return [...new Set(capabilities as Capability[])];
@@ -90,11 +108,17 @@ function parseCapabilities(value: string | undefined): readonly Capability[] {
 
 function readAuthToken(name: string): string {
   const value = process.env[name];
-  if (value === undefined || value === '') throw new Error(`Authentication token environment variable ${name} is empty.`);
+  if (value === undefined || value === '')
+    throw new Error(
+      `Authentication token environment variable ${name} is empty.`,
+    );
   return value;
 }
 
-async function waitForServerStop(server: Awaited<ReturnType<typeof bootstrapAgentServer>>, listener: ServerListener): Promise<void> {
+async function waitForServerStop(
+  server: Awaited<ReturnType<typeof bootstrapAgentServer>>,
+  listener: ServerListener,
+): Promise<void> {
   try {
     await server.waitUntilStopped();
   } finally {

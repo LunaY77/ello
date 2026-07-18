@@ -26,7 +26,7 @@
     "format": "prettier --write src",
     "lint": "eslint src",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.0",

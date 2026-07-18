@@ -45,21 +45,48 @@ export class SubscriptionHub {
 
   publish(notification: ServerNotification): void {
     for (const listener of this.listeners.values()) {
-      void Promise.resolve(listener.notify(notification)).catch(() => undefined);
+      void Promise.resolve(listener.notify(notification)).catch(
+        () => undefined,
+      );
     }
   }
 
-  /** 同一时刻只把交互交给一个 controller；失败时保留持久化 pending 状态。 */
+  /**
+   * 同一时刻只把交互交给一个 controller。当前 controller 断线或处理失败时，
+   * 按订阅顺序尝试下一个；全部失败仍保留持久化 pending 状态。
+   */
   request(request: PendingServerRequest): Promise<unknown> | undefined {
-    for (const subscription of this.listeners.values()) {
-      if (subscription.request !== undefined) {
-        return subscription.request(request);
-      }
+    if (![...this.listeners.values()].some((listener) => listener.request)) {
+      return undefined;
     }
-    return undefined;
+    return this.requestWithFailover(request);
   }
 
   clear(): void {
     this.listeners.clear();
+  }
+
+  private async requestWithFailover(
+    request: PendingServerRequest,
+  ): Promise<unknown> {
+    const attempted = new Set<Subscription>();
+    let lastError: unknown;
+    while (true) {
+      const subscription = [...this.listeners.values()].find(
+        (candidate) =>
+          candidate.request !== undefined && !attempted.has(candidate),
+      );
+      if (subscription === undefined) {
+        throw (
+          lastError ?? new Error('No Server Request controller is available.')
+        );
+      }
+      attempted.add(subscription);
+      try {
+        return await subscription.request!(request);
+      } catch (error) {
+        lastError = error;
+      }
+    }
   }
 }

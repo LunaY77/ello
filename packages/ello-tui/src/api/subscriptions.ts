@@ -14,5 +14,7 @@ export class NotificationSubscription {
     for (const listener of this.listeners) listener(notification);
   }
 
-  clear(): void { this.listeners.clear(); }
+  clear(): void {
+    this.listeners.clear();
+  }
 }

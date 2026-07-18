@@ -2,7 +2,4 @@
 export { bootstrapAgentServer } from './server/bootstrap.js';
 export type { BootstrapAgentServerOptions } from './server/bootstrap.js';
 export { AgentServer } from './server/server.js';
-export type {
-  AgentServerOptions,
-  AgentServerState,
-} from './server/server.js';
+export type { AgentServerOptions, AgentServerState } from './server/server.js';

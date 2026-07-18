@@ -24,7 +24,7 @@
     "ello": "node dist/cli/main.js",
     "lint": "eslint src",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
     "@ello/agent": "workspace:*",

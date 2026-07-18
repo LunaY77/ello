@@ -55,6 +55,7 @@ export class ThreadRuntime {
   private readonly projector: ThreadSnapshotProjector;
   private readonly stopRecordListener: () => void;
   private readonly subscriptions = new SubscriptionHub();
+  private readonly dispatchedServerRequests = new Set<string>();
   private mutationQueue: Promise<void> = Promise.resolve();
   private activeTurn: ActiveTurn | undefined;
   private closing = false;
@@ -163,6 +164,10 @@ export class ThreadRuntime {
         items: [],
         startedAt: new Date().toISOString(),
       };
+      const activeGoalId =
+        this.projector.current().goal?.status === 'active'
+          ? this.projector.current().goal?.id
+          : undefined;
       await this.append({ kind: 'turn.started', turn });
       await this.append({
         kind: 'thread.status',
@@ -188,13 +193,20 @@ export class ThreadRuntime {
           userInput: input,
         });
       } catch (error) {
-        await this.finishTurn(turn, {
-          status: 'failed',
-          error: { code: 'EXECUTOR_START_FAILED', message: errorMessage(error) },
-        });
+        await this.finishTurn(
+          turn,
+          {
+            status: 'failed',
+            error: {
+              code: 'EXECUTOR_START_FAILED',
+              message: errorMessage(error),
+            },
+          },
+          activeGoalId,
+        );
         throw error;
       }
-      const driveTask = this.driveTurn(turn, handle);
+      const driveTask = this.driveTurn(turn, handle, activeGoalId);
       this.activeTurn = { id: turn.id, handle, driveTask };
       void driveTask.catch(() => undefined);
       return turn;
@@ -208,7 +220,10 @@ export class ThreadRuntime {
     });
   }
 
-  async interruptTurn(turnId: string, reason = 'client request'): Promise<Turn> {
+  async interruptTurn(
+    turnId: string,
+    reason = 'client request',
+  ): Promise<Turn> {
     const activeToWait = await this.enqueue(async () => {
       const active = this.activeTurn;
       if (active === undefined) {
@@ -280,11 +295,18 @@ export class ThreadRuntime {
   }): Promise<Goal> {
     return this.enqueue(async () => {
       this.assertOpen();
+      const objective = input.objective.trim();
+      if (objective.length === 0 || objective.length > 4_000) {
+        throw new AppServerError({
+          type: 'invalidParams',
+          message: 'Goal objective must contain 1 to 4000 characters.',
+        });
+      }
       const current = this.projector.current().goal;
       const now = new Date().toISOString();
       const goal: Goal = {
         id: current?.id ?? createEntityId('job'),
-        objective: input.objective,
+        objective,
         status: input.status ?? current?.status ?? 'active',
         ...(input.tokenBudget === undefined
           ? current?.tokenBudget === undefined
@@ -329,29 +351,6 @@ export class ThreadRuntime {
     });
   }
 
-  compact(): Promise<string> {
-    return this.enqueue(async () => {
-      this.assertOpen();
-      if (this.activeTurn !== undefined) {
-        throw new AppServerError({
-          type: 'threadBusy',
-          message: `Thread ${this.id} cannot compact during an active turn.`,
-        });
-      }
-      const snapshot = this.projector.current();
-      const jobId = createEntityId('job');
-      await this.append({
-        kind: 'compaction',
-        turnId: snapshot.turns.at(-1)?.id ?? createEntityId('turn'),
-        summary: `Manual compaction ${jobId}`,
-        firstKeptSeq: Math.max(1, snapshot.seq),
-        tokensBefore:
-          snapshot.usage.inputTokens + snapshot.usage.outputTokens,
-      });
-      return jobId;
-    });
-  }
-
   async close(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
@@ -373,6 +372,7 @@ export class ThreadRuntime {
   private async driveTurn(
     turn: Turn,
     handle: TurnExecutionHandle,
+    activeGoalId: string | undefined,
   ): Promise<void> {
     let eventFailure: unknown;
     try {
@@ -386,38 +386,58 @@ export class ThreadRuntime {
       const result = await handle.final;
       await this.enqueue(async () => {
         if (eventFailure !== undefined && result.status === 'completed') {
-          await this.finishTurn(turn, {
-            status: 'failed',
-            error: {
-              code: 'EXECUTION_FAILED',
-              message: errorMessage(eventFailure),
+          await this.finishTurn(
+            turn,
+            {
+              status: 'failed',
+              error: {
+                code: 'EXECUTION_FAILED',
+                message: errorMessage(eventFailure),
+              },
             },
-          });
+            activeGoalId,
+          );
           return;
         }
         if (result.status === 'completed') {
-          await this.finishTurn(turn, { status: 'completed', usage: result.usage });
+          await this.finishTurn(
+            turn,
+            { status: 'completed', usage: result.usage },
+            activeGoalId,
+          );
         } else if (result.status === 'interrupted') {
-          await this.finishTurn(turn, {
-            status: 'interrupted',
-            usage: result.usage,
-            reason: result.reason,
-          });
+          await this.finishTurn(
+            turn,
+            {
+              status: 'interrupted',
+              usage: result.usage,
+              reason: result.reason,
+            },
+            activeGoalId,
+          );
         } else {
-          await this.finishTurn(turn, {
-            status: 'failed',
-            usage: result.usage,
-            error: result.error,
-          });
+          await this.finishTurn(
+            turn,
+            {
+              status: 'failed',
+              usage: result.usage,
+              error: result.error,
+            },
+            activeGoalId,
+          );
         }
       });
     } catch (error) {
       const failure = eventFailure ?? error;
       await this.enqueue(() =>
-        this.finishTurn(turn, {
-          status: 'failed',
-          error: { code: 'EXECUTION_FAILED', message: errorMessage(failure) },
-        }),
+        this.finishTurn(
+          turn,
+          {
+            status: 'failed',
+            error: { code: 'EXECUTION_FAILED', message: errorMessage(failure) },
+          },
+          activeGoalId,
+        ),
       );
     }
   }
@@ -443,6 +463,15 @@ export class ThreadRuntime {
         return;
       case 'planUpdated':
         await this.append({ kind: 'plan.state', plan: event.plan });
+        return;
+      case 'goalUpdated':
+        await this.append({ kind: 'goal.state', goal: event.goal });
+        return;
+      case 'settingsUpdated':
+        await this.append({
+          kind: 'thread.metadata',
+          settings: event.settings,
+        });
         return;
       case 'serverRequest':
         await this.append({
@@ -470,7 +499,12 @@ export class ThreadRuntime {
           readonly usage?: Turn['usage'];
           readonly error: { readonly code: string; readonly message: string };
         },
+    activeGoalId?: string,
   ): Promise<void> {
+    const cumulativeUsage =
+      result.usage === undefined
+        ? undefined
+        : addUsage(this.projector.current().usage, result.usage);
     const turn: Turn = {
       ...started,
       status: result.status,
@@ -501,7 +535,28 @@ export class ThreadRuntime {
       activeFlags: [],
     });
     if (result.usage !== undefined) {
-      await this.append({ kind: 'usage.updated', usage: result.usage });
+      await this.append({ kind: 'usage.updated', usage: cumulativeUsage! });
+      const goal = this.projector.current().goal;
+      if (activeGoalId !== undefined && goal?.id === activeGoalId) {
+        const tokensUsed =
+          goal.tokensUsed +
+          Math.max(0, result.usage.inputTokens - result.usage.cacheReadTokens) +
+          result.usage.outputTokens;
+        await this.append({
+          kind: 'goal.state',
+          goal: {
+            ...goal,
+            tokensUsed,
+            status:
+              goal.status === 'active' &&
+              goal.tokenBudget !== undefined &&
+              tokensUsed >= goal.tokenBudget
+                ? 'paused'
+                : goal.status,
+            updatedAt: new Date().toISOString(),
+          },
+        });
+      }
     }
     if (this.activeTurn?.id === started.id) this.activeTurn = undefined;
   }
@@ -535,12 +590,15 @@ export class ThreadRuntime {
   private dispatchServerRequest(
     request: ThreadSnapshot['pendingServerRequests'][number],
   ): void {
+    if (this.dispatchedServerRequests.has(request.id)) return;
     const response = this.subscriptions.request(request);
     if (response === undefined) return;
+    this.dispatchedServerRequests.add(request.id);
     void response
       .then((result) => this.resolveServerRequest(request.id, result))
       // 断线和没有 handler 都不能把持久化 pending request 伪装成已解决。
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => this.dispatchedServerRequests.delete(request.id));
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -614,6 +672,20 @@ export class ThreadRuntime {
   }
 }
 
+function addUsage(
+  left: NonNullable<Turn['usage']>,
+  right: NonNullable<Turn['usage']>,
+): NonNullable<Turn['usage']> {
+  return {
+    requests: left.requests + right.requests,
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
+    cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
+    toolCalls: left.toolCalls + right.toolCalls,
+  };
+}
+
 function formatUserInput(input: UserInput): string {
   switch (input.type) {
     case 'text':
@@ -638,7 +710,11 @@ function notificationsFor(
       return [
         {
           method: 'thread/started',
-          params: { threadId: record.threadId, seq: record.seq, thread: snapshot.thread },
+          params: {
+            threadId: record.threadId,
+            seq: record.seq,
+            thread: snapshot.thread,
+          },
         },
       ];
     case 'thread.status':
@@ -701,7 +777,9 @@ function notificationsFor(
             threadId: record.threadId,
             turnId: record.turn.id,
             seq: record.seq,
-            turn: snapshot.turns.find((turn) => turn.id === record.turn.id) ?? record.turn,
+            turn:
+              snapshot.turns.find((turn) => turn.id === record.turn.id) ??
+              record.turn,
           },
         },
       ];

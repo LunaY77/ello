@@ -81,6 +81,8 @@ function interruptItem(item: ThreadItem): ThreadItem | null {
     case 'toolCall':
     case 'subagent':
     case 'contextCompaction':
-      return item.status === 'inProgress' ? { ...item, status: 'failed' } : null;
+      return item.status === 'inProgress'
+        ? { ...item, status: 'failed' }
+        : null;
   }
 }

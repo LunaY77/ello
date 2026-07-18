@@ -550,28 +550,70 @@ async function waitForTurn(
   turnId: string,
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const stop = client.onNotification((notification) => {
+    const pending: { timeout?: NodeJS.Timeout } = {};
+    let stop = (): void => undefined;
+    let settled = false;
+    const settle = (result: { readonly error?: Error }): void => {
+      if (settled) return;
+      settled = true;
+      stop();
+      if (pending.timeout !== undefined) clearTimeout(pending.timeout);
+      if (result.error === undefined) resolve();
+      else reject(result.error);
+    };
+    stop = client.onNotification((notification) => {
       if (
-        notification.method === 'turn/completed' &&
-        notification.params.threadId === threadId &&
-        notification.params.turnId === turnId
+        notification.method !== 'turn/completed' ||
+        notification.params.threadId !== threadId ||
+        notification.params.turnId !== turnId
       ) {
-        stop();
-        resolve();
+        return;
       }
+      const turn = notification.params.turn;
+      if (turn.status === 'completed') {
+        settle({});
+        return;
+      }
+      if (turn.status === 'interrupted') {
+        settle({ error: new Error(`Turn ${turnId} was interrupted.`) });
+        return;
+      }
+      if (turn.status === 'failed') {
+        const errorItem = [...turn.items]
+          .reverse()
+          .find((item) => item.type === 'error');
+        const detail =
+          errorItem === undefined
+            ? turn.errorCode
+            : `${errorItem.code}: ${errorItem.message}`;
+        settle({
+          error: new Error(
+            `Turn ${turnId} failed${detail === undefined ? '.' : ` (${detail}).`}`,
+          ),
+        });
+        return;
+      }
+      settle({
+        error: new Error(
+          `Turn ${turnId} emitted a terminal notification with status ${turn.status}.`,
+        ),
+      });
     });
-    const timeout = setTimeout(
+    if (settled) {
+      stop();
+      return;
+    }
+    pending.timeout = setTimeout(
       () => {
-        stop();
-        reject(
-          new Error(
+        settle({
+          error: new Error(
             `Turn ${turnId} did not complete before the client timeout.`,
           ),
-        );
+        });
       },
       24 * 60 * 60 * 1000,
     );
-    timeout.unref();
+    pending.timeout.unref();
   });
 }
 

@@ -6,6 +6,7 @@ export {
 export {
   ArtifactStore,
   type ArtifactGcReport,
+  type ArtifactMetadata,
   type ArtifactOwner,
   type ArtifactOwnerKind,
   type ArtifactRef,

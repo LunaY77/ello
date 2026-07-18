@@ -1,7 +1,6 @@
 import { renderPromptTemplate } from '../context/prompts.js';
 import type { AgentRunContext, SystemSection } from '../engine/index.js';
 
-
 import type { GoalService } from './service.js';
 
 export function createGoalSystemSection(service: GoalService): SystemSection {

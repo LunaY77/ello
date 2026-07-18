@@ -5,7 +5,6 @@ import {
   type AgentToolContext,
 } from '../../engine/index.js';
 
-
 import type {
   AnyCodingTool,
   CodingTool,

@@ -37,7 +37,10 @@ export class StdioTransport implements AppServerTransport {
     for await (const chunk of this.input) {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       buffered = Buffer.concat([buffered, bytes]);
-      if (buffered.byteLength > this.maxMessageBytes && !buffered.includes(10)) {
+      if (
+        buffered.byteLength > this.maxMessageBytes &&
+        !buffered.includes(10)
+      ) {
         throw new AppServerError({
           type: 'invalidRequest',
           message: `stdio JSON-RPC line exceeds ${this.maxMessageBytes} bytes.`,
@@ -76,7 +79,11 @@ export class StdioTransport implements AppServerTransport {
           message: 'Outgoing JSON-RPC message exceeds the transport limit.',
         });
       }
-      if (!this.output.write(Buffer.concat([Buffer.from(message), Buffer.from('\n')]))) {
+      if (
+        !this.output.write(
+          Buffer.concat([Buffer.from(message), Buffer.from('\n')]),
+        )
+      ) {
         await once(this.output, 'drain');
       }
     });

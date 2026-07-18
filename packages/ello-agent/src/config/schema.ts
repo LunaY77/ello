@@ -226,41 +226,51 @@ export const ContextMemoryConfigSchema = z.object({
 });
 
 /** context pipeline 总配置。 */
-export const ContextConfigSchema = z.object({
-  max_input_tokens: z.number().int().positive().default(160_000),
-  reserved_output_tokens: z.number().int().positive().default(8_000),
-  show_sources_in_tui: z.boolean().default(true),
-  system_prompt_profile: z.string().default('coding'),
-  instructions: ContextInstructionsConfigSchema.default({
-    global: ['~/.ello/ELLO.md'],
-    project: ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'],
-    extra: [],
-    nearby: true,
-  }),
-  compaction: ContextCompactionConfigSchema.default({
-    auto: true,
-    tail_turns: 2,
-    preserve_recent_tokens: 20_000,
-    reserved_tokens: 16_384,
-    prune_tool_output: false,
-    tool_output_max_chars: 2_000,
-    split_turns: true,
-  }),
-  tool_result_budget: ContextToolResultBudgetConfigSchema.default({
-    enabled: false,
-    max_chars: 20_000,
-  }),
-  memory: ContextMemoryConfigSchema.default({
-    enabled: false,
-    private_dir: '~/.ello/memory/private',
-    team_dir: '.ello/memory/team',
-    extraction: {
-      enabled: true,
-      recent_messages: 40,
-      max_attempts: 2,
-    },
-  }),
-});
+export const ContextConfigSchema = z
+  .object({
+    max_input_tokens: z.number().int().positive().default(160_000),
+    reserved_output_tokens: z.number().int().positive().default(8_000),
+    show_sources_in_tui: z.boolean().default(true),
+    system_prompt_profile: z.string().default('coding'),
+    instructions: ContextInstructionsConfigSchema.default({
+      global: ['~/.ello/ELLO.md'],
+      project: ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'],
+      extra: [],
+      nearby: true,
+    }),
+    compaction: ContextCompactionConfigSchema.default({
+      auto: true,
+      tail_turns: 2,
+      preserve_recent_tokens: 20_000,
+      reserved_tokens: 16_384,
+      prune_tool_output: false,
+      tool_output_max_chars: 2_000,
+      split_turns: true,
+    }),
+    tool_result_budget: ContextToolResultBudgetConfigSchema.default({
+      enabled: false,
+      max_chars: 20_000,
+    }),
+    memory: ContextMemoryConfigSchema.default({
+      enabled: false,
+      private_dir: '~/.ello/memory/private',
+      team_dir: '.ello/memory/team',
+      extraction: {
+        enabled: true,
+        recent_messages: 40,
+        max_attempts: 2,
+      },
+    }),
+  })
+  .superRefine((value, context) => {
+    if (value.reserved_output_tokens >= value.max_input_tokens) {
+      context.addIssue({
+        code: 'custom',
+        path: ['reserved_output_tokens'],
+        message: 'must be below max_input_tokens',
+      });
+    }
+  });
 
 export const GoalConfigSchema = z.object({
   max_continuations: z.number().int().positive().default(20),

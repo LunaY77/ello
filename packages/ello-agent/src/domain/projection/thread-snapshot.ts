@@ -61,7 +61,10 @@ export class ThreadSnapshotProjector {
   }
 }
 
-function applyThreadRecord(state: MutableProjection, record: ThreadRecord): void {
+function applyThreadRecord(
+  state: MutableProjection,
+  record: ThreadRecord,
+): void {
   if (record.kind === 'thread.created') {
     if (state.snapshot !== undefined) {
       throw new Error('Thread log contains duplicate thread.created records.');
@@ -97,7 +100,8 @@ function applyThreadRecord(state: MutableProjection, record: ThreadRecord): void
   switch (record.kind) {
     case 'thread.metadata':
       if (record.name !== undefined) snapshot.thread.name = record.name;
-      if (record.preview !== undefined) snapshot.thread.preview = record.preview;
+      if (record.preview !== undefined)
+        snapshot.thread.preview = record.preview;
       if (record.archived !== undefined) {
         snapshot.thread.archived = record.archived;
         snapshot.thread.status = record.archived ? 'archived' : 'idle';
@@ -266,10 +270,7 @@ export function projectThreadItemDelta(
     projected.text += delta.text;
     return projected;
   }
-  if (
-    delta.type === 'commandOutput' &&
-    projected.type === 'commandExecution'
-  ) {
+  if (delta.type === 'commandOutput' && projected.type === 'commandExecution') {
     projected.outputPreview = `${projected.outputPreview ?? ''}${delta.text}`;
     return projected;
   }

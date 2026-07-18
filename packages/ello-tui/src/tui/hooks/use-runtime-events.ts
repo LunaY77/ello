@@ -27,10 +27,14 @@ export function useRuntimeEvents(thread: ThreadClient): {
     readonly seconds: number;
   }>();
 
-  useEffect(() => thread.subscribe((event) => {
-    if (event.type === 'snapshot') clearTerminalScrollback();
-    dispatch(event);
-  }), [thread]);
+  useEffect(
+    () =>
+      thread.subscribe((event) => {
+        if (event.type === 'snapshot') clearTerminalScrollback();
+        dispatch(event);
+      }),
+    [thread],
+  );
 
   useEffect(() => {
     const runStartedAt = state.runStartedAt;
@@ -47,13 +51,16 @@ export function useRuntimeEvents(thread: ThreadClient): {
   const queueSteer = useCallback((text: string) => {
     dispatch({ type: 'steer.queued', text });
   }, []);
-  const resolveInteraction = useCallback((requestId: string, resolution?: UserInputResolution) => {
-    dispatch({
-      type: 'interaction.resolved',
-      requestId,
-      ...(resolution === undefined ? {} : { resolution }),
-    });
-  }, []);
+  const resolveInteraction = useCallback(
+    (requestId: string, resolution?: UserInputResolution) => {
+      dispatch({
+        type: 'interaction.resolved',
+        requestId,
+        ...(resolution === undefined ? {} : { resolution }),
+      });
+    },
+    [],
+  );
 
   return {
     state,

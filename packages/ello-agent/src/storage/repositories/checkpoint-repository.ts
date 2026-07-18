@@ -3,7 +3,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { asc, eq } from 'drizzle-orm';
 
 import type { Checkpoint, FileChange } from '../../agent/change/checkpoint.js';
-import type { ArtifactRef, ArtifactStore } from '../artifacts/artifact-store.js';
+import type {
+  ArtifactRef,
+  ArtifactStore,
+} from '../artifacts/artifact-store.js';
 import { transaction, type CodingDatabase } from '../database/database.js';
 import {
   checkpointFileChanges,

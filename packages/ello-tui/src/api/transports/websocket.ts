@@ -30,7 +30,9 @@ export class WebSocketTransport implements ClientTransport {
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(endpoint, {
         headers:
-          token === undefined ? undefined : { authorization: `Bearer ${token}` },
+          token === undefined
+            ? undefined
+            : { authorization: `Bearer ${token}` },
       });
       const onError = (error: Error) => reject(error);
       socket.once('error', onError);

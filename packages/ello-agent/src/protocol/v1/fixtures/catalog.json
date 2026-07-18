@@ -39,6 +39,11 @@
       "limit": 20
     },
     "thread/export": { "threadId": "thr_fixture", "format": "jsonl" },
+    "artifact/read": {
+      "artifactId": "artifact_fixture",
+      "offset": 0,
+      "maxBytes": 1024
+    },
     "thread/compact/start": { "threadId": "thr_fixture" },
     "thread/shellCommand": {
       "threadId": "thr_fixture",

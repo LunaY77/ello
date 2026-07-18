@@ -221,7 +221,7 @@ export const PendingServerRequestSchema = z
 export const GoalSchema = z
   .object({
     id: OpaqueIdSchema,
-    objective: z.string().min(1),
+    objective: z.string().min(1).max(4_000),
     status: z.enum(['active', 'paused', 'blocked', 'complete']),
     tokenBudget: NonNegativeIntegerSchema.optional(),
     tokensUsed: NonNegativeIntegerSchema,

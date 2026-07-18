@@ -46,10 +46,7 @@
       "indexes": {
         "artifact_references_owner_idx": {
           "name": "artifact_references_owner_idx",
-          "columns": [
-            "owner_kind",
-            "owner_id"
-          ],
+          "columns": ["owner_kind", "owner_id"],
           "isUnique": false
         }
       },
@@ -58,24 +55,15 @@
           "name": "artifact_references_artifact_id_artifacts_id_fk",
           "tableFrom": "artifact_references",
           "tableTo": "artifacts",
-          "columnsFrom": [
-            "artifact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["artifact_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "artifact_references_artifact_id_owner_kind_owner_id_relation_pk": {
-          "columns": [
-            "artifact_id",
-            "owner_kind",
-            "owner_id",
-            "relation"
-          ],
+          "columns": ["artifact_id", "owner_kind", "owner_id", "relation"],
           "name": "artifact_references_artifact_id_owner_kind_owner_id_relation_pk"
         }
       },
@@ -138,9 +126,7 @@
       "indexes": {
         "artifacts_sha256_idx": {
           "name": "artifacts_sha256_idx",
-          "columns": [
-            "sha256"
-          ],
+          "columns": ["sha256"],
           "isUnique": true
         }
       },
@@ -240,9 +226,7 @@
       "indexes": {
         "checkpoint_file_changes_path_idx": {
           "name": "checkpoint_file_changes_path_idx",
-          "columns": [
-            "path_hash"
-          ],
+          "columns": ["path_hash"],
           "isUnique": false
         }
       },
@@ -251,12 +235,8 @@
           "name": "checkpoint_file_changes_checkpoint_id_checkpoints_id_fk",
           "tableFrom": "checkpoint_file_changes",
           "tableTo": "checkpoints",
-          "columnsFrom": [
-            "checkpoint_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["checkpoint_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -264,12 +244,8 @@
           "name": "checkpoint_file_changes_before_artifact_id_artifacts_id_fk",
           "tableFrom": "checkpoint_file_changes",
           "tableTo": "artifacts",
-          "columnsFrom": [
-            "before_artifact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["before_artifact_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -277,12 +253,8 @@
           "name": "checkpoint_file_changes_after_artifact_id_artifacts_id_fk",
           "tableFrom": "checkpoint_file_changes",
           "tableTo": "artifacts",
-          "columnsFrom": [
-            "after_artifact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["after_artifact_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -343,12 +315,8 @@
           "name": "checkpoint_rollbacks_checkpoint_id_checkpoints_id_fk",
           "tableFrom": "checkpoint_rollbacks",
           "tableTo": "checkpoints",
-          "columnsFrom": [
-            "checkpoint_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["checkpoint_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -493,31 +461,19 @@
       "indexes": {
         "memory_jobs_extract_source_idx": {
           "name": "memory_jobs_extract_source_idx",
-          "columns": [
-            "kind",
-            "cwd",
-            "session_id",
-            "source_leaf_id"
-          ],
+          "columns": ["kind", "cwd", "session_id", "source_leaf_id"],
           "isUnique": true,
           "where": "\"memory_jobs\".\"kind\" = 'extract'"
         },
         "memory_jobs_active_dream_idx": {
           "name": "memory_jobs_active_dream_idx",
-          "columns": [
-            "kind",
-            "cwd"
-          ],
+          "columns": ["kind", "cwd"],
           "isUnique": true,
           "where": "\"memory_jobs\".\"kind\" = 'dream' and \"memory_jobs\".\"status\" in ('queued', 'running')"
         },
         "memory_jobs_status_created_idx": {
           "name": "memory_jobs_status_created_idx",
-          "columns": [
-            "cwd",
-            "status",
-            "created_at"
-          ],
+          "columns": ["cwd", "status", "created_at"],
           "isUnique": false
         }
       },
@@ -626,16 +582,12 @@
       "indexes": {
         "repositories_remote_url_idx": {
           "name": "repositories_remote_url_idx",
-          "columns": [
-            "remote_url"
-          ],
+          "columns": ["remote_url"],
           "isUnique": false
         },
         "repositories_key_unique": {
           "name": "repositories_key_unique",
-          "columns": [
-            "key"
-          ],
+          "columns": ["key"],
           "isUnique": true
         }
       },
@@ -693,10 +645,7 @@
       "indexes": {
         "task_boards_scope_type_scope_id_unique": {
           "name": "task_boards_scope_type_scope_id_unique",
-          "columns": [
-            "scope_type",
-            "scope_id"
-          ],
+          "columns": ["scope_type", "scope_id"],
           "isUnique": true
         }
       },
@@ -743,12 +692,8 @@
           "name": "task_dependencies_board_id_task_boards_id_fk",
           "tableFrom": "task_dependencies",
           "tableTo": "task_boards",
-          "columnsFrom": [
-            "board_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["board_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -756,12 +701,8 @@
           "name": "task_dependencies_blocker_task_id_tasks_id_fk",
           "tableFrom": "task_dependencies",
           "tableTo": "tasks",
-          "columnsFrom": [
-            "blocker_task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["blocker_task_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -769,23 +710,15 @@
           "name": "task_dependencies_blocked_task_id_tasks_id_fk",
           "tableFrom": "task_dependencies",
           "tableTo": "tasks",
-          "columnsFrom": [
-            "blocked_task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["blocked_task_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "task_dependencies_board_id_blocker_task_id_blocked_task_id_pk": {
-          "columns": [
-            "board_id",
-            "blocker_task_id",
-            "blocked_task_id"
-          ],
+          "columns": ["board_id", "blocker_task_id", "blocked_task_id"],
           "name": "task_dependencies_board_id_blocker_task_id_blocked_task_id_pk"
         }
       },
@@ -881,18 +814,12 @@
       "indexes": {
         "tasks_board_status_idx": {
           "name": "tasks_board_status_idx",
-          "columns": [
-            "board_id",
-            "status"
-          ],
+          "columns": ["board_id", "status"],
           "isUnique": false
         },
         "tasks_board_id_sequence_unique": {
           "name": "tasks_board_id_sequence_unique",
-          "columns": [
-            "board_id",
-            "sequence"
-          ],
+          "columns": ["board_id", "sequence"],
           "isUnique": true
         }
       },
@@ -901,12 +828,8 @@
           "name": "tasks_board_id_task_boards_id_fk",
           "tableFrom": "tasks",
           "tableTo": "task_boards",
-          "columnsFrom": [
-            "board_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["board_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -999,18 +922,12 @@
       "indexes": {
         "thread_catalog_updated_idx": {
           "name": "thread_catalog_updated_idx",
-          "columns": [
-            "\"updated_at\" desc"
-          ],
+          "columns": ["\"updated_at\" desc"],
           "isUnique": false
         },
         "thread_catalog_cwd_status_idx": {
           "name": "thread_catalog_cwd_status_idx",
-          "columns": [
-            "cwd",
-            "status",
-            "archived"
-          ],
+          "columns": ["cwd", "status", "archived"],
           "isUnique": false
         }
       },
@@ -1094,10 +1011,7 @@
       "indexes": {
         "thread_checkpoint_catalog_thread_seq_idx": {
           "name": "thread_checkpoint_catalog_thread_seq_idx",
-          "columns": [
-            "thread_id",
-            "created_at"
-          ],
+          "columns": ["thread_id", "created_at"],
           "isUnique": false
         }
       },
@@ -1106,12 +1020,8 @@
           "name": "thread_checkpoint_catalog_thread_id_thread_catalog_id_fk",
           "tableFrom": "thread_checkpoint_catalog",
           "tableTo": "thread_catalog",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["thread_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1119,12 +1029,8 @@
           "name": "thread_checkpoint_catalog_artifact_id_artifacts_id_fk",
           "tableFrom": "thread_checkpoint_catalog",
           "tableTo": "artifacts",
-          "columnsFrom": [
-            "artifact_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["artifact_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1196,10 +1102,7 @@
       "indexes": {
         "thread_item_catalog_turn_seq_idx": {
           "name": "thread_item_catalog_turn_seq_idx",
-          "columns": [
-            "turn_id",
-            "seq"
-          ],
+          "columns": ["turn_id", "seq"],
           "isUnique": false
         }
       },
@@ -1208,12 +1111,8 @@
           "name": "thread_item_catalog_thread_id_thread_catalog_id_fk",
           "tableFrom": "thread_item_catalog",
           "tableTo": "thread_catalog",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["thread_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1221,12 +1120,8 @@
           "name": "thread_item_catalog_turn_id_thread_turn_catalog_id_fk",
           "tableFrom": "thread_item_catalog",
           "tableTo": "thread_turn_catalog",
-          "columnsFrom": [
-            "turn_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["turn_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1280,12 +1175,8 @@
           "name": "thread_lock_catalog_thread_id_thread_catalog_id_fk",
           "tableFrom": "thread_lock_catalog",
           "tableTo": "thread_catalog",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["thread_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1371,11 +1262,7 @@
       "indexes": {
         "thread_request_catalog_pending_idx": {
           "name": "thread_request_catalog_pending_idx",
-          "columns": [
-            "thread_id",
-            "status",
-            "created_at"
-          ],
+          "columns": ["thread_id", "status", "created_at"],
           "isUnique": false
         }
       },
@@ -1384,12 +1271,8 @@
           "name": "thread_request_catalog_thread_id_thread_catalog_id_fk",
           "tableFrom": "thread_request_catalog",
           "tableTo": "thread_catalog",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["thread_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1466,10 +1349,7 @@
       "indexes": {
         "thread_turn_catalog_thread_seq_idx": {
           "name": "thread_turn_catalog_thread_seq_idx",
-          "columns": [
-            "thread_id",
-            "seq"
-          ],
+          "columns": ["thread_id", "seq"],
           "isUnique": false
         }
       },
@@ -1478,12 +1358,8 @@
           "name": "thread_turn_catalog_thread_id_thread_catalog_id_fk",
           "tableFrom": "thread_turn_catalog",
           "tableTo": "thread_catalog",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["thread_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1611,25 +1487,17 @@
       "indexes": {
         "usage_model_calls_run_turn_idx": {
           "name": "usage_model_calls_run_turn_idx",
-          "columns": [
-            "run_id",
-            "turn_index"
-          ],
+          "columns": ["run_id", "turn_index"],
           "isUnique": true
         },
         "usage_model_calls_run_idx": {
           "name": "usage_model_calls_run_idx",
-          "columns": [
-            "run_id",
-            "turn_index"
-          ],
+          "columns": ["run_id", "turn_index"],
           "isUnique": false
         },
         "usage_model_calls_created_at_idx": {
           "name": "usage_model_calls_created_at_idx",
-          "columns": [
-            "created_at"
-          ],
+          "columns": ["created_at"],
           "isUnique": false
         }
       },
@@ -1844,23 +1712,17 @@
       "indexes": {
         "usage_records_started_at_idx": {
           "name": "usage_records_started_at_idx",
-          "columns": [
-            "started_at"
-          ],
+          "columns": ["started_at"],
           "isUnique": false
         },
         "usage_records_model_idx": {
           "name": "usage_records_model_idx",
-          "columns": [
-            "model"
-          ],
+          "columns": ["model"],
           "isUnique": false
         },
         "usage_records_status_idx": {
           "name": "usage_records_status_idx",
-          "columns": [
-            "status"
-          ],
+          "columns": ["status"],
           "isUnique": false
         }
       },
@@ -2008,12 +1870,8 @@
           "name": "workspace_repositories_workspace_id_workspaces_id_fk",
           "tableFrom": "workspace_repositories",
           "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2021,22 +1879,15 @@
           "name": "workspace_repositories_repository_id_repositories_id_fk",
           "tableFrom": "workspace_repositories",
           "tableTo": "repositories",
-          "columnsFrom": [
-            "repository_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["repository_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "workspace_repositories_workspace_id_repository_id_pk": {
-          "columns": [
-            "workspace_id",
-            "repository_id"
-          ],
+          "columns": ["workspace_id", "repository_id"],
           "name": "workspace_repositories_workspace_id_repository_id_pk"
         }
       },
@@ -2109,12 +1960,8 @@
           "name": "workspace_sync_runs_workspace_id_workspaces_id_fk",
           "tableFrom": "workspace_sync_runs",
           "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2200,10 +2047,7 @@
       "indexes": {
         "workspaces_active_selector_idx": {
           "name": "workspaces_active_selector_idx",
-          "columns": [
-            "kind",
-            "name"
-          ],
+          "columns": ["kind", "name"],
           "isUnique": true,
           "where": "\"workspaces\".\"status\" in ('active', 'missing')"
         }

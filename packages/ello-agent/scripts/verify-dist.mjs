@@ -2,8 +2,13 @@ import { access, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const distDir = path.resolve(process.env.ELLO_DIST_DIR ?? path.join(packageDir, 'dist'));
+const packageDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+);
+const distDir = path.resolve(
+  process.env.ELLO_DIST_DIR ?? path.join(packageDir, 'dist'),
+);
 const required = [
   'server/entry.js',
   'protocol/v1/index.js',

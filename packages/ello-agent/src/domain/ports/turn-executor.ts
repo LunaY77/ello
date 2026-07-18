@@ -24,6 +24,14 @@ export type TurnExecutionEvent =
   | { readonly type: 'itemCompleted'; readonly item: ThreadItem }
   | { readonly type: 'planUpdated'; readonly plan: Plan }
   | {
+      readonly type: 'goalUpdated';
+      readonly goal: NonNullable<ThreadSnapshot['goal']>;
+    }
+  | {
+      readonly type: 'settingsUpdated';
+      readonly settings: ThreadSnapshot['settings'];
+    }
+  | {
       readonly type: 'serverRequest';
       readonly request: PendingServerRequest;
     }

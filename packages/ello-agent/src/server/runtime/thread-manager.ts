@@ -29,6 +29,7 @@ import { ThreadRuntime } from './thread-runtime.js';
 interface ThreadEntry {
   readonly runtime: ThreadRuntime;
   readonly subscriptions: Map<string, () => void>;
+  holds: number;
   unloadTimer: NodeJS.Timeout | undefined;
 }
 
@@ -114,6 +115,7 @@ export class ThreadManager {
       const entry: ThreadEntry = {
         runtime,
         subscriptions: new Map(),
+        holds: 0,
         unloadTimer: undefined,
       };
       this.entries.set(threadId, entry);
@@ -124,7 +126,9 @@ export class ThreadManager {
         listener,
         requestListener,
       );
-      return { runtime, snapshot: await runtime.snapshot() };
+      const attachedSnapshot = await runtime.snapshot();
+      this.scheduleUnload(threadId, entry);
+      return { runtime, snapshot: attachedSnapshot };
     } catch (error) {
       await lease.release();
       throw error;
@@ -132,21 +136,19 @@ export class ThreadManager {
   }
 
   async updateSettings(
-    connectionId: string,
+    _connectionId: string,
     params: ParsedClientParams<'thread/settings/update'>,
   ): Promise<ThreadSnapshot['settings']> {
-    const attachment = await this.resume(connectionId, {
-      threadId: params.threadId,
-      subscribe: false,
+    return this.withEntry(params.threadId, true, async (entry) => {
+      const snapshot = await entry.runtime.snapshot();
+      const update = await this.resolveSettingsUpdate(snapshot, {
+        ...(params.mode === undefined ? {} : { mode: params.mode }),
+        ...(params.profile === undefined ? {} : { profile: params.profile }),
+        ...(params.model === undefined ? {} : { model: params.model }),
+        ...(params.agent === undefined ? {} : { agent: params.agent }),
+      });
+      return entry.runtime.updateSettings(update);
     });
-    const snapshot = await attachment.runtime.snapshot();
-    const update = await this.resolveSettingsUpdate(snapshot, {
-      ...(params.mode === undefined ? {} : { mode: params.mode }),
-      ...(params.profile === undefined ? {} : { profile: params.profile }),
-      ...(params.model === undefined ? {} : { model: params.model }),
-      ...(params.agent === undefined ? {} : { agent: params.agent }),
-    });
-    return attachment.runtime.updateSettings(update);
   }
 
   async resume(
@@ -165,7 +167,9 @@ export class ThreadManager {
       listener,
       requestListener,
     );
-    return { runtime: entry.runtime, snapshot: await entry.runtime.snapshot() };
+    const snapshot = await entry.runtime.snapshot();
+    this.scheduleUnload(params.threadId, entry);
+    return { runtime: entry.runtime, snapshot };
   }
 
   async read(
@@ -224,6 +228,7 @@ export class ThreadManager {
       });
     }
     const threadId = createEntityId('thr');
+    const sourceRecords = await this.logs.read(params.threadId);
     const lease = await this.leases.acquire(threadId);
     try {
       const created = await this.logs.create(threadId, {
@@ -261,6 +266,21 @@ export class ThreadManager {
             }),
           );
         }
+        for (const transcript of sourceRecords.filter(
+          (record) =>
+            record.kind === 'transcript.entry' &&
+            record.turnId === sourceTurn.id,
+        )) {
+          if (transcript.kind !== 'transcript.entry') continue;
+          records.push(
+            await this.append(threadId, {
+              kind: 'transcript.entry',
+              turnId: turn.id,
+              role: transcript.role,
+              message: transcript.message,
+            }),
+          );
+        }
         const terminal = { ...turn, items: [] };
         records.push(
           await this.append(
@@ -288,7 +308,12 @@ export class ThreadManager {
         records.push(
           await this.append(threadId, {
             kind: 'goal.state',
-            goal: { ...source.goal, id: createEntityId('job') },
+            goal: {
+              ...source.goal,
+              id: createEntityId('job'),
+              status: 'paused',
+              updatedAt: new Date().toISOString(),
+            },
           }),
         );
       }
@@ -304,6 +329,7 @@ export class ThreadManager {
       const entry: ThreadEntry = {
         runtime,
         subscriptions: new Map(),
+        holds: 0,
         unloadTimer: undefined,
       };
       this.entries.set(threadId, entry);
@@ -314,7 +340,9 @@ export class ThreadManager {
         listener,
         requestListener,
       );
-      return { runtime, snapshot: await runtime.snapshot() };
+      const attachedSnapshot = await runtime.snapshot();
+      this.scheduleUnload(threadId, entry);
+      return { runtime, snapshot: attachedSnapshot };
     } catch (error) {
       await lease.release();
       throw error;
@@ -326,7 +354,9 @@ export class ThreadManager {
     input: readonly UserInput[],
     options?: Parameters<ThreadRuntime['startTurn']>[1],
   ): Promise<Turn> {
-    return this.requireLoaded(threadId).runtime.startTurn(input, options);
+    return this.withEntry(threadId, false, (entry) =>
+      entry.runtime.startTurn(input, options),
+    );
   }
 
   steerTurn(
@@ -334,7 +364,9 @@ export class ThreadManager {
     turnId: string,
     input: readonly UserInput[],
   ): Promise<void> {
-    return this.requireLoaded(threadId).runtime.steerTurn(turnId, input);
+    return this.withEntry(threadId, false, (entry) =>
+      entry.runtime.steerTurn(turnId, input),
+    );
   }
 
   interruptTurn(
@@ -342,7 +374,9 @@ export class ThreadManager {
     turnId: string,
     reason?: string,
   ): Promise<Turn> {
-    return this.requireLoaded(threadId).runtime.interruptTurn(turnId, reason);
+    return this.withEntry(threadId, false, (entry) =>
+      entry.runtime.interruptTurn(turnId, reason),
+    );
   }
 
   async goal(threadId: string): Promise<Goal | null> {
@@ -359,11 +393,13 @@ export class ThreadManager {
     threadId: string,
     input: Parameters<ThreadRuntime['setGoal']>[0],
   ): Promise<Goal> {
-    return (await this.load(threadId)).runtime.setGoal(input);
+    return this.withEntry(threadId, true, (entry) =>
+      entry.runtime.setGoal(input),
+    );
   }
 
   async clearGoal(threadId: string): Promise<string> {
-    return (await this.load(threadId)).runtime.clearGoal();
+    return this.withEntry(threadId, true, (entry) => entry.runtime.clearGoal());
   }
 
   async plan(threadId: string): Promise<Plan | null> {
@@ -377,11 +413,9 @@ export class ThreadManager {
   }
 
   async setPlan(threadId: string, plan: Plan): Promise<Plan> {
-    return (await this.load(threadId)).runtime.setPlan(plan);
-  }
-
-  async compact(threadId: string): Promise<string> {
-    return (await this.load(threadId)).runtime.compact();
+    return this.withEntry(threadId, true, (entry) =>
+      entry.runtime.setPlan(plan),
+    );
   }
 
   async unsubscribe(connectionId: string, threadId: string): Promise<void> {
@@ -476,9 +510,11 @@ export class ThreadManager {
           lease,
         }),
         subscriptions: new Map(),
+        holds: 0,
         unloadTimer: undefined,
       };
       this.entries.set(threadId, entry);
+      this.scheduleUnload(threadId, entry);
       return entry;
     } catch (error) {
       await lease.release();
@@ -514,15 +550,19 @@ export class ThreadManager {
   private scheduleUnload(threadId: string, entry: ThreadEntry): void {
     if (
       entry.subscriptions.size > 0 ||
-      entry.runtime.hasActiveTurn() ||
-      entry.runtime.hasPendingServerRequest() ||
+      entry.holds > 0 ||
       entry.unloadTimer !== undefined
     ) {
       return;
     }
     entry.unloadTimer = setTimeout(() => {
       entry.unloadTimer = undefined;
-      void this.unloadNow(threadId).catch(() => undefined);
+      void this.unloadNow(threadId).catch(() => {
+        const current = this.entries.get(threadId);
+        if (!this.stopping && current === entry) {
+          this.scheduleUnload(threadId, entry);
+        }
+      });
     }, this.unloadGraceMs);
   }
 
@@ -530,6 +570,7 @@ export class ThreadManager {
     const entry = this.entries.get(threadId);
     if (entry === undefined) return;
     if (
+      entry.holds > 0 ||
       entry.runtime.hasActiveTurn() ||
       entry.runtime.hasPendingServerRequest()
     ) {
@@ -552,6 +593,27 @@ export class ThreadManager {
       });
     }
     return entry;
+  }
+
+  private async withEntry<T>(
+    threadId: string,
+    allowLoad: boolean,
+    operation: (entry: ThreadEntry) => Promise<T>,
+  ): Promise<T> {
+    const entry = allowLoad
+      ? await this.load(threadId)
+      : this.requireLoaded(threadId);
+    if (entry.unloadTimer !== undefined) {
+      clearTimeout(entry.unloadTimer);
+      entry.unloadTimer = undefined;
+    }
+    entry.holds += 1;
+    try {
+      return await operation(entry);
+    } finally {
+      entry.holds -= 1;
+      this.scheduleUnload(threadId, entry);
+    }
   }
 
   private assertRunning(): void {

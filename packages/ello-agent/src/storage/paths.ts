@@ -1,5 +1,7 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+
+const STORAGE_ID_PATTERN = /^[A-Za-z0-9_@+-][A-Za-z0-9._:@+-]{0,199}$/u;
 
 export function elloHomeDir(): string {
   const configured = process.env.ELLO_HOME?.trim();
@@ -17,14 +19,14 @@ export function archivedThreadsDir(root = elloHomeDir()): string {
 }
 
 export function threadLogPath(threadId: string, root = elloHomeDir()): string {
-  return join(activeThreadsDir(root), `${threadId}.jsonl`);
+  return storageFilePath(activeThreadsDir(root), threadId, '.jsonl');
 }
 
 export function archivedThreadLogPath(
   threadId: string,
   root = elloHomeDir(),
 ): string {
-  return join(archivedThreadsDir(root), `${threadId}.jsonl`);
+  return storageFilePath(archivedThreadsDir(root), threadId, '.jsonl');
 }
 
 export function artifactsDir(root = elloHomeDir()): string {
@@ -37,4 +39,38 @@ export function stateDatabasePath(root = elloHomeDir()): string {
 
 export function serverRunDir(root = elloHomeDir()): string {
   return join(root, 'run');
+}
+
+export function threadLocksDir(root = elloHomeDir()): string {
+  return join(serverRunDir(root), 'thread-locks');
+}
+
+export function threadLeasePath(
+  threadId: string,
+  root = elloHomeDir(),
+): string {
+  return storageFilePath(threadLocksDir(root), threadId, '.lock');
+}
+
+/** 文件型 thread ID 不接受目录分隔符，并再次验证结果仍位于目标目录。 */
+function storageFilePath(
+  directory: string,
+  id: string,
+  extension: string,
+): string {
+  if (!STORAGE_ID_PATTERN.test(id) || id === '.' || id === '..') {
+    throw new Error(`Unsafe storage id: ${id}.`);
+  }
+  const base = resolve(directory);
+  const candidate = resolve(base, `${id}${extension}`);
+  const relativeCandidate = relative(base, candidate);
+  if (
+    relativeCandidate === '' ||
+    relativeCandidate === '..' ||
+    relativeCandidate.startsWith(`..${sep}`) ||
+    isAbsolute(relativeCandidate)
+  ) {
+    throw new Error(`Storage path escapes its directory: ${id}.`);
+  }
+  return candidate;
 }

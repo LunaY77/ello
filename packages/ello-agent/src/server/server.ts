@@ -73,7 +73,9 @@ export class AgentServer {
     capabilities: readonly Capability[],
   ): Promise<void> {
     if (this.currentState !== 'ready') {
-      throw new Error(`Cannot accept transport while Server is ${this.currentState}.`);
+      throw new Error(
+        `Cannot accept transport while Server is ${this.currentState}.`,
+      );
     }
     if (this.connections.has(transport.connectionId)) {
       throw new Error(`Duplicate connection ${transport.connectionId}.`);
@@ -91,6 +93,7 @@ export class AgentServer {
       for (const threadId of connection.state.subscribedThreads) {
         await this.threads.unsubscribe(connection.id, threadId);
       }
+      this.options.services.closeConnection?.(connection.id);
       this.connections.delete(connection.id);
     }
   }

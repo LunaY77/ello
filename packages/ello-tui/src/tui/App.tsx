@@ -122,12 +122,12 @@ function ThreadScreen({
     () =>
       completeInput(
         draft,
-        models.map((model) => model.id),
+        profiles.map((profile) => profile.name),
         fileSuggestions,
         skills,
         cursor,
       ),
-    [cursor, draft, fileSuggestions, models, skills],
+    [cursor, draft, fileSuggestions, profiles, skills],
   );
   const modelOptions = useMemo(
     () => buildModelCatalogOptions(models, providers),
@@ -489,6 +489,7 @@ function ThreadScreen({
     const matches = [...value.matchAll(/(^|\s)@([^\s]+)/gu)];
     if (matches.length === 0) return [{ type: 'text', text: value }];
     const files: UserInput[] = [];
+    const resolvedPaths = new Set<string>();
     let text = value;
     for (const match of matches) {
       const query = match[2];
@@ -503,12 +504,14 @@ function ThreadScreen({
         (entry) => entry.path.endsWith(`/${query}`) || entry.name === query,
       );
       if (found === undefined) continue;
+      text = text.replace(match[0], '');
+      if (resolvedPaths.has(found.path)) continue;
+      resolvedPaths.add(found.path);
       files.push({
         type: 'file',
         path: found.path,
         displayName: displayFilePath(found.path, thread.cwd),
       });
-      text = text.replace(match[0], match[1] ?? '');
     }
     return text.trim() === ''
       ? files
@@ -553,10 +556,12 @@ function ThreadScreen({
   const onDenyPlan = (requestId: string): void =>
     onApprove(requestId, { decision: 'decline' });
   const onChatAboutPlan = (requestId: string, prompt: string): void => {
+    if (!beginRequestResolution(requestId)) return;
     void thread
       .approve(requestId, 'decline')
       .then(() => submitPrompt(prompt))
-      .catch((error: unknown) => notify(dispatch, error));
+      .catch((error: unknown) => notify(dispatch, error))
+      .finally(() => finishRequestResolution(requestId));
   };
 
   const switchThread = async (

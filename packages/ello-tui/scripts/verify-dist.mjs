@@ -2,12 +2,20 @@ import { access, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const packageDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+);
 const distDir = path.resolve(
   process.env.ELLO_DIST_DIR ?? path.join(packageDir, 'dist'),
 );
 
-for (const asset of ['cli/main.js', 'index.js', 'api/client.js', 'tui/App.js']) {
+for (const asset of [
+  'cli/main.js',
+  'index.js',
+  'api/client.js',
+  'tui/App.js',
+]) {
   await access(path.join(distDir, asset));
 }
 

@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { CheckpointRepository } from '../../storage/repositories/checkpoint-repository.js';
@@ -73,19 +72,16 @@ export class CheckpointStore {
     if (this.pending.length === 0) {
       return null;
     }
-    const checkpoint: Checkpoint = {
-      id: randomUUID(),
-      runId,
-      createdAt: new Date().toISOString(),
-      ...(label !== undefined ? { label } : {}),
-      changes: this.pending,
-    };
-    this.pending = [];
-    return this.repository.seal({
+    const changes = [...this.pending];
+    const checkpoint = await this.repository.seal({
       runId,
       ...(label !== undefined ? { label } : {}),
-      changes: checkpoint.changes,
+      changes,
     });
+    if (checkpoint !== null) {
+      this.pending.splice(0, changes.length);
+    }
+    return checkpoint;
   }
 
   /** 列出全部已封存检查点，按创建时间升序。 */
@@ -117,6 +113,7 @@ export class CheckpointStore {
     }
     // 反向应用：按记录的相反顺序写回 before。
     try {
+      await assertRollbackPreconditions(target.changes);
       for (const change of [...target.changes].reverse()) {
         if (change.before === null) {
           // 原本是新建：回滚 = 删除该文件。目录清理由调用方或后续 GC 决定。
@@ -134,5 +131,42 @@ export class CheckpointStore {
       throw error;
     }
     return target.changes;
+  }
+}
+
+/**
+ * 在产生任何写操作前模拟完整逆序回滚，确保文件仍处于检查点记录的 after 状态。
+ * 同一 run 多次修改同一路径时使用虚拟状态推进，不会把合法的变更链误判为漂移。
+ */
+async function assertRollbackPreconditions(
+  changes: readonly FileChange[],
+): Promise<void> {
+  const virtualState = new Map<string, string | null>();
+  for (const change of [...changes].reverse()) {
+    const normalizedPath = path.resolve(change.path);
+    const current = virtualState.has(normalizedPath)
+      ? virtualState.get(normalizedPath)!
+      : await readCurrentFile(normalizedPath);
+    if (current !== change.after) {
+      throw new Error(
+        `Checkpoint rollback precondition failed because the file drifted: ${normalizedPath}`,
+      );
+    }
+    virtualState.set(normalizedPath, change.before);
+  }
+}
+
+async function readCurrentFile(filePath: string): Promise<string | null> {
+  try {
+    const info = await lstat(filePath);
+    if (!info.isFile()) {
+      throw new Error(
+        `Checkpoint rollback target is not a regular file: ${filePath}`,
+      );
+    }
+    return readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
   }
 }
