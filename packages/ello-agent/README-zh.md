@@ -1,75 +1,21 @@
 # @ello/agent
 
-`@ello/agent` 是 ello 的 provider 无关 Agent 运行时 SDK。它提供一个小而稳定的接口来执行模型与工具循环，不绑定 UI，也不预设产品层能力。
+`@ello/agent` 是 ello 的 App Server。它拥有 provider 密钥、模型执行、工具、权限、存储以及 Thread/Turn/Item runtime；Client 只能通过 JSON-RPC 2.0 连接，不能 import Server 实现。
 
 ## 能力
 
-- `createAgent()`，以及 `run()`、`stream()`、`resume()`、`close()`
-- 使用 `defineTool()` 和 Zod schema 定义类型安全工具
-- 本地文件系统、Shell 和资源注册表环境
-- AI SDK provider 模型适配器
-- 会话、消息转换、system sections、审批、observer、用量诊断
-- 技能，以及可延迟/可恢复的工具执行
+- Thread、Turn、Item、管理 RPC 和 Server Request 的 JSON-RPC v1 schema
+- stdio、WebSocket 和 Unix socket transport
+- Server-owned 模型适配器、工具、权限、技能、记忆、工作区和持久化
+- 支持断线恢复的审批与用户输入请求
 
-## 安装
+## 启动 Server
 
 ```bash
-pnpm add @ello/agent
+pnpm --filter @ello/agent build
+node packages/ello-agent/dist/server/entry.js --listen stdio://
 ```
 
-## 示例
+公开出口只包含 Server 生命周期和 `@ello/agent/protocol`。`@ello/agent/server-entry` 只由 `@ello/tui` 用来启动隔离的 Server 进程。
 
-```ts
-import {
-  createAgent,
-  createLocalShellEnvironment,
-  defineTool,
-  z,
-} from '@ello/agent';
-
-const echo = defineTool({
-  name: 'echo',
-  description: '返回文本',
-  discovery: { aliases: ['重复文本'], risk: 'readonly' },
-  input: z.object({ text: z.string() }).strict(),
-  execute: ({ text }) => text,
-});
-
-const agent = createAgent({
-  model: 'openai:gpt-4.1-mini',
-  instructions: '请简洁回答。',
-  environment: createLocalShellEnvironment({
-    cwd: process.cwd(),
-    allowedPaths: [process.cwd()],
-  }),
-  executionTools: [echo],
-  modelTools: [echo],
-});
-
-const result = await agent.run('你好');
-console.log(result.output);
-await agent.close();
-```
-
-`stream()` 与 `run()` 走同一执行路径，会返回事件和最终结果。调用方应持续消费迭代器，以遵守流式事件的背压限制。
-
-## 运行时流程
-
-```mermaid
-sequenceDiagram
-  participant App as 应用
-  participant Agent
-  participant Env as 环境
-  participant Model as 模型
-  participant Tool as 工具
-  App->>Agent: run / stream
-  Agent->>Env: setup
-  Agent->>Model: 组装输入并调用
-  Model-->>Agent: 回复 / 工具调用
-  Agent->>Tool: 校验并执行
-  Tool-->>Agent: 工具结果
-  Agent-->>App: 事件与最终结果
-  Agent->>Env: close
-```
-
-英文文档见 [`README.md`](README.md)。
+JSON-RPC 生命周期为 `initialize` → `initialized` → `thread/start` 或 `thread/resume` → `turn/start`。进度通过严格类型的 notification 发送，审批和用户输入使用双向 Server Request。

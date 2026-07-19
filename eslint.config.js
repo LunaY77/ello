@@ -144,4 +144,33 @@ export default tseslint.config(
       'check-file/folder-naming-convention': 'off',
     },
   },
+
+  {
+    files: ['packages/ello-tui/src/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@ello/agent',
+              message:
+                'TUI may only import protocol types from @ello/agent/protocol.',
+            },
+            {
+              name: '@ello/agent/server-entry',
+              message:
+                'Resolve server-entry for a child process; never import it.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['@ello/agent/internal/**', '@ello/agent/dist/**'],
+              message: 'TUI cannot import private Server implementation paths.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

@@ -1,75 +1,21 @@
 # @ello/agent
 
-`@ello/agent` is ello's provider-agnostic Agent runtime SDK. It gives application code a small, stable surface for running model/tool loops without imposing a UI or product preset.
+`@ello/agent` is Ello's App Server. It owns provider credentials, model execution, tools, permissions, storage, and the Thread/Turn/Item runtime. Clients connect through JSON-RPC 2.0 and never import the server implementation.
 
 ## Features
 
-- `createAgent()` with `run()`, `stream()`, `resume()`, and `close()`
-- Typed tools via `defineTool()` and Zod schemas
-- Local filesystem, shell, and resource environments
-- Model adapters for AI SDK providers
-- Sessions, message transforms, system sections, approvals, observers, and usage diagnostics
-- Skills and deferred/resumable tool execution
+- JSON-RPC v1 schemas for Thread, Turn, Item, management RPC, and Server Requests
+- stdio, WebSocket, and Unix socket transports
+- Server-owned model adapters, tools, permissions, skills, memory, workspace, and persistence
+- Approval and user-input requests that can be resumed by a reconnecting client
 
-## Install
+## Start the server
 
 ```bash
-pnpm add @ello/agent
+pnpm --filter @ello/agent build
+node packages/ello-agent/dist/server/entry.js --listen stdio://
 ```
 
-## Example
+The public package export contains only the server lifecycle and `@ello/agent/protocol`. The `@ello/agent/server-entry` subpath is used by `@ello/tui` to spawn an isolated process.
 
-```ts
-import {
-  createAgent,
-  createLocalShellEnvironment,
-  defineTool,
-  z,
-} from '@ello/agent';
-
-const echo = defineTool({
-  name: 'echo',
-  description: 'Return text',
-  discovery: { aliases: ['repeat text'], risk: 'readonly' },
-  input: z.object({ text: z.string() }).strict(),
-  execute: ({ text }) => text,
-});
-
-const agent = createAgent({
-  model: 'openai:gpt-4.1-mini',
-  instructions: 'Answer concisely.',
-  environment: createLocalShellEnvironment({
-    cwd: process.cwd(),
-    allowedPaths: [process.cwd()],
-  }),
-  executionTools: [echo],
-  modelTools: [echo],
-});
-
-const result = await agent.run('Hello');
-console.log(result.output);
-await agent.close();
-```
-
-`stream()` follows the same execution path as `run()` and exposes events plus a final result. Consumers should keep consuming the iterator to respect the configured backpressure limit.
-
-## Runtime model
-
-```mermaid
-sequenceDiagram
-  participant App
-  participant Agent
-  participant Env
-  participant Model
-  participant Tool
-  App->>Agent: run(input) / stream(input)
-  Agent->>Env: setup(context)
-  Agent->>Model: build input and call model
-  Model-->>Agent: response / tool call
-  Agent->>Tool: validate and execute
-  Tool-->>Agent: result
-  Agent-->>App: events and final result
-  Agent->>Env: close()
-```
-
-See [`README-zh.md`](README-zh.md) for Chinese documentation.
+The JSON-RPC lifecycle is `initialize` → `initialized` → `thread/start` or `thread/resume` → `turn/start`. Progress is delivered as typed notifications; approvals and user input are bidirectional Server Requests.

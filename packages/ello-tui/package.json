@@ -1,0 +1,46 @@
+{
+  "name": "@ello/tui",
+  "version": "1.0.0",
+  "description": "Ello JSON-RPC client, CLI, and terminal UI",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ello": "./dist/cli/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "verify-dist": "node scripts/verify-dist.mjs",
+    "ello": "node dist/cli/main.js",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit"
+  },
+  "dependencies": {
+    "@ello/agent": "workspace:*",
+    "@inkjs/ui": "^2.0.0",
+    "commander": "^15.0.0",
+    "ink": "^6.5.0",
+    "react": "^19.2.3",
+    "ws": "^8.18.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.2",
+    "@types/react": "^19.2.7",
+    "@types/ws": "^8.18.1",
+    "ink-testing-library": "^4.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.0.15"
+  }
+}
