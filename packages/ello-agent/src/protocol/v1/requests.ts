@@ -364,35 +364,66 @@ export const CLIENT_REQUEST_SCHEMAS = {
       kind: z.enum(['feature', 'fix', 'refactor', 'explore']),
       name: z.string().min(1),
       repos: z.array(z.string().min(1)).min(1),
+      tmux: z.string().min(1).optional(),
     })
     .strict(),
-  'workspace/list': EmptyParamsSchema,
-  'workspace/archived/list': EmptyParamsSchema,
+  'workspace/list': z
+    .object({
+      kind: z.enum(['feature', 'fix', 'refactor', 'explore']).optional(),
+      status: z.enum(['active', 'archived', 'missing', 'deleted']).optional(),
+    })
+    .strict(),
+  'workspace/archived/list': z
+    .object({ workspace: z.string().min(1).optional() })
+    .strict(),
   'workspace/read': WorkspaceIdentifierParamsSchema,
   'workspace/path': WorkspaceIdentifierParamsSchema,
   'workspace/status': WorkspaceIdentifierParamsSchema,
   'workspace/repo/add': WorkspaceIdentifierParamsSchema.extend({
-    repo: z.string().min(1),
+    repo: z.string().min(1).optional(),
+    repos: z.array(z.string().min(1)).min(1).optional(),
     role: z.enum(['development', 'reference']).default('development'),
     detached: z.boolean().default(false),
-  }).strict(),
+  })
+    .strict()
+    .refine(
+      (params) => (params.repo === undefined) !== (params.repos === undefined),
+      {
+        message: 'Specify repo or repos',
+      },
+    ),
   'workspace/repo/create': WorkspaceIdentifierParamsSchema.extend({
     key: z.string().min(1),
   }).strict(),
   'workspace/repo/remove': WorkspaceIdentifierParamsSchema.extend({
-    repo: z.string().min(1),
-  }).strict(),
+    repo: z.string().min(1).optional(),
+    repos: z.array(z.string().min(1)).min(1).optional(),
+    force: z.boolean().default(false),
+  })
+    .strict()
+    .refine(
+      (params) => (params.repo === undefined) !== (params.repos === undefined),
+      {
+        message: 'Specify repo or repos',
+      },
+    ),
   'workspace/rename': WorkspaceIdentifierParamsSchema.extend({
     name: z.string().min(1),
   }).strict(),
   'workspace/archive': WorkspaceIdentifierParamsSchema,
   'workspace/delete': WorkspaceIdentifierParamsSchema.extend({
+    archived: z.boolean().default(false),
     force: z.boolean().default(false),
   }).strict(),
-  'workspace/reconcile': WorkspaceIdentifierParamsSchema,
-  'workspace/repair': WorkspaceIdentifierParamsSchema,
+  'workspace/reconcile': z
+    .object({ workspace: z.string().min(1).optional() })
+    .strict(),
+  'workspace/repair': z
+    .object({ workspace: z.string().min(1).optional() })
+    .strict(),
   'workspace/tmux/new': WorkspaceIdentifierParamsSchema.extend({
     command: z.string().min(1).optional(),
+    name: z.string().min(1).optional(),
   }).strict(),
 } as const;
 

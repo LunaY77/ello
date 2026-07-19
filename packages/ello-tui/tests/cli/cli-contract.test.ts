@@ -200,6 +200,44 @@ describe('CLI contract', () => {
     ).rejects.toThrow('Unsupported config operation legacy-read');
     expect(mocks.connectClient).not.toHaveBeenCalled();
   });
+
+  it('workspace 支持 ws alias，并将 repo add 映射到 workspace RPC', async () => {
+    const client = managementClient({
+      workspace: {
+        id: 'ws_fixture',
+        kind: 'refactor',
+        name: 'ello',
+        rootPath: '/workspace/refactor/ello',
+        status: 'active',
+        branch: 'refactor/ello',
+        repositories: [],
+        createdAt: '2026-07-19T00:00:00.000Z',
+        updatedAt: '2026-07-19T00:00:00.000Z',
+      },
+    });
+    mocks.connectClient.mockResolvedValue(connection(client));
+    const { runCli } = await import('../../src/cli/main.js');
+
+    await runCli([
+      'node',
+      'ello',
+      '--json',
+      'ws',
+      'repo',
+      'add',
+      'ccb/claude-code',
+      '--workspace',
+      'refactor/ello',
+      '--detached',
+    ]);
+
+    expect(client.request).toHaveBeenCalledWith('workspace/repo/add', {
+      workspace: 'refactor/ello',
+      repo: 'ccb/claude-code',
+      role: 'reference',
+      detached: true,
+    });
+  });
 });
 
 function managementClient(result: unknown, rejects = false) {

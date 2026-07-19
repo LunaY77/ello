@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import path from 'node:path';
+
 import { Command } from 'commander';
 
 import type { AppServerClient } from '../api/client.js';
@@ -399,45 +401,305 @@ program
     },
   );
 
-program
-  .command('workspace <operation> [workspace]')
+const workspace = program
+  .command('workspace')
+  .alias('ws')
   .description('list, read, or manage workspaces')
-  .option('--force')
+  .option('--json');
+
+workspace
+  .command('create <selector> <repo...>')
+  .description('create a workspace from registered repositories')
+  .option('--tmux [name]', 'create and bind a tmux session')
   .option('--json')
   .action(
     async (
-      operation: string,
-      workspace: string | undefined,
-      options: { force?: boolean },
+      selector: string,
+      repos: readonly string[],
+      options: { tmux?: true | string },
       command: Command,
     ) => {
       const global = resolveGlobalOptions(command);
-      if (operation === 'list')
-        await runManagement(global, 'workspace/list', {});
-      else if (operation === 'archived')
-        await runManagement(global, 'workspace/archived/list', {});
-      else {
-        if (workspace === undefined)
-          throw new Error(`workspace ${operation} requires a workspace.`);
-        if (operation === 'read')
-          await runManagement(global, 'workspace/read', { workspace });
-        else if (operation === 'path')
-          await runManagement(global, 'workspace/path', { workspace });
-        else if (operation === 'status')
-          await runManagement(global, 'workspace/status', { workspace });
-        else if (operation === 'archive')
-          await runManagement(global, 'workspace/archive', { workspace });
-        else if (operation === 'delete')
-          await runManagement(global, 'workspace/delete', {
-            workspace,
-            force: options.force === true,
-          });
-        else if (operation === 'reconcile')
-          await runManagement(global, 'workspace/reconcile', { workspace });
-        else if (operation === 'repair')
-          await runManagement(global, 'workspace/repair', { workspace });
-        else throw new Error(`Unsupported workspace operation ${operation}.`);
-      }
+      const { kind, name } = parseWorkspaceSelector(selector);
+      await runManagement(global, 'workspace/create', {
+        kind,
+        name,
+        repos: [...repos],
+        ...(options.tmux === undefined
+          ? {}
+          : {
+              tmux:
+                typeof options.tmux === 'string'
+                  ? options.tmux
+                  : `${kind}-${name}`,
+            }),
+      });
+    },
+  );
+
+workspace
+  .command('list')
+  .description('list active workspaces')
+  .option('--kind <kind>')
+  .option('--status <status>')
+  .option('--json')
+  .action(
+    async (options: { kind?: string; status?: string }, command: Command) => {
+      await runManagement(resolveGlobalOptions(command), 'workspace/list', {
+        ...(options.kind === undefined
+          ? {}
+          : {
+              kind: options.kind as 'feature' | 'fix' | 'refactor' | 'explore',
+            }),
+        ...(options.status === undefined
+          ? {}
+          : {
+              status: options.status as
+                | 'active'
+                | 'archived'
+                | 'missing'
+                | 'deleted',
+            }),
+      });
+    },
+  );
+
+workspace
+  .command('archived [selector]')
+  .description('list archived workspaces')
+  .option('--json')
+  .action(
+    async (
+      selector: string | undefined,
+      _options: unknown,
+      command: Command,
+    ) => {
+      await runManagement(
+        resolveGlobalOptions(command),
+        'workspace/archived/list',
+        selector === undefined ? {} : { workspace: selector },
+      );
+    },
+  );
+
+const workspaceRead = workspace
+  .command('show [selector]')
+  .alias('read')
+  .description('read one workspace');
+workspaceRead
+  .option('--id <id>')
+  .option('--json')
+  .action(
+    async (
+      selector: string | undefined,
+      options: { id?: string },
+      command: Command,
+    ) => {
+      await runManagement(resolveGlobalOptions(command), 'workspace/read', {
+        workspace: requireWorkspaceIdentifier(selector, options.id),
+      });
+    },
+  );
+
+const workspacePath = workspace
+  .command('path [selector]')
+  .description('print the workspace path');
+workspacePath
+  .option('--id <id>')
+  .option('--json')
+  .action(
+    async (
+      selector: string | undefined,
+      options: { id?: string },
+      command: Command,
+    ) => {
+      await runManagement(resolveGlobalOptions(command), 'workspace/path', {
+        workspace: requireWorkspaceIdentifier(selector, options.id),
+      });
+    },
+  );
+
+const workspaceStatus = workspace
+  .command('status [selector]')
+  .description('show workspace filesystem and Git status');
+workspaceStatus
+  .option('--id <id>')
+  .option('--json')
+  .action(
+    async (
+      selector: string | undefined,
+      options: { id?: string },
+      command: Command,
+    ) => {
+      await runManagement(resolveGlobalOptions(command), 'workspace/status', {
+        workspace: await resolveWorkspaceIdentifier(
+          resolveGlobalOptions(command),
+          workspaceIdentifier(selector, options.id),
+        ),
+      });
+    },
+  );
+
+const workspaceRepo = workspace
+  .command('repo')
+  .description('manage repositories attached to a workspace');
+workspaceRepo
+  .command('add <repo...>')
+  .description('add repositories to a workspace')
+  .option('--workspace <selector>')
+  .option('--detached', 'add detached reference checkouts')
+  .option('--json')
+  .action(
+    async (
+      repos: readonly string[],
+      options: { workspace?: string; detached?: boolean },
+      command: Command,
+    ) => {
+      const global = resolveGlobalOptions(command);
+      const workspaceId = await resolveWorkspaceIdentifier(
+        global,
+        options.workspace,
+      );
+      await runManagement(global, 'workspace/repo/add', {
+        workspace: workspaceId,
+        ...(repos.length === 1 ? { repo: repos[0]! } : { repos: [...repos] }),
+        role: options.detached === true ? 'reference' : 'development',
+        detached: options.detached === true,
+      });
+    },
+  );
+
+workspaceRepo
+  .command('create <key>')
+  .description('create and attach a managed repository')
+  .option('--workspace <selector>')
+  .option('--json')
+  .action(
+    async (key: string, options: { workspace?: string }, command: Command) => {
+      await runManagement(
+        resolveGlobalOptions(command),
+        'workspace/repo/create',
+        {
+          workspace: await resolveWorkspaceIdentifier(
+            resolveGlobalOptions(command),
+            options.workspace,
+          ),
+          key,
+        },
+      );
+    },
+  );
+
+workspaceRepo
+  .command('remove <repo...>')
+  .description('remove repositories from a workspace')
+  .option('--workspace <selector>')
+  .option('--force', 'discard dirty worktree content')
+  .option('--json')
+  .action(
+    async (
+      repos: readonly string[],
+      options: { workspace?: string; force?: boolean },
+      command: Command,
+    ) => {
+      const global = resolveGlobalOptions(command);
+      const workspaceId = await resolveWorkspaceIdentifier(
+        global,
+        options.workspace,
+      );
+      await runManagement(global, 'workspace/repo/remove', {
+        workspace: workspaceId,
+        ...(repos.length === 1 ? { repo: repos[0]! } : { repos: [...repos] }),
+        force: options.force === true,
+      });
+    },
+  );
+
+const workspaceRename = workspace
+  .command('rename <selector> <newName>')
+  .description('rename an active workspace');
+workspaceRename
+  .option('--json')
+  .action(
+    async (
+      selector: string,
+      newName: string,
+      _options: Record<string, unknown>,
+      command: Command,
+    ) => {
+      await runManagement(resolveGlobalOptions(command), 'workspace/rename', {
+        workspace: selector,
+        name: newName,
+      });
+    },
+  );
+
+const workspaceArchive = workspace
+  .command('archive <selector>')
+  .description('archive an active workspace');
+workspaceArchive
+  .option('--json')
+  .action(async (selector: string, _options: unknown, command: Command) => {
+    await runManagement(resolveGlobalOptions(command), 'workspace/archive', {
+      workspace: selector,
+    });
+  });
+
+const workspaceDelete = workspace
+  .command('delete [selector]')
+  .description('delete a workspace');
+workspaceDelete
+  .option('--force', 'discard dirty worktree and workspace content')
+  .option('--archived', 'delete an archived workspace')
+  .option('--id <id>', 'delete one workspace by id')
+  .option('--json')
+  .action(
+    async (
+      selector: string | undefined,
+      options: { force?: boolean; archived?: boolean; id?: string },
+      command: Command,
+    ) => {
+      await runManagement(resolveGlobalOptions(command), 'workspace/delete', {
+        workspace: requireWorkspaceIdentifier(selector, options.id),
+        archived: options.archived === true,
+        force: options.force === true,
+      });
+    },
+  );
+
+for (const operation of ['reconcile', 'repair'] as const) {
+  const command = workspace
+    .command(`${operation} [selector]`)
+    .description(`${operation} workspace filesystem and metadata`)
+    .option('--id <id>')
+    .option('--json');
+  command.action(
+    async (
+      selector: string | undefined,
+      options: { id?: string },
+      cmd: Command,
+    ) => {
+      const selected = workspaceIdentifier(selector, options.id);
+      await runManagement(resolveGlobalOptions(cmd), `workspace/${operation}`, {
+        ...(selected === undefined ? {} : { workspace: selected }),
+      });
+    },
+  );
+}
+
+const workspaceTmux = workspace
+  .command('tmux')
+  .description('manage workspace tmux sessions');
+workspaceTmux
+  .command('new <selector>')
+  .option('--name <name>')
+  .option('--json')
+  .action(
+    async (selector: string, options: { name?: string }, command: Command) => {
+      await runManagement(resolveGlobalOptions(command), 'workspace/tmux/new', {
+        workspace: selector,
+        ...(options.name === undefined ? {} : { name: options.name }),
+      });
     },
   );
 
@@ -622,11 +884,19 @@ async function runManagement<M extends Exclude<ClientMethod, 'initialize'>>(
   method: M,
   params: ClientParams<M>,
 ): Promise<void> {
+  const result = await requestManagement(global, method, params);
+  if (global.json === true) writeJson(result);
+  else writeText(result);
+}
+
+async function requestManagement<M extends Exclude<ClientMethod, 'initialize'>>(
+  global: GlobalCliOptions,
+  method: M,
+  params: ClientParams<M>,
+): Promise<import('../api/protocol-types.js').ClientResult<M>> {
   const connection = await connectClientFor(global);
   try {
-    const result = await connection.client.request(method, params);
-    if (global.json === true) writeJson(result);
-    else writeText(result);
+    return await connection.client.request(method, params);
   } finally {
     await closeConnection(connection.client);
   }
@@ -720,4 +990,63 @@ function normalizeOptions(
     ...(values.json === true ? { json: true } : {}),
     ...(values.tui === false ? { noTui: true } : {}),
   };
+}
+
+function parseWorkspaceSelector(selector: string): {
+  readonly kind: 'feature' | 'fix' | 'refactor' | 'explore';
+  readonly name: string;
+} {
+  const slash = selector.indexOf('/');
+  if (
+    slash <= 0 ||
+    slash === selector.length - 1 ||
+    selector.indexOf('/', slash + 1) !== -1
+  ) {
+    throw new Error(`Invalid workspace selector: ${selector}`);
+  }
+  const kind = selector.slice(0, slash);
+  if (
+    kind !== 'feature' &&
+    kind !== 'fix' &&
+    kind !== 'refactor' &&
+    kind !== 'explore'
+  ) {
+    throw new Error(`Invalid workspace selector: ${selector}`);
+  }
+  return { kind, name: selector.slice(slash + 1) };
+}
+
+function workspaceIdentifier(
+  selector: string | undefined,
+  id?: string,
+): string | undefined {
+  if (selector !== undefined && id !== undefined)
+    throw new Error('Specify a workspace selector or --id');
+  return selector ?? id;
+}
+
+function requireWorkspaceIdentifier(
+  selector: string | undefined,
+  id?: string,
+): string {
+  const workspace = workspaceIdentifier(selector, id);
+  if (workspace === undefined)
+    throw new Error('Workspace selector or --id is required');
+  return workspace;
+}
+
+async function resolveWorkspaceIdentifier(
+  global: GlobalCliOptions,
+  selector: string | undefined,
+): Promise<string> {
+  if (selector !== undefined) return selector;
+  const result = await requestManagement(global, 'workspace/list', {});
+  const cwd = path.resolve(global.root ?? process.cwd());
+  const workspace = result.data.find(
+    (candidate) => path.resolve(candidate.rootPath) === cwd,
+  );
+  if (workspace === undefined) {
+    throw new Error(`Current directory is not a workspace root: ${cwd}`);
+  }
+  return workspace.id;
 }

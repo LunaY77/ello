@@ -172,7 +172,8 @@
     },
     "workspace/repo/remove": {
       "workspace": "feature/fixture",
-      "repo": "fixture"
+      "repo": "fixture",
+      "force": false
     },
     "workspace/rename": { "workspace": "feature/fixture", "name": "renamed" },
     "workspace/archive": { "workspace": "feature/fixture" },

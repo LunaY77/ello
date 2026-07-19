@@ -1151,18 +1151,37 @@ export class ServerServices implements RpcServices {
         const params = rawParams as ParsedClientParams<'workspace/create'>;
         return {
           workspace: protocolWorkspace(
-            await store.create(params.kind, params.name, params.repos),
+            await store.create(
+              params.kind,
+              params.name,
+              params.repos,
+              params.tmux,
+            ),
           ),
         };
       }
-      case 'workspace/list':
+      case 'workspace/list': {
+        const params = rawParams as ParsedClientParams<'workspace/list'>;
         return {
-          data: store.list({ status: 'active' }).map(protocolWorkspace),
+          data: store
+            .list({
+              ...(params.kind === undefined ? {} : { kind: params.kind }),
+              ...(params.status === undefined ? {} : { status: params.status }),
+            })
+            .map(protocolWorkspace),
         };
-      case 'workspace/archived/list':
+      }
+      case 'workspace/archived/list': {
+        const params =
+          rawParams as ParsedClientParams<'workspace/archived/list'>;
+        const archived =
+          params.workspace === undefined
+            ? store.list({ status: 'archived' })
+            : listArchivedWorkspace(store, params.workspace);
         return {
-          data: store.list({ status: 'archived' }).map(protocolWorkspace),
+          data: archived.map(protocolWorkspace),
         };
+      }
       case 'workspace/read': {
         const params = rawParams as ParsedClientParams<'workspace/read'>;
         return {
@@ -1189,9 +1208,10 @@ export class ServerServices implements RpcServices {
             'detached must be true exactly for reference checkouts.',
           );
         }
+        const repos = params.repos ?? [params.repo!];
         const workspace = await store.addRepos(
           openWorkspace(store, params.workspace),
-          [params.repo],
+          repos,
           params.role,
         );
         return { workspace: protocolWorkspace(workspace) };
@@ -1213,8 +1233,8 @@ export class ServerServices implements RpcServices {
           workspace: protocolWorkspace(
             await store.removeRepos(
               openWorkspace(store, params.workspace),
-              [params.repo],
-              false,
+              params.repos ?? [params.repo!],
+              params.force,
             ),
           ),
         };
@@ -1241,7 +1261,9 @@ export class ServerServices implements RpcServices {
       case 'workspace/delete': {
         const params = rawParams as ParsedClientParams<'workspace/delete'>;
         await store.delete(
-          openWorkspace(store, params.workspace),
+          params.archived
+            ? openArchivedWorkspace(store, params.workspace)
+            : openWorkspace(store, params.workspace),
           params.force,
         );
         return { ok: true };
@@ -1250,7 +1272,11 @@ export class ServerServices implements RpcServices {
         const params = rawParams as ParsedClientParams<'workspace/reconcile'>;
         return {
           result: toJson(
-            await store.reconcile([openWorkspace(store, params.workspace)]),
+            await store.reconcile(
+              params.workspace === undefined
+                ? store.listRepairable()
+                : [openWorkspace(store, params.workspace)],
+            ),
           ),
         };
       }
@@ -1258,7 +1284,11 @@ export class ServerServices implements RpcServices {
         const params = rawParams as ParsedClientParams<'workspace/repair'>;
         return {
           result: toJson(
-            await store.repair([openWorkspace(store, params.workspace)]),
+            await store.repair(
+              params.workspace === undefined
+                ? store.listRepairable()
+                : [openWorkspace(store, params.workspace)],
+            ),
           ),
         };
       }
@@ -1270,7 +1300,7 @@ export class ServerServices implements RpcServices {
           );
         }
         const workspace = openWorkspace(store, params.workspace);
-        const session = `${workspace.kind}-${workspace.name}`;
+        const session = params.name ?? `${workspace.kind}-${workspace.name}`;
         await store.bindTmux(workspace, session);
         return { session };
       }
@@ -1360,6 +1390,55 @@ function openWorkspace(store: WorkspaceStore, selector: string): Workspace {
     if (slash <= 0 || slash === selector.length - 1) throw idError;
     return store.open(selector.slice(0, slash), selector.slice(slash + 1));
   }
+}
+
+function listArchivedWorkspace(
+  store: WorkspaceStore,
+  selector: string,
+): readonly Workspace[] {
+  const { kind, name } = parseWorkspaceSelector(selector);
+  return store.listArchived(kind, name);
+}
+
+function openArchivedWorkspace(
+  store: WorkspaceStore,
+  selector: string,
+): Workspace {
+  try {
+    const workspace = store.openById(selector);
+    if (workspace.status !== 'archived') {
+      throw invalid(`Workspace is not archived: ${selector}`);
+    }
+    return workspace;
+  } catch (idError) {
+    if (!selector.includes('/')) throw idError;
+    const { kind, name } = parseWorkspaceSelector(selector);
+    return store.openArchived(kind, name);
+  }
+}
+
+function parseWorkspaceSelector(selector: string): {
+  readonly kind: 'feature' | 'fix' | 'refactor' | 'explore';
+  readonly name: string;
+} {
+  const slash = selector.indexOf('/');
+  if (
+    slash <= 0 ||
+    slash === selector.length - 1 ||
+    selector.indexOf('/', slash + 1) !== -1
+  ) {
+    throw invalid(`Invalid workspace selector: ${selector}`);
+  }
+  const kind = selector.slice(0, slash);
+  if (
+    kind !== 'feature' &&
+    kind !== 'fix' &&
+    kind !== 'refactor' &&
+    kind !== 'explore'
+  ) {
+    throw invalid(`Invalid workspace selector: ${selector}`);
+  }
+  return { kind, name: selector.slice(slash + 1) };
 }
 
 function readRepositoryImport(document: unknown): {
