@@ -3,3 +3,9 @@ dist/
 coverage/
 .turbo/
 *.tsbuildinfo
+
+# Local App Server runtime data
+/artifacts/
+/run/
+/state/
+/threads/

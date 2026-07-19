@@ -1,0 +1,271 @@
+{
+  "protocolVersion": 1,
+  "clientRequests": {
+    "initialize": {
+      "clientInfo": {
+        "name": "fixture",
+        "title": "Fixture Client",
+        "version": "1.0.0"
+      },
+      "protocolVersion": 1,
+      "capabilities": {
+        "experimentalApi": false,
+        "supportsServerRequests": true,
+        "supportsUserInput": true,
+        "optOutNotificationMethods": [],
+        "platform": "automation"
+      }
+    },
+    "server/read": {},
+    "server/shutdown": { "reason": "fixture complete" },
+    "thread/start": { "cwd": "/workspace", "subscribe": true },
+    "thread/resume": { "threadId": "thr_fixture", "subscribe": true },
+    "thread/read": {
+      "threadId": "thr_fixture",
+      "includeTurns": true,
+      "includeItems": true
+    },
+    "thread/list": { "archived": false, "limit": 20 },
+    "thread/loaded/list": {},
+    "thread/fork": { "threadId": "thr_fixture", "subscribe": true },
+    "thread/unsubscribe": { "threadId": "thr_fixture" },
+    "thread/archive": { "threadId": "thr_fixture" },
+    "thread/unarchive": { "threadId": "thr_fixture" },
+    "thread/delete": { "threadId": "thr_fixture" },
+    "thread/turns/list": { "threadId": "thr_fixture", "limit": 20 },
+    "thread/items/list": {
+      "threadId": "thr_fixture",
+      "turnId": "turn_fixture",
+      "limit": 20
+    },
+    "thread/export": { "threadId": "thr_fixture", "format": "jsonl" },
+    "artifact/read": {
+      "artifactId": "artifact_fixture",
+      "offset": 0,
+      "maxBytes": 1024
+    },
+    "thread/compact/start": { "threadId": "thr_fixture" },
+    "thread/shellCommand": {
+      "threadId": "thr_fixture",
+      "command": "pwd",
+      "timeoutMs": 1000
+    },
+    "thread/settings/update": {
+      "threadId": "thr_fixture",
+      "mode": "ask-before-changes"
+    },
+    "turn/start": {
+      "threadId": "thr_fixture",
+      "input": [{ "type": "text", "text": "hello" }]
+    },
+    "turn/steer": {
+      "threadId": "thr_fixture",
+      "expectedTurnId": "turn_fixture",
+      "input": [{ "type": "text", "text": "continue" }]
+    },
+    "turn/interrupt": {
+      "threadId": "thr_fixture",
+      "turnId": "turn_fixture",
+      "reason": "fixture"
+    },
+    "thread/goal/get": { "threadId": "thr_fixture" },
+    "thread/goal/set": {
+      "threadId": "thr_fixture",
+      "objective": "finish fixture",
+      "tokenBudget": 1000
+    },
+    "thread/goal/clear": { "threadId": "thr_fixture" },
+    "thread/plan/read": { "threadId": "thr_fixture" },
+    "thread/plan/preview": {
+      "threadId": "thr_fixture",
+      "contentHash": "sha256:fixture"
+    },
+    "config/read": { "cwd": "/workspace", "includeSources": true },
+    "config/settings": { "cwd": "/workspace" },
+    "config/write": {
+      "cwd": "/workspace",
+      "source": "project",
+      "path": ["active_profile"],
+      "operation": "set",
+      "value": "main"
+    },
+    "config/init": { "cwd": "/workspace", "force": false },
+    "config/sources": { "cwd": "/workspace" },
+    "model/list": { "cwd": "/workspace" },
+    "provider/list": { "cwd": "/workspace" },
+    "agent/list": { "cwd": "/workspace" },
+    "tool/list": { "cwd": "/workspace" },
+    "skills/list": { "cwd": "/workspace", "query": "fixture" },
+    "skills/get": { "cwd": "/workspace", "name": "fixture" },
+    "skills/reload": { "cwd": "/workspace" },
+    "memory/status": { "cwd": "/workspace" },
+    "memory/reload": { "cwd": "/workspace" },
+    "memory/dream/start": { "cwd": "/workspace" },
+    "task/list": { "status": "pending", "limit": 20 },
+    "task/get": { "id": "task_fixture" },
+    "task/create": {
+      "boardId": "board_fixture",
+      "subject": "fixture",
+      "description": "fixture task",
+      "blockedBy": [],
+      "metadata": {}
+    },
+    "task/update": { "id": "task_fixture", "status": "inProgress" },
+    "task/delete": { "id": "task_fixture" },
+    "task/claim": { "id": "task_fixture", "owner": "fixture" },
+    "task/reset": { "boardId": "board_fixture", "force": true },
+    "fs/readFile": {
+      "cwd": "/workspace",
+      "path": "README.md",
+      "maxBytes": 1024
+    },
+    "fs/readDirectory": { "cwd": "/workspace", "path": "." },
+    "fs/getMetadata": { "cwd": "/workspace", "path": "README.md" },
+    "fs/search": {
+      "cwd": "/workspace",
+      "query": "README",
+      "kind": "file",
+      "limit": 20
+    },
+    "fs/watch": { "cwd": "/workspace", "paths": ["README.md"] },
+    "fs/unwatch": { "watchId": "watch_fixture" },
+    "repo/add": { "key": "fixture", "source": "/workspace/repo" },
+    "repo/list": {},
+    "repo/read": { "repo": "fixture" },
+    "repo/rename": { "repo": "fixture", "name": "renamed" },
+    "repo/remove": { "repo": "fixture" },
+    "repo/fetch": { "repo": "fixture" },
+    "repo/fetchLocal": { "repo": "fixture", "path": "/workspace/repo" },
+    "repo/remote/read": { "repo": "fixture" },
+    "repo/remote/add": {
+      "repo": "fixture",
+      "name": "origin",
+      "url": "git@example.test:fixture.git"
+    },
+    "repo/remote/set": {
+      "repo": "fixture",
+      "name": "origin",
+      "url": "git@example.test:fixture.git"
+    },
+    "repo/remote/remove": { "repo": "fixture", "name": "origin" },
+    "repo/export": { "repos": ["fixture"] },
+    "repo/import": { "document": { "formatVersion": 1, "repositories": [] } },
+    "workspace/create": {
+      "kind": "feature",
+      "name": "fixture",
+      "repos": ["fixture"]
+    },
+    "workspace/list": {},
+    "workspace/archived/list": {},
+    "workspace/read": { "workspace": "feature/fixture" },
+    "workspace/path": { "workspace": "feature/fixture" },
+    "workspace/status": { "workspace": "feature/fixture" },
+    "workspace/repo/add": {
+      "workspace": "feature/fixture",
+      "repo": "fixture",
+      "role": "development",
+      "detached": false
+    },
+    "workspace/repo/create": {
+      "workspace": "feature/fixture",
+      "key": "fixture"
+    },
+    "workspace/repo/remove": {
+      "workspace": "feature/fixture",
+      "repo": "fixture",
+      "force": false
+    },
+    "workspace/rename": { "workspace": "feature/fixture", "name": "renamed" },
+    "workspace/archive": { "workspace": "feature/fixture" },
+    "workspace/delete": { "workspace": "feature/fixture", "force": true },
+    "workspace/reconcile": { "workspace": "feature/fixture" },
+    "workspace/repair": { "workspace": "feature/fixture" },
+    "workspace/tmux/new": { "workspace": "feature/fixture" }
+  },
+  "serverNotifications": [
+    "thread/sequence/advanced",
+    "thread/started",
+    "thread/status/changed",
+    "thread/closed",
+    "thread/name/updated",
+    "thread/settings/updated",
+    "thread/goal/updated",
+    "thread/goal/cleared",
+    "thread/tokenUsage/updated",
+    "thread/plan/updated",
+    "thread/compaction/updated",
+    "thread/archived",
+    "thread/unarchived",
+    "thread/deleted",
+    "turn/started",
+    "turn/completed",
+    "turn/diff/updated",
+    "item/started",
+    "item/completed",
+    "item/agentMessage/delta",
+    "item/plan/delta",
+    "item/commandExecution/outputDelta",
+    "serverRequest/resolved",
+    "skills/changed",
+    "fs/changed",
+    "memory/job/updated",
+    "warning",
+    "server/ready"
+  ],
+  "serverRequests": [
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/permissions/requestApproval",
+    "item/tool/requestUserInput",
+    "item/plan/requestApproval"
+  ],
+  "wireSamples": {
+    "stringIdRequest": {
+      "jsonrpc": "2.0",
+      "id": "request_fixture",
+      "method": "server/read",
+      "params": {}
+    },
+    "numberIdRequest": {
+      "jsonrpc": "2.0",
+      "id": 7,
+      "method": "server/read",
+      "params": {}
+    },
+    "clientNotification": {
+      "jsonrpc": "2.0",
+      "method": "initialized",
+      "params": {}
+    },
+    "successResponse": { "jsonrpc": "2.0", "id": 7, "result": { "ok": true } },
+    "errorResponse": {
+      "jsonrpc": "2.0",
+      "id": null,
+      "error": {
+        "code": -32700,
+        "message": "Invalid JSON.",
+        "data": { "type": "parseError", "retryable": false }
+      }
+    },
+    "serverNotification": {
+      "jsonrpc": "2.0",
+      "method": "server/ready",
+      "params": { "protocolVersion": 1 }
+    },
+    "serverRequest": {
+      "jsonrpc": "2.0",
+      "id": "srvreq_fixture",
+      "method": "item/commandExecution/requestApproval",
+      "params": {
+        "threadId": "thr_fixture",
+        "turnId": "turn_fixture",
+        "itemId": "item_fixture",
+        "reason": "fixture",
+        "availableDecisions": ["accept", "decline"],
+        "command": ["pnpm", "test"],
+        "cwd": "/workspace"
+      }
+    },
+    "serverRequestResult": { "decision": "accept" }
+  }
+}
