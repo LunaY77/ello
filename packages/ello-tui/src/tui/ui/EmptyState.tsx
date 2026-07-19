@@ -1,7 +1,8 @@
 import { Text } from 'ink';
 
-import { tuiTokens } from './tokens.js';
+import { useTheme } from '../theme/index.js';
 
 export function EmptyState({ label }: { readonly label: string }) {
-  return <Text color={tuiTokens.color.muted}>{label}</Text>;
+  const theme = useTheme();
+  return <Text color={theme.textMuted}>{label}</Text>;
 }

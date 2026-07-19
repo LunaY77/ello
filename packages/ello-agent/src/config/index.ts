@@ -70,3 +70,9 @@ export {
   type ToolConfig,
   type WorkspaceConfig,
 } from './schema.js';
+export {
+  describeConfigSettings,
+  type ConfigSettingDescriptor,
+  type ConfigSettingEffect,
+  type ConfigSettingValueType,
+} from './settings.js';

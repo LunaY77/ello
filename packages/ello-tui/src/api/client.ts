@@ -58,7 +58,7 @@ export interface IncomingServerRequest<M extends ServerRequestMethod> {
 type NotificationListener = (notification: ServerNotification) => void;
 type ServerRequestListener = (
   request: IncomingServerRequest<ServerRequestMethod>,
-) => void | Promise<void>;
+) => boolean | void | Promise<boolean | void>;
 
 interface PendingRequest {
   readonly method: ClientMethod;
@@ -353,8 +353,8 @@ export class AppServerClient {
       },
     } as IncomingServerRequest<ServerRequestMethod>;
     for (const listener of this.serverRequestListeners) {
-      await listener(incoming);
-      if (settled) return;
+      const claimed = await listener(incoming);
+      if (settled || claimed === true) return;
     }
     if (!settled) {
       await incoming.reject({

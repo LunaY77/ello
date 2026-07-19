@@ -1,8 +1,8 @@
 import { Box, Text } from 'ink';
 
 import type { SubagentRunView, ToolCallView } from '../store/history-entry.js';
+import { useTheme } from '../theme/index.js';
 import { glyphs } from '../ui/glyphs.js';
-import { tuiTokens } from '../ui/tokens.js';
 
 import { ToolActivityList } from './ToolActivityList.js';
 
@@ -50,10 +50,11 @@ export function LiveViewport({
 }
 
 function LiveAssistantText({ text }: { readonly text: string }) {
+  const theme = useTheme();
   return (
     <Box flexDirection="column">
       {text.split('\n').map((line, index) => (
-        <Text key={`${index}:${line}`} color={tuiTokens.color.text} wrap="wrap">
+        <Text key={`${index}:${line}`} color={theme.text} wrap="wrap">
           {`${index === 0 ? glyphs.assistant : ' '} ${line}`}
         </Text>
       ))}
@@ -68,6 +69,7 @@ function SubagentActivity({
   readonly run: SubagentRunView;
   readonly cwd: string;
 }) {
+  const theme = useTheme();
   const hidden = Math.max(0, run.tools.length - SUBAGENT_VISIBLE_TOOL_LIMIT);
   const visibleTools = run.tools.slice(-SUBAGENT_VISIBLE_TOOL_LIMIT);
   return (
@@ -76,41 +78,42 @@ function SubagentActivity({
         <Text
           color={
             run.status === 'fail'
-              ? tuiTokens.color.danger
-              : tuiTokens.color.warning
+              ? theme.error
+              : theme.warning
           }
         >
           {glyphs.subagent}
         </Text>
-        <Text color={tuiTokens.color.warning}>{run.agentName}</Text>
-        <Text color={tuiTokens.color.muted}>
+        <Text color={theme.warning}>{run.agentName}</Text>
+        <Text color={theme.textMuted}>
           {run.background ? 'background' : 'foreground'}
         </Text>
       </Box>
-      <Text color={tuiTokens.color.text} wrap="wrap">
+      <Text color={theme.text} wrap="wrap">
         {run.description}
       </Text>
       {hidden > 0 ? (
         <Text
-          color={tuiTokens.color.muted}
+          color={theme.textMuted}
         >{`  +${hidden} earlier tool calls`}</Text>
       ) : null}
       <ToolActivityList tools={visibleTools} cwd={cwd} indent={2} />
       {run.status === 'fail' && run.error !== undefined ? (
-        <Text color={tuiTokens.color.danger}>{run.error}</Text>
+        <Text color={theme.error}>{run.error}</Text>
       ) : null}
     </Box>
   );
 }
 
 function PendingSteers({ prompts }: { readonly prompts: readonly string[] }) {
+  const theme = useTheme();
   return (
     <Box marginTop={1} flexDirection="column">
-      <Text color={tuiTokens.color.warning}>
+      <Text color={theme.warning}>
         Messages queued for the running turn
       </Text>
       {prompts.map((prompt, index) => (
-        <Text key={`${index}:${prompt}`} color={tuiTokens.color.text}>
+        <Text key={`${index}:${prompt}`} color={theme.text}>
           {`${glyphs.subagent} ${prompt}`}
         </Text>
       ))}
@@ -127,10 +130,11 @@ function RunStatus({
   readonly workingSeconds?: number;
   readonly interruptNotice?: string;
 }) {
+  const theme = useTheme();
   if (running) {
     return (
       <Box marginTop={1}>
-        <Text color={tuiTokens.color.warning}>
+        <Text color={theme.warning}>
           {`working ${workingSeconds ?? 0}s`}
         </Text>
       </Box>
@@ -139,7 +143,7 @@ function RunStatus({
   if (interruptNotice !== undefined) {
     return (
       <Box marginTop={1}>
-        <Text color={tuiTokens.color.danger}>{interruptNotice}</Text>
+        <Text color={theme.error}>{interruptNotice}</Text>
       </Box>
     );
   }

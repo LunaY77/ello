@@ -88,7 +88,9 @@ class TestServer {
     (notification: ServerNotification) => void
   >();
   private readonly serverRequestListeners = new Set<
-    (request: IncomingServerRequest<ServerRequestMethod>) => void
+    (
+      request: IncomingServerRequest<ServerRequestMethod>,
+    ) => boolean | void | Promise<boolean | void>
   >();
 
   constructor(private readonly recovery: Promise<ThreadSnapshot>) {}
@@ -101,7 +103,9 @@ class TestServer {
   }
 
   onServerRequest(
-    listener: (request: IncomingServerRequest<ServerRequestMethod>) => void,
+    listener: (
+      request: IncomingServerRequest<ServerRequestMethod>,
+    ) => boolean | void | Promise<boolean | void>,
   ): () => void {
     this.serverRequestListeners.add(listener);
     return () => this.serverRequestListeners.delete(listener);

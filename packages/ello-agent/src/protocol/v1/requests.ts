@@ -241,6 +241,7 @@ export const CLIENT_REQUEST_SCHEMAS = {
     .object({ threadId: OpaqueIdSchema, contentHash: z.string().min(1) })
     .strict(),
   'config/read': ConfigReadParamsSchema,
+  'config/settings': CwdParamsSchema,
   'config/write': ConfigWriteParamsSchema,
   'config/init': z
     .object({ cwd: z.string().min(1), force: z.boolean().default(false) })

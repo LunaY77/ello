@@ -37,6 +37,11 @@ export function stateDatabasePath(root = elloHomeDir()): string {
   return join(root, 'state', 'ello.sqlite');
 }
 
+/** 数据库目录重构前的全局 state.sqlite，供首次启动时只读迁移。 */
+export function legacyStateDatabasePath(root = elloHomeDir()): string {
+  return join(root, 'state.sqlite');
+}
+
 export function serverRunDir(root = elloHomeDir()): string {
   return join(root, 'run');
 }

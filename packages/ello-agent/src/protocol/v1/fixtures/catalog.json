@@ -81,6 +81,7 @@
       "contentHash": "sha256:fixture"
     },
     "config/read": { "cwd": "/workspace", "includeSources": true },
+    "config/settings": { "cwd": "/workspace" },
     "config/write": {
       "cwd": "/workspace",
       "source": "project",

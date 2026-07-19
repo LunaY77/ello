@@ -10,9 +10,7 @@ export type TuiOverlayName =
   | 'settings'
   | 'skills'
   | 'tasks'
-  | 'theme'
-  | 'workspace'
-  | 'permission-rules';
+  | 'workspace';
 
 export type CommandResult =
   | { readonly type: 'message'; readonly message: string }
@@ -26,7 +24,6 @@ export type CommandResult =
         | 'dream'
         | 'goal'
         | 'rewind'
-        | 'new-thread'
         | 'fork'
         | 'export'
         | 'quit';
@@ -112,10 +109,6 @@ export const slashCommands: readonly SlashCommand[] = [
     action: 'goal',
     args,
   })),
-  command('new', 'Create a new thread', () => ({
-    type: 'runtime-action',
-    action: 'new-thread',
-  })),
   command('fork', 'Fork the current thread', (args) => ({
     type: 'runtime-action',
     action: 'fork',
@@ -130,15 +123,6 @@ export const slashCommands: readonly SlashCommand[] = [
     action: 'rewind',
     args,
   })),
-  command('tools', 'Explain tool discovery', () => ({
-    type: 'message',
-    message:
-      'Use /help to inspect available Client commands; tools execute only in the Server.',
-  })),
-  command('permissions', 'Show permission capabilities', () => ({
-    type: 'open-overlay',
-    overlay: 'permission-rules',
-  })),
   command('memory', 'Show or reload memory status', (args) => ({
     type: 'runtime-action',
     action: 'memory',
@@ -152,10 +136,6 @@ export const slashCommands: readonly SlashCommand[] = [
     type: 'runtime-action',
     action: 'export',
     args,
-  })),
-  command('theme', 'Switch UI theme', () => ({
-    type: 'open-overlay',
-    overlay: 'theme',
   })),
   command(
     'quit',

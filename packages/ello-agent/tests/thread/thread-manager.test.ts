@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ThreadTitleGenerator } from '../../src/domain/ports/thread-title-generator.js';
 import type {
   TurnExecutionEvent,
   TurnExecutionHandle,
@@ -432,6 +433,28 @@ describe('ThreadManager', () => {
       kind: 'item.started',
       turnId: recoveryTurnId,
       item: {
+        type: 'userMessage',
+        id: 'item_recovery_user',
+        turnId: recoveryTurnId,
+        createdAt,
+        text: '  恢复旧会话\n预览  ',
+      },
+    });
+    await logs.append(recoveryThreadId, {
+      kind: 'item.completed',
+      turnId: recoveryTurnId,
+      item: {
+        type: 'userMessage',
+        id: 'item_recovery_user',
+        turnId: recoveryTurnId,
+        createdAt,
+        text: '  恢复旧会话\n预览  ',
+      },
+    });
+    await logs.append(recoveryThreadId, {
+      kind: 'item.started',
+      turnId: recoveryTurnId,
+      item: {
         type: 'agentMessage',
         id: 'item_recovery',
         turnId: recoveryTurnId,
@@ -469,11 +492,173 @@ describe('ThreadManager', () => {
       includeItems: true,
     });
     expect(snapshot.thread.status).toBe('interrupted');
+    expect(snapshot.thread.preview).toBe('恢复旧会话 预览');
     expect(snapshot.turns[0]?.status).toBe('interrupted');
-    expect(snapshot.turns[0]?.items[0]).toMatchObject({ status: 'failed' });
+    expect(
+      snapshot.turns[0]?.items.find((item) => item.type === 'agentMessage'),
+    ).toMatchObject({ status: 'failed' });
     expect(snapshot.pendingServerRequests).toEqual([]);
     expect(storage.threads.state(recoveryThreadId)?.seq).toBe(snapshot.seq);
     expect(recoveryFactory.created).toBe(0);
+  });
+
+  it('首个成功 Turn 生成并持久化标题，生成前使用用户输入 preview', async () => {
+    await manager.close();
+    const generatedSnapshots: ThreadSnapshot[] = [];
+    const titleGenerator: ThreadTitleGenerator = {
+      generate(snapshot) {
+        generatedSnapshots.push(snapshot);
+        return Promise.resolve('修复延迟审批响应');
+      },
+    };
+    manager = new ThreadManager({
+      root,
+      logs,
+      catalog: storage.threads,
+      executorFactory: (snapshot) => executors.create(snapshot),
+      titleGenerator,
+      resolveInitialSettings: testInitialSettings,
+      resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
+    });
+    await manager.initialize();
+    const notifications: string[] = [];
+    const attachment = await manager.start(
+      'connection-title',
+      {
+        cwd: '/workspace',
+        subscribe: true,
+        metadata: {},
+      },
+      (notification) => {
+        notifications.push(notification.method);
+      },
+    );
+    await attachment.runtime.startTurn([
+      { type: 'text', text: '  修复审批流程\n并补测试  ' },
+    ]);
+    expect((await attachment.runtime.snapshot()).thread).toMatchObject({
+      name: '',
+      preview: '修复审批流程 并补测试',
+    });
+    executors.handle(attachment.snapshot.thread.id).finish({
+      status: 'completed',
+      usage: EMPTY_USAGE,
+    });
+
+    await vi.waitFor(async () => {
+      expect((await attachment.runtime.snapshot()).thread.name).toBe(
+        '修复延迟审批响应',
+      );
+    });
+    expect(generatedSnapshots).toHaveLength(1);
+    expect(generatedSnapshots[0]?.turns[0]?.status).toBe('completed');
+    expect(notifications).toContain('thread/name/updated');
+    expect(
+      (await manager.list({ archived: false, limit: 50 })).data[0]?.name,
+    ).toBe('修复延迟审批响应');
+
+    const threadId = attachment.snapshot.thread.id;
+    await manager.close();
+    manager = new ThreadManager({
+      root,
+      logs,
+      catalog: storage.threads,
+      executorFactory: (snapshot) => executors.create(snapshot),
+      resolveInitialSettings: testInitialSettings,
+      resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
+    });
+    await manager.initialize();
+    await expect(
+      manager.list({ archived: false, limit: 50 }),
+    ).resolves.toMatchObject({
+      data: [
+        {
+          id: threadId,
+          name: '修复延迟审批响应',
+          preview: '修复审批流程 并补测试',
+        },
+      ],
+    });
+  });
+
+  it('标题生成失败不改变 Turn 成功终态', async () => {
+    await manager.close();
+    let attempted = false;
+    manager = new ThreadManager({
+      root,
+      logs,
+      catalog: storage.threads,
+      executorFactory: (snapshot) => executors.create(snapshot),
+      titleGenerator: {
+        generate() {
+          attempted = true;
+          return Promise.reject(new Error('title provider unavailable'));
+        },
+      },
+      resolveInitialSettings: testInitialSettings,
+      resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
+    });
+    await manager.initialize();
+    const attachment = await manager.start('connection-title-failure', {
+      cwd: '/workspace',
+      subscribe: false,
+      metadata: {},
+    });
+    await attachment.runtime.startTurn([
+      { type: 'text', text: '仍应成功完成的任务' },
+    ]);
+    executors.handle(attachment.snapshot.thread.id).finish({
+      status: 'completed',
+      usage: EMPTY_USAGE,
+    });
+
+    await vi.waitFor(async () => {
+      expect(attempted).toBe(true);
+      expect((await attachment.runtime.snapshot()).turns[0]?.status).toBe(
+        'completed',
+      );
+    });
+    expect((await attachment.runtime.snapshot()).thread).toMatchObject({
+      name: '',
+      preview: '仍应成功完成的任务',
+      status: 'idle',
+    });
+  });
+
+  it('启动时跳过其他 Server 持有的活跃 Thread', async () => {
+    const attachment = await startThread(manager, 'connection-owner');
+    const threadId = attachment.snapshot.thread.id;
+    const secondStorage = createCodingStorage({
+      databasePath: join(root, 'state.sqlite'),
+      artifactsDir: join(root, 'artifacts'),
+    });
+    const secondManager = new ThreadManager({
+      root,
+      logs: new ThreadLogRepository({ root }),
+      catalog: secondStorage.threads,
+      executorFactory: (snapshot) => executors.create(snapshot),
+      resolveInitialSettings: testInitialSettings,
+      resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
+    });
+    try {
+      await expect(secondManager.initialize()).resolves.toBeUndefined();
+      await expect(
+        secondManager.list({ archived: false, limit: 50 }),
+      ).resolves.toMatchObject({ data: [{ id: threadId }] });
+      await expect(
+        secondManager.resume(
+          'connection-contender',
+          { threadId, subscribe: false },
+          undefined,
+        ),
+      ).rejects.toMatchObject({
+        type: 'threadBusy',
+        message: expect.stringContaining('Another Ello session'),
+      });
+    } finally {
+      await secondManager.close();
+      secondStorage.close();
+    }
   });
 
   it('thread/list 只查询 SQLite catalog，不重放 JSONL', async () => {

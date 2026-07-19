@@ -56,6 +56,51 @@ describe.sequential('actual App Server process', () => {
     }
   }, 30_000);
 
+  it('第二个本地 Server 跳过活跃 Thread 并继续提供管理 RPC', async () => {
+    const root = await temporaryRoot('ello-multi-server-e2e-');
+    const cwd = path.join(root, 'workspace');
+    await mkdir(cwd, { recursive: true });
+    const owner = new StdioProcessPeer(
+      spawnServer(['--listen', 'stdio://', '--root', root], root),
+    );
+    await initialize(owner);
+    const started = await rpc(owner, 2, 'thread/start', {
+      cwd,
+      subscribe: true,
+    });
+    const threadId = readThreadId(started);
+
+    const contender = new StdioProcessPeer(
+      spawnServer(['--listen', 'stdio://', '--root', root], root),
+    );
+    await initialize(contender);
+    expect((await rpc(contender, 2, 'repo/list', {})).result).toEqual({
+      data: [],
+    });
+    expect((await rpc(contender, 3, 'workspace/list', {})).result).toEqual({
+      data: [],
+    });
+    expect(
+      readDataIds(
+        await rpc(contender, 4, 'thread/list', {
+          archived: false,
+          limit: 50,
+        }),
+      ),
+    ).toContain(threadId);
+    await expect(
+      rpc(contender, 5, 'thread/resume', {
+        threadId,
+        subscribe: false,
+      }),
+    ).rejects.toThrow(/Another Ello session.*threadBusy/u);
+
+    contender.endInput();
+    await expect(contender.exited()).resolves.toEqual([0, null]);
+    owner.endInput();
+    await expect(owner.exited()).resolves.toEqual([0, null]);
+  }, 30_000);
+
   it('真实 WebSocket 慢连接过载时不阻塞另一客户端', async () => {
     const root = await temporaryRoot('ello-slow-client-e2e-');
     const cwd = path.join(root, 'watched');
@@ -531,6 +576,16 @@ describe.sequential('actual App Server process', () => {
     });
 
     await waitForNotification(resumedController, 'turn/completed', turnTrace);
+    await waitForNotification(
+      resumedController,
+      'thread/tokenUsage/updated',
+      turnTrace,
+    );
+    await waitForNotification(
+      resumedController,
+      'thread/goal/updated',
+      turnTrace,
+    );
     expectContinuousThreadSequence(
       turnTrace.slice(resumedTraceStart),
       threadId,
@@ -641,7 +696,7 @@ describe.sequential('actual App Server process', () => {
       subscribe: false,
     });
     expect(resumed.result).toMatchObject({
-      thread: { id: threadId },
+      thread: { id: threadId, name: 'Process E2E title' },
       turns: [{ id: turnId, status: 'completed' }],
     });
 
@@ -654,8 +709,11 @@ describe.sequential('actual App Server process', () => {
     await Promise.allSettled([reader.close(), observer.close()]);
     await modelServer.close();
 
-    expect(modelServer.requests).toHaveLength(6);
-    expect(requestExposesTool(modelServer.requests[0], 'bash')).toBe(true);
+    const primaryRequests = modelServer.requests.filter(
+      (request) => !isTitleModelRequest(request),
+    );
+    expect(primaryRequests).toHaveLength(6);
+    expect(requestExposesTool(primaryRequests[0], 'bash')).toBe(true);
     expect(JSON.stringify(modelServer.requests)).toContain(
       'external context from approval',
     );
@@ -882,7 +940,9 @@ class MockChatServer {
       const body = await readRequestBody(request);
       const parsed = JSON.parse(body) as JsonObject;
       requests.push(parsed);
-      const step = queuedSteps.shift();
+      const step = isTitleModelRequest(parsed)
+        ? { type: 'text' as const, deltas: ['Process E2E title'] }
+        : queuedSteps.shift();
       if (step === undefined) {
         response.statusCode = 500;
         response.end('no mock model step');
@@ -1210,6 +1270,12 @@ function requestExposesTool(
     tools.some(
       (tool) => readObject(readObject(tool)?.function)?.name === toolName,
     )
+  );
+}
+
+function isTitleModelRequest(request: JsonObject): boolean {
+  return JSON.stringify(request.messages ?? '').includes(
+    'session title generator',
   );
 }
 

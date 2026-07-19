@@ -215,6 +215,10 @@ function headline(
   if (call.name === 'glob') {
     return `Glob${searchTarget(call.input, metadata, options)}`;
   }
+  if (call.name === 'activate_skill') {
+    const skillName = inputString(call.input, 'name');
+    return `Activate Skill${skillName !== '' ? ` ${skillName}` : ''}`;
+  }
   if (kind === 'shell' || call.name === 'bash') {
     const command =
       text(metadata?.command) || inputString(call.input, 'command');

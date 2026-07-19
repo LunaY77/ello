@@ -25,7 +25,7 @@ export function overlayCallbacks(
     onSaveProfile: () => undefined,
     onSelectSession: () => undefined,
     onSelectRewind: () => undefined,
-    onSelectTheme: () => undefined,
+    onUpdateSetting: async () => undefined,
     ...overrides,
   };
 }

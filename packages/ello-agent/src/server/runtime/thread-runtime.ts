@@ -1,4 +1,5 @@
 import { createEntityId } from '../../domain/ids.js';
+import type { ThreadTitleGenerator } from '../../domain/ports/thread-title-generator.js';
 import type {
   TurnExecutionEvent,
   TurnExecutionHandle,
@@ -34,6 +35,7 @@ export interface ThreadRuntimeOptions {
   readonly catalog: ThreadCatalogRepository;
   readonly executor: TurnExecutor;
   readonly lease: ThreadLease;
+  readonly titleGenerator?: ThreadTitleGenerator;
 }
 
 interface ActiveTurn {
@@ -52,12 +54,15 @@ export class ThreadRuntime {
   private readonly catalog: ThreadCatalogRepository;
   private readonly executor: TurnExecutor;
   private readonly lease: ThreadLease;
+  private readonly titleGenerator: ThreadTitleGenerator | undefined;
   private readonly projector: ThreadSnapshotProjector;
   private readonly stopRecordListener: () => void;
   private readonly subscriptions = new SubscriptionHub();
   private readonly dispatchedServerRequests = new Set<string>();
   private mutationQueue: Promise<void> = Promise.resolve();
   private activeTurn: ActiveTurn | undefined;
+  private titleTask: Promise<void> | undefined;
+  private titleAbortController: AbortController | undefined;
   private closing = false;
 
   constructor(options: ThreadRuntimeOptions) {
@@ -65,6 +70,7 @@ export class ThreadRuntime {
     this.catalog = options.catalog;
     this.executor = options.executor;
     this.lease = options.lease;
+    this.titleGenerator = options.titleGenerator;
     this.projector = new ThreadSnapshotProjector(options.records);
     const snapshot = this.projector.current();
     this.id = snapshot.thread.id;
@@ -156,6 +162,13 @@ export class ThreadRuntime {
             ...(options.mode === undefined ? {} : { mode: options.mode }),
           },
         });
+      }
+      const current = this.projector.current();
+      if (current.thread.preview.trim() === '') {
+        const preview = threadPreview(input);
+        if (preview !== '') {
+          await this.append({ kind: 'thread.metadata', preview });
+        }
       }
       const turn: Turn = {
         id: createEntityId('turn'),
@@ -354,11 +367,14 @@ export class ThreadRuntime {
   async close(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
+    this.titleAbortController?.abort('thread runtime closing');
     const active = this.activeTurn;
     if (active !== undefined) {
       await active.handle.interrupt('thread runtime closing');
       await active.driveTask;
     }
+    await this.mutationQueue;
+    await this.titleTask;
     await this.mutationQueue;
     this.subscriptions.clear();
     try {
@@ -559,6 +575,50 @@ export class ThreadRuntime {
       }
     }
     if (this.activeTurn?.id === started.id) this.activeTurn = undefined;
+    if (result.status === 'completed') this.scheduleTitleGeneration();
+  }
+
+  private scheduleTitleGeneration(): void {
+    if (
+      this.closing ||
+      this.titleGenerator === undefined ||
+      this.titleTask !== undefined ||
+      this.projector.current().thread.name.trim() !== ''
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    this.titleAbortController = controller;
+    this.titleTask = this.titleGenerator
+      .generate(this.projector.current(), controller.signal)
+      .then(async (title) => {
+        const name = title?.trim();
+        if (
+          name === undefined ||
+          name === '' ||
+          controller.signal.aborted ||
+          this.closing
+        ) {
+          return;
+        }
+        await this.enqueue(async () => {
+          if (
+            controller.signal.aborted ||
+            this.closing ||
+            this.projector.current().thread.name.trim() !== ''
+          ) {
+            return;
+          }
+          await this.append({ kind: 'thread.metadata', name });
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.titleAbortController === controller) {
+          this.titleTask = undefined;
+          this.titleAbortController = undefined;
+        }
+      });
   }
 
   private append(record: NewThreadRecord): Promise<ThreadRecord> {
@@ -695,6 +755,17 @@ function formatUserInput(input: UserInput): string {
     case 'image':
       return `[image ${input.artifactId}]`;
   }
+}
+
+function threadPreview(input: readonly UserInput[]): string {
+  const preferred = input.find(
+    (item): item is Extract<UserInput, { readonly type: 'text' }> =>
+      item.type === 'text' && item.text.trim() !== '',
+  );
+  return (preferred?.text ?? input.map(formatUserInput).join(' '))
+    .trim()
+    .replace(/\s+/gu, ' ')
+    .slice(0, 500);
 }
 
 function errorMessage(error: unknown): string {

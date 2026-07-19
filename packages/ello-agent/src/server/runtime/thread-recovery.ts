@@ -1,5 +1,9 @@
 import { projectThreadSnapshot } from '../../domain/projection/thread-snapshot.js';
-import type { ThreadItem, Turn } from '../../protocol/v1/index.js';
+import type {
+  ThreadItem,
+  ThreadSnapshot,
+  Turn,
+} from '../../protocol/v1/index.js';
 import { ThreadLeaseStore } from '../../storage/threads/thread-lease.js';
 import { ThreadLogRepository } from '../../storage/threads/thread-log.js';
 
@@ -10,12 +14,24 @@ import { ThreadLogRepository } from '../../storage/threads/thread-log.js';
 export async function recoverInterruptedThreads(options: {
   readonly logs: ThreadLogRepository;
   readonly leases: ThreadLeaseStore;
-}): Promise<void> {
+}): Promise<ReadonlySet<string>> {
+  const activeThreadIds = new Set<string>();
   const threadIds = await options.logs.listThreadIds(false);
   for (const threadId of threadIds) {
-    const lease = await options.leases.acquire(threadId);
+    const lease = await options.leases.tryAcquire(threadId);
+    if (lease === undefined) {
+      activeThreadIds.add(threadId);
+      continue;
+    }
     try {
       const snapshot = projectThreadSnapshot(await options.logs.read(threadId));
+      const preview = recoverablePreview(snapshot);
+      if (preview !== undefined) {
+        await options.logs.append(threadId, {
+          kind: 'thread.metadata',
+          preview,
+        });
+      }
       const activeTurns = snapshot.turns.filter(
         (turn) => turn.status === 'inProgress',
       );
@@ -55,6 +71,18 @@ export async function recoverInterruptedThreads(options: {
       await lease.release();
     }
   }
+  return activeThreadIds;
+}
+
+function recoverablePreview(snapshot: ThreadSnapshot): string | undefined {
+  if (snapshot.thread.preview.trim() !== '') return undefined;
+  for (const turn of snapshot.turns) {
+    const message = turn.items.find((item) => item.type === 'userMessage');
+    if (message?.type !== 'userMessage') continue;
+    const preview = message.text.trim().replace(/\s+/gu, ' ').slice(0, 500);
+    if (preview !== '') return preview;
+  }
+  return undefined;
 }
 
 function interruptedTurn(turn: Turn): Turn {

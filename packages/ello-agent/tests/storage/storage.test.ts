@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,7 +8,10 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createCodingStorage } from '../../src/storage/database/index.js';
-import { stateDatabasePath } from '../../src/storage/paths.js';
+import {
+  legacyStateDatabasePath,
+  stateDatabasePath,
+} from '../../src/storage/paths.js';
 
 describe('global coding storage', () => {
   let oldHome: string | undefined;
@@ -128,5 +132,128 @@ describe('global coding storage', () => {
     database.close();
 
     expect(() => createCodingStorage()).toThrow('migration version is newer');
+  });
+
+  it('从旧版 state.sqlite 幂等迁移 repo、workspace 及关联关系', () => {
+    const legacyPath = legacyStateDatabasePath();
+    mkdirSync(home, { recursive: true });
+    const legacy = new Database(legacyPath);
+    legacy.exec(`
+      create table repositories (
+        id text primary key,
+        key text not null,
+        remote_url text,
+        mirror_path text not null,
+        default_branch text not null,
+        created_at text not null,
+        updated_at text not null
+      );
+      create table workspaces (
+        id text primary key,
+        kind text not null,
+        name text not null,
+        root_path text not null,
+        status text not null,
+        branch text,
+        tmux_session text,
+        last_synced_at text,
+        created_at text not null,
+        updated_at text not null
+      );
+      create table workspace_repositories (
+        workspace_id text not null,
+        repository_id text not null,
+        checkout_path text not null,
+        checkout_role text,
+        checkout_mode text,
+        branch text,
+        head_commit text,
+        status text not null,
+        last_git_status text,
+        last_synced_at text,
+        created_at text not null,
+        updated_at text not null,
+        primary key (workspace_id, repository_id)
+      );
+    `);
+    legacy
+      .prepare(
+        `insert into repositories
+         (id, key, remote_url, mirror_path, default_branch, created_at, updated_at)
+         values (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'repo-legacy',
+        'org/project',
+        'https://example.test/project.git',
+        '/home/alice/.ello/mirrors/org/project.git',
+        'main',
+        '2026-07-18T00:00:00.000Z',
+        '2026-07-18T00:00:00.000Z',
+      );
+    legacy
+      .prepare(
+        `insert into workspaces
+         (id, kind, name, root_path, status, branch, tmux_session,
+          last_synced_at, created_at, updated_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'workspace-legacy',
+        'feature',
+        'legacy-workspace',
+        '/home/alice/workspaces/legacy',
+        'active',
+        'feature/legacy',
+        null,
+        null,
+        '2026-07-18T00:00:00.000Z',
+        '2026-07-18T00:00:00.000Z',
+      );
+    legacy
+      .prepare(
+        `insert into workspace_repositories
+         (workspace_id, repository_id, checkout_path, checkout_role,
+          checkout_mode, branch, head_commit, status, last_git_status,
+          last_synced_at, created_at, updated_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'workspace-legacy',
+        'repo-legacy',
+        '/home/alice/workspaces/legacy/project',
+        null,
+        null,
+        'feature/legacy',
+        'abc123',
+        'active',
+        null,
+        null,
+        '2026-07-18T00:00:00.000Z',
+        '2026-07-18T00:00:00.000Z',
+      );
+    legacy.close();
+
+    const first = createCodingStorage();
+    expect(first.repositories.list()).toHaveLength(1);
+    expect(first.workspaces.list()).toEqual([
+      expect.objectContaining({
+        id: 'workspace-legacy',
+        name: 'legacy-workspace',
+        repos: [
+          expect.objectContaining({
+            repositoryId: 'repo-legacy',
+            checkoutMode: 'branch',
+            role: 'development',
+          }),
+        ],
+      }),
+    ]);
+    first.close();
+
+    const second = createCodingStorage();
+    expect(second.repositories.list()).toHaveLength(1);
+    expect(second.workspaces.list()).toHaveLength(1);
+    second.close();
   });
 });

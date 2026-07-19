@@ -1,7 +1,8 @@
 import { Text } from 'ink';
 
-import { tuiTokens } from './tokens.js';
+import { useTheme } from '../theme/index.js';
 
 export function KeyHint({ keys }: { readonly keys: string }) {
-  return <Text color={tuiTokens.color.muted}>{keys}</Text>;
+  const theme = useTheme();
+  return <Text color={theme.textMuted}>{keys}</Text>;
 }

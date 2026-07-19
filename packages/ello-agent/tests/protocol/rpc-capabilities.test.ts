@@ -27,6 +27,7 @@ const READ_METHODS = [
   'thread/plan/read',
   'thread/plan/preview',
   'config/read',
+  'config/settings',
   'config/sources',
   'model/list',
   'provider/list',

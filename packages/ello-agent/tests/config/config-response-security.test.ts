@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { globalConfigPath } from '../../src/config/index.js';
+import { parseClientResult } from '../../src/protocol/v1/index.js';
 import type { ServerConnection } from '../../src/server/connection/server-connection.js';
 import { sanitizeConfigForResponse } from '../../src/server/methods/config-response.js';
 import { ServerServices } from '../../src/server/methods/server-services.js';
@@ -113,7 +114,6 @@ describe('config RPC credential boundary', () => {
       'config/read',
       { cwd, includeSources: true },
     );
-
     expect(response).toMatchObject({
       config: {
         active_profile: 'main',
@@ -140,6 +140,30 @@ describe('config RPC credential boundary', () => {
               },
             },
           }),
+        }),
+      ]),
+    });
+    expectCredentialValuesAbsent(response);
+  });
+
+  it('config/settings 暴露敏感字段元数据但不回显 credential', async () => {
+    const response = await services.dispatch(
+      {} as ServerConnection,
+      'config/settings',
+      { cwd },
+    );
+    expect(() => parseClientResult('config/settings', response)).not.toThrow();
+
+    expect(response).toMatchObject({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'provider.vault.api_key',
+          sensitive: true,
+          source: 'global',
+        }),
+        expect.objectContaining({
+          id: 'provider.vault.base_url',
+          value: 'https://api.example.test/v1?region=cn',
         }),
       ]),
     });

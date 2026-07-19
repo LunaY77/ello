@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -57,5 +59,20 @@ describe('theme catalog', () => {
     const theme = resolveTheme(defaultThemeName);
     expect(theme.name).toBe('tokyo-night');
     expect(theme.appearance).toBe('dark');
+  });
+
+  it('主视图消费 ThemeProvider，禁止回退到固定颜色 tokens', async () => {
+    for (const source of [
+      'component/BottomDock.tsx',
+      'component/LiveViewport.tsx',
+      'store/HistoryRenderer.tsx',
+    ]) {
+      const content = await readFile(
+        new URL(`../../src/tui/${source}`, import.meta.url),
+        'utf8',
+      );
+      expect(content, source).toContain('useTheme');
+      expect(content, source).not.toContain('tuiTokens.color');
+    }
   });
 });

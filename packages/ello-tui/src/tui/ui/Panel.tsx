@@ -1,25 +1,27 @@
 import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 
-import { tuiTokens } from './tokens.js';
+import { useTheme } from '../theme/index.js';
 
 export function Panel({
   title,
   children,
-  color = tuiTokens.color.border,
+  color,
 }: {
   readonly title?: string;
   readonly children: ReactNode;
   readonly color?: string;
 }) {
+  const theme = useTheme();
+  const panelColor = color ?? theme.border;
   return (
     <Box
       flexDirection="column"
       borderStyle="single"
-      borderColor={color}
+      borderColor={panelColor}
       paddingX={1}
     >
-      {title !== undefined ? <Text color={color}>{title}</Text> : null}
+      {title !== undefined ? <Text color={panelColor}>{title}</Text> : null}
       {children}
     </Box>
   );

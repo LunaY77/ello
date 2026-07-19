@@ -1,12 +1,13 @@
 import { Box, Text } from 'ink';
 
-import { tuiTokens } from './tokens.js';
+import { useTheme, type TuiTheme } from '../theme/index.js';
 
 export function DiffBlock({ diff }: { readonly diff: string }) {
+  const theme = useTheme();
   return (
     <Box flexDirection="column">
       {diff.split('\n').map((line, index) => (
-        <Text key={`${index}:${line}`} color={diffLineColor(line)}>
+        <Text key={`${index}:${line}`} color={diffLineColor(theme, line)}>
           {line}
         </Text>
       ))}
@@ -14,12 +15,12 @@ export function DiffBlock({ diff }: { readonly diff: string }) {
   );
 }
 
-function diffLineColor(line: string): string {
+function diffLineColor(theme: TuiTheme, line: string): string {
   if (line.startsWith('+') && !line.startsWith('+++')) {
-    return tuiTokens.color.diffAdd;
+    return theme.diffAdded;
   }
   if (line.startsWith('-') && !line.startsWith('---')) {
-    return tuiTokens.color.diffRemove;
+    return theme.diffRemoved;
   }
-  return tuiTokens.color.muted;
+  return theme.diffContext;
 }

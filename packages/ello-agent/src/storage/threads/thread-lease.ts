@@ -14,6 +14,17 @@ export interface ThreadLease {
 export class ThreadLeaseStore {
   constructor(private readonly root: string) {}
 
+  async tryAcquire(threadId: string): Promise<ThreadLease | undefined> {
+    try {
+      return await this.acquire(threadId);
+    } catch (error) {
+      if (error instanceof AppServerError && error.type === 'threadBusy') {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+
   async acquire(threadId: string): Promise<ThreadLease> {
     const directory = threadLocksDir(this.root);
     const path = threadLeasePath(threadId, this.root);
@@ -27,7 +38,7 @@ export class ThreadLeaseStore {
     if (processExists(owner.pid)) {
       throw new AppServerError({
         type: 'threadBusy',
-        message: `Thread ${threadId} is owned by process ${owner.pid}.`,
+        message: `Another Ello session is using this thread (process ${owner.pid}). Close it before resuming the thread.`,
         details: { threadId, pid: owner.pid },
       });
     }

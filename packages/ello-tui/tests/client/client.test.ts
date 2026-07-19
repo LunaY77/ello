@@ -7,7 +7,10 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { z } from 'zod';
 
-import { AppServerClient } from '../../src/api/client.js';
+import {
+  AppServerClient,
+  type IncomingServerRequest,
+} from '../../src/api/client.js';
 import {
   RequestTimeoutError,
   ResponseValidationError,
@@ -189,6 +192,47 @@ describe('AppServerClient', () => {
     });
     await context.client.close();
   });
+
+  it('允许 handler 接管 Server Request 后延迟回写 response', async () => {
+    const context = await initializedClient();
+    const serverMessages = context.server.messages()[Symbol.asyncIterator]();
+    const received =
+      deferred<
+        IncomingServerRequest<'item/commandExecution/requestApproval'>
+      >();
+    context.client.onServerRequest((request) => {
+      if (request.method !== 'item/commandExecution/requestApproval') {
+        return false;
+      }
+      received.resolve(
+        request as IncomingServerRequest<'item/commandExecution/requestApproval'>,
+      );
+      return true;
+    });
+    await send(context.server, {
+      jsonrpc: '2.0',
+      id: 'srvreq_delayed',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thr_1',
+        turnId: 'turn_1',
+        itemId: 'item_1',
+        reason: 'write',
+        availableDecisions: ['accept', 'decline'],
+        command: ['pnpm', 'test'],
+        cwd: '/workspace',
+      },
+    });
+    const request = await received.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await request.respond({ decision: 'accept' });
+    await expect(readJson(serverMessages)).resolves.toEqual({
+      jsonrpc: '2.0',
+      id: 'srvreq_delayed',
+      result: { decision: 'accept' },
+    });
+    await context.client.close();
+  });
 });
 
 async function initializedClient(options?: {
@@ -232,4 +276,15 @@ function send(
   message: Readonly<Record<string, unknown>>,
 ): Promise<void> {
   return transport.send(encoder.encode(JSON.stringify(message)));
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+} {
+  let resolve = (_value: T): void => undefined;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
 }

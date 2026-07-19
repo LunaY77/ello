@@ -18,9 +18,13 @@ import type {
   ClientServerRequest,
 } from '../../api/server-requests.js';
 import type { ProfileRole, TuiProfile } from '../profile-types.js';
+import type { SettingUpdate, TuiSetting } from '../settings/types.js';
 import { buildPermissionView } from '../store/permission-view.js';
-import { listThemes, useTheme, type ThemeName } from '../theme/index.js';
+import { useTheme } from '../theme/index.js';
 import { InlineSelect, type SelectOption } from '../ui/List.js';
+
+import { SettingsPanel } from './SettingsPanel.js';
+import { UserInputPanel } from './UserInputPanel.js';
 
 export type OverlayState =
   | { readonly type: 'none' }
@@ -54,8 +58,7 @@ export type OverlayState =
       readonly options: readonly SelectOption[];
     }
   | { readonly type: 'help' }
-  | { readonly type: 'settings'; readonly config: unknown }
-  | { readonly type: 'theme'; readonly active: ThemeName }
+  | { readonly type: 'settings'; readonly settings: readonly TuiSetting[] }
   | { readonly type: 'agents'; readonly agents: readonly AgentCatalogEntry[] }
   | { readonly type: 'skills'; readonly skills: readonly AgentSkill[] }
   | { readonly type: 'tasks'; readonly tasks: readonly Task[] }
@@ -111,7 +114,7 @@ export interface OverlayHostProps {
   onSaveProfile(profile: string): void;
   onSelectSession(threadId: string): void;
   onSelectRewind(entryId: string): void;
-  onSelectTheme(theme: ThemeName): void;
+  onUpdateSetting(update: SettingUpdate): Promise<void>;
 }
 
 /**
@@ -139,7 +142,7 @@ export function OverlayHost({
   onBindProfileRoleModel,
   onSelectSession,
   onSelectRewind,
-  onSelectTheme,
+  onUpdateSetting,
   onOpenProfiles,
   onSaveProfile,
 }: OverlayHostProps) {
@@ -164,8 +167,10 @@ export function OverlayHost({
       ) : null}
       {overlay.type === 'user-input' ? (
         <UserInputPanel
-          request={overlay.request}
-          onResolve={onResolveUserInput}
+          pending={overlay.request}
+          onResolve={(resolution) =>
+            onResolveUserInput(overlay.request.id, resolution)
+          }
         />
       ) : null}
       {overlay.type === 'plan-preview' ? (
@@ -267,26 +272,7 @@ export function OverlayHost({
       ) : null}
       {overlay.type === 'help' ? <HelpPanel /> : null}
       {overlay.type === 'settings' ? (
-        <Panel title="Settings" color={theme.markdownHeading}>
-          <Text color={theme.textMuted} wrap="wrap">
-            {formatSettings(overlay.config)}
-          </Text>
-          <InlineSelect
-            options={[{ value: 'profiles', label: 'Profiles' }]}
-            onChange={onOpenProfiles}
-          />
-        </Panel>
-      ) : null}
-      {overlay.type === 'theme' ? (
-        <Panel title="Theme" color={theme.accent}>
-          <InlineSelect
-            options={listThemes().map((item) => ({
-              value: item.name,
-              label: `${item.name}${item.name === overlay.active ? ' [active]' : ''}  ${item.appearance}`,
-            }))}
-            onChange={(value) => onSelectTheme(value as ThemeName)}
-          />
-        </Panel>
+        <SettingsPanel settings={overlay.settings} onUpdate={onUpdateSetting} />
       ) : null}
       {overlay.type === 'agents' ? (
         <CatalogPanel title="Subagents" entries={overlay.agents} />
@@ -396,39 +382,6 @@ function ApprovalPanel({
       {submitting ? (
         <Text color={theme.textMuted}>Submitting decision…</Text>
       ) : null}
-    </Panel>
-  );
-}
-
-function UserInputPanel({
-  request,
-  onResolve,
-}: {
-  readonly request: UserInputRequest;
-  readonly onResolve: OverlayHostProps['onResolveUserInput'];
-}) {
-  const theme = useTheme();
-  const question = request.params.questions[0];
-  if (question === undefined) return null;
-  const options = question.options.map((option, index) => ({
-    value: String(index),
-    label: `${option.label} — ${option.description}`,
-  }));
-  return (
-    <Panel title={question.header} color={theme.warning}>
-      <Text wrap="wrap">{question.question}</Text>
-      <InlineSelect
-        options={options}
-        onChange={(value) => {
-          const option = question.options[Number(value)];
-          if (option !== undefined)
-            onResolve(request.id, {
-              status: 'submitted',
-              answers: [{ questionId: question.id, selected: [option.label] }],
-            });
-        }}
-      />
-      <Text color={theme.textMuted}>Esc denies this request</Text>
     </Panel>
   );
 }
@@ -551,8 +504,8 @@ function HelpPanel() {
   return (
     <Panel title="Commands" color={theme.accent}>
       <Text wrap="wrap">
-        /help /mode /models /profiles /resume /new /fork /tasks /skills /goal
-        /compact /theme /quit
+        /help /mode /models /profiles /settings /resume /fork /tasks /skills
+        /goal /compact /quit
       </Text>
       <Text color={theme.textMuted}>
         @path sends a file reference through fs/search; !cmd runs
@@ -651,18 +604,6 @@ function workspaceEntry(workspace: WorkspaceSummary): CatalogEntry {
     enabled: true,
     metadata: {},
   };
-}
-
-function formatSettings(config: unknown): string {
-  if (typeof config === 'string') return config;
-  if (typeof config !== 'object' || config === null)
-    return 'Configuration is loaded by the App Server.';
-  return Object.entries(config as Record<string, unknown>)
-    .map(
-      ([key, value]) =>
-        `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`,
-    )
-    .join('\n');
 }
 
 function clip(value: string, max: number): string {

@@ -950,6 +950,7 @@ function startedToolItem(
       status: 'inProgress',
     };
   }
+  const serializedInput = jsonValue(input);
   return {
     type: 'toolCall',
     id,
@@ -958,6 +959,9 @@ function startedToolItem(
     toolName: name,
     headline: toolHeadline(name, input),
     status: 'inProgress',
+    ...(serializedInput === undefined
+      ? {}
+      : { metadata: { input: serializedInput } }),
   };
 }
 
@@ -1161,6 +1165,15 @@ function preview(value: unknown): string {
   if (value === undefined) return '';
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   return text.length > 4_000 ? `${text.slice(0, 4_000)}...` : text;
+}
+
+function jsonValue(value: unknown): unknown | undefined {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined ? undefined : JSON.parse(serialized);
+  } catch {
+    return undefined;
+  }
 }
 
 function formatUserInput(input: UserInput): string {

@@ -13,7 +13,7 @@ export function UserInputPanel({
   onResolve,
 }: {
   readonly pending: UserInputRequest;
-  onResolve(resolution: UserInputResolution): Promise<void>;
+  onResolve(resolution: UserInputResolution): void | Promise<void>;
 }) {
   const theme = useTheme();
   const [questionIndex, setQuestionIndex] = useState(0);
@@ -65,7 +65,7 @@ export function UserInputPanel({
     if (resolving.current) return;
     resolving.current = true;
     setError(undefined);
-    void onResolve(resolution).catch((caught) => {
+    void Promise.resolve(onResolve(resolution)).catch((caught) => {
       resolving.current = false;
       setError(caught instanceof Error ? caught.message : String(caught));
     });

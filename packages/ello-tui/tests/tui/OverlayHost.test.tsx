@@ -32,6 +32,86 @@ const profile: TuiProfile = {
 };
 
 describe('OverlayHost product overlays', () => {
+  it('从真实 overlay 入口收集并一次提交全部问题', async () => {
+    const onResolveUserInput = vi.fn();
+    const request = {
+      id: 'srvreq_questions',
+      method: 'item/tool/requestUserInput' as const,
+      params: {
+        threadId: 'thr_questions',
+        turnId: 'turn_questions',
+        itemId: 'call_questions',
+        reason: 'Need user input',
+        questions: [
+          {
+            id: 'project',
+            header: 'Project',
+            question: 'Which project?',
+            multiple: false,
+            options: [
+              { label: 'Ello', description: 'Work on Ello.' },
+              { label: 'Elsewhere', description: 'Work elsewhere.' },
+            ],
+          },
+          {
+            id: 'stack',
+            header: 'Stack',
+            question: 'Which stack?',
+            multiple: true,
+            options: [
+              { label: 'TypeScript', description: 'Use TypeScript.' },
+              { label: 'Rust', description: 'Use Rust.' },
+            ],
+          },
+          {
+            id: 'milestone',
+            header: 'Milestone',
+            question: 'What comes next?',
+            multiple: false,
+            options: [
+              { label: 'Ship', description: 'Ship the feature.' },
+              { label: 'Polish', description: 'Polish the feature.' },
+            ],
+          },
+        ],
+      },
+      respond: async () => undefined,
+      reject: async () => undefined,
+    };
+    const view = render(
+      <OverlayHost
+        {...overlayCallbacks({ onResolveUserInput })}
+        overlay={{ type: 'user-input', request }}
+      />,
+    );
+
+    view.stdin.write('\r');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('2/3 Stack'));
+    view.stdin.write(' ');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('[x] TypeScript'),
+    );
+    view.stdin.write('\r');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('3/3 Milestone'),
+    );
+    view.stdin.write('\r');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('Review'));
+    view.stdin.write('\r');
+
+    await vi.waitFor(() =>
+      expect(onResolveUserInput).toHaveBeenCalledWith('srvreq_questions', {
+        status: 'submitted',
+        answers: [
+          { questionId: 'project', selected: ['Ello'] },
+          { questionId: 'stack', selected: ['TypeScript'] },
+          { questionId: 'milestone', selected: ['Ship'] },
+        ],
+      }),
+    );
+    view.unmount();
+  });
+
   it('审批提交期间禁用重复 response', () => {
     const onApprove = vi.fn();
     const request = {

@@ -106,6 +106,16 @@ describe('buildToolCardModel', () => {
     expect(model.icon).toBe('✓');
   });
 
+  it('shows the activated skill name in the headline', () => {
+    const model = buildToolCardModel(
+      call({
+        name: 'activate_skill',
+        input: { name: 'workspace', arguments: 'list repositories' },
+      }),
+    );
+    expect(model.headline).toBe('Activate Skill workspace');
+  });
+
   it('prioritizes denied/failed over exit code and duration', () => {
     const denied = buildToolCardModel(
       call({

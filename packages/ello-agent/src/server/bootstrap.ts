@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import type { Writable } from 'node:stream';
 
 import { createAgentTurnExecutorFactory } from '../agent/execution/agent-turn-executor.js';
+import { createThreadTitleGenerator } from '../agent/execution/thread-title-generator.js';
 import { createProviderRegistry } from '../agent/providers/catalog/index.js';
 import { loadCodingAgentConfig } from '../config/index.js';
 import {
@@ -13,6 +14,7 @@ import { createCodingStorage } from '../storage/database/index.js';
 import {
   artifactsDir,
   elloHomeDir,
+  legacyStateDatabasePath,
   stateDatabasePath,
 } from '../storage/paths.js';
 import { ThreadLogRepository } from '../storage/threads/thread-log.js';
@@ -36,12 +38,14 @@ export async function bootstrapAgentServer(
   const storage = createCodingStorage({
     databasePath: stateDatabasePath(root),
     artifactsDir: artifactsDir(root),
+    legacyDatabasePath: legacyStateDatabasePath(root),
   });
   const threads = new ThreadManager({
     root,
     logs,
     catalog: storage.threads,
     executorFactory: createAgentTurnExecutorFactory({ logs, storage }),
+    titleGenerator: createThreadTitleGenerator({ logs }),
     resolveInitialSettings,
     resolveSettingsUpdate,
   });

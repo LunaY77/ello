@@ -23,6 +23,7 @@ import { ThreadClient } from '../client/thread-client.js';
 import {
   loadLocalUiConfig,
   saveLocalUiConfig,
+  type LocalUiConfig,
 } from '../config/local-ui-config.js';
 
 import { completeInput } from './completion.js';
@@ -34,7 +35,10 @@ import {
   type RewindTarget,
 } from './component/OverlayHost.js';
 import { TerminalHistoryOutput } from './component/TerminalHistoryOutput.js';
-import { useRuntimeEvents } from './hooks/use-runtime-events.js';
+import {
+  clearTerminalScrollback,
+  useRuntimeEvents,
+} from './hooks/use-runtime-events.js';
 import {
   buildModelCatalogOptions,
   buildProfileSelectorOptions,
@@ -44,12 +48,14 @@ import {
   type ProfileRole,
   type TuiProfile,
 } from './profile-types.js';
+import type { SettingUpdate, TuiSetting } from './settings/types.js';
 import { detectTrigger } from './store/autocomplete.js';
 import type { HistoryEntry } from './store/history-entry.js';
 import {
   defaultThemeName,
   resolveTheme,
   ThemeProvider,
+  themeNames,
   type ThemeName,
 } from './theme/index.js';
 
@@ -98,6 +104,7 @@ function ThreadScreen({
   const [draft, setDraft] = useState(initialDraft);
   const [cursor, setCursor] = useState({ line: 0, column: 0 });
   const [themeName, setThemeName] = useState<ThemeName>(defaultThemeName);
+  const [themeEpoch, setThemeEpoch] = useState(0);
   const [models, setModels] = useState<readonly CatalogEntry[]>([]);
   const [providers, setProviders] = useState<readonly CatalogEntry[]>([]);
   const [skills, setSkills] = useState<readonly AgentSkill[]>([]);
@@ -159,9 +166,15 @@ function ThreadScreen({
 
   useEffect(() => {
     void loadLocalUiConfig()
-      .then((local) => setThemeName(local.theme))
+      .then((local) => {
+        if (local.theme !== themeName) {
+          clearTerminalScrollback();
+          setThemeEpoch((current) => current + 1);
+          setThemeName(local.theme);
+        }
+      })
       .catch((error: unknown) => notify(dispatch, error));
-  }, [dispatch]);
+  }, [dispatch, themeName]);
 
   useEffect(() => {
     if (activeTrigger?.kind !== 'file') return;
@@ -320,10 +333,7 @@ function ThreadScreen({
         setOverlay({ type: 'profiles', options: profileOptions });
         return;
       case 'settings':
-        setOverlay({ type: 'settings', config });
-        return;
-      case 'theme':
-        setOverlay({ type: 'theme', active: themeName });
+        setOverlay({ type: 'settings', settings: await loadSettings(thread) });
         return;
       case 'agents':
         setOverlay({ type: 'agents', agents });
@@ -354,12 +364,6 @@ function ThreadScreen({
           targets: rewindTargets(state.history),
         });
         return;
-      case 'permission-rules':
-        dispatch({
-          type: 'ui.message',
-          text: 'Permission decisions are owned by the App Server.',
-        });
-        return;
     }
   };
 
@@ -381,9 +385,6 @@ function ThreadScreen({
         });
         return;
       }
-      case 'new-thread':
-        await switchThread(await thread.startNewThread());
-        return;
       case 'fork':
         await switchThread(await thread.fork(args[0]));
         return;
@@ -695,6 +696,35 @@ function ThreadScreen({
       .catch((error: unknown) => notify(dispatch, error));
   };
 
+  const updateSetting = async (update: SettingUpdate): Promise<void> => {
+    if (update.setting.owner === 'client') {
+      const current = await loadLocalUiConfig();
+      const next = updatedLocalUiConfig(current, update);
+      const previousTheme = themeName;
+      if (next.theme !== current.theme) {
+        clearTerminalScrollback();
+        setThemeEpoch((currentEpoch) => currentEpoch + 1);
+        setThemeName(next.theme);
+      }
+      try {
+        await saveLocalUiConfig(next);
+      } catch (error) {
+        setThemeName(previousTheme);
+        throw error;
+      }
+    } else {
+      const result = await thread.request('config/write', {
+        cwd: thread.cwd,
+        source: update.source,
+        path: update.setting.path,
+        operation: update.operation,
+        ...(update.operation === 'set' ? { value: update.value } : {}),
+      });
+      applyConfig(result.config);
+    }
+    setOverlay({ type: 'settings', settings: await loadSettings(thread) });
+  };
+
   const onEscape = (): void => {
     if (effectiveOverlay.type !== 'none') setOverlay({ type: 'none' });
     else if (running)
@@ -707,7 +737,7 @@ function ThreadScreen({
     <ThemeProvider theme={resolveTheme(themeName)}>
       <TerminalHistoryOutput
         entries={state.history}
-        resetKey={state.historyResetKey}
+        resetKey={state.historyResetKey + themeEpoch}
         cwd={thread.cwd}
         settings={state.settings}
       />
@@ -770,15 +800,7 @@ function ThreadScreen({
                 );
               }
             }}
-            onSelectTheme={(name) => {
-              void loadLocalUiConfig()
-                .then((local) => saveLocalUiConfig({ ...local, theme: name }))
-                .then(() => {
-                  setThemeName(name);
-                  setOverlay({ type: 'none' });
-                })
-                .catch((error: unknown) => notify(dispatch, error));
-            }}
+            onUpdateSetting={updateSetting}
             onOpenProfiles={openProfiles}
           />
         }
@@ -877,6 +899,77 @@ async function loadCatalogs(thread: ThreadClient): Promise<{
     profiles: profilesFromConfig(config.config),
     config: config.config,
   };
+}
+
+async function loadSettings(
+  thread: ThreadClient,
+): Promise<readonly TuiSetting[]> {
+  const [server, local] = await Promise.all([
+    thread.request('config/settings', { cwd: thread.cwd }),
+    loadLocalUiConfig(),
+  ]);
+  return [
+    {
+      owner: 'client',
+      id: 'appearance.theme',
+      path: ['theme'],
+      label: 'Theme',
+      description: 'Color theme used by the terminal interface.',
+      group: 'Appearance',
+      type: 'enum',
+      value: local.theme,
+      source: 'global',
+      writableScopes: ['global'],
+      effect: 'immediate',
+      options: themeNames,
+      sensitive: false,
+    },
+    {
+      owner: 'client',
+      id: 'input.keymap',
+      path: ['keymap'],
+      label: 'Keymap',
+      description: 'Local TUI key bindings as a JSON object.',
+      group: 'Input',
+      type: 'json',
+      value: local.keymap,
+      source: 'global',
+      writableScopes: ['global'],
+      effect: 'restart',
+      sensitive: false,
+    },
+    ...server.data.map((setting) => ({ ...setting, owner: 'server' as const })),
+  ];
+}
+
+function updatedLocalUiConfig(
+  current: LocalUiConfig,
+  update: SettingUpdate,
+): LocalUiConfig {
+  if (update.setting.path[0] === 'theme') {
+    const theme =
+      update.operation === 'delete' ? defaultThemeName : update.value;
+    if (
+      typeof theme !== 'string' ||
+      !themeNames.includes(theme as ThemeName)
+    ) {
+      throw new Error(`Unknown theme: ${String(theme)}`);
+    }
+    return { ...current, theme: theme as ThemeName };
+  }
+  if (update.setting.path[0] === 'keymap') {
+    const keymap = update.operation === 'delete' ? {} : update.value;
+    if (
+      typeof keymap !== 'object' ||
+      keymap === null ||
+      Array.isArray(keymap) ||
+      !Object.values(keymap).every((value) => typeof value === 'string')
+    ) {
+      throw new Error('Keymap must be a JSON object with string values.');
+    }
+    return { ...current, keymap: keymap as Record<string, string> };
+  }
+  throw new Error(`Unknown local setting ${update.setting.id}.`);
 }
 
 function profilesFromConfig(config: unknown): readonly TuiProfile[] {

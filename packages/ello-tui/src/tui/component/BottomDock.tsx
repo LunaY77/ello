@@ -2,7 +2,7 @@ import { Box, Text } from 'ink';
 import type { ReactNode } from 'react';
 
 import type { Goal, SessionMode, Usage } from '../../api/protocol-types.js';
-import { tuiTokens } from '../ui/tokens.js';
+import { useTheme, type TuiTheme } from '../theme/index.js';
 
 export interface TuiModeState {
   readonly mode: SessionMode;
@@ -25,6 +25,7 @@ export function BottomDock({
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
 }) {
+  const theme = useTheme();
   const tokens =
     usage !== undefined ? usage.inputTokens + usage.outputTokens : 0;
   const cacheLabel =
@@ -36,32 +37,32 @@ export function BottomDock({
       {overlay}
       <Box
         borderStyle="single"
-        borderColor={tuiTokens.color.border}
+        borderColor={theme.border}
         paddingX={1}
       >
         {composer}
       </Box>
       <Box justifyContent="space-between">
         <Box gap={1}>
-          <Text color={tuiTokens.color.muted}>{profile}</Text>
-          <Text color={modeColor(mode.mode)}>{modeLabel(mode.mode)}</Text>
+          <Text color={theme.textMuted}>{profile}</Text>
+          <Text color={modeColor(theme, mode.mode)}>
+            {modeLabel(mode.mode)}
+          </Text>
           {mode.mode === 'plan' ? (
-            <Text color={tuiTokens.color.accent}>Shift+Tab to cycle</Text>
+            <Text color={theme.accent}>Shift+Tab to cycle</Text>
           ) : null}
           {pendingPlanApproval ? (
-            <Text color={tuiTokens.color.warning}>
+            <Text color={theme.warning}>
               Plan ready · Accept / Chat about this / Deny
             </Text>
           ) : null}
           {goal !== undefined ? (
-            <Text color={tuiTokens.color.accent}>{formatGoal(goal)}</Text>
+            <Text color={theme.accent}>{formatGoal(goal)}</Text>
           ) : null}
         </Box>
         <Box gap={1}>
-          <Text color={tuiTokens.color.muted}>{cacheLabel}</Text>
-          <Text
-            color={tuiTokens.color.muted}
-          >{`${formatTokens(tokens)} tokens`}</Text>
+          <Text color={theme.textMuted}>{cacheLabel}</Text>
+          <Text color={theme.textMuted}>{`${formatTokens(tokens)} tokens`}</Text>
         </Box>
       </Box>
     </Box>
@@ -76,16 +77,16 @@ function formatGoal(goal: Goal): string {
   return `goal ${goal.status} · ${usage}`;
 }
 
-function modeColor(mode: SessionMode): string {
+function modeColor(theme: TuiTheme, mode: SessionMode): string {
   switch (mode) {
     case 'bypass':
-      return tuiTokens.color.danger;
+      return theme.error;
     case 'accept-edits':
-      return tuiTokens.color.warning;
+      return theme.warning;
     case 'plan':
-      return tuiTokens.color.accent;
+      return theme.accent;
     default:
-      return tuiTokens.color.success;
+      return theme.success;
   }
 }
 

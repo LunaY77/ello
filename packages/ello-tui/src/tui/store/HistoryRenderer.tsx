@@ -2,8 +2,8 @@ import { Box, Text } from 'ink';
 
 import type { UserInputResolution } from '../../api/protocol-types.js';
 import { DiffPreview } from '../presenters/index.js';
+import { useTheme, type TuiTheme } from '../theme/index.js';
 import { glyphs } from '../ui/glyphs.js';
-import { tuiTokens } from '../ui/tokens.js';
 
 import type {
   HistoryEntry,
@@ -21,7 +21,8 @@ export function HistoryEntryRenderer({
   readonly entry: HistoryEntry;
   readonly cwd: string;
 }) {
-  const content = renderHistoryEntryContent(entry, cwd);
+  const theme = useTheme();
+  const content = renderHistoryEntryContent(entry, cwd, theme);
   return (
     <Box key={entry.id} marginBottom={1}>
       {content}
@@ -29,7 +30,11 @@ export function HistoryEntryRenderer({
   );
 }
 
-function renderHistoryEntryContent(entry: HistoryEntry, cwd: string) {
+function renderHistoryEntryContent(
+  entry: HistoryEntry,
+  cwd: string,
+  theme: TuiTheme,
+) {
   switch (entry.kind) {
     case 'session_header':
       return <SessionHeader entry={entry} />;
@@ -37,7 +42,7 @@ function renderHistoryEntryContent(entry: HistoryEntry, cwd: string) {
       return (
         <Box flexDirection="column">
           {entry.text.split('\n').map((line, index) => (
-            <Text key={`${entry.id}:${index}`} color={tuiTokens.color.success}>
+            <Text key={`${entry.id}:${index}`} color={theme.success}>
               {`${index === 0 ? glyphs.user : '|'} ${line}`}
             </Text>
           ))}
@@ -47,7 +52,7 @@ function renderHistoryEntryContent(entry: HistoryEntry, cwd: string) {
       return (
         <Box flexDirection="column">
           {entry.text.split('\n').map((line, index) => (
-            <Text key={`${entry.id}:${index}`} color={tuiTokens.color.text}>
+            <Text key={`${entry.id}:${index}`} color={theme.text}>
               {`${index === 0 ? glyphs.assistant : ' '} ${line}`}
             </Text>
           ))}
@@ -55,7 +60,7 @@ function renderHistoryEntryContent(entry: HistoryEntry, cwd: string) {
       );
     case 'skill':
       return (
-        <Text color={tuiTokens.color.accent}>{`loaded [${entry.name}]`}</Text>
+        <Text color={theme.accent}>{`loaded [${entry.name}]`}</Text>
       );
     case 'tool':
       return <HistoryTool tool={entry.tool} cwd={cwd} />;
@@ -64,16 +69,16 @@ function renderHistoryEntryContent(entry: HistoryEntry, cwd: string) {
         <Box
           flexDirection="column"
           borderStyle="round"
-          borderColor={tuiTokens.color.accent}
+          borderColor={theme.accent}
           paddingX={1}
         >
-          <Text color={tuiTokens.color.accent}>Question</Text>
+          <Text color={theme.accent}>Question</Text>
           {entry.pending.params.questions.map((question) => (
-            <Text key={question.id} color={tuiTokens.color.text}>
+            <Text key={question.id} color={theme.text}>
               {`${question.header}: ${question.question}`}
             </Text>
           ))}
-          <Text color={tuiTokens.color.muted}>
+          <Text color={theme.textMuted}>
             {entry.resolution === undefined
               ? 'Awaiting your input'
               : summarizeUserInputResolution(entry.resolution)}
@@ -85,9 +90,9 @@ function renderHistoryEntryContent(entry: HistoryEntry, cwd: string) {
     case 'separator':
       return <RunSeparator text={entry.text} />;
     case 'system':
-      return <Text color={tuiTokens.color.accent}>{`- ${entry.text}`}</Text>;
+      return <Text color={theme.accent}>{`- ${entry.text}`}</Text>;
     case 'diagnostic':
-      return <Text color={tuiTokens.color.danger}>{`x ${entry.text}`}</Text>;
+      return <Text color={theme.error}>{`x ${entry.text}`}</Text>;
   }
 }
 
@@ -104,34 +109,35 @@ function SessionHeader({
 }: {
   readonly entry: Extract<HistoryEntry, { kind: 'session_header' }>;
 }) {
+  const theme = useTheme();
   return (
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor={tuiTokens.color.accent}
+      borderColor={theme.accent}
       paddingX={1}
     >
       <Box justifyContent="space-between">
-        <Text color={tuiTokens.color.accent}>
+        <Text color={theme.accent}>
           {`>_ Ello Coding Agent${entry.version ? ` (v${entry.version})` : ''}`}
         </Text>
-        <Text color={tuiTokens.color.success}>ready</Text>
+        <Text color={theme.success}>ready</Text>
       </Box>
       <Text>
-        <Text color={tuiTokens.color.muted}>profile: </Text>
-        <Text color={tuiTokens.color.text}>{entry.profile}</Text>
+        <Text color={theme.textMuted}>profile: </Text>
+        <Text color={theme.text}>{entry.profile}</Text>
       </Text>
       <Text>
-        <Text color={tuiTokens.color.muted}>directory: </Text>
-        <Text color={tuiTokens.color.text}>{compactPath(entry.cwd)}</Text>
+        <Text color={theme.textMuted}>directory: </Text>
+        <Text color={theme.text}>{compactPath(entry.cwd)}</Text>
       </Text>
       <Text>
-        <Text color={tuiTokens.color.muted}>model: </Text>
-        <Text color={tuiTokens.color.text}>{entry.model}</Text>
+        <Text color={theme.textMuted}>model: </Text>
+        <Text color={theme.text}>{entry.model}</Text>
       </Text>
       <Text>
-        <Text color={tuiTokens.color.muted}>mode: </Text>
-        <Text color={tuiTokens.color.text}>{formatPermission(entry.mode)}</Text>
+        <Text color={theme.textMuted}>mode: </Text>
+        <Text color={theme.text}>{formatPermission(entry.mode)}</Text>
       </Text>
     </Box>
   );
@@ -144,8 +150,9 @@ function HistoryTool({
   readonly tool: ToolCallView;
   readonly cwd: string;
 }) {
+  const theme = useTheme();
   const model = buildToolCardModel(tool, { cwd });
-  const color = toolStatusColor(tool.status);
+  const color = toolStatusColor(theme, tool.status);
   const prefix = tool.name === 'bash' ? '• ' : '  ';
   return (
     <Box flexDirection="column">
@@ -154,17 +161,17 @@ function HistoryTool({
       </Text>
       {model.details.length > 0 ? (
         <Text
-          color={tuiTokens.color.muted}
+          color={theme.textMuted}
           wrap="truncate"
         >{`  ${model.details.join(' · ')}`}</Text>
       ) : null}
       {model.outputPreview.length > 0 ? (
         <Box flexDirection="column">
-          <Text color={tuiTokens.color.muted}> └</Text>
+          <Text color={theme.textMuted}> └</Text>
           {model.outputPreview.map((line, index) => (
             <Text
               key={`${tool.id}:out:${index}`}
-              color={tuiTokens.color.muted}
+              color={theme.textMuted}
               wrap="truncate"
             >
               {`    ${line}`}
@@ -174,8 +181,8 @@ function HistoryTool({
       ) : null}
       {model.artifact !== undefined ? (
         <Box marginLeft={2} gap={2}>
-          <Text color={tuiTokens.color.warning}>artifact</Text>
-          <Text color={tuiTokens.color.warning} wrap="truncate-middle">
+          <Text color={theme.warning}>artifact</Text>
+          <Text color={theme.warning} wrap="truncate-middle">
             {model.artifact.displayPath}
           </Text>
         </Box>
@@ -190,30 +197,35 @@ function HistoryTool({
         />
       ) : null}
       {tool.status === 'fail' && tool.error !== undefined ? (
-        <Text color={tuiTokens.color.danger}>{`  ${tool.error.message}`}</Text>
+        <Text color={theme.error}>{`  ${tool.error.message}`}</Text>
       ) : null}
     </Box>
   );
 }
 
-function toolStatusColor(status: ToolCallView['status']): string {
+function toolStatusColor(
+  theme: TuiTheme,
+  status: ToolCallView['status'],
+): string {
   switch (status) {
     case 'running':
-      return tuiTokens.color.warning;
+      return theme.warning;
     case 'ok':
-      return tuiTokens.color.borderActive;
+      return theme.borderActive;
     case 'fail':
-      return tuiTokens.color.danger;
+      return theme.error;
   }
 }
 
 function RunSeparator({ text }: { readonly text: string }) {
+  const theme = useTheme();
   return (
-    <Text color={tuiTokens.color.border}>{`─ ${text} ${'─'.repeat(72)}`}</Text>
+    <Text color={theme.border}>{`─ ${text} ${'─'.repeat(72)}`}</Text>
   );
 }
 
 function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
+  const theme = useTheme();
   const hidden = Math.max(0, run.tools.length - SUBAGENT_VISIBLE_TOOL_LIMIT);
   const visibleTools = run.tools.slice(-SUBAGENT_VISIBLE_TOOL_LIMIT);
   return (
@@ -221,30 +233,30 @@ function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
       <Text
         color={
           run.status === 'fail'
-            ? tuiTokens.color.danger
-            : tuiTokens.color.warning
+            ? theme.error
+            : theme.warning
         }
       >
         {`${glyphs.subagent} ${run.agentName} ${run.background ? 'background' : 'foreground'} ${run.status}`}
       </Text>
-      <Text color={tuiTokens.color.text}>{`  ${run.description}`}</Text>
+      <Text color={theme.text}>{`  ${run.description}`}</Text>
       {hidden > 0 ? (
         <Text
-          color={tuiTokens.color.muted}
+          color={theme.textMuted}
         >{`  +${hidden} earlier tool calls`}</Text>
       ) : null}
       {visibleTools.map((tool) => (
-        <Text key={tool.id} color={tuiTokens.color.muted}>
+        <Text key={tool.id} color={theme.textMuted}>
           {`  ${tool.name} ${tool.status}`}
         </Text>
       ))}
       {run.output !== undefined && run.output.trim() !== '' ? (
         <Text
-          color={tuiTokens.color.muted}
+          color={theme.textMuted}
         >{`  ${compactText(run.output)}`}</Text>
       ) : null}
       {run.error !== undefined ? (
-        <Text color={tuiTokens.color.danger}>{`  ${run.error}`}</Text>
+        <Text color={theme.error}>{`  ${run.error}`}</Text>
       ) : null}
     </Box>
   );

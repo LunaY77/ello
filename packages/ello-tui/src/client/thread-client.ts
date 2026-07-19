@@ -58,11 +58,12 @@ export class ThreadClient {
         void this.recover().catch(() => undefined);
       }
     });
-    this.stopServerRequestListener = server.onServerRequest(async (request) => {
-      if (request.params.threadId !== this.threadId) return;
+    this.stopServerRequestListener = server.onServerRequest((request) => {
+      if (request.params.threadId !== this.threadId) return false;
       const typedRequest = request as ClientServerRequest;
       this.pendingRequests.set(request.id, typedRequest);
       this.emit({ type: 'serverRequest', request: typedRequest });
+      return true;
     });
   }
 

@@ -288,7 +288,7 @@ describe('App typed client behavior', () => {
     deleteView.unmount();
   });
 
-  it('/theme 把选择写入 Client 本地 tui.json', async () => {
+  it('/settings 中的 theme 立即生效并写入 Client 本地 tui.json', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ello-tui-app-'));
     roots.push(root);
     process.env.ELLO_HOME = root;
@@ -296,8 +296,16 @@ describe('App typed client behavior', () => {
     const view = render(<App thread={harness.thread} />);
     await waitForCatalogs(harness);
 
-    await submitCommand(view, '/theme');
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('github-dark'));
+    await submitCommand(view, '/settings');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('appearance.theme'),
+    );
+    view.stdin.write('\r');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('Set global'));
+    view.stdin.write('\r');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('appearance.theme → global'),
+    );
     view.stdin.write('\u001b[B');
     await vi.waitFor(() =>
       expect(selectedLine(view.lastFrame(), 'github-dark')).toContain('›'),
@@ -313,6 +321,44 @@ describe('App typed client behavior', () => {
     expect(
       harness.request.mock.calls.some(([method]) => method === 'config/write'),
     ).toBe(false);
+    view.unmount();
+  });
+
+  it('/settings 将 Server setting 写入选择的配置作用域', async () => {
+    const harness = createThreadHarness(snapshot());
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, '/settings');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('appearance.theme'),
+    );
+    view.stdin.write('initial_mode');
+    await vi.waitFor(() => {
+      expect(view.lastFrame()).toContain('initial_mode');
+      expect(view.lastFrame()).not.toContain('appearance.theme =');
+    });
+    view.stdin.write('\r');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('Set global'));
+    view.stdin.write('\r');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('initial_mode → global'),
+    );
+    view.stdin.write('\u001b[B');
+    await vi.waitFor(() =>
+      expect(selectedLine(view.lastFrame(), 'accept-edits')).toContain('›'),
+    );
+    view.stdin.write('\r');
+
+    await vi.waitFor(() =>
+      expect(harness.request).toHaveBeenCalledWith('config/write', {
+        cwd: '/workspace',
+        source: 'global',
+        path: ['initial_mode'],
+        operation: 'set',
+        value: 'accept-edits',
+      }),
+    );
     view.unmount();
   });
 });
@@ -357,6 +403,30 @@ function createThreadHarness(
       case 'config/read':
       case 'config/write':
         return { config };
+      case 'config/settings':
+        return {
+          data: [
+            {
+              id: 'initial_mode',
+              path: ['initial_mode'],
+              label: 'Initial Mode',
+              description: 'Initial mode for new threads.',
+              group: 'General',
+              type: 'enum',
+              value: 'ask-before-changes',
+              source: 'global',
+              writableScopes: ['global', 'project'],
+              effect: 'newThread',
+              options: [
+                'ask-before-changes',
+                'accept-edits',
+                'plan',
+                'bypass',
+              ],
+              sensitive: false,
+            },
+          ],
+        };
       case 'workspace/list':
         return {
           data: [

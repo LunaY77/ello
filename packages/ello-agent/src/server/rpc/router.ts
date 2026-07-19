@@ -58,6 +58,7 @@ export const CLIENT_METHOD_CAPABILITIES = {
   'thread/plan/read': 'read',
   'thread/plan/preview': 'read',
   'config/read': 'read',
+  'config/settings': 'read',
   'config/write': 'write',
   'config/init': 'write',
   'config/sources': 'read',

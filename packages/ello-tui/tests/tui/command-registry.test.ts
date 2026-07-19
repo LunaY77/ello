@@ -20,10 +20,9 @@ describe('command registry', () => {
   });
 
   it('layers UI metadata (id/group/shortcut) onto known commands', () => {
-    const theme = findCommandById('theme.switch');
-    expect(theme?.slash).toBe('theme');
-    expect(theme?.group).toBe('View');
-    expect(theme?.shortcut).toBe('ctrl+t');
+    const settings = findCommandById('config.open');
+    expect(settings?.slash).toBe('settings');
+    expect(settings?.group).toBe('General');
   });
 
   it('inherits slash description and merges aliases into keywords', () => {
@@ -36,8 +35,8 @@ describe('command registry', () => {
     const commands = buildCommands();
     expect(filterCommands(commands, '')).toEqual(commands);
 
-    const ranked = filterCommands(commands, 'theme');
-    expect(ranked[0]?.id).toBe('theme.switch');
+    const ranked = filterCommands(commands, 'preferences');
+    expect(ranked[0]?.id).toBe('config.open');
   });
 
   it('groups commands while preserving first-seen group order', () => {

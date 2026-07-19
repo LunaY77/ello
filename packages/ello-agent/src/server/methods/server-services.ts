@@ -22,6 +22,7 @@ import { SkillCatalog } from '../../agent/skills/index.js';
 import { createAgentRegistry } from '../../agent/subagents/registry.js';
 import { createProductionToolRuntime } from '../../agent/tools/production.js';
 import {
+  describeConfigSettings,
   ensureGlobalConfig,
   ensureProjectConfig,
   globalConfigPath,
@@ -141,6 +142,10 @@ export class ServerServices implements RpcServices {
         );
       case 'config/read':
         return this.readConfig(rawParams as ParsedClientParams<'config/read'>);
+      case 'config/settings':
+        return this.readSettings(
+          rawParams as ParsedClientParams<'config/settings'>,
+        );
       case 'config/write':
         return this.writeConfig(
           rawParams as ParsedClientParams<'config/write'>,
@@ -475,6 +480,19 @@ export class ServerServices implements RpcServices {
           exists: source.path === undefined ? true : await exists(source.path),
           value: sanitizeConfigForResponse(toJson(source.data)),
         })),
+      ),
+    };
+  }
+
+  private async readSettings(params: ParsedClientParams<'config/settings'>) {
+    const [config, sources] = await Promise.all([
+      loadCodingAgentConfig({ cwd: params.cwd }),
+      loadConfigSources(params.cwd),
+    ]);
+    return {
+      data: describeConfigSettings(
+        sanitizeConfigForResponse(toJson(config)),
+        sources,
       ),
     };
   }

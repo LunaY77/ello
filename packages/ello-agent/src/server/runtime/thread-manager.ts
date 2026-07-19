@@ -1,4 +1,5 @@
 import { createEntityId } from '../../domain/ids.js';
+import type { ThreadTitleGenerator } from '../../domain/ports/thread-title-generator.js';
 import type { TurnExecutorFactory } from '../../domain/ports/turn-executor.js';
 import { projectThreadSnapshot } from '../../domain/projection/thread-snapshot.js';
 import {
@@ -39,6 +40,7 @@ export interface ThreadManagerOptions {
   readonly catalog: ThreadCatalogRepository;
   readonly logs?: ThreadLogRepository;
   readonly unloadGraceMs?: number;
+  readonly titleGenerator?: ThreadTitleGenerator;
   resolveInitialSettings(
     params: ParsedClientParams<'thread/start'>,
   ): Promise<ThreadSnapshot['settings']>;
@@ -62,6 +64,7 @@ export class ThreadManager {
   private readonly resolveInitialSettings: ThreadManagerOptions['resolveInitialSettings'];
   private readonly resolveSettingsUpdate: ThreadManagerOptions['resolveSettingsUpdate'];
   private readonly unloadGraceMs: number;
+  private readonly titleGenerator: ThreadTitleGenerator | undefined;
   private readonly entries = new Map<string, ThreadEntry>();
   private readonly loading = new Map<string, Promise<ThreadEntry>>();
   private stopping = false;
@@ -74,12 +77,16 @@ export class ThreadManager {
     this.resolveInitialSettings = options.resolveInitialSettings;
     this.resolveSettingsUpdate = options.resolveSettingsUpdate;
     this.unloadGraceMs = options.unloadGraceMs ?? 30_000;
+    this.titleGenerator = options.titleGenerator;
   }
 
   async initialize(): Promise<void> {
     await this.logs.initialize();
-    await recoverInterruptedThreads({ logs: this.logs, leases: this.leases });
-    await this.reconcileCatalog();
+    const activeThreadIds = await recoverInterruptedThreads({
+      logs: this.logs,
+      leases: this.leases,
+    });
+    await this.reconcileCatalog(activeThreadIds);
   }
 
   async start(
@@ -111,6 +118,9 @@ export class ThreadManager {
         catalog: this.catalog,
         executor,
         lease,
+        ...(this.titleGenerator === undefined
+          ? {}
+          : { titleGenerator: this.titleGenerator }),
       });
       const entry: ThreadEntry = {
         runtime,
@@ -325,6 +335,9 @@ export class ThreadManager {
         catalog: this.catalog,
         executor,
         lease,
+        ...(this.titleGenerator === undefined
+          ? {}
+          : { titleGenerator: this.titleGenerator }),
       });
       const entry: ThreadEntry = {
         runtime,
@@ -508,6 +521,9 @@ export class ThreadManager {
           catalog: this.catalog,
           executor,
           lease,
+          ...(this.titleGenerator === undefined
+            ? {}
+            : { titleGenerator: this.titleGenerator }),
         }),
         subscriptions: new Map(),
         holds: 0,
@@ -634,7 +650,9 @@ export class ThreadManager {
     return persisted;
   }
 
-  private async reconcileCatalog(): Promise<void> {
+  private async reconcileCatalog(
+    activeThreadIds: ReadonlySet<string>,
+  ): Promise<void> {
     const [activeIds, archivedIds] = await Promise.all([
       this.logs.listThreadIds(false),
       this.logs.listThreadIds(true),
@@ -652,6 +670,7 @@ export class ThreadManager {
           });
         }
         logIds.add(threadId);
+        if (!archived && activeThreadIds.has(threadId)) continue;
         const records = archived
           ? await this.logs.readArchived(threadId)
           : await this.logs.read(threadId);

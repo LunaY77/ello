@@ -99,12 +99,6 @@ const META: Record<string, CommandMeta> = {
     title: 'Goal',
     keywords: ['objective', 'continue'],
   },
-  new: {
-    id: 'session.new',
-    group: 'Session',
-    title: 'New session',
-    keywords: [],
-  },
   session: {
     id: 'session.current',
     group: 'Session',
@@ -129,18 +123,6 @@ const META: Record<string, CommandMeta> = {
     title: 'Compact session',
     keywords: ['summarize'],
   },
-  tools: {
-    id: 'tools.list',
-    group: 'General',
-    title: 'List tools',
-    keywords: [],
-  },
-  permissions: {
-    id: 'config.permissions',
-    group: 'General',
-    title: 'Permission rules',
-    keywords: ['rules'],
-  },
   memory: {
     id: 'context.memory',
     group: 'Context',
@@ -158,13 +140,6 @@ const META: Record<string, CommandMeta> = {
     group: 'Session',
     title: 'Export session',
     keywords: ['save'],
-  },
-  theme: {
-    id: 'theme.switch',
-    group: 'View',
-    title: 'Switch theme',
-    keywords: ['color', 'dark', 'light'],
-    shortcut: 'ctrl+t',
   },
   quit: {
     id: 'app.quit',

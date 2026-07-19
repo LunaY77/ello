@@ -2,9 +2,9 @@ import { Box, Text } from 'ink';
 
 import type { ToolCallView } from '../store/history-entry.js';
 import { buildToolCardModel } from '../store/tool-card.js';
+import { useTheme, type TuiTheme } from '../theme/index.js';
 
 import { glyphs } from './glyphs.js';
-import { tuiTokens } from './tokens.js';
 
 export function ToolRow({
   call,
@@ -15,18 +15,21 @@ export function ToolRow({
   readonly cwd: string;
   readonly indent?: number;
 }) {
+  const theme = useTheme();
   const model = buildToolCardModel(call, { cwd });
   return (
     <Box marginLeft={indent} gap={1}>
-      <Text color={statusColor(call.status)}>{statusGlyph(call.status)}</Text>
-      <Text color={statusColor(call.status)}>{model.name}</Text>
+      <Text color={statusColor(theme, call.status)}>
+        {statusGlyph(call.status)}
+      </Text>
+      <Text color={statusColor(theme, call.status)}>{model.name}</Text>
       {model.summary !== '' ? (
-        <Text color={tuiTokens.color.muted} wrap="truncate-middle">
+        <Text color={theme.textMuted} wrap="truncate-middle">
           {model.summary}
         </Text>
       ) : null}
       {model.metaRight !== '' ? (
-        <Text color={tuiTokens.color.muted}>{model.metaRight}</Text>
+        <Text color={theme.textMuted}>{model.metaRight}</Text>
       ) : null}
     </Box>
   );
@@ -43,13 +46,13 @@ function statusGlyph(status: ToolCallView['status']): string {
   }
 }
 
-function statusColor(status: ToolCallView['status']): string {
+function statusColor(theme: TuiTheme, status: ToolCallView['status']): string {
   switch (status) {
     case 'running':
-      return tuiTokens.color.warning;
+      return theme.warning;
     case 'ok':
-      return tuiTokens.color.success;
+      return theme.success;
     case 'fail':
-      return tuiTokens.color.danger;
+      return theme.error;
   }
 }

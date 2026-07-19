@@ -84,6 +84,12 @@ describe('斜杠命令派发', () => {
       handled: true,
       output: 'Unknown command: /model',
     });
+    for (const command of ['/new', '/permissions', '/theme', '/tools']) {
+      expect(handleSlashCommand(command)).toMatchObject({
+        handled: true,
+        output: `Unknown command: ${command}`,
+      });
+    }
   });
 
   it('命令注册项名称保持唯一，避免补全与派发歧义', () => {

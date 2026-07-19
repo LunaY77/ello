@@ -7,7 +7,11 @@ import Database from 'better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 
 import { ArtifactStore } from '../artifacts/artifact-store.js';
-import { artifactsDir, stateDatabasePath } from '../paths.js';
+import {
+  artifactsDir,
+  legacyStateDatabasePath,
+  stateDatabasePath,
+} from '../paths.js';
 import { CheckpointRepository } from '../repositories/checkpoint-repository.js';
 import { RepositoryRepository } from '../repositories/repository-repository.js';
 import { TaskBoardRepository } from '../repositories/task-board-repository.js';
@@ -20,6 +24,7 @@ import {
   createCodingDatabase,
   type CodingDatabase,
 } from './database.js';
+import { migrateLegacyStateDatabase } from './legacy-state-migration.js';
 
 const migrationsFolder = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -48,6 +53,8 @@ export function createCodingStorage(
   options: {
     readonly databasePath?: string;
     readonly artifactsDir?: string;
+    /** 覆盖旧版 `state.sqlite` 路径；未提供时从新路径自动推断。 */
+    readonly legacyDatabasePath?: string;
   } = {},
 ): CodingStorage {
   const databasePath = options.databasePath ?? stateDatabasePath();
@@ -59,6 +66,11 @@ export function createCodingStorage(
     validateAppliedMigrations(client, readMigrationDescriptors());
     migrate(db, { migrationsFolder });
     validateAppliedMigrations(client, readMigrationDescriptors());
+    const legacyDatabase =
+      options.legacyDatabasePath ?? inferLegacyDatabasePath(databasePath);
+    if (legacyDatabase !== undefined) {
+      migrateLegacyStateDatabase(client, legacyDatabase);
+    }
     const artifactStore = new ArtifactStore(
       db,
       options.artifactsDir ?? artifactsDir(),
@@ -85,6 +97,17 @@ export function createCodingStorage(
     client.close();
     throw error;
   }
+}
+
+function inferLegacyDatabasePath(databasePath: string): string | undefined {
+  const stateDirectory = path.dirname(databasePath);
+  if (
+    path.basename(databasePath) !== 'ello.sqlite' ||
+    path.basename(stateDirectory) !== 'state'
+  ) {
+    return undefined;
+  }
+  return legacyStateDatabasePath(path.dirname(stateDirectory));
 }
 
 /**

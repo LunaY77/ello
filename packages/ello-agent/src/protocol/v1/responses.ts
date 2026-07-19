@@ -239,6 +239,47 @@ export const CLIENT_RESPONSE_SCHEMAS = {
         .optional(),
     })
     .strict(),
+  'config/settings': z
+    .object({
+      data: z
+        .array(
+          z
+            .object({
+              id: z.string().min(1),
+              path: z.array(z.string().min(1)).min(1).readonly(),
+              label: z.string().min(1),
+              description: z.string().min(1),
+              group: z.string().min(1),
+              type: z.enum([
+                'boolean',
+                'enum',
+                'integer',
+                'number',
+                'string',
+                'stringList',
+                'json',
+                'secret',
+              ]),
+              value: JsonValueSchema.optional(),
+              source: z.enum(['defaults', 'global', 'project', 'override']),
+              writableScopes: z
+                .array(z.enum(['global', 'project']))
+                .min(1)
+                .readonly(),
+              effect: z.enum([
+                'immediate',
+                'nextTurn',
+                'newThread',
+                'restart',
+              ]),
+              options: z.array(z.string().min(1)).readonly().optional(),
+              sensitive: z.boolean(),
+            })
+            .strict(),
+        )
+        .readonly(),
+    })
+    .strict(),
   'config/write': z.object({ config: JsonValueSchema }).strict(),
   'config/init': z
     .object({ created: z.array(z.string().min(1)).readonly() })
