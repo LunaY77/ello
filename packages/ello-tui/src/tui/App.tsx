@@ -949,10 +949,7 @@ function updatedLocalUiConfig(
   if (update.setting.path[0] === 'theme') {
     const theme =
       update.operation === 'delete' ? defaultThemeName : update.value;
-    if (
-      typeof theme !== 'string' ||
-      !themeNames.includes(theme as ThemeName)
-    ) {
+    if (typeof theme !== 'string' || !themeNames.includes(theme as ThemeName)) {
       throw new Error(`Unknown theme: ${String(theme)}`);
     }
     return { ...current, theme: theme as ThemeName };

@@ -59,9 +59,7 @@ function renderHistoryEntryContent(
         </Box>
       );
     case 'skill':
-      return (
-        <Text color={theme.accent}>{`loaded [${entry.name}]`}</Text>
-      );
+      return <Text color={theme.accent}>{`loaded [${entry.name}]`}</Text>;
     case 'tool':
       return <HistoryTool tool={entry.tool} cwd={cwd} />;
     case 'user_input':
@@ -219,9 +217,7 @@ function toolStatusColor(
 
 function RunSeparator({ text }: { readonly text: string }) {
   const theme = useTheme();
-  return (
-    <Text color={theme.border}>{`─ ${text} ${'─'.repeat(72)}`}</Text>
-  );
+  return <Text color={theme.border}>{`─ ${text} ${'─'.repeat(72)}`}</Text>;
 }
 
 function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
@@ -230,20 +226,12 @@ function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
   const visibleTools = run.tools.slice(-SUBAGENT_VISIBLE_TOOL_LIMIT);
   return (
     <Box flexDirection="column">
-      <Text
-        color={
-          run.status === 'fail'
-            ? theme.error
-            : theme.warning
-        }
-      >
+      <Text color={run.status === 'fail' ? theme.error : theme.warning}>
         {`${glyphs.subagent} ${run.agentName} ${run.background ? 'background' : 'foreground'} ${run.status}`}
       </Text>
       <Text color={theme.text}>{`  ${run.description}`}</Text>
       {hidden > 0 ? (
-        <Text
-          color={theme.textMuted}
-        >{`  +${hidden} earlier tool calls`}</Text>
+        <Text color={theme.textMuted}>{`  +${hidden} earlier tool calls`}</Text>
       ) : null}
       {visibleTools.map((tool) => (
         <Text key={tool.id} color={theme.textMuted}>
@@ -251,9 +239,7 @@ function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
         </Text>
       ))}
       {run.output !== undefined && run.output.trim() !== '' ? (
-        <Text
-          color={theme.textMuted}
-        >{`  ${compactText(run.output)}`}</Text>
+        <Text color={theme.textMuted}>{`  ${compactText(run.output)}`}</Text>
       ) : null}
       {run.error !== undefined ? (
         <Text color={theme.error}>{`  ${run.error}`}</Text>

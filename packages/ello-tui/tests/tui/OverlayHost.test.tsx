@@ -92,9 +92,7 @@ describe('OverlayHost product overlays', () => {
       expect(view.lastFrame()).toContain('[x] TypeScript'),
     );
     view.stdin.write('\r');
-    await vi.waitFor(() =>
-      expect(view.lastFrame()).toContain('3/3 Milestone'),
-    );
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('3/3 Milestone'));
     view.stdin.write('\r');
     await vi.waitFor(() => expect(view.lastFrame()).toContain('Review'));
     view.stdin.write('\r');

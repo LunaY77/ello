@@ -181,9 +181,13 @@ function SettingActions({
   ]);
   return (
     <Box flexDirection="column">
-      <Text color={theme.info}>{`${setting.group} / ${displayPath(setting)}`}</Text>
+      <Text
+        color={theme.info}
+      >{`${setting.group} / ${displayPath(setting)}`}</Text>
       <Text wrap="wrap">{setting.description}</Text>
-      <Text color={theme.textMuted}>{`Current: ${settingValue(setting)} · source ${setting.source} · applies ${effectLabel(setting.effect)}`}</Text>
+      <Text
+        color={theme.textMuted}
+      >{`Current: ${settingValue(setting)} · source ${setting.source} · applies ${effectLabel(setting.effect)}`}</Text>
       <InlineSelect
         key={`actions:${setting.id}`}
         isActive={active}
@@ -224,7 +228,9 @@ function SettingEditor({
         <InlineSelect
           isActive={active}
           options={options.map((value) => ({ value, label: value }))}
-          onChange={(value) => onSubmit(setting.type === 'boolean' ? value === 'true' : value)}
+          onChange={(value) =>
+            onSubmit(setting.type === 'boolean' ? value === 'true' : value)
+          }
         />
       ) : setting.sensitive ? (
         <SecretInput
@@ -234,7 +240,9 @@ function SettingEditor({
               onError(undefined);
               onSubmit(parseSettingValue(setting, text));
             } catch (caught) {
-              onError(caught instanceof Error ? caught.message : String(caught));
+              onError(
+                caught instanceof Error ? caught.message : String(caught),
+              );
             }
           }}
         />
@@ -247,7 +255,9 @@ function SettingEditor({
               onError(undefined);
               onSubmit(parseSettingValue(setting, text));
             } catch (caught) {
-              onError(caught instanceof Error ? caught.message : String(caught));
+              onError(
+                caught instanceof Error ? caught.message : String(caught),
+              );
             }
           }}
         />
@@ -376,7 +386,10 @@ function parseSettingValue(setting: TuiSetting, text: string): unknown {
   if (setting.type === 'stringList') {
     if (text.trim().startsWith('[')) {
       const value = JSON.parse(text) as unknown;
-      if (!Array.isArray(value) || !value.every((item) => typeof item === 'string'))
+      if (
+        !Array.isArray(value) ||
+        !value.every((item) => typeof item === 'string')
+      )
         throw new Error('Enter a JSON string array.');
       return value;
     }

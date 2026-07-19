@@ -75,13 +75,7 @@ function SubagentActivity({
   return (
     <Box flexDirection="column" marginTop={1}>
       <Box gap={1}>
-        <Text
-          color={
-            run.status === 'fail'
-              ? theme.error
-              : theme.warning
-          }
-        >
+        <Text color={run.status === 'fail' ? theme.error : theme.warning}>
           {glyphs.subagent}
         </Text>
         <Text color={theme.warning}>{run.agentName}</Text>
@@ -93,9 +87,7 @@ function SubagentActivity({
         {run.description}
       </Text>
       {hidden > 0 ? (
-        <Text
-          color={theme.textMuted}
-        >{`  +${hidden} earlier tool calls`}</Text>
+        <Text color={theme.textMuted}>{`  +${hidden} earlier tool calls`}</Text>
       ) : null}
       <ToolActivityList tools={visibleTools} cwd={cwd} indent={2} />
       {run.status === 'fail' && run.error !== undefined ? (
@@ -109,9 +101,7 @@ function PendingSteers({ prompts }: { readonly prompts: readonly string[] }) {
   const theme = useTheme();
   return (
     <Box marginTop={1} flexDirection="column">
-      <Text color={theme.warning}>
-        Messages queued for the running turn
-      </Text>
+      <Text color={theme.warning}>Messages queued for the running turn</Text>
       {prompts.map((prompt, index) => (
         <Text key={`${index}:${prompt}`} color={theme.text}>
           {`${glyphs.subagent} ${prompt}`}
@@ -134,9 +124,7 @@ function RunStatus({
   if (running) {
     return (
       <Box marginTop={1}>
-        <Text color={theme.warning}>
-          {`working ${workingSeconds ?? 0}s`}
-        </Text>
+        <Text color={theme.warning}>{`working ${workingSeconds ?? 0}s`}</Text>
       </Box>
     );
   }

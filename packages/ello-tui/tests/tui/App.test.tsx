@@ -417,12 +417,7 @@ function createThreadHarness(
               source: 'global',
               writableScopes: ['global', 'project'],
               effect: 'newThread',
-              options: [
-                'ask-before-changes',
-                'accept-edits',
-                'plan',
-                'bypass',
-              ],
+              options: ['ask-before-changes', 'accept-edits', 'plan', 'bypass'],
               sensitive: false,
             },
           ],

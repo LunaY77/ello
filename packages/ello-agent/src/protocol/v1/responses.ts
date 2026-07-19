@@ -266,12 +266,7 @@ export const CLIENT_RESPONSE_SCHEMAS = {
                 .array(z.enum(['global', 'project']))
                 .min(1)
                 .readonly(),
-              effect: z.enum([
-                'immediate',
-                'nextTurn',
-                'newThread',
-                'restart',
-              ]),
+              effect: z.enum(['immediate', 'nextTurn', 'newThread', 'restart']),
               options: z.array(z.string().min(1)).readonly().optional(),
               sensitive: z.boolean(),
             })

@@ -108,7 +108,10 @@ export function describeConfigSettings(
   sources: readonly LoadedConfigSource[],
 ): readonly ConfigSettingDescriptor[] {
   const root = isRecord(config) ? config : {};
-  const leaves: Array<{ readonly path: readonly string[]; readonly value: unknown }> = [];
+  const leaves: Array<{
+    readonly path: readonly string[];
+    readonly value: unknown;
+  }> = [];
   for (const [key, value] of Object.entries(root)) {
     if (EXCLUDED_ROOTS.has(key)) continue;
     flattenValue([key], value, leaves);
@@ -184,8 +187,7 @@ function descriptorFor(
     type: metadata.type ?? inferType(value),
     ...(sensitive || value === undefined ? {} : { value }),
     source: sourceFor(path, sources),
-    writableScopes:
-      metadata.writableScopes ?? writableScopesFor(path[0] ?? ''),
+    writableScopes: metadata.writableScopes ?? writableScopesFor(path[0] ?? ''),
     effect: metadata.effect ?? effectFor(path[0] ?? ''),
     ...(metadata.options === undefined ? {} : { options: metadata.options }),
     sensitive,
@@ -242,9 +244,7 @@ function effectFor(root: string): ConfigSettingEffect {
   return root === 'observability' ? 'restart' : 'nextTurn';
 }
 
-function writableScopesFor(
-  root: string,
-): readonly ('global' | 'project')[] {
+function writableScopesFor(root: string): readonly ('global' | 'project')[] {
   return root === 'projects' ? ['global'] : ['global', 'project'];
 }
 

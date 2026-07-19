@@ -35,11 +35,7 @@ export function BottomDock({
   return (
     <Box flexDirection="column" marginTop={1}>
       {overlay}
-      <Box
-        borderStyle="single"
-        borderColor={theme.border}
-        paddingX={1}
-      >
+      <Box borderStyle="single" borderColor={theme.border} paddingX={1}>
         {composer}
       </Box>
       <Box justifyContent="space-between">
@@ -62,7 +58,9 @@ export function BottomDock({
         </Box>
         <Box gap={1}>
           <Text color={theme.textMuted}>{cacheLabel}</Text>
-          <Text color={theme.textMuted}>{`${formatTokens(tokens)} tokens`}</Text>
+          <Text
+            color={theme.textMuted}
+          >{`${formatTokens(tokens)} tokens`}</Text>
         </Box>
       </Box>
     </Box>
