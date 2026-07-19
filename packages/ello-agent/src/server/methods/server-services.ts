@@ -74,6 +74,7 @@ export interface ServerServicesOptions {
   readonly threads: ThreadManager;
   readonly logs: ThreadLogRepository;
   readonly storage: CodingStorage;
+  readonly compactThread?: (threadId: string) => Promise<unknown | null>;
 }
 
 /** 除核心 Thread/Turn 生命周期外，所有产品 RPC 的唯一实现表。 */
@@ -102,9 +103,17 @@ export class ServerServices implements RpcServices {
           rawParams as ParsedClientParams<'artifact/read'>,
         );
       case 'thread/compact/start': {
-        throw invalid(
-          'Manual context compaction is unavailable because no production compaction runner is configured.',
-        );
+        if (this.options.compactThread === undefined) {
+          throw invalid(
+            'Manual context compaction is unavailable because no production compaction runner is configured.',
+          );
+        }
+        const params = rawParams as ParsedClientParams<'thread/compact/start'>;
+        const report = await this.options.compactThread(params.threadId);
+        if (report === null) {
+          throw invalid('Thread has no compactable history.');
+        }
+        return { jobId: createEntityId('job') };
       }
       case 'thread/shellCommand':
         return this.runThreadShell(

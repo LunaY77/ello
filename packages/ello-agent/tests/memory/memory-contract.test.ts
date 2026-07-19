@@ -383,6 +383,9 @@ describe('Memory 生产装配契约', () => {
           'memory_search',
         ]),
       );
+      expect(runtime.tools.every((tool) => tool.discovery.core === true)).toBe(
+        true,
+      );
       expect(
         (await runtime.memoryIndexLoader!.load()).sources[0]?.content,
       ).not.toContain('Runtime preference');

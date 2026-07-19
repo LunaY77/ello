@@ -11,6 +11,7 @@ import type {
   CatalogEntry,
   Plan,
   Task,
+  ThreadSnapshot,
   UserInput,
   UserInputResolution,
 } from '../api/protocol-types.js';
@@ -112,6 +113,16 @@ function ThreadScreen({
   const [tasks, setTasks] = useState<readonly Task[]>([]);
   const [profiles, setProfiles] = useState<readonly TuiProfile[]>([]);
   const [config, setConfig] = useState<unknown>();
+  const [submittedInputs, setSubmittedInputs] = useState<readonly string[]>([]);
+  const [submissionPending, setSubmissionPending] = useState(false);
+  const pendingSubmittedInput = useRef<
+    | {
+        readonly value: string;
+        readonly turnId?: string;
+        readonly interruptRequested?: boolean;
+      }
+    | undefined
+  >(undefined);
   const resolvingRequests = useRef(new Set<string>());
   const switchingMode = useRef(false);
   const [resolvingRequestId, setResolvingRequestId] = useState<string>();
@@ -208,6 +219,50 @@ function ThreadScreen({
     state.status === 'running' ||
     state.status === 'awaitingApproval' ||
     state.status === 'awaitingUserInput';
+  const ctrlCInterrupts = running || submissionPending;
+  const activeTurn = state.snapshot.turns.find(
+    (turn) => turn.id === state.activeTurnId,
+  );
+  const activeTurnHasAgentTrace =
+    activeTurn?.items.some(isCompletedRenderableTrace) ?? false;
+  const inputHistory = useMemo(
+    () =>
+      mergeInputHistory(
+        state.history.flatMap((entry) =>
+          entry.kind === 'user' ? [entry.text] : [],
+        ),
+        submittedInputs,
+      ),
+    [state.history, submittedInputs],
+  );
+
+  useEffect(() => {
+    const pending = pendingSubmittedInput.current;
+    if (pending === undefined) return;
+    if (activeTurnHasAgentTrace) {
+      pendingSubmittedInput.current = undefined;
+      return;
+    }
+    if (
+      pending.turnId !== undefined &&
+      state.activeTurnId !== undefined &&
+      state.activeTurnId !== pending.turnId
+    ) {
+      pendingSubmittedInput.current = undefined;
+      return;
+    }
+    const submittedTurn = state.snapshot.turns.find(
+      (turn) => turn.id === pending.turnId,
+    );
+    if (submittedTurn !== undefined && submittedTurn.status !== 'inProgress') {
+      pendingSubmittedInput.current = undefined;
+    }
+  }, [
+    activeTurnHasAgentTrace,
+    state.activeTurnId,
+    state.snapshot.turns,
+    submissionPending,
+  ]);
 
   useInput(
     (_input, key) => {
@@ -259,13 +314,40 @@ function ThreadScreen({
       await runShellCommand(trimmed.slice(1).trim());
       return;
     }
-    const input = await resolveUserInput(value);
     if (running) {
+      const input = await resolveUserInput(value);
       queueSteer(value);
       await thread.steerInput(input);
     } else {
-      await thread.submitInput(input);
+      pendingSubmittedInput.current = { value };
+      setSubmissionPending(true);
+      try {
+        const input = await resolveUserInput(value);
+        const turnId = await thread.submitInput(input);
+        setSubmissionPending(false);
+        const pending = pendingSubmittedInput.current;
+        if (pending?.value === value) {
+          if (pending.interruptRequested === true) {
+            pendingSubmittedInput.current = undefined;
+            setSubmissionPending(false);
+            await thread.interrupt('user cancelled');
+          } else {
+            pendingSubmittedInput.current = { value, turnId };
+          }
+        }
+      } catch (error) {
+        if (pendingSubmittedInput.current?.value === value) {
+          pendingSubmittedInput.current = undefined;
+        }
+        setSubmissionPending(false);
+        throw error;
+      }
     }
+  };
+
+  const rememberInput = (value: string): void => {
+    if (value.trim() === '') return;
+    setSubmittedInputs((current) => mergeInputHistory(current, [value]));
   };
 
   const runShellCommand = async (command: string): Promise<void> => {
@@ -355,7 +437,10 @@ function ThreadScreen({
           archived: false,
           limit: 50,
         });
-        setOverlay({ type: 'session-selector', sessions: result.data });
+        setOverlay({
+          type: 'session-selector',
+          sessions: result.data.filter(isResumableThread),
+        });
         return;
       }
       case 'rewind-selector':
@@ -381,7 +466,7 @@ function ThreadScreen({
         });
         dispatch({
           type: 'ui.message',
-          text: `Compaction job ${result.jobId} started.`,
+          text: `Context compaction completed (${result.jobId}).`,
         });
         return;
       }
@@ -453,7 +538,7 @@ function ThreadScreen({
         return;
       }
       case 'quit':
-        await thread.close();
+        await closeCurrentThread();
         exit();
         return;
     }
@@ -569,9 +654,62 @@ function ThreadScreen({
     next: ThreadClient,
     nextDraft = '',
   ): Promise<void> => {
-    await thread.close();
+    await closeCurrentThread();
     onThreadChange(next, nextDraft);
   };
+
+  const closeCurrentThread = async (): Promise<void> => {
+    const discard = isDisposableThread(state.snapshot);
+    await thread.close();
+    if (discard) {
+      await thread.request('thread/delete', { threadId: thread.threadId });
+    }
+  };
+
+  const handleCancel = (): void => {
+    const pending = pendingSubmittedInput.current;
+    if (!ctrlCInterrupts && pending === undefined && draft !== '') {
+      setDraft('');
+      return;
+    }
+    if (ctrlCInterrupts || pending !== undefined) {
+      if (
+        pending !== undefined &&
+        !activeTurnHasAgentTrace &&
+        (pending.turnId === undefined ||
+          state.activeTurnId === undefined ||
+          pending.turnId === state.activeTurnId)
+      ) {
+        setDraft(pending.value);
+      }
+      if (pending !== undefined && pending.turnId === undefined) {
+        pendingSubmittedInput.current = {
+          ...pending,
+          interruptRequested: true,
+        };
+      } else {
+        pendingSubmittedInput.current = undefined;
+        setSubmissionPending(false);
+        void thread
+          .interrupt('user cancelled')
+          .catch((error: unknown) => notify(dispatch, error));
+      }
+      return;
+    }
+    void closeCurrentThread()
+      .then(exit)
+      .catch((error: unknown) => notify(dispatch, error));
+  };
+
+  useInput(
+    (input, key) => {
+      if (effectiveOverlay.type === 'none' || !key.ctrl || input !== 'c') {
+        return;
+      }
+      handleCancel();
+    },
+    { isActive: true },
+  );
 
   const rewindToTarget = async (target: RewindTarget): Promise<void> => {
     const next = await thread.fork(target.turnId);
@@ -807,7 +945,8 @@ function ThreadScreen({
         composer={
           <Composer
             isActive={effectiveOverlay.type === 'none'}
-            running={running}
+            running={ctrlCInterrupts}
+            history={inputHistory}
             {...(suggestions === undefined ? {} : { suggestions })}
             value={draft}
             onChange={(value, nextCursor) => {
@@ -816,27 +955,64 @@ function ThreadScreen({
             }}
             onSuggestionAccepted={() => undefined}
             onSubmit={(value) => {
+              rememberInput(value);
               void submitPrompt(value).catch((error: unknown) =>
                 notify(dispatch, error),
               );
             }}
-            onCancel={() => {
-              if (running)
-                void thread
-                  .interrupt('user cancelled')
-                  .catch((error: unknown) => notify(dispatch, error));
-              else
-                void thread
-                  .close()
-                  .then(exit)
-                  .catch((error: unknown) => notify(dispatch, error));
-            }}
+            onCancel={handleCancel}
             onEscape={onEscape}
           />
         }
       />
     </ThemeProvider>
   );
+}
+
+function mergeInputHistory(
+  ...groups: readonly (readonly string[])[]
+): readonly string[] {
+  const values: string[] = [];
+  for (const group of groups) {
+    for (const value of group) {
+      if (value.trim() === '') continue;
+      const previous = values.indexOf(value);
+      if (previous !== -1) values.splice(previous, 1);
+      values.push(value);
+    }
+  }
+  return values.slice(-50);
+}
+
+function isCompletedRenderableTrace(
+  item: ThreadSnapshot['turns'][number]['items'][number],
+): boolean {
+  if (item.type === 'agentMessage' || item.type === 'plan') {
+    return item.status === 'completed' && item.text.trim() !== '';
+  }
+  if (
+    item.type === 'commandExecution' ||
+    item.type === 'fileChange' ||
+    item.type === 'toolCall'
+  ) {
+    return item.status !== 'inProgress';
+  }
+  return false;
+}
+
+function isDisposableThread(snapshot: ThreadSnapshot): boolean {
+  return (
+    snapshot.thread.name.trim() === '' &&
+    snapshot.thread.preview.trim() === '' &&
+    snapshot.turns.length === 0
+  );
+}
+
+function isResumableThread(thread: {
+  readonly name: string;
+  readonly preview: string;
+}): boolean {
+  return thread.name.trim() !== '' || thread.preview.trim() !== '';
 }
 
 function overlayForRequest(

@@ -51,7 +51,7 @@ export function createProductionToolRuntime(
       ? {}
       : { readRoots: options.readRoots }),
     decide,
-  });
+  }).map(markCoreTool);
   if (!options.config.context.memory.enabled) {
     return {
       tools: codingTools,
@@ -78,12 +78,21 @@ export function createProductionToolRuntime(
         });
       },
     },
-  }).filter((tool) => !options.config.tools.disabled.includes(tool.name));
+  })
+    .filter((tool) => !options.config.tools.disabled.includes(tool.name))
+    .map(markCoreTool);
 
   return {
     tools: [...codingTools, ...memoryTools],
     memoryIndexLoader,
     initialize: () => repository.initialize(),
+  };
+}
+
+export function markCoreTool(tool: AnyAgentTool): AnyAgentTool {
+  return {
+    ...tool,
+    discovery: { ...tool.discovery, core: true },
   };
 }
 

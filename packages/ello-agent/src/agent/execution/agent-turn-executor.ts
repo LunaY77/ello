@@ -31,6 +31,7 @@ import { CheckpointStore } from '../change/checkpoint.js';
 import { recordCheckpointChanges } from '../change/recording.js';
 import { dynamicSystemSection } from '../context/cache-layout.js';
 import { createCodingSystemPromptSection } from '../context/prompts.js';
+import { createThreadCompactor } from '../context/thread-compactor.js';
 import type {
   Agent,
   AgentRunResult,
@@ -70,7 +71,10 @@ import {
   createMetaToolRuntime,
   TOOL_ROUTING_INSTRUCTIONS,
 } from '../tools/meta-tools.js';
-import { createProductionToolRuntime } from '../tools/production.js';
+import {
+  createProductionToolRuntime,
+  markCoreTool,
+} from '../tools/production.js';
 import type {
   CodingToolResult,
   ToolMetadata,
@@ -234,39 +238,43 @@ async function composeAgent(input: {
     createActivateSkillTool({ service: activation }),
     createRequestUserInputTool(),
     ...goalRuntime.tools,
-  ];
+  ].map(markCoreTool);
   if (settings.mode === 'plan') {
     directTools.push(
-      defineTool({
-        name: 'write_plan',
-        description: 'Persist the complete Markdown plan for this thread.',
-        discovery: { aliases: ['save plan'], risk: 'workspace-write' },
-        input: z.object({ content: z.string().min(1) }).strict(),
-        execute: async ({ content }) => {
-          const artifact = await writePlanArtifact({
-            cwd: input.thread.thread.cwd,
-            sessionId: input.thread.thread.id,
-            content,
-          });
-          return {
-            kind: 'thread-plan-written' as const,
-            plan: {
-              threadId: input.thread.thread.id,
-              status: 'draft' as const,
-              contentHash: artifact.contentHash,
-              content: artifact.content,
-              path: artifact.path,
-              updatedAt: new Date().toISOString(),
-            },
-          };
-        },
-      }),
-      defineDeferredTool({
-        name: PLAN_EXIT_TOOL_NAME,
-        description: 'Request approval for the current persisted plan.',
-        discovery: { aliases: ['approve plan'], risk: 'workspace-write' },
-        input: z.object({}).strict(),
-      }),
+      markCoreTool(
+        defineTool({
+          name: 'write_plan',
+          description: 'Persist the complete Markdown plan for this thread.',
+          discovery: { aliases: ['save plan'], risk: 'workspace-write' },
+          input: z.object({ content: z.string().min(1) }).strict(),
+          execute: async ({ content }) => {
+            const artifact = await writePlanArtifact({
+              cwd: input.thread.thread.cwd,
+              sessionId: input.thread.thread.id,
+              content,
+            });
+            return {
+              kind: 'thread-plan-written' as const,
+              plan: {
+                threadId: input.thread.thread.id,
+                status: 'draft' as const,
+                contentHash: artifact.contentHash,
+                content: artifact.content,
+                path: artifact.path,
+                updatedAt: new Date().toISOString(),
+              },
+            };
+          },
+        }),
+      ),
+      markCoreTool(
+        defineDeferredTool({
+          name: PLAN_EXIT_TOOL_NAME,
+          description: 'Request approval for the current persisted plan.',
+          discovery: { aliases: ['approve plan'], risk: 'workspace-write' },
+          input: z.object({}).strict(),
+        }),
+      ),
     );
   }
   const toolRuntime = createMetaToolRuntime(
@@ -294,6 +302,16 @@ async function composeAgent(input: {
     config.observability?.langfuse,
     input.thread.thread.id,
   );
+  const compactor = createThreadCompactor({
+    logs: input.logs,
+    config,
+    profileName: settings.profile,
+    contextWindow: Math.min(
+      binding.model.limit.context,
+      config.context.max_input_tokens,
+    ),
+    agentRegistry,
+  });
   let agent: Agent;
   try {
     agent = createAgent({
@@ -315,6 +333,7 @@ async function composeAgent(input: {
       executionTools: toolRuntime.executionTools,
       modelTools: toolRuntime.modelTools,
       transcript: new ThreadTranscriptStore(input.logs),
+      compaction: compactor,
       ...(tracing.eventRecorder === undefined
         ? {}
         : { eventRecorder: tracing.eventRecorder }),
@@ -762,6 +781,7 @@ class AgentExecutionHandle implements TurnExecutionHandle {
       resolveResult = resolve;
       rejectResult = reject;
     });
+    void result.catch(() => undefined);
     this.pending.set(requestId, {
       deferred,
       method,

@@ -177,6 +177,30 @@ describe('context source contract', () => {
     });
   });
 
+  it('手动压缩调用生产 runner 并返回真实 job id', async () => {
+    const compactThread = vi.fn(async () => ({
+      compactor: 'ello-thread-compactor',
+    }));
+    const services = new ServerServices({
+      threads: {} as never,
+      logs: {} as never,
+      compactThread,
+      storage: {
+        artifacts: {
+          deleteExpiredReferences: () =>
+            Promise.resolve({ deleted: 0, bytesFreed: 0 }),
+        },
+      } as never,
+    });
+
+    await expect(
+      services.dispatch({} as ServerConnection, 'thread/compact/start', {
+        threadId: 'thr_context_contract',
+      }),
+    ).resolves.toMatchObject({ jobId: expect.stringMatching(/^job_/u) });
+    expect(compactThread).toHaveBeenCalledWith('thr_context_contract');
+  });
+
   it('按输入预算保留最新消息，并拒绝无可用输入空间的参数', async () => {
     const transform = compactMessages({
       maxInputTokens: 10,

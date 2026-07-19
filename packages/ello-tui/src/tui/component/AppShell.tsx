@@ -28,7 +28,7 @@ export interface AppShellProps {
 
 export function AppShell(props: AppShellProps) {
   const size = useTerminalSize();
-  const mainWidth = Math.max(tuiTokens.width.minMain, size.columns);
+  const mainWidth = Math.max(tuiTokens.width.minMain, size.columns - 2);
 
   return (
     <Box flexDirection="column" width="100%" paddingX={1}>

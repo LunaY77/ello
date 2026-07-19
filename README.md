@@ -53,6 +53,7 @@ After that, `ello --help` is available from shells where pnpm's global bin direc
 
 ## Documentation
 
+- [Chinese technical documentation](docs/README.md)
 - [Functional design and module contracts](docs/functional-design.md)
 - [Test design and contract matrix](docs/test-design.md)
 - [Refactor code review (Chinese)](docs/code-review.md)

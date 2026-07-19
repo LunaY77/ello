@@ -195,6 +195,66 @@ export function moveDown(buffer: ComposerBuffer): ComposerBuffer {
   };
 }
 
+export function moveUpVisual(
+  buffer: ComposerBuffer,
+  width: number,
+): ComposerBuffer {
+  return moveVisual(buffer, width, -1);
+}
+
+export function moveDownVisual(
+  buffer: ComposerBuffer,
+  width: number,
+): ComposerBuffer {
+  return moveVisual(buffer, width, 1);
+}
+
+export function visualLineCount(buffer: ComposerBuffer, width: number): number {
+  return visualRows(buffer.lines, width).length;
+}
+
+function moveVisual(
+  buffer: ComposerBuffer,
+  width: number,
+  delta: -1 | 1,
+): ComposerBuffer {
+  const rows = visualRows(buffer.lines, width);
+  const { line, column } = buffer.cursor;
+  let currentRow = 0;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!;
+    if (row.line === line && row.start <= column) currentRow = index;
+  }
+  const target = rows[currentRow + delta];
+  if (target === undefined) return buffer;
+  const visualColumn = column - rows[currentRow]!.start;
+  return {
+    ...buffer,
+    cursor: {
+      line: target.line,
+      column: Math.min(
+        lineAt(buffer, target.line).length,
+        target.start + visualColumn,
+      ),
+    },
+  };
+}
+
+function visualRows(
+  lines: readonly string[],
+  width: number,
+): readonly { readonly line: number; readonly start: number }[] {
+  const safeWidth = Math.max(1, Math.floor(width));
+  const rows: { line: number; start: number }[] = [];
+  for (const [line, text] of lines.entries()) {
+    const rowCount = Math.max(1, Math.floor(text.length / safeWidth) + 1);
+    for (let row = 0; row < rowCount; row += 1) {
+      rows.push({ line, start: row * safeWidth });
+    }
+  }
+  return rows;
+}
+
 export function moveLineStart(buffer: ComposerBuffer): ComposerBuffer {
   return { ...buffer, cursor: { line: buffer.cursor.line, column: 0 } };
 }

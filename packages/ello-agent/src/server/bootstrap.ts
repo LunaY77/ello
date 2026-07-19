@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { Writable } from 'node:stream';
 
+import { createProductionThreadCompactor } from '../agent/context/thread-compactor.js';
 import { createAgentTurnExecutorFactory } from '../agent/execution/agent-turn-executor.js';
 import { createThreadTitleGenerator } from '../agent/execution/thread-title-generator.js';
 import { createProviderRegistry } from '../agent/providers/catalog/index.js';
@@ -49,7 +50,34 @@ export async function bootstrapAgentServer(
     resolveInitialSettings,
     resolveSettingsUpdate,
   });
-  const services = new ServerServices({ threads, logs, storage });
+  const services = new ServerServices({
+    threads,
+    logs,
+    storage,
+    compactThread: async (threadId) => {
+      const snapshot = await threads.read({
+        threadId,
+        includeTurns: true,
+        includeItems: true,
+      });
+      if (snapshot.thread.status === 'running') {
+        throw new AppServerError({
+          type: 'threadBusy',
+          message: `Thread ${threadId} is running; interrupt it before compacting.`,
+        });
+      }
+      const compactor = await createProductionThreadCompactor({
+        logs,
+        snapshot,
+      });
+      return compactor.compactNow(threadId, {
+        force: true,
+        ...(snapshot.turns.at(-1)?.id === undefined
+          ? {}
+          : { turnId: snapshot.turns.at(-1)!.id }),
+      });
+    },
+  });
   return new AgentServer({
     version: await packageVersion(),
     threads,

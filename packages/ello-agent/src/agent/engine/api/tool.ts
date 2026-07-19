@@ -10,6 +10,7 @@ export type ToolRisk = 'readonly' | 'workspace-write' | 'external';
 export interface AgentToolDiscovery {
   readonly aliases: readonly string[];
   readonly risk: ToolRisk;
+  readonly core?: boolean;
 }
 
 export interface AgentApprovalRequest {

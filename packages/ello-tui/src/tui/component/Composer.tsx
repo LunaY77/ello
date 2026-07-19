@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -12,14 +12,15 @@ import {
   isEmpty,
   killToLineEnd,
   killToLineStart,
-  moveDown,
+  moveDownVisual,
   moveLeft,
   moveLineEnd,
   moveLineStart,
   moveRight,
-  moveUp,
+  moveUpVisual,
   toText,
   type ComposerBuffer,
+  visualLineCount,
 } from '../store/composer-buffer.js';
 import { useTheme } from '../theme/index.js';
 
@@ -52,12 +53,14 @@ export type ComposerSuggestion =
 
 export function Composer(props: ComposerProps) {
   const theme = useTheme();
+  const { stdout } = useStdout();
   const { onChange } = props;
   const [buffer, setBuffer] = useState<ComposerBuffer>(emptyBuffer);
   const [cursorVisible, setCursorVisible] = useState(true);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
-  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const historyIndexRef = useRef<number | null>(null);
   const bufferRef = useRef(buffer);
+  const wrapWidth = Math.max(1, (stdout.columns ?? 100) - 10);
 
   const replaceBuffer = useCallback(
     (next: ComposerBuffer): void => {
@@ -114,9 +117,9 @@ export function Composer(props: ComposerProps) {
     if (history.length === 0) {
       return;
     }
-    const current = historyIndex ?? history.length;
+    const current = historyIndexRef.current ?? history.length;
     const next = Math.max(0, Math.min(history.length, current + delta));
-    setHistoryIndex(next === history.length ? null : next);
+    historyIndexRef.current = next === history.length ? null : next;
     replaceBuffer(
       next === history.length ? emptyBuffer : fromText(history[next] ?? ''),
     );
@@ -126,7 +129,7 @@ export function Composer(props: ComposerProps) {
     const value = toText(bufferRef.current);
     props.onSubmit(value);
     if (value.trim() !== '') {
-      setHistoryIndex(null);
+      historyIndexRef.current = null;
       replaceBuffer(emptyBuffer);
     }
   };
@@ -139,6 +142,10 @@ export function Composer(props: ComposerProps) {
       const current = bufferRef.current;
       if (key.escape) {
         props.onEscape();
+        return;
+      }
+      if (isShiftEnter(input, key)) {
+        replaceBuffer(insertNewline(current));
         return;
       }
       if (key.return) {
@@ -175,8 +182,10 @@ export function Composer(props: ComposerProps) {
         return;
       }
       if (key.ctrl && input === 'c') {
-        if (!isEmpty(current)) {
-          setHistoryIndex(null);
+        if (props.running) {
+          props.onCancel();
+        } else if (!isEmpty(current)) {
+          historyIndexRef.current = null;
           replaceBuffer(emptyBuffer);
         } else {
           props.onCancel();
@@ -192,46 +201,51 @@ export function Composer(props: ComposerProps) {
         return;
       }
       if (key.upArrow) {
-        if (current.lines.length > 1 && current.cursor.line > 0) {
-          replaceBuffer(moveUp(current));
+        if (visualLineCount(current, wrapWidth) > 1) {
+          const moved = moveUpVisual(current, wrapWidth);
+          if (moved !== current) replaceBuffer(moved);
+          else if (historyIndexRef.current === null) return;
+        } else if (historyIndexRef.current !== null) {
+          moveHistory(-1);
         } else if (
           props.suggestions !== undefined &&
           props.suggestions.length > 0
         ) {
           moveSuggestion(-1);
-        } else if (isEmpty(current) || historyIndex !== null) {
+        } else if (isEmpty(current)) {
           moveHistory(-1);
         }
         return;
       }
       if (key.downArrow) {
-        if (
-          current.lines.length > 1 &&
-          current.cursor.line < current.lines.length - 1
-        ) {
-          replaceBuffer(moveDown(current));
+        if (visualLineCount(current, wrapWidth) > 1) {
+          const moved = moveDownVisual(current, wrapWidth);
+          if (moved !== current) replaceBuffer(moved);
+          else if (historyIndexRef.current === null) return;
+        } else if (historyIndexRef.current !== null) {
+          moveHistory(1);
         } else if (
           props.suggestions !== undefined &&
           props.suggestions.length > 0
         ) {
           moveSuggestion(1);
-        } else if (isEmpty(current) || historyIndex !== null) {
+        } else if (isEmpty(current)) {
           moveHistory(1);
         }
         return;
       }
       if (isBackspace(input, key)) {
-        setHistoryIndex(null);
+        historyIndexRef.current = null;
         replaceBuffer(backspace(current));
         return;
       }
       if (isDelete(input, key)) {
-        setHistoryIndex(null);
+        historyIndexRef.current = null;
         replaceBuffer(deleteForward(current));
         return;
       }
       if (input.length > 0 && !key.ctrl && !key.meta) {
-        setHistoryIndex(null);
+        historyIndexRef.current = null;
         replaceBuffer(insertText(current, input));
       }
     },
@@ -244,19 +258,20 @@ export function Composer(props: ComposerProps) {
     props.suggestions ?? [],
     activeSuggestionIndex,
   );
+  const visualLines = wrapComposerLines(buffer, wrapWidth);
 
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Box flexDirection="column">
-        {buffer.lines.map((line, index) => (
+    <Box flexDirection="column" paddingX={1} width="100%">
+      <Box flexDirection="column" width="100%">
+        {visualLines.map((visualLine, index) => (
           <ComposerLine
-            key={index}
-            line={line}
+            key={`${visualLine.lineIndex}:${visualLine.start}`}
+            line={visualLine.text}
             lineIndex={index}
-            activeLine={buffer.cursor.line}
-            cursorColumn={buffer.cursor.column}
+            activeLine={visualLine.active ? index : -1}
+            cursorColumn={visualLine.cursorColumn}
             showCursor={showCursor}
-            prompt={index === 0 ? '>' : '|'}
+            prompt={visualLine.continuation ? '|' : '>'}
           />
         ))}
       </Box>
@@ -278,6 +293,47 @@ export function Composer(props: ComposerProps) {
       ) : null}
     </Box>
   );
+}
+
+interface VisualComposerLine {
+  readonly lineIndex: number;
+  readonly start: number;
+  readonly text: string;
+  readonly active: boolean;
+  readonly cursorColumn: number;
+  readonly continuation: boolean;
+}
+
+function wrapComposerLines(
+  buffer: ComposerBuffer,
+  width: number,
+): readonly VisualComposerLine[] {
+  const safeWidth = Math.max(1, Math.floor(width));
+  const rows: VisualComposerLine[] = [];
+  for (const [lineIndex, line] of buffer.lines.entries()) {
+    const active = lineIndex === buffer.cursor.line;
+    const baseCount = Math.max(1, Math.ceil(line.length / safeWidth));
+    const rowCount =
+      active && line.length > 0 && line.length % safeWidth === 0
+        ? baseCount + 1
+        : baseCount;
+    for (let row = 0; row < rowCount; row += 1) {
+      const start = row * safeWidth;
+      const cursorOnRow =
+        active &&
+        buffer.cursor.column >= start &&
+        buffer.cursor.column < start + safeWidth;
+      rows.push({
+        lineIndex,
+        start,
+        text: line.slice(start, start + safeWidth),
+        active: cursorOnRow,
+        cursorColumn: cursorOnRow ? buffer.cursor.column - start : 0,
+        continuation: lineIndex > 0 || row > 0,
+      });
+    }
+  }
+  return rows;
 }
 
 function ComposerLine({
@@ -356,6 +412,21 @@ function shouldInsertLineBreak(
   }
   const line = buffer.lines[buffer.cursor.line] ?? '';
   return buffer.cursor.column === line.length && line.endsWith('\\');
+}
+
+function isShiftEnter(
+  input: string,
+  key: {
+    readonly return?: boolean;
+    readonly shift?: boolean;
+    readonly meta?: boolean;
+  },
+): boolean {
+  return (
+    (key.return === true && (key.shift === true || key.meta === true)) ||
+    input === '\u001b[13;2u' ||
+    input === '\u001b[27;2;13~'
+  );
 }
 
 function dropTrailingLineContinuation(buffer: ComposerBuffer): ComposerBuffer {

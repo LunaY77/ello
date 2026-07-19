@@ -1,3 +1,4 @@
+import { compactionView } from '../../agent/context/thread-compactor.js';
 import type {
   AgentMessage,
   TranscriptStore,
@@ -14,9 +15,7 @@ export class ThreadTranscriptStore implements TranscriptStore {
 
   async load(threadId: string): Promise<AgentMessage[]> {
     const records = await this.logs.read(threadId);
-    return records
-      .filter((record) => record.kind === 'transcript.entry')
-      .map((record) => record.message as AgentMessage);
+    return [...compactionView(records).projectedMessages];
   }
 
   async append(

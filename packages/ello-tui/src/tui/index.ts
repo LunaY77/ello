@@ -8,6 +8,9 @@ import { App } from './App.js';
 export { App } from './App.js';
 
 export async function renderTui(thread: ThreadClient): Promise<void> {
-  const instance = render(React.createElement(App, { thread }));
+  const instance = render(React.createElement(App, { thread }), {
+    exitOnCtrlC: false,
+    kittyKeyboard: { mode: 'auto' },
+  });
   await instance.waitUntilExit();
 }

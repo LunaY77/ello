@@ -33,9 +33,14 @@ export function BottomDock({
       ? 'cache unavailable'
       : `${Math.round((usage.cacheReadTokens / usage.inputTokens) * 100)}% cached · ${formatTokens(usage.inputTokens - usage.cacheReadTokens)} uncached`;
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={1} width="100%">
       {overlay}
-      <Box borderStyle="single" borderColor={theme.border} paddingX={1}>
+      <Box
+        borderStyle="single"
+        borderColor={theme.border}
+        paddingX={1}
+        width="100%"
+      >
         {composer}
       </Box>
       <Box justifyContent="space-between">

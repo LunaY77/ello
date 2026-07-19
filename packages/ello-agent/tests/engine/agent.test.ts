@@ -431,6 +431,47 @@ describe('createAgent', () => {
     await agent.close();
   });
 
+  it('persists the current run before automatic session compaction', async () => {
+    const persisted: AgentMessage[] = [];
+    let messagesSeenByCompactor: AgentMessage[] = [];
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: new EchoAdapter(),
+      transcript: {
+        async load() {
+          return [];
+        },
+        async append(_sessionId, messages) {
+          persisted.push(...messages);
+        },
+      },
+      compaction: {
+        name: 'test-compactor',
+        async maybeCompact() {
+          messagesSeenByCompactor = [...persisted];
+          return {
+            compactor: 'test-compactor',
+            beforeMessageCount: persisted.length,
+            afterMessageCount: persisted.length,
+          };
+        },
+      },
+    });
+
+    const result = await agent.run('current input', {
+      sessionId: 'sess_compaction_order',
+    });
+
+    expect(messagesSeenByCompactor.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+    ]);
+    expect(result.diagnostics?.compactions).toEqual([
+      expect.objectContaining({ compactor: 'test-compactor' }),
+    ]);
+    await agent.close();
+  });
+
   it('runs environment lifecycle and resource instructions inside the agent loop', async () => {
     const events: string[] = [];
     const requests: AgentModelRequest[] = [];

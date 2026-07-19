@@ -54,6 +54,7 @@ pnpm add -g .
 ## 文档
 
 - [功能设计与模块契约](docs/functional-design.md)
+- [中文技术文档](docs/README.md)
 - [测试设计与契约矩阵](docs/test-design.md)
 - [重构代码审查报告](docs/code-review.md)
 - [Coding Agent TUI 设计](docs/ello-coding-agent-tui-design.md)

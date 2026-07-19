@@ -16,12 +16,12 @@ const META_TOOL_NAMES = new Set(['tool_search', 'call_tool']);
 
 export const TOOL_ROUTING_INSTRUCTIONS = `# Tool Routing Protocol
 
-- In this routing mode, \`tool_search\`, \`call_tool\`, and any explicitly listed direct interaction tools are directly callable.
-- Never emit a native tool call using a target name such as \`bash\`, \`read\`, or \`write\`, even when the user explicitly requests that tool or you already know its name.
+- Core tools already present in your tool list are directly callable and must keep using native tool calls.
+- \`tool_search\` and \`call_tool\` are only for non-core deferred tools that are absent from your tool list.
 - Use \`tool_search\` to discover unknown capabilities and obtain the exact target name and input schema.
 - Omit \`tool_search.query\`, or use a query such as \`all tools\`, to list lightweight summaries of the current mode's targets. Follow \`nextOffset\` while \`truncated\` is true, then search an exact tool name to get its input schema.
-- Tool discovery is mode-scoped. Plan-only targets such as \`write_plan\` and \`request_plan_exit\` appear only after the user enters Plan mode with \`/plan <task>\`.
-- To execute any target tool, always call \`call_tool\` with \`{"name":"<exact target name>","arguments":{...}}\`.
+- Tool availability is mode-scoped. Plan-only core tools appear directly only after the user enters Plan mode with \`/plan <task>\`.
+- To execute a discovered deferred tool, call \`call_tool\` with \`{"name":"<exact target name>","arguments":{...}}\`.
 - Names and schemas returned by \`tool_search\` are discovery data only; they do not become directly callable tools.
 - Never invent a target tool name or target arguments. \`call_tool.arguments\` must match the schema returned by \`tool_search\`.`;
 
@@ -50,15 +50,27 @@ export function createMetaToolRuntime(
       usesToolRouting: false,
     };
   }
+  const coreTools = targetTools.filter((tool) => tool.discovery.core === true);
+  const deferredTools = targetTools.filter(
+    (tool) => tool.discovery.core !== true,
+  );
+  if (deferredTools.length === 0) {
+    const tools = [...targetTools, ...directTools];
+    return {
+      executionTools: tools,
+      modelTools: tools,
+      usesToolRouting: false,
+    };
+  }
   const toolSearch = createToolSearchTool({
-    index: createToolSearchIndex(targetTools),
+    index: createToolSearchIndex(deferredTools),
     resultLimit: config.search.result_limit,
     maxResultBytes: config.search.max_result_bytes,
   });
-  const callTool = createCallTool(targetTools);
-  const modelTools = [toolSearch, callTool, ...directTools];
+  const callTool = createCallTool(deferredTools);
+  const modelTools = [...coreTools, ...directTools, toolSearch, callTool];
   return {
-    executionTools: [...targetTools, toolSearch, callTool, ...directTools],
+    executionTools: [...targetTools, ...directTools, toolSearch, callTool],
     modelTools,
     usesToolRouting: true,
   };
@@ -84,7 +96,7 @@ export function createToolSearchTool(options: {
     name: 'tool_search',
     description:
       'Search target tools by capability, or omit query to page through lightweight summaries of tools available in the current mode. Returned names are not directly callable; execute targets only through call_tool.',
-    discovery: { aliases: ['find tool'], risk: 'readonly' },
+    discovery: { aliases: ['find tool'], risk: 'readonly', core: true },
     input: z
       .object({
         query: z.string().trim().min(1).optional(),
@@ -146,7 +158,6 @@ export function createCallTool(
   if (targets.size === 0) {
     throw new Error('call_tool requires at least one target tool.');
   }
-
   const inputSchema = z
     .object({
       name: z.string().min(1),
@@ -190,7 +201,7 @@ export function createCallTool(
     name: 'call_tool',
     description:
       'Call one available tool by its exact name using arguments that match the schema returned by tool_search.',
-    discovery: { aliases: ['invoke tool'], risk: 'external' },
+    discovery: { aliases: ['invoke tool'], risk: 'external', core: true },
     input: inputSchema,
     approval: async (input, context) => {
       const resolved = resolveTargetCall(input);

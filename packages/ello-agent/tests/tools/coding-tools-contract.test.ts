@@ -283,6 +283,58 @@ describe('Meta Tool 路由契约', () => {
     ]);
   });
 
+  it('保留 core tools 的定义顺序，只把非 core tools 放入懒加载索引', async () => {
+    const coreRead = {
+      ...tools[0]!,
+      discovery: { ...tools[0]!.discovery, core: true },
+    };
+    const runtime = createMetaToolRuntime(
+      [coreRead, tools[1]!, tools[2]!],
+      [],
+      config,
+    );
+
+    expect(runtime.modelTools.map((tool) => tool.name)).toEqual([
+      'read',
+      'tool_search',
+      'call_tool',
+    ]);
+    const search = runtime.modelTools.find(
+      (tool) => tool.name === 'tool_search',
+    );
+    if (search === undefined || search.execution !== 'immediate') {
+      throw new Error('tool_search missing');
+    }
+    const result = (await search.execute(
+      { query: 'file', limit: 6 },
+      agentToolContext,
+    )) as { readonly results: readonly { readonly name: string }[] };
+    expect(result.results.map(({ name }) => name)).not.toContain('read');
+  });
+
+  it('全部目标都是 core 时不启用工具路由', () => {
+    const coreTools = tools.map((tool) => ({
+      ...tool,
+      discovery: { ...tool.discovery, core: true },
+    }));
+    const runtime = createMetaToolRuntime(coreTools, [], config);
+
+    expect(runtime.usesToolRouting).toBe(false);
+    expect(runtime.executionTools.map((tool) => tool.name)).toEqual([
+      'read',
+      'grep',
+      'write',
+    ]);
+    expect(runtime.modelTools.map((tool) => tool.name)).toEqual([
+      'read',
+      'grep',
+      'write',
+    ]);
+    expect(
+      runtime.modelTools.every((tool) => tool.discovery.core === true),
+    ).toBe(true);
+  });
+
   it('库存分页不泄露 schema，精确搜索可返回当前模式的 Plan 工具', async () => {
     const planTools = createPlanTools({
       write: async () => 'written',

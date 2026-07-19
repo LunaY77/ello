@@ -5,7 +5,13 @@ import path from 'node:path';
 import { render } from 'ink-testing-library';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ThreadSnapshot } from '../../src/api/protocol-types.js';
+import type {
+  ServerNotification,
+  ThreadSnapshot,
+  ThreadSummary,
+  Turn,
+} from '../../src/api/protocol-types.js';
+import type { ThreadClientEvent } from '../../src/client/client-events.js';
 import { ThreadClient } from '../../src/client/thread-client.js';
 import { App } from '../../src/tui/App.js';
 
@@ -233,6 +239,184 @@ describe('App typed client behavior', () => {
     view.unmount();
   });
 
+  it('上下方向键切换 Server 历史输入', async () => {
+    const harness = createThreadHarness(snapshot('thr_history', true));
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    view.stdin.write('\u001b[A');
+    view.stdin.write('\r');
+
+    await vi.waitFor(() =>
+      expect(harness.submitInput).toHaveBeenCalledWith([
+        { type: 'text', text: 'original prompt' },
+      ]),
+    );
+    view.unmount();
+  });
+
+  it('无 agent 运行轨迹时 Ctrl+C 中断并回填刚提交的输入', async () => {
+    let resolveTurn!: (turnId: string) => void;
+    const turnStarted = new Promise<string>((resolve) => {
+      resolveTurn = resolve;
+    });
+    const harness = createThreadHarness(snapshot(), {
+      submitInput: () => turnStarted,
+    });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, 'retry this prompt');
+    await vi.waitFor(() => expect(harness.submitInput).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('Enter steers this run'),
+    );
+
+    view.stdin.write('\x03');
+
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('retry this prompt'),
+    );
+    expect(harness.interrupt).not.toHaveBeenCalled();
+
+    resolveTurn('turn_new');
+    await vi.waitFor(() => expect(harness.interrupt).toHaveBeenCalledOnce());
+    view.unmount();
+  });
+
+  it('assistant 只有流式输出尚未完成时 Ctrl+C 仍回填输入', async () => {
+    const harness = createThreadHarness(snapshot());
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, 'restore after partial stream');
+    const turn: Turn = {
+      id: 'turn_new',
+      threadId: 'thr_1',
+      status: 'inProgress',
+      items: [],
+      startedAt: createdAt,
+    };
+    const item = {
+      id: 'item_partial',
+      turnId: turn.id,
+      type: 'agentMessage' as const,
+      text: '',
+      phase: 'commentary' as const,
+      status: 'inProgress' as const,
+      createdAt,
+    };
+    harness.emit(notification('turn/started', 2, { turnId: turn.id, turn }));
+    harness.emit(
+      notification('thread/status/changed', 3, {
+        status: 'running',
+        activeFlags: ['turn'],
+      }),
+    );
+    harness.emit(
+      notification('item/started', 4, {
+        turnId: turn.id,
+        itemId: item.id,
+        item,
+      }),
+    );
+    harness.emit(
+      notification('item/agentMessage/delta', 5, {
+        turnId: turn.id,
+        itemId: item.id,
+        delta: 'partial output',
+      }),
+    );
+
+    view.stdin.write('\x03');
+
+    await vi.waitFor(() => expect(harness.interrupt).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('restore after partial stream'),
+    );
+    view.unmount();
+  });
+
+  it('assistant message 完成后 Ctrl+C 只中断而不回填', async () => {
+    const harness = createThreadHarness(snapshot());
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, 'do not restore completed trace');
+    const turn: Turn = {
+      id: 'turn_new',
+      threadId: 'thr_1',
+      status: 'inProgress',
+      items: [],
+      startedAt: createdAt,
+    };
+    const item = {
+      id: 'item_completed',
+      turnId: turn.id,
+      type: 'agentMessage' as const,
+      text: '',
+      phase: 'final' as const,
+      status: 'inProgress' as const,
+      createdAt,
+    };
+    harness.emit(notification('turn/started', 2, { turnId: turn.id, turn }));
+    harness.emit(
+      notification('thread/status/changed', 3, {
+        status: 'running',
+        activeFlags: ['turn'],
+      }),
+    );
+    harness.emit(
+      notification('item/started', 4, {
+        turnId: turn.id,
+        itemId: item.id,
+        item,
+      }),
+    );
+    harness.emit(
+      notification('item/completed', 5, {
+        turnId: turn.id,
+        itemId: item.id,
+        item: {
+          ...item,
+          text: 'completed answer',
+          status: 'completed',
+        },
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('completed answer'),
+    );
+
+    view.stdin.write('\x03');
+
+    await vi.waitFor(() => expect(harness.interrupt).toHaveBeenCalledOnce());
+    expect(view.lastFrame()).not.toContain('do not restore completed trace');
+    view.unmount();
+  });
+
+  it('/resume 隐藏空白 thread，空白 TUI 退出时删除当前 thread', async () => {
+    const named = summary('thr_named', 'Named session', 'work');
+    const blank = summary('thr_blank', '', '');
+    const harness = createThreadHarness(snapshot(), {
+      sessions: [blank, named],
+    });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, '/resume');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('Named session'));
+    expect(view.lastFrame()).not.toContain('Untitled session');
+    view.stdin.write('\x03');
+
+    await vi.waitFor(() => expect(harness.close).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(harness.request).toHaveBeenCalledWith('thread/delete', {
+        threadId: 'thr_1',
+      }),
+    );
+  });
+
   it('profile create/delete 使用 profile 叶节点，不覆盖整个配置', async () => {
     const createHarness = createThreadHarness(snapshot());
     const createView = render(<App thread={createHarness.thread} />);
@@ -368,14 +552,20 @@ interface ThreadHarness {
   readonly request: ReturnType<typeof vi.fn>;
   readonly fork: ReturnType<typeof vi.fn>;
   readonly close: ReturnType<typeof vi.fn>;
+  readonly interrupt: ReturnType<typeof vi.fn>;
   readonly setProfile: ReturnType<typeof vi.fn>;
   readonly setMode: ReturnType<typeof vi.fn>;
   readonly submitInput: ReturnType<typeof vi.fn>;
+  emit(notification: ServerNotification): void;
 }
 
 function createThreadHarness(
   initialSnapshot: ThreadSnapshot,
-  options: { readonly fileSearchError?: Error } = {},
+  options: {
+    readonly fileSearchError?: Error;
+    readonly submitInput?: () => Promise<string>;
+    readonly sessions?: readonly ThreadSummary[];
+  } = {},
 ): ThreadHarness {
   const config = profileConfig();
   const request = vi.fn(async (method: string, _params?: unknown) => {
@@ -403,6 +593,8 @@ function createThreadHarness(
       case 'config/read':
       case 'config/write':
         return { config };
+      case 'thread/delete':
+        return { ok: true };
       case 'config/settings':
         return {
           data: [
@@ -438,6 +630,8 @@ function createThreadHarness(
             },
           ],
         };
+      case 'thread/list':
+        return { data: options.sessions ?? [] };
       case 'fs/search':
         if (options.fileSearchError !== undefined) {
           throw options.fileSearchError;
@@ -457,18 +651,24 @@ function createThreadHarness(
   });
   const fork = vi.fn();
   const close = vi.fn(async () => undefined);
+  const interrupt = vi.fn(async () => undefined);
   const setProfile = vi.fn(async () => undefined);
   const setMode = vi.fn(async () => undefined);
-  const submitInput = vi.fn(async () => undefined);
+  const submitInput = vi.fn(options.submitInput ?? (async () => 'turn_new'));
+  const listeners = new Set<(event: ThreadClientEvent) => void>();
   const thread = {
     threadId: initialSnapshot.thread.id,
     cwd: initialSnapshot.thread.cwd,
     snapshot: initialSnapshot,
-    subscribe: () => () => undefined,
+    subscribe: (listener: (event: ThreadClientEvent) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     loadHistory: async () => undefined,
     request,
     fork,
     close,
+    interrupt,
     setProfile,
     setMode,
     submitInput,
@@ -478,9 +678,15 @@ function createThreadHarness(
     request,
     fork,
     close,
+    interrupt,
     setProfile,
     setMode,
     submitInput,
+    emit: (notification: ServerNotification) => {
+      for (const listener of listeners) {
+        listener({ type: 'notification', notification });
+      }
+    },
   };
 }
 
@@ -588,4 +794,32 @@ async function submitCommand(
 
 function selectedLine(frame: string | undefined, value: string): string {
   return frame?.split('\n').find((line) => line.includes(value)) ?? '';
+}
+
+function summary(id: string, name: string, preview: string): ThreadSummary {
+  return {
+    id,
+    rootId: id,
+    cwd: '/workspace',
+    name,
+    preview,
+    status: 'idle',
+    archived: false,
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function notification<M extends ServerNotification['method']>(
+  method: M,
+  seq: number,
+  params: Omit<
+    Extract<ServerNotification, { method: M }>['params'],
+    'threadId' | 'seq'
+  >,
+): Extract<ServerNotification, { method: M }> {
+  return {
+    method,
+    params: { threadId: 'thr_1', seq, ...params },
+  } as unknown as Extract<ServerNotification, { method: M }>;
 }

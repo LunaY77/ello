@@ -57,6 +57,7 @@ export {
   WorkspaceConfigSchema,
   type AgentConfigEntry,
   type CodingAgentConfig,
+  type ContextCompactionConfig,
   type CodingAgentConfigOverrides,
   type GoalConfig,
   type LangfuseObservabilityConfig,

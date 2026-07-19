@@ -443,10 +443,26 @@ export class RunSession {
   }
 
   /**
-   * 收尾运行：尝试压缩会话、汇总诊断与最终结果、把新增消息追加持久化，
+   * 收尾运行：把新增消息追加持久化、尝试压缩会话、汇总诊断与最终结果，
    * 中断时另发 `run.interrupted`，最终发布 `run.completed` 并完结事件流。
    */
   async finish(): Promise<AgentRunResult> {
+    const preliminaryResult = createRunResult({
+      run: this,
+      diagnostics: createRunDiagnostics({
+        run: this,
+        turns: this.turns,
+        compactions: [],
+      }),
+    });
+    const messagesToAppend = preliminaryResult.messages.slice(
+      this.loadedSessionMessages.length,
+    );
+    await saveSessionResult({
+      config: this.config,
+      result: preliminaryResult,
+      messagesToAppend,
+    });
     const compactions = await compactSession({
       config: this.config,
       ctx: this.ctx,
@@ -471,15 +487,6 @@ export class RunSession {
       compactions,
     });
     const result = createRunResult({ run: this, diagnostics });
-    // 仅持久化相对载入历史新增的部分，避免重复写入既有会话历史。
-    const messagesToAppend = result.messages.slice(
-      this.loadedSessionMessages.length,
-    );
-    await saveSessionResult({
-      config: this.config,
-      result,
-      messagesToAppend,
-    });
     if (this.stopReason === 'interrupted') {
       await this.events.emit({
         type: 'run.interrupted',

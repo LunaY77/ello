@@ -163,7 +163,7 @@ export const ToolConfigSchema = z
     need_approval: z
       .array(z.string())
       .default(DEFAULT_TOOL_CONFIG.need_approval),
-    /** 是否只向模型暴露 tool_search/call_tool，并通过它们发现和调用真实工具。 */
+    /** 存在非 core 工具时加入 tool_search/call_tool，并通过它们路由非 core 工具。 */
     routing_enabled: z.boolean().default(DEFAULT_TOOL_CONFIG.routing_enabled),
     search: ToolSearchConfigSchema.default(DEFAULT_TOOL_SEARCH_CONFIG),
   })

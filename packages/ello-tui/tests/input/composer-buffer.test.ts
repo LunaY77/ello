@@ -17,7 +17,10 @@ import {
   moveLineStart,
   moveRight,
   moveUp,
+  moveDownVisual,
+  moveUpVisual,
   toText,
+  visualLineCount,
 } from '../../src/tui/store/composer-buffer.js';
 
 describe('输入缓冲区构造与插入', () => {
@@ -85,5 +88,18 @@ describe('输入缓冲区光标移动', () => {
     buffer = moveLineEnd(buffer);
     buffer = moveDown(buffer);
     expect(buffer.cursor).toEqual({ line: 1, column: 1 });
+  });
+
+  it('按终端宽度在视觉行之间移动，不改变提交文本', () => {
+    let buffer = fromText('abcdefghij');
+
+    expect(visualLineCount(buffer, 5)).toBe(3);
+    buffer = moveUpVisual(buffer, 5);
+    expect(buffer.cursor).toEqual({ line: 0, column: 5 });
+    buffer = moveUpVisual(buffer, 5);
+    expect(buffer.cursor).toEqual({ line: 0, column: 0 });
+    buffer = moveDownVisual(buffer, 5);
+    expect(buffer.cursor).toEqual({ line: 0, column: 5 });
+    expect(toText(buffer)).toBe('abcdefghij');
   });
 });

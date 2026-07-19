@@ -140,7 +140,8 @@ bypass_enabled: false
 
 # 工具配置。disabled 表示完全不注册；need_approval 在 Default/Accept edits 下要求审批，
 # 但 Accept edits 会自动放行 edit 类工具，Bypass 会跳过全部审批。
-# routing_enabled=true 时模型只直接看到 tool_search/call_tool。
+# routing_enabled=true 且存在非 core 工具时，core 工具直连，非 core 工具通过
+# tool_search/call_tool 路由；没有非 core 工具时不会注册这两个工具。
 # tools:
 #   disabled: []
 #   need_approval:
