@@ -5,8 +5,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createThreadCompactor } from '../../src/agent/context/thread-compactor.js';
-import { CodingAgentConfigSchema } from '../../src/config/index.js';
 import type { AgentMessage } from '../../src/agent/engine/index.js';
+import { CodingAgentConfigSchema } from '../../src/config/index.js';
 import { ThreadLogRepository } from '../../src/storage/threads/thread-log.js';
 import { ThreadTranscriptStore } from '../../src/storage/threads/transcript-store.js';
 

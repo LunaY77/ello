@@ -57,7 +57,7 @@ After that, `ello --help` is available from shells where pnpm's global bin direc
 - [Functional design and module contracts](docs/functional-design.md)
 - [Test design and contract matrix](docs/test-design.md)
 - [Refactor code review (Chinese)](docs/code-review.md)
-- [Coding Agent TUI design](docs/ello-coding-agent-tui-design.md)
+- [Coding Agent TUI design](docs/tui/ello-tui-design.md)
 
 ## Development
 

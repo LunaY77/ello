@@ -338,7 +338,7 @@ live tool 渲染：
 - `ToolActivityList` 逐个渲染 `ToolCard`。
 - `ToolCard` 首行：`ok|...|x headline metaRight`。
 - details 显示为 `  a · b · c`。
-- output preview 以 `└` 引出。
+- output preview 以 `└` 开始。
 - running 显示 `working`。
 - 普通成功工具默认折叠；带 diff 或失败工具默认展开。
 

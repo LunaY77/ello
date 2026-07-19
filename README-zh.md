@@ -57,7 +57,7 @@ pnpm add -g .
 - [中文技术文档](docs/README.md)
 - [测试设计与契约矩阵](docs/test-design.md)
 - [重构代码审查报告](docs/code-review.md)
-- [Coding Agent TUI 设计](docs/ello-coding-agent-tui-design.md)
+- [Coding Agent TUI 设计](docs/tui/ello-tui-design.md)
 
 ## 开发
 
