@@ -39,10 +39,23 @@ export function createSearchTools(
       },
       input: z
         .object({
-          pattern: z.string().min(1),
-          path: z.string().default('.'),
-          glob: z.string().min(1).optional(),
-          limit: z.number().int().min(1).max(500).default(100),
+          pattern: z
+            .string()
+            .min(1)
+            .describe('Regular expression pattern to search for'),
+          filePath: z.string().default('.').describe('Directory to search in'),
+          glob: z
+            .string()
+            .min(1)
+            .optional()
+            .describe('Glob pattern to filter files'),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(500)
+            .default(100)
+            .describe('Maximum number of results'),
         })
         .strict(),
       approval: (input, ctx) =>
@@ -51,16 +64,16 @@ export function createSearchTools(
             permission: 'search',
             patterns: [input.pattern],
             always: [input.pattern],
-            paths: [input.path],
+            paths: [input.filePath],
             metadata: {
               kind: 'search',
               pattern: input.pattern,
-              path: input.path,
+              path: input.filePath,
             },
           },
           ctx.agent,
         ),
-      execute: async ({ pattern, path: targetPath, glob, limit }, ctx) => {
+      execute: async ({ pattern, filePath: targetPath, glob, limit }, ctx) => {
         const fs = requireFs(ctx.agent);
         const root = resolveRuntimePath(fs, targetPath);
         const output = await searchFiles({
@@ -95,9 +108,18 @@ export function createSearchTools(
       },
       input: z
         .object({
-          pattern: z.string().min(1),
-          path: z.string().default('.'),
-          limit: z.number().int().min(1).max(1000).default(200),
+          pattern: z
+            .string()
+            .min(1)
+            .describe('Glob pattern to match file paths'),
+          filePath: z.string().default('.').describe('Directory to search in'),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(1000)
+            .default(200)
+            .describe('Maximum number of results'),
         })
         .strict(),
       approval: (input, ctx) =>
@@ -106,16 +128,16 @@ export function createSearchTools(
             permission: 'search',
             patterns: [input.pattern],
             always: [input.pattern],
-            paths: [input.path],
+            paths: [input.filePath],
             metadata: {
               kind: 'search',
               pattern: input.pattern,
-              path: input.path,
+              path: input.filePath,
             },
           },
           ctx.agent,
         ),
-      execute: async ({ pattern, path: targetPath, limit }, ctx) => {
+      execute: async ({ pattern, filePath: targetPath, limit }, ctx) => {
         const fs = requireFs(ctx.agent);
         const root = resolveRuntimePath(fs, targetPath);
         const files = await walk(fs, root, 100_000, ctx.abortSignal);

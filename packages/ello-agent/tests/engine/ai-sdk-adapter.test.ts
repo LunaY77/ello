@@ -10,7 +10,7 @@ import { AiSdkModelAdapter } from '../../src/agent/providers/ai-sdk/ai-sdk.js';
 describe('AiSdkModelAdapter', () => {
   it('does not emit text deltas for provider tool-call mirror JSON', async () => {
     const mirror =
-      '[{"type":"tool-call","toolCallId":"call_1","toolName":"read","input":{"path":"README.md"}}]';
+      '[{"type":"tool-call","toolCallId":"call_1","toolName":"read","input":{"filePath":"README.md"}}]';
     const adapter = new AiSdkModelAdapter();
 
     const events = await collectEvents(
