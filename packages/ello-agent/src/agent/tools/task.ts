@@ -25,13 +25,25 @@ export function createTaskTools(
       discovery: { aliases: ['new task'], risk: 'workspace-write' },
       input: z
         .object({
-          subject: z.string(),
-          description: z.string().optional(),
-          activeForm: z.string().optional(),
-          owner: z.string().optional(),
-          blocks: z.array(z.string()).optional(),
-          blockedBy: z.array(z.string()).optional(),
-          metadata: Metadata.optional(),
+          subject: z.string().describe('Task title'),
+          description: z
+            .string()
+            .optional()
+            .describe('Longer task description'),
+          activeForm: z
+            .string()
+            .optional()
+            .describe('Present-tense form for display'),
+          owner: z.string().optional().describe('Task owner identifier'),
+          blocks: z
+            .array(z.string())
+            .optional()
+            .describe('Task IDs this task blocks'),
+          blockedBy: z
+            .array(z.string())
+            .optional()
+            .describe('Task IDs that block this task'),
+          metadata: Metadata.optional().describe('Additional structured data'),
         })
         .strict(),
       approval: approval('task_create'),
@@ -49,7 +61,7 @@ export function createTaskTools(
       name: 'task_get',
       description: 'Get one persisted coding-agent task.',
       discovery: { aliases: ['task details'], risk: 'readonly' },
-      input: z.object({ id: z.string() }).strict(),
+      input: z.object({ id: z.string().describe('Task identifier') }).strict(),
       approval: approval('task_get'),
       execute: async ({ id }) => {
         const task = await service.get(id);
@@ -65,15 +77,32 @@ export function createTaskTools(
       discovery: { aliases: ['change task'], risk: 'workspace-write' },
       input: z
         .object({
-          id: z.string(),
-          subject: z.string().optional(),
-          description: z.string().optional(),
-          activeForm: z.string().nullable().optional(),
-          status: TaskStatus.optional(),
-          owner: z.string().nullable().optional(),
-          blocks: z.array(z.string()).optional(),
-          blockedBy: z.array(z.string()).optional(),
-          metadata: Metadata.optional(),
+          id: z.string().describe('Task identifier'),
+          subject: z.string().optional().describe('Updated task title'),
+          description: z
+            .string()
+            .optional()
+            .describe('Updated task description'),
+          activeForm: z
+            .string()
+            .nullable()
+            .optional()
+            .describe('Updated present-tense form'),
+          status: TaskStatus.optional().describe('New task status'),
+          owner: z
+            .string()
+            .nullable()
+            .optional()
+            .describe('Updated owner identifier'),
+          blocks: z
+            .array(z.string())
+            .optional()
+            .describe('Updated blocked task IDs'),
+          blockedBy: z
+            .array(z.string())
+            .optional()
+            .describe('Updated blocking task IDs'),
+          metadata: Metadata.optional().describe('Updated structured data'),
         })
         .strict(),
       approval: approval('task_update'),
@@ -83,7 +112,7 @@ export function createTaskTools(
       name: 'task_delete',
       description: 'Delete one persisted coding-agent task.',
       discovery: { aliases: ['remove task'], risk: 'workspace-write' },
-      input: z.object({ id: z.string() }).strict(),
+      input: z.object({ id: z.string().describe('Task identifier') }).strict(),
       approval: approval('task_delete'),
       execute: async ({ id }) => ({ deleted: await service.delete(id), id }),
     }),
@@ -91,7 +120,12 @@ export function createTaskTools(
       name: 'task_claim',
       description: 'Claim a task for an owner and move it in progress.',
       discovery: { aliases: ['assign task'], risk: 'workspace-write' },
-      input: z.object({ id: z.string(), owner: z.string() }).strict(),
+      input: z
+        .object({
+          id: z.string().describe('Task identifier'),
+          owner: z.string().describe('Owner to assign'),
+        })
+        .strict(),
       approval: approval('task_claim'),
       execute: ({ id, owner }) => service.claim(id, owner),
     }),

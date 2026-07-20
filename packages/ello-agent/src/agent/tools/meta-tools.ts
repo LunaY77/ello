@@ -99,9 +99,24 @@ export function createToolSearchTool(options: {
     discovery: { aliases: ['find tool'], risk: 'readonly', core: true },
     input: z
       .object({
-        query: z.string().trim().min(1).optional(),
-        limit: z.number().int().min(1).max(options.resultLimit),
-        offset: z.number().int().min(0).default(0),
+        query: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe('Search query for tool capabilities'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(options.resultLimit)
+          .describe('Maximum number of results'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .default(0)
+          .describe('Pagination offset for inventory mode'),
       })
       .strict(),
     execute: ({ query, limit, offset = 0 }) => {
@@ -160,8 +175,13 @@ export function createCallTool(
   }
   const inputSchema = z
     .object({
-      name: z.string().min(1),
-      arguments: z.record(z.string(), z.unknown()),
+      name: z
+        .string()
+        .min(1)
+        .describe('Exact target tool name returned by tool_search'),
+      arguments: z
+        .record(z.string(), z.unknown())
+        .describe('Arguments matching the target tool schema'),
     })
     .strict();
   type CallToolInput = z.infer<typeof inputSchema>;

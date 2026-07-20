@@ -31,7 +31,9 @@ export function createMemoryTools(options: {
       description:
         'List memory topics in one scope with metadata and current revisions.',
       discovery: { aliases: ['memories'], risk: 'readonly' },
-      input: z.object({ scope: ScopeSchema }).strict(),
+      input: z
+        .object({ scope: ScopeSchema.describe('Memory scope to list') })
+        .strict(),
       execute: async ({ scope }) =>
         (await options.port.repository.list(scope)).map((topic) => ({
           scope: topic.scope,
@@ -45,7 +47,12 @@ export function createMemoryTools(options: {
       description:
         'Read MEMORY.md or one top-level topic file and return its revision.',
       discovery: { aliases: ['recall memory'], risk: 'readonly' },
-      input: z.object({ scope: ScopeSchema, file: z.string().min(1) }).strict(),
+      input: z
+        .object({
+          scope: ScopeSchema.describe('Memory scope'),
+          file: z.string().min(1).describe('Topic file name'),
+        })
+        .strict(),
       execute: ({ scope, file }) => options.port.repository.read(scope, file),
     }),
     defineTool({
@@ -56,9 +63,13 @@ export function createMemoryTools(options: {
       input: z
         .object({
           scope: ScopeSchema,
-          file: z.string().min(1),
-          expectedRevision: z.string().min(1).nullable(),
-          content: z.string().min(1),
+          file: z.string().min(1).describe('Topic file name'),
+          expectedRevision: z
+            .string()
+            .min(1)
+            .nullable()
+            .describe('Expected revision for conflict detection'),
+          content: z.string().min(1).describe('Markdown content for the topic'),
         })
         .strict(),
       ...(options.approval !== undefined
@@ -77,8 +88,11 @@ export function createMemoryTools(options: {
       input: z
         .object({
           scope: ScopeSchema,
-          file: z.string().min(1),
-          expectedRevision: z.string().min(1),
+          file: z.string().min(1).describe('Topic file name'),
+          expectedRevision: z
+            .string()
+            .min(1)
+            .describe('Current revision for conflict detection'),
         })
         .strict(),
       ...(options.approval !== undefined
@@ -96,8 +110,12 @@ export function createMemoryTools(options: {
       discovery: { aliases: ['find memory'], risk: 'readonly' },
       input: z
         .object({
-          query: z.string().trim().min(1),
-          scope: ScopeSchema.optional(),
+          query: z
+            .string()
+            .trim()
+            .min(1)
+            .describe('Search query for memory topics'),
+          scope: ScopeSchema.optional().describe('Optional scope filter'),
         })
         .strict(),
       execute: ({ query, scope }) =>

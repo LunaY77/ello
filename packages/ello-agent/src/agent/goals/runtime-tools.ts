@@ -46,7 +46,11 @@ export function createThreadGoalRuntime(
           aliases: ['complete goal', 'block goal'],
           risk: 'workspace-write',
         },
-        input: z.object({ status: z.enum(['complete', 'blocked']) }).strict(),
+        input: z
+          .object({
+            status: z.enum(['complete', 'blocked']).describe('New goal status'),
+          })
+          .strict(),
         execute: ({ status }): ThreadGoalToolResult => {
           if (currentGoal === null) {
             throw new Error('No goal exists for this thread.');

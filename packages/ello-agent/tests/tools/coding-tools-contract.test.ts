@@ -192,14 +192,14 @@ describe('搜索工具契约', () => {
     const grep = searchTool('grep');
 
     const limited = await grep.execute(
-      { pattern: 'abc-\\d+', path: '.', limit: 1 },
+      { pattern: 'abc-\\d+', filePath: '.', limit: 1 },
       searchContext(root),
     );
     expect(limited.output).toBe('a.txt:1:abc-123');
     expect(limited.metadata.matchCount).toBe(1);
 
     const empty = await grep.execute(
-      { pattern: 'missing', path: '.', limit: 10 },
+      { pattern: 'missing', filePath: '.', limit: 10 },
       searchContext(root),
     );
     expect(empty.output).toBe('');
@@ -219,10 +219,13 @@ describe('搜索工具契约', () => {
     const grep = searchTool('grep');
 
     await expect(
-      grep.execute({ pattern: '[', path: '.', limit: 10 }, searchContext(root)),
+      grep.execute(
+        { pattern: '[', filePath: '.', limit: 10 },
+        searchContext(root),
+      ),
     ).rejects.toThrow('Invalid grep regular expression');
     const result = await grep.execute(
-      { pattern: 'hit', path: '.', limit: 10 },
+      { pattern: 'hit', filePath: '.', limit: 10 },
       searchContext(root),
     );
     expect(result.output).toBe('visible.txt:1:hit');
@@ -237,7 +240,7 @@ describe('搜索工具契约', () => {
     const glob = searchTool('glob');
 
     const result = await glob.execute(
-      { pattern: '**/*.ts', path: '.', limit: 2 },
+      { pattern: '**/*.ts', filePath: '.', limit: 2 },
       searchContext(root),
     );
     expect(result.output.split('\n')).toEqual(['src/a.ts', 'src/nested/b.ts']);

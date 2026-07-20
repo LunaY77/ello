@@ -21,8 +21,11 @@ export function createActivateSkillTool(options: {
     discovery: { aliases: ['load skill'], risk: 'readonly' },
     input: z
       .object({
-        name: z.string().trim().min(1),
-        arguments: z.string().optional(),
+        name: z.string().trim().min(1).describe('Skill name to activate'),
+        arguments: z
+          .string()
+          .optional()
+          .describe('Optional arguments passed to the skill'),
       })
       .strict(),
     execute: (input, context) => {

@@ -224,7 +224,7 @@ describe.sequential('actual App Server process', () => {
       toolStep('call_plan_write', 'write_plan', { content: planContent }),
       toolStep('call_plan_exit', 'request_plan_exit', {}),
       toolStep('call_approved_write', 'write', {
-        path: 'approved.txt',
+        filePath: 'approved.txt',
         content: 'executed approved plan\n',
         reason: 'execute approved plan',
       }),
@@ -386,12 +386,14 @@ describe.sequential('actual App Server process', () => {
         timeoutMs: 1_000,
       }),
       toolStep('call_write', 'write', {
-        path: 'e2e.txt',
+        filePath: 'e2e.txt',
         content: 'written by process e2e\n',
         reason: 'verify file change',
       }),
-      toolStep('call_external_read', 'read', { path: externalFile }),
-      toolStep('call_external_read_again', 'read', { path: externalFile }),
+      toolStep('call_external_read', 'read', { filePath: externalFile }),
+      toolStep('call_external_read_again', 'read', {
+        filePath: externalFile,
+      }),
       toolStep('call_input', 'request_user_input', {
         questions: [
           {

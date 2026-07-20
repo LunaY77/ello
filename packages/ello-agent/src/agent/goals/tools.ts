@@ -42,8 +42,12 @@ export function createGoalTools(service: GoalService): AnyAgentTool[] {
       },
       input: z
         .object({
-          status: z.enum(['complete', 'blocked']),
-          reason: z.string().trim().min(1),
+          status: z.enum(['complete', 'blocked']).describe('New goal status'),
+          reason: z
+            .string()
+            .trim()
+            .min(1)
+            .describe('Reason for this status change'),
         })
         .strict(),
       execute: ({ status, reason }, context) =>

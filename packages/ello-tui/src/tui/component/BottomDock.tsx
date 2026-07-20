@@ -52,9 +52,7 @@ export function BottomDock({
             {modeLabel(mode.mode)}
           </Text>
           {contextPercent !== undefined ? (
-            <Text color={theme.textMuted}>
-              context {contextPercent}% left
-            </Text>
+            <Text color={theme.textMuted}>context {contextPercent}% left</Text>
           ) : null}
           {mode.mode === 'plan' ? (
             <Text color={theme.accent}>Shift+Tab to cycle</Text>

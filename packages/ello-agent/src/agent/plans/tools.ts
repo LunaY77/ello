@@ -18,7 +18,11 @@ export function createPlanTools(input: {
       description:
         'Write the complete Markdown implementation plan for the current plan session. This is the only writable artifact in Plan mode.',
       discovery: { aliases: ['save plan'], risk: 'workspace-write' },
-      input: z.object({ content: z.string().min(1) }).strict(),
+      input: z
+        .object({
+          content: z.string().min(1).describe('Markdown plan content'),
+        })
+        .strict(),
       execute: ({ content }) => input.write(content),
     }),
     defineTool({
