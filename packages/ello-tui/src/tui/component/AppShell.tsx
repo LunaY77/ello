@@ -10,7 +10,7 @@ import { LiveViewport } from './LiveViewport.js';
 
 export interface AppShellProps {
   readonly cwd: string;
-  readonly profile: string;
+  readonly model: string;
   readonly mode: TuiModeState;
   readonly pendingPlanApproval?: boolean;
   readonly liveAssistantText: string;
@@ -22,6 +22,7 @@ export interface AppShellProps {
   readonly pendingSteers?: readonly string[];
   readonly usage?: Usage;
   readonly goal?: Goal;
+  readonly contextPercent?: number;
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
 }
@@ -51,11 +52,14 @@ export function AppShell(props: AppShellProps) {
         />
       </Box>
       <BottomDock
-        profile={props.profile}
+        model={props.model}
         mode={props.mode}
         pendingPlanApproval={props.pendingPlanApproval === true}
         {...(props.usage !== undefined ? { usage: props.usage } : {})}
         {...(props.goal !== undefined ? { goal: props.goal } : {})}
+        {...(props.contextPercent !== undefined
+          ? { contextPercent: props.contextPercent }
+          : {})}
         overlay={props.overlay}
         composer={props.composer}
       />
