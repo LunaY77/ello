@@ -246,7 +246,11 @@ async function composeAgent(input: {
           name: 'write_plan',
           description: 'Persist the complete Markdown plan for this thread.',
           discovery: { aliases: ['save plan'], risk: 'workspace-write' },
-          input: z.object({ content: z.string().min(1) }).strict(),
+          input: z
+            .object({
+              content: z.string().min(1).describe('Markdown plan content'),
+            })
+            .strict(),
           execute: async ({ content }) => {
             const artifact = await writePlanArtifact({
               cwd: input.thread.thread.cwd,

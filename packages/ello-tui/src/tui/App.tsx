@@ -1,7 +1,14 @@
 import { relative } from 'node:path';
 
-import { useApp, useInput } from 'ink';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useApp, useInput, type Key } from 'ink';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { cycleSessionMode } from '../api/protocol-types.js';
 import type {
@@ -158,9 +165,7 @@ function ThreadScreen({
     [activeProfile, profiles],
   );
   const contextPercent = useMemo(() => {
-    const modelEntry = models.find(
-      (m) => m.id === state.settings.model,
-    );
+    const modelEntry = models.find((m) => m.id === state.settings.model);
     const contextWindow = modelEntry?.metadata?.context;
     if (typeof contextWindow !== 'number' || contextWindow <= 0)
       return undefined;
@@ -169,7 +174,12 @@ function ThreadScreen({
       0,
       Math.round(((contextWindow - used) / contextWindow) * 100),
     );
-  }, [models, state.settings.model, state.usage.inputTokens, state.usage.outputTokens]);
+  }, [
+    models,
+    state.settings.model,
+    state.usage.inputTokens,
+    state.usage.outputTokens,
+  ]);
 
   useEffect(() => {
     void thread
@@ -714,15 +724,10 @@ function ThreadScreen({
       .catch((error: unknown) => notify(dispatch, error));
   };
 
-  useInput(
-    (input, key) => {
-      if (effectiveOverlay.type === 'none' || !key.ctrl || input !== 'c') {
-        return;
-      }
-      handleCancel();
-    },
-    { isActive: true },
-  );
+  useStableInput((input, key) => {
+    if (effectiveOverlay.type === 'none' || !key.ctrl || input !== 'c') return;
+    handleCancel();
+  });
 
   const rewindToTarget = async (target: RewindTarget): Promise<void> => {
     const next = await thread.fork(target.turnId);
@@ -996,6 +1001,17 @@ function mergeInputHistory(
     }
   }
   return values.slice(-50);
+}
+
+function useStableInput(handler: (input: string, key: Key) => void): void {
+  const handlerRef = useRef(handler);
+  useLayoutEffect(() => {
+    handlerRef.current = handler;
+  }, [handler]);
+  const stableHandler = useCallback((input: string, key: Key): void => {
+    handlerRef.current(input, key);
+  }, []);
+  useInput(stableHandler, { isActive: true });
 }
 
 function isCompletedRenderableTrace(

@@ -38,23 +38,37 @@ export function createFsTools(
       discovery: { aliases: ['file', 'directory', 'cat'], risk: 'readonly' },
       input: z
         .object({
-          path: z.string().min(1),
-          offset: z.number().int().min(1).optional(),
-          limit: z.number().int().min(1).max(2000).optional(),
+          filePath: z.string().min(1).describe('File path to read'),
+          offset: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe('Starting line number (1-based)'),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(2000)
+            .optional()
+            .describe('Maximum number of lines to return'),
         })
         .strict(),
       approval: (input, ctx) =>
         decide(
           {
             permission: 'read',
-            patterns: [input.path],
-            always: [input.path],
-            paths: [input.path],
-            metadata: { kind: 'read', path: input.path },
+            patterns: [input.filePath],
+            always: [input.filePath],
+            paths: [input.filePath],
+            metadata: { kind: 'read', path: input.filePath },
           },
           ctx.agent,
         ),
-      execute: async ({ path: targetPath, offset = 1, limit = 400 }, ctx) => {
+      execute: async (
+        { filePath: targetPath, offset = 1, limit = 400 },
+        ctx,
+      ) => {
         const fs = requireFs(ctx.agent);
         const absolutePath = resolveRuntimePath(fs, targetPath);
         const info = await statRuntimePath(fs, targetPath);
@@ -144,25 +158,31 @@ export function createFsTools(
       },
       input: z
         .object({
-          path: z.string().min(1),
-          content: z.string(),
-          expectedContent: z.string().optional(),
-          reason: z.string().optional(),
+          filePath: z.string().min(1).describe('File path to write'),
+          content: z.string().describe('File content to write'),
+          expectedContent: z
+            .string()
+            .optional()
+            .describe('Expected current content for safe overwrite'),
+          reason: z
+            .string()
+            .optional()
+            .describe('Reason for writing this file'),
         })
         .strict(),
       approval: async (input, ctx) =>
         decide(
           {
             permission: 'edit',
-            patterns: [input.path],
-            always: [input.path],
-            paths: [input.path],
+            patterns: [input.filePath],
+            always: [input.filePath],
+            paths: [input.filePath],
             metadata: await writeMetadata(input, ctx.agent),
           },
           ctx.agent,
         ),
       execute: async (
-        { path: targetPath, content, expectedContent, reason },
+        { filePath: targetPath, content, expectedContent, reason },
         ctx,
       ) => {
         const fs = requireFs(ctx.agent);
@@ -196,24 +216,30 @@ export function createFsTools(
       },
       input: z
         .object({
-          path: z.string().min(1),
-          oldText: z.string().min(1),
-          newText: z.string(),
-          reason: z.string().optional(),
+          filePath: z.string().min(1).describe('File path to edit'),
+          oldText: z.string().min(1).describe('Text to find and replace'),
+          newText: z.string().describe('Replacement text'),
+          reason: z.string().optional().describe('Reason for this edit'),
         })
         .strict(),
       approval: async (input, ctx) =>
         decide(
           {
             permission: 'edit',
-            patterns: [input.path],
-            always: [input.path],
-            paths: [input.path],
-            metadata: await editMetadata(input, ctx.agent),
+            patterns: [input.filePath],
+            always: [input.filePath],
+            paths: [input.filePath],
+            metadata: await editMetadata(
+              input as Parameters<typeof editMetadata>[0],
+              ctx.agent,
+            ),
           },
           ctx.agent,
         ),
-      execute: async ({ path: targetPath, oldText, newText, reason }, ctx) => {
+      execute: async (
+        { filePath: targetPath, oldText, newText, reason },
+        ctx,
+      ) => {
         const fs = requireFs(ctx.agent);
         const current = await fs.readText(targetPath);
         const first = current.indexOf(oldText);
@@ -267,7 +293,10 @@ Example:
             .describe(
               "Patch text using *** Begin Patch / *** End Patch. Update hunks use @@ plus context, '-' removed lines, and '+' added lines.",
             ),
-          reason: z.string().optional(),
+          reason: z
+            .string()
+            .optional()
+            .describe('Reason for applying this patch'),
         })
         .strict(),
       approval: async (input, ctx) => {
@@ -354,40 +383,40 @@ function isBinary(buffer: Buffer): boolean {
 
 async function writeMetadata(
   input: {
-    readonly path: string;
+    readonly filePath: string;
     readonly content: string;
     readonly expectedContent?: string | undefined;
     readonly reason?: string | undefined;
   },
   ctx: Parameters<DecideApproval>[1],
 ): Promise<Extract<PermissionMetadata, { kind: 'edit' }>> {
-  const previous = await readOptional(requireFs(ctx), input.path);
+  const previous = await readOptional(requireFs(ctx), input.filePath);
   if (previous !== null && input.expectedContent !== previous) {
-    throw new Error(`File changed since last read: ${input.path}`);
+    throw new Error(`File changed since last read: ${input.filePath}`);
   }
   return {
     kind: 'edit',
-    path: input.path,
-    fileChanges: [createFileChange(input.path, previous, input.content)],
+    path: input.filePath,
+    fileChanges: [createFileChange(input.filePath, previous, input.content)],
   };
 }
 
 async function editMetadata(
   input: {
-    readonly path: string;
+    readonly filePath: string;
     readonly oldText: string;
     readonly newText: string;
     readonly reason?: string | undefined;
   },
   ctx: Parameters<DecideApproval>[1],
 ): Promise<Extract<PermissionMetadata, { kind: 'edit' }>> {
-  const current = await requireFs(ctx).readText(input.path);
+  const current = await requireFs(ctx).readText(input.filePath);
   const first = current.indexOf(input.oldText);
   if (first === -1) {
-    throw new Error(`Text not found in ${input.path}`);
+    throw new Error(`Text not found in ${input.filePath}`);
   }
   if (current.indexOf(input.oldText, first + input.oldText.length) !== -1) {
-    throw new Error(`Text is not unique in ${input.path}`);
+    throw new Error(`Text is not unique in ${input.filePath}`);
   }
   const next =
     current.slice(0, first) +
@@ -395,7 +424,7 @@ async function editMetadata(
     current.slice(first + input.oldText.length);
   return {
     kind: 'edit',
-    path: input.path,
-    fileChanges: [createFileChange(input.path, current, next)],
+    path: input.filePath,
+    fileChanges: [createFileChange(input.filePath, current, next)],
   };
 }

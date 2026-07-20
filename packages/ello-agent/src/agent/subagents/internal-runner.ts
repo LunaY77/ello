@@ -31,7 +31,9 @@ export async function runInternalAgent(input: {
     name: 'internal_complete',
     description: 'Return a completed internal-agent response payload.',
     discovery: { aliases: ['complete response'], risk: 'readonly' },
-    input: z.object({ output: z.string() }).strict(),
+    input: z
+      .object({ output: z.string().describe('Completed response payload') })
+      .strict(),
     execute: ({ output }) => output,
   });
   const agent = createAgent({
