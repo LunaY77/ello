@@ -9,21 +9,23 @@ export interface TuiModeState {
 }
 
 export function BottomDock({
-  profile,
+  model,
   mode,
   pendingPlanApproval,
   usage,
   goal,
   overlay,
   composer,
+  contextPercent,
 }: {
-  readonly profile: string;
+  readonly model: string;
   readonly mode: TuiModeState;
   readonly pendingPlanApproval: boolean;
   readonly usage?: Usage;
   readonly goal?: Goal;
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
+  readonly contextPercent?: number;
 }) {
   const theme = useTheme();
   const tokens =
@@ -45,10 +47,15 @@ export function BottomDock({
       </Box>
       <Box justifyContent="space-between">
         <Box gap={1}>
-          <Text color={theme.textMuted}>{profile}</Text>
+          <Text color={theme.textMuted}>{model}</Text>
           <Text color={modeColor(theme, mode.mode)}>
             {modeLabel(mode.mode)}
           </Text>
+          {contextPercent !== undefined ? (
+            <Text color={theme.textMuted}>
+              context {contextPercent}% left
+            </Text>
+          ) : null}
           {mode.mode === 'plan' ? (
             <Text color={theme.accent}>Shift+Tab to cycle</Text>
           ) : null}

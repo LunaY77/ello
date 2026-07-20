@@ -157,6 +157,19 @@ function ThreadScreen({
     () => buildProfileSelectorOptions(profiles, activeProfile),
     [activeProfile, profiles],
   );
+  const contextPercent = useMemo(() => {
+    const modelEntry = models.find(
+      (m) => m.id === state.settings.model,
+    );
+    const contextWindow = modelEntry?.metadata?.context;
+    if (typeof contextWindow !== 'number' || contextWindow <= 0)
+      return undefined;
+    const used = state.usage.inputTokens + state.usage.outputTokens;
+    return Math.max(
+      0,
+      Math.round(((contextWindow - used) / contextWindow) * 100),
+    );
+  }, [models, state.settings.model, state.usage.inputTokens, state.usage.outputTokens]);
 
   useEffect(() => {
     void thread
@@ -881,8 +894,9 @@ function ThreadScreen({
       />
       <AppShell
         cwd={thread.cwd}
-        profile={state.settings.profile}
+        model={state.settings.model}
         mode={{ mode: state.settings.mode }}
+        {...(contextPercent !== undefined ? { contextPercent } : {})}
         pendingPlanApproval={effectiveOverlay.type === 'plan-approval'}
         liveAssistantText={state.live.assistantText}
         runningTools={[...state.live.runningTools.values()]}
