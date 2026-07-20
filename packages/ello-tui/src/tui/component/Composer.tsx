@@ -22,6 +22,13 @@ import {
   type ComposerBuffer,
   visualLineCount,
 } from '../store/composer-buffer.js';
+import {
+  formatPastePlaceholder,
+  matchPastePlaceholderAtEnd,
+  matchPastePlaceholderAtStart,
+  PASTE_TRUNCATION_THRESHOLD,
+  resolvePastePlaceholders,
+} from '../store/composer-paste.js';
 import { useTheme } from '../theme/index.js';
 
 export interface ComposerProps {
@@ -60,6 +67,8 @@ export function Composer(props: ComposerProps) {
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const historyIndexRef = useRef<number | null>(null);
   const bufferRef = useRef(buffer);
+  const pastesRef = useRef<Map<number, string>>(new Map());
+  const nextPasteIdRef = useRef(1);
   const wrapWidth = Math.max(1, (stdout.columns ?? 100) - 10);
 
   const replaceBuffer = useCallback(
@@ -127,6 +136,18 @@ export function Composer(props: ComposerProps) {
 
   const submit = (): void => {
     const value = toText(bufferRef.current);
+    const pastes = pastesRef.current;
+    if (pastes.size > 0) {
+      const resolved = resolvePastePlaceholders(value, pastes);
+      pastesRef.current = new Map();
+      nextPasteIdRef.current = 1;
+      props.onSubmit(resolved);
+      if (resolved.trim() !== '') {
+        historyIndexRef.current = null;
+        replaceBuffer(emptyBuffer);
+      }
+      return;
+    }
     props.onSubmit(value);
     if (value.trim() !== '') {
       historyIndexRef.current = null;
@@ -186,6 +207,8 @@ export function Composer(props: ComposerProps) {
           props.onCancel();
         } else if (!isEmpty(current)) {
           historyIndexRef.current = null;
+          pastesRef.current = new Map();
+          nextPasteIdRef.current = 1;
           replaceBuffer(emptyBuffer);
         } else {
           props.onCancel();
@@ -236,17 +259,59 @@ export function Composer(props: ComposerProps) {
       }
       if (isBackspace(input, key)) {
         historyIndexRef.current = null;
-        replaceBuffer(backspace(current));
+        const line = current.lines[current.cursor.line] ?? '';
+        const before = line.slice(0, current.cursor.column);
+        const ph = matchPastePlaceholderAtEnd(before);
+        if (ph !== null) {
+          pastesRef.current.delete(ph.id);
+          const lines = [...current.lines];
+          lines[current.cursor.line] =
+            line.slice(0, current.cursor.column - ph.length) +
+            line.slice(current.cursor.column);
+          replaceBuffer({
+            lines,
+            cursor: {
+              line: current.cursor.line,
+              column: current.cursor.column - ph.length,
+            },
+          });
+        } else {
+          replaceBuffer(backspace(current));
+        }
         return;
       }
       if (isDelete(input, key)) {
         historyIndexRef.current = null;
-        replaceBuffer(deleteForward(current));
+        const line = current.lines[current.cursor.line] ?? '';
+        const after = line.slice(current.cursor.column);
+        const ph = matchPastePlaceholderAtStart(after);
+        if (ph !== null) {
+          pastesRef.current.delete(ph.id);
+          const lines = [...current.lines];
+          lines[current.cursor.line] =
+            line.slice(0, current.cursor.column) +
+            line.slice(current.cursor.column + ph.length);
+          replaceBuffer({ lines, cursor: current.cursor });
+        } else {
+          replaceBuffer(deleteForward(current));
+        }
         return;
       }
       if (input.length > 0 && !key.ctrl && !key.meta) {
         historyIndexRef.current = null;
-        replaceBuffer(insertText(current, input));
+        if (input.length > PASTE_TRUNCATION_THRESHOLD) {
+          const pasteId = nextPasteIdRef.current;
+          nextPasteIdRef.current += 1;
+          pastesRef.current.set(pasteId, input);
+          replaceBuffer(
+            insertText(
+              current,
+              formatPastePlaceholder(input.length, pasteId),
+            ),
+          );
+        } else {
+          replaceBuffer(insertText(current, input));
+        }
       }
     },
     { isActive: props.isActive !== false },
