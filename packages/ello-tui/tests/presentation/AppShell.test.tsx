@@ -195,12 +195,12 @@ describe('TerminalHistoryOutput', () => {
 describe('AppShell', () => {
   it('renders only live viewport and bottom dock', () => {
     const output = renderToString(
-      <AppShell
-        cwd="/workspace"
-        profile="main"
-        mode={{
-          mode: 'bypass',
-        }}
+        <AppShell
+          cwd="/workspace"
+          model="main"
+          mode={{
+            mode: 'bypass',
+          }}
         liveAssistantText=""
         runningTools={[]}
         runningSubagents={[]}
@@ -218,12 +218,12 @@ describe('AppShell', () => {
 
   it('shows running status in the live viewport', () => {
     const output = renderToString(
-      <AppShell
-        cwd="/workspace"
-        profile="main"
-        mode={{
-          mode: 'ask-before-changes',
-        }}
+        <AppShell
+          cwd="/workspace"
+          model="main"
+          mode={{
+            mode: 'ask-before-changes',
+          }}
         liveAssistantText="I am checking the parser"
         runningTools={[]}
         runningSubagents={[]}
@@ -241,12 +241,12 @@ describe('AppShell', () => {
 
   it('does not render blank assistant stream chunks as empty message lines', () => {
     const output = renderToString(
-      <AppShell
-        cwd="/workspace"
-        profile="main"
-        mode={{
-          mode: 'ask-before-changes',
-        }}
+        <AppShell
+          cwd="/workspace"
+          model="main"
+          mode={{
+            mode: 'ask-before-changes',
+          }}
         liveAssistantText={'\n\n   \n'}
         runningTools={[]}
         runningSubagents={[]}
@@ -264,12 +264,12 @@ describe('AppShell', () => {
 
   it('shows an interrupt notice when idle after abort', () => {
     const output = renderToString(
-      <AppShell
-        cwd="/workspace"
-        profile="main"
-        mode={{
-          mode: 'ask-before-changes',
-        }}
+        <AppShell
+          cwd="/workspace"
+          model="main"
+          mode={{
+            mode: 'ask-before-changes',
+          }}
         liveAssistantText=""
         runningTools={[]}
         runningSubagents={[]}
@@ -286,12 +286,12 @@ describe('AppShell', () => {
 
   it('shows queued steering above the composer', () => {
     const output = renderToString(
-      <AppShell
-        cwd="/workspace"
-        profile="main"
-        mode={{
-          mode: 'ask-before-changes',
-        }}
+        <AppShell
+          cwd="/workspace"
+          model="main"
+          mode={{
+            mode: 'ask-before-changes',
+          }}
         liveAssistantText=""
         runningTools={[]}
         runningSubagents={[]}
@@ -309,12 +309,12 @@ describe('AppShell', () => {
 
   it('renders running subagent status with nested tools', () => {
     const output = renderToString(
-      <AppShell
-        cwd="/workspace"
-        profile="main"
-        mode={{
-          mode: 'ask-before-changes',
-        }}
+        <AppShell
+          cwd="/workspace"
+          model="main"
+          mode={{
+            mode: 'ask-before-changes',
+          }}
         liveAssistantText=""
         runningTools={[]}
         runningSubagents={[
@@ -359,12 +359,12 @@ describe('AppShell', () => {
       output: { metadata: { totalLines: index + 1 } },
     }));
     const output = renderToString(
-      <AppShell
-        cwd="/workspace"
-        profile="main"
-        mode={{
-          mode: 'ask-before-changes',
-        }}
+        <AppShell
+          cwd="/workspace"
+          model="main"
+          mode={{
+            mode: 'ask-before-changes',
+          }}
         liveAssistantText=""
         runningTools={[]}
         runningSubagents={[

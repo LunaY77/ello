@@ -111,7 +111,7 @@ Ink dynamic viewport
 bottom dock
   overlay
   composer
-  footer: profile / approval mode / token usage
+  footer: model / mode / context XX% left / plan hints / goal ··· cache / token usage
 ```
 
 `AppShell` 只渲染 dynamic viewport 和 dock：
@@ -183,11 +183,13 @@ footer
 
 footer 左侧：
 
-- `profile / primaryModel`
+- `model`（如 `deepseek/deepseek-v4-pro`）与 Hero Panel 的 model 一致
 - approval mode
+- `context XX% left`：基于 model catalog 的 context window 与当前 token 用量计算，仅在数据可用时显示
 
 footer 右侧：
 
+- cache 命中率及未缓存 token 数
 - `inputTokens + outputTokens`，大于等于 1000 时显示 `1.2k tokens`。
 
 approval mode 颜色：
