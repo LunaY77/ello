@@ -781,6 +781,7 @@ async function waitForCatalogs(harness: ThreadHarness): Promise<void> {
       includeSources: false,
     }),
   );
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 async function submitCommand(

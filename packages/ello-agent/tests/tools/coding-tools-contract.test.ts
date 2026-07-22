@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 coding-tools-contract 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import {
   mkdir,
   mkdtemp,
@@ -17,22 +23,21 @@ import {
   defineTool,
   type AgentFileSystem,
   type AgentToolContext,
-} from '../../src/agent/engine/index.js';
-import { createPlanTools } from '../../src/agent/plans/tools.js';
+} from '../../src/features/agent/engine/index.js';
+import type { CodingAgentConfig } from '../../src/features/config/index.js';
 import {
   parseApplyPatch,
   prepareApplyPatch,
-} from '../../src/agent/tools/apply-patch.js';
-import { projectToolEvent } from '../../src/agent/tools/event-projection.js';
+} from '../../src/features/tool/internal/apply-patch.js';
+import { projectToolEvent } from '../../src/features/tool/internal/event-projection.js';
 import {
   createCallTool,
   createMetaToolRuntime,
   createToolSearchTool,
-} from '../../src/agent/tools/meta-tools.js';
-import type { CodingToolContext } from '../../src/agent/tools/runtime/coding-tool.js';
-import { createToolSearchIndex } from '../../src/agent/tools/search-index.js';
-import { createSearchTools } from '../../src/agent/tools/search.js';
-import type { CodingAgentConfig } from '../../src/config/index.js';
+} from '../../src/features/tool/internal/meta-tools.js';
+import type { CodingToolContext } from '../../src/features/tool/internal/runtime/coding-tool.js';
+import { createToolSearchIndex } from '../../src/features/tool/internal/search-index.js';
+import { createSearchTools } from '../../src/features/tool/internal/search.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -339,10 +344,22 @@ describe('Meta Tool 路由契约', () => {
   });
 
   it('库存分页不泄露 schema，精确搜索可返回当前模式的 Plan 工具', async () => {
-    const planTools = createPlanTools({
-      write: async () => 'written',
-      requestExit: async () => 'requested',
-    });
+    const planTools = [
+      defineTool({
+        name: 'write_plan',
+        description: 'Write the complete plan.',
+        discovery: { aliases: ['save plan'], risk: 'workspace-write' },
+        input: z.object({ content: z.string() }).strict(),
+        execute: async () => 'written',
+      }),
+      defineTool({
+        name: 'request_plan_exit',
+        description: 'Request approval for the complete plan.',
+        discovery: { aliases: ['approve plan'], risk: 'workspace-write' },
+        input: z.object({}).strict(),
+        execute: async () => 'requested',
+      }),
+    ];
     const runtime = createMetaToolRuntime([...tools, ...planTools], [], config);
     const search = runtime.modelTools.find(
       (tool) => tool.name === 'tool_search',

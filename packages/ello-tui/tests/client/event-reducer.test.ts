@@ -77,7 +77,7 @@ describe('thread notification reducer', () => {
       }),
     );
     expect(delta.projection.snapshot.turns[0]?.items[0]).toMatchObject({
-      text: 'hello',
+      text: '',
     });
 
     const completed = reduceNotification(

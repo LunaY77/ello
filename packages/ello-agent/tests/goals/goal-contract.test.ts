@@ -1,20 +1,26 @@
+/**
+ * 本文件验证 goal-contract 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
   AgentRunContext,
   AgentToolContext,
-} from '../../src/agent/engine/index.js';
+} from '../../src/features/agent/engine/index.js';
 import {
   formatGoalStatus,
   goalUsage,
   parseGoalSlashCommand,
-} from '../../src/agent/goals/controller.js';
-import { createThreadGoalRuntime } from '../../src/agent/goals/runtime-tools.js';
+} from '../../src/features/thread/goals/controller.js';
+import { createThreadGoalRuntime } from '../../src/features/thread/goals/runtime-tools.js';
 import {
   GoalService,
   type GoalPersistencePort,
-} from '../../src/agent/goals/service.js';
-import type { GoalState } from '../../src/agent/goals/types.js';
+} from '../../src/features/thread/goals/service.js';
+import type { GoalState } from '../../src/features/thread/goals/types.js';
 
 function createHarness(maxContinuations = 20) {
   let snapshot: GoalState | null = null;

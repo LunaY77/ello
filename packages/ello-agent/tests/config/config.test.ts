@@ -1,13 +1,16 @@
+/**
+ * 本文件验证 config 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { AgentToolContext } from '../../src/agent/engine/index.js';
-import { makeApprovalPolicy } from '../../src/agent/permissions/policy.js';
-import { createProviderRegistry } from '../../src/agent/providers/catalog/index.js';
-import { createCodingTools } from '../../src/agent/tools/index.js';
+import type { AgentToolContext } from '../../src/features/agent/engine/index.js';
 import {
   ensureGlobalConfig,
   ensureProjectConfig,
@@ -19,9 +22,15 @@ import {
   setConfigValue,
   setConfigValues,
   writeConfigPath,
-} from '../../src/config/index.js';
-import { parseYamlConfig, stringifyYamlConfig } from '../../src/config/yaml.js';
-import { createCodingStorage } from '../../src/storage/database/index.js';
+} from '../../src/features/config/index.js';
+import {
+  parseYamlConfig,
+  stringifyYamlConfig,
+} from '../../src/features/config/yaml.js';
+import { createProviderRegistry } from '../../src/features/model/providers/catalog/index.js';
+import { createCodingTools } from '../../src/features/tool/internal/index.js';
+import { makeApprovalPolicy } from '../../src/features/tool/permissions/policy.js';
+import { createTestStores } from '../support/stores.js';
 
 describe('loadCodingAgentConfig', () => {
   let previousHome: string | undefined;
@@ -269,11 +278,11 @@ describe('loadCodingAgentConfig', () => {
       },
     });
 
-    const storage = createCodingStorage({ databasePath: ':memory:' });
+    const storage = createTestStores({ databasePath: ':memory:' });
     try {
       const tools = createCodingTools({
         config,
-        storage,
+        taskBoards: storage.taskBoards,
         taskBoardScope: { type: 'session', sessionId: 'config-test' },
         mode: () => ({
           mode: 'ask-before-changes',

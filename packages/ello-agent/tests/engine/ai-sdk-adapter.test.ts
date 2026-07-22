@@ -1,17 +1,23 @@
+/**
+ * 本文件验证 ai-sdk-adapter 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 
 import type {
   AgentModelEvent,
   AgentModelRequest,
-} from '../../src/agent/engine/api/types.js';
-import { AiSdkModelAdapter } from '../../src/agent/providers/ai-sdk/ai-sdk.js';
+} from '../../src/features/agent/engine/model.js';
+import { createAiSdkModelAdapter } from '../../src/features/model/providers/ai-sdk/ai-sdk.js';
 
-describe('AiSdkModelAdapter', () => {
+describe('AI SDK model adapter', () => {
   it('does not emit text deltas for provider tool-call mirror JSON', async () => {
     const mirror =
       '[{"type":"tool-call","toolCallId":"call_1","toolName":"read","input":{"filePath":"README.md"}}]';
-    const adapter = new AiSdkModelAdapter();
+    const adapter = createAiSdkModelAdapter();
 
     const events = await collectEvents(
       adapter.stream(
@@ -61,7 +67,7 @@ describe('AiSdkModelAdapter', () => {
   });
 
   it('keeps normal text streaming incremental', async () => {
-    const adapter = new AiSdkModelAdapter();
+    const adapter = createAiSdkModelAdapter();
 
     const events = await collectEvents(
       adapter.stream(
@@ -87,7 +93,7 @@ describe('AiSdkModelAdapter', () => {
   });
 
   it('maps AI SDK cache token details into AgentUsage', async () => {
-    const adapter = new AiSdkModelAdapter();
+    const adapter = createAiSdkModelAdapter();
     const events = await collectEvents(
       adapter.stream(
         createRequest([
@@ -125,7 +131,7 @@ describe('AiSdkModelAdapter', () => {
   });
 
   it('streams normal JSON text once it cannot be a tool-call mirror', async () => {
-    const adapter = new AiSdkModelAdapter();
+    const adapter = createAiSdkModelAdapter();
 
     const events = await collectEvents(
       adapter.stream(

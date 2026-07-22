@@ -304,10 +304,7 @@ export function Composer(props: ComposerProps) {
           nextPasteIdRef.current += 1;
           pastesRef.current.set(pasteId, input);
           replaceBuffer(
-            insertText(
-              current,
-              formatPastePlaceholder(input.length, pasteId),
-            ),
+            insertText(current, formatPastePlaceholder(input.length, pasteId)),
           );
         } else {
           replaceBuffer(insertText(current, input));

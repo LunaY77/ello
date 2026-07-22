@@ -1,3 +1,9 @@
+/**
+ * 本文件负责 Protocol 的“responses”模块职责。
+ *
+ * 模块不持有可变运行状态；wire 数据以 unknown 进入并由 schema 或显式 parser 收窄。
+ * 字段名称、判别值和错误语义属于跨进程协议，调用方不得绕过校验直接构造不完整值。
+ */
 import { z } from 'zod';
 
 import {
@@ -6,6 +12,7 @@ import {
   JsonValueSchema,
   NonNegativeIntegerSchema,
   OpaqueIdSchema,
+  parseSchemaMap,
   ProtocolVersionSchema,
 } from './common.js';
 import { CLIENT_REQUEST_SCHEMAS, type ClientMethod } from './requests.js';
@@ -371,11 +378,24 @@ export type ClientResult<M extends ClientMethod> = z.output<
   (typeof CLIENT_RESPONSE_SCHEMAS)[M]
 >;
 
+/**
+ * 校验 JSON-RPC 协议的 `responses` 模块 的输入并返回已满足领域约束的值。
+ *
+ * Args:
+ * - `method`: `parseClientResult` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `result`: 用于完成唯一待处理操作的结果；同一结果不得重复消费。
+ *
+ * Returns:
+ * - 返回 `parseClientResult` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ *
+ * Throws:
+ * - 当 JSON-RPC 协议的 `responses` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+ */
 export function parseClientResult<M extends ClientMethod>(
   method: M,
   result: unknown,
 ): ClientResult<M> {
-  return CLIENT_RESPONSE_SCHEMAS[method].parse(result) as ClientResult<M>;
+  return parseSchemaMap(CLIENT_RESPONSE_SCHEMAS, method, result);
 }
 
 export { EmptyResultSchema };

@@ -1,3 +1,9 @@
+/**
+ * 本文件负责 Protocol 的“requests”模块职责。
+ *
+ * 模块不持有可变运行状态；wire 数据以 unknown 进入并由 schema 或显式 parser 收窄。
+ * 字段名称、判别值和错误语义属于跨进程协议，调用方不得绕过校验直接构造不完整值。
+ */
 import { z } from 'zod';
 
 import {
@@ -5,6 +11,7 @@ import {
   JsonValueSchema,
   OpaqueIdSchema,
   PaginationParamsSchema,
+  parseSchemaMap,
   ProtocolVersionSchema,
   SessionModeSchema,
   UserInputSchema,
@@ -42,13 +49,13 @@ export const InitializeParamsSchema = z
 export const ThreadStartParamsSchema = z
   .object({
     cwd: z.string().min(1),
-    name: z.string().optional(),
+    name: z.string().default(''),
     profile: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
     mode: SessionModeSchema.optional(),
     agent: z.string().min(1).optional(),
     subscribe: z.boolean().default(true),
-    metadata: z.record(z.string(), z.string()).optional(),
+    metadata: z.record(z.string(), z.string()).default({}),
   })
   .strict();
 
@@ -435,9 +442,22 @@ export type ParsedClientParams<M extends ClientMethod> = z.output<
   (typeof CLIENT_REQUEST_SCHEMAS)[M]
 >;
 
+/**
+ * 校验 JSON-RPC 协议的 `requests` 模块 的输入并返回已满足领域约束的值。
+ *
+ * Args:
+ * - `method`: `parseClientParams` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `params`: `parseClientParams` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
+ *
+ * Returns:
+ * - 返回 `parseClientParams` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ *
+ * Throws:
+ * - 当 JSON-RPC 协议的 `requests` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+ */
 export function parseClientParams<M extends ClientMethod>(
   method: M,
   params: unknown,
 ): ParsedClientParams<M> {
-  return CLIENT_REQUEST_SCHEMAS[method].parse(params) as ParsedClientParams<M>;
+  return parseSchemaMap(CLIENT_REQUEST_SCHEMAS, method, params);
 }

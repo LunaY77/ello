@@ -1,22 +1,28 @@
+/**
+ * 本文件验证 context-contract 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ContextSnapshot } from '../../src/agent/context/context-snapshot.js';
-import { loadInstructionSources } from '../../src/agent/context/instructions.js';
+import { ContextSnapshot } from '../../src/features/agent/context/context-snapshot.js';
+import { loadInstructionSources } from '../../src/features/agent/context/instructions.js';
 import {
   loadContextBundle,
   type ContextEvent,
-} from '../../src/agent/context/source-registry.js';
-import { compactMessages } from '../../src/agent/engine/core/input-transforms.js';
+} from '../../src/features/agent/context/source-registry.js';
+import { compactMessages } from '../../src/features/agent/engine/model-input.js';
 import {
   CodingAgentConfigSchema,
   type CodingAgentConfig,
-} from '../../src/config/schema.js';
-import type { ServerConnection } from '../../src/server/connection/server-connection.js';
-import { ServerServices } from '../../src/server/methods/server-services.js';
+} from '../../src/features/config/schema.js';
+import { createThreadRoutes } from '../../src/features/thread/routes.js';
+import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 
 describe('context source contract', () => {
   const roots: string[] = [];
@@ -156,45 +162,20 @@ describe('context source contract', () => {
     ).rejects.toThrow('HTTP 503');
   });
 
-  it('手动压缩没有生产 runner 时明确失败，不写入虚假 compaction 事件', async () => {
-    const services = new ServerServices({
-      threads: {} as never,
-      logs: {} as never,
-      storage: {
-        artifacts: {
-          deleteExpiredReferences: () =>
-            Promise.resolve({ deleted: 0, bytesFreed: 0 }),
-        },
-      } as never,
-    });
-    await expect(
-      services.dispatch({} as ServerConnection, 'thread/compact/start', {
-        threadId: 'thr_context_contract',
-      }),
-    ).rejects.toMatchObject({
-      type: 'invalidParams',
-      message: expect.stringContaining('no production compaction runner'),
-    });
-  });
-
   it('手动压缩调用生产 runner 并返回真实 job id', async () => {
     const compactThread = vi.fn(async () => ({
       compactor: 'ello-thread-compactor',
     }));
-    const services = new ServerServices({
-      threads: {} as never,
-      logs: {} as never,
-      compactThread,
-      storage: {
-        artifacts: {
-          deleteExpiredReferences: () =>
-            Promise.resolve({ deleted: 0, bytesFreed: 0 }),
-        },
-      } as never,
-    });
+    const services = {
+      routes: createThreadRoutes({
+        artifacts: {} as never,
+        compact: compactThread,
+        threads: {} as never,
+      }),
+    };
 
     await expect(
-      services.dispatch({} as ServerConnection, 'thread/compact/start', {
+      invokeServiceRoute(services, createTestPeer(), 'thread/compact/start', {
         threadId: 'thr_context_contract',
       }),
     ).resolves.toMatchObject({ jobId: expect.stringMatching(/^job_/u) });

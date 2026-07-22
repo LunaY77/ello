@@ -9,8 +9,10 @@ import type { z } from 'zod';
 import { AppServerClient } from '../api/client.js';
 import type { ClientTransport } from '../api/transport.js';
 import { StdioChildTransport } from '../api/transports/stdio-child.js';
-import { UnixTransport } from '../api/transports/unix.js';
-import { WebSocketTransport } from '../api/transports/websocket.js';
+import {
+  UnixTransport,
+  WebSocketTransport,
+} from '../api/transports/websocket.js';
 import { ELLO_TUI_VERSION } from '../version.js';
 
 type InitializeParams = z.input<typeof InitializeParamsSchema>;

@@ -1,17 +1,23 @@
+/**
+ * 本文件验证 subagent-contract 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { PermissionRule } from '../../src/agent/permissions/types.js';
 import {
   BackgroundJobStore,
   createAgentRegistry,
   deriveSubagentPermission,
   type CodingAgentDefinition,
-} from '../../src/agent/subagents/index.js';
-import type { CodingAgentConfig } from '../../src/config/index.js';
+} from '../../src/features/agent/subagents/index.js';
+import type { CodingAgentConfig } from '../../src/features/config/index.js';
+import type { PermissionRule } from '../../src/features/tool/permissions/types.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -37,6 +43,7 @@ const subagentDefinition: CodingAgentDefinition = {
   role: 'small',
   description: '测试代理',
   source: 'builtin',
+  maxTurns: 4,
 };
 
 describe('Subagent 注册与隔离契约', () => {
@@ -72,6 +79,7 @@ describe('Subagent 注册与隔离契约', () => {
 description: 项目专用探索代理
 mode: subagent
 role: primary
+max-turns: 6
 tools:
   - read
   - grep
@@ -102,6 +110,7 @@ tools:
         mode: 'subagent',
         role: 'review',
         description: '代码审查',
+        max_turns: 8,
       },
     });
     expect(registry.get('reviewer')).toMatchObject({

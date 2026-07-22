@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 thread-title-generator 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -9,15 +15,15 @@ import type {
   AgentModelRequest,
   AgentModelResponse,
   ModelAdapter,
-} from '../../src/agent/engine/index.js';
-import {
-  generateThreadTitle,
-  renderTitleConversation,
-} from '../../src/agent/execution/thread-title-generator.js';
+} from '../../src/features/agent/engine/index.js';
 import {
   CodingAgentConfigSchema,
   type CodingAgentConfig,
-} from '../../src/config/index.js';
+} from '../../src/features/config/index.js';
+import {
+  generateThreadTitle,
+  renderTitleConversation,
+} from '../../src/features/thread/title.js';
 import type { ThreadSnapshot } from '../../src/protocol/v1/index.js';
 
 const roots: string[] = [];
@@ -45,9 +51,16 @@ describe('Thread title generator', () => {
 
     expect(title).toBe('修复延迟审批响应');
     expect(adapter.requests).toHaveLength(1);
-    expect(adapter.requests[0]?.model).toBe('mock/title-model');
-    expect(adapter.requests[0]?.system).toContain('session title generator');
-    expect(JSON.stringify(adapter.requests[0]?.messages)).toContain(
+    const request = adapter.requests[0];
+    if (request === undefined) {
+      throw new Error('Title adapter did not receive the expected request.');
+    }
+    if (typeof request.model === 'string') {
+      throw new Error('Title model was not resolved to a LanguageModel.');
+    }
+    expect(request.model.modelId).toBe('title-model');
+    expect(request.system).toContain('session title generator');
+    expect(JSON.stringify(request.messages)).toContain(
       '修复审批按钮无法确认的问题',
     );
   });
@@ -91,6 +104,7 @@ function response(
   return {
     text: title,
     messages: [...request.messages, { role: 'assistant', content: title }],
+    newMessages: [{ role: 'assistant', content: title }],
     usage: {
       requests: 1,
       inputTokens: 10,
@@ -110,13 +124,17 @@ function config(cwd: string): CodingAgentConfig {
     initial_mode: 'ask-before-changes',
     active_profile: 'main',
     provider: {
-      mock: { kind: 'openai-compatible', api_key: 'test-key' },
+      mock: {
+        kind: 'openai-compatible',
+        api_key: 'test-key',
+      },
     },
     models: {
       mock: {
         'title-model': {
           provider: 'mock',
           api_id: 'title-model',
+          endpoint: 'chat',
         },
       },
     },

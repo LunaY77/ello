@@ -1,9 +1,16 @@
+/**
+ * 本文件负责 Protocol 的通知投影。
+ *
+ * 模块不持有可变运行状态；wire 数据以 unknown 进入并由 schema 或显式 parser 收窄。
+ * 字段名称、判别值和错误语义属于跨进程协议，调用方不得绕过校验直接构造不完整值。
+ */
 import { z } from 'zod';
 
 import {
   JsonValueSchema,
   NonNegativeIntegerSchema,
   OpaqueIdSchema,
+  parseSchemaMap,
   UsageSchema,
 } from './common.js';
 import {
@@ -161,7 +168,7 @@ export const SERVER_NOTIFICATION_SCHEMAS = {
 
 export type ClientNotificationMethod = keyof typeof CLIENT_NOTIFICATION_SCHEMAS;
 export type ClientNotificationParams<M extends ClientNotificationMethod> =
-  z.input<(typeof CLIENT_NOTIFICATION_SCHEMAS)[M]>;
+  z.output<(typeof CLIENT_NOTIFICATION_SCHEMAS)[M]>;
 export type ServerNotificationMethod = keyof typeof SERVER_NOTIFICATION_SCHEMAS;
 export type ServerNotificationParams<M extends ServerNotificationMethod> =
   z.output<(typeof SERVER_NOTIFICATION_SCHEMAS)[M]>;
@@ -172,18 +179,40 @@ export type ServerNotification = {
   };
 }[ServerNotificationMethod];
 
+/**
+ * 校验 JSON-RPC 协议的 `notifications` 模块 的输入并返回已满足领域约束的值。
+ *
+ * Args:
+ * - `method`: `parseClientNotificationParams` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `params`: `parseClientNotificationParams` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
+ *
+ * Returns:
+ * - 返回 `parseClientNotificationParams` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ *
+ * Throws:
+ * - 当 JSON-RPC 协议的 `notifications` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+ */
 export function parseClientNotificationParams<
   M extends ClientNotificationMethod,
 >(method: M, params: unknown): ClientNotificationParams<M> {
-  return CLIENT_NOTIFICATION_SCHEMAS[method].parse(
-    params,
-  ) as ClientNotificationParams<M>;
+  return parseSchemaMap(CLIENT_NOTIFICATION_SCHEMAS, method, params);
 }
 
+/**
+ * 校验 JSON-RPC 协议的 `notifications` 模块 的输入并返回已满足领域约束的值。
+ *
+ * Args:
+ * - `method`: `parseServerNotificationParams` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `params`: `parseServerNotificationParams` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
+ *
+ * Returns:
+ * - 返回 `parseServerNotificationParams` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ *
+ * Throws:
+ * - 当 JSON-RPC 协议的 `notifications` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+ */
 export function parseServerNotificationParams<
   M extends ServerNotificationMethod,
 >(method: M, params: unknown): ServerNotificationParams<M> {
-  return SERVER_NOTIFICATION_SCHEMAS[method].parse(
-    params,
-  ) as ServerNotificationParams<M>;
+  return parseSchemaMap(SERVER_NOTIFICATION_SCHEMAS, method, params);
 }

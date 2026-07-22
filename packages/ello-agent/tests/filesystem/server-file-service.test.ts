@@ -1,25 +1,27 @@
+/**
+ * 本文件验证 server-file-service 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createArtifactFeature } from '../../src/features/artifact/index.js';
+import { createFsFeature } from '../../src/features/fs/index.js';
 import { parseClientParams } from '../../src/protocol/v1/index.js';
-import type { ServerConnection } from '../../src/server/connection/server-connection.js';
-import { ServerServices } from '../../src/server/methods/server-services.js';
-import type { ThreadManager } from '../../src/server/runtime/thread-manager.js';
-import {
-  createCodingStorage,
-  type CodingStorage,
-} from '../../src/storage/database/index.js';
-import type { ThreadLogRepository } from '../../src/storage/threads/thread-log.js';
+import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
+import { createTestStores, type TestStores } from '../support/stores.js';
 
 describe('Server 文件服务契约', () => {
   let previousHome: string | undefined;
   let root: string;
   let workspace: string;
-  let storage: CodingStorage;
-  let services: ServerServices;
+  let storage: TestStores;
+  let services: ReturnType<typeof createFileFeatures>;
 
   beforeEach(async () => {
     previousHome = process.env.ELLO_HOME;
@@ -27,15 +29,12 @@ describe('Server 文件服务契约', () => {
     workspace = path.join(root, 'workspace');
     await mkdir(workspace);
     process.env.ELLO_HOME = root;
-    storage = createCodingStorage({
+    storage = createTestStores({
       databasePath: path.join(root, 'state.sqlite'),
       artifactsDir: path.join(root, 'artifacts'),
     });
-    services = new ServerServices({
-      storage,
-      threads: {} as ThreadManager,
-      logs: {} as ThreadLogRepository,
-    });
+    services = createFileFeatures(storage);
+    await services.initialize();
   });
 
   afterEach(async () => {
@@ -50,11 +49,16 @@ describe('Server 文件服务契约', () => {
     const content = '甲乙丙';
     await writeFile(path.join(workspace, 'unicode.txt'), content, 'utf8');
 
-    const response = (await services.dispatch(connection(), 'fs/readFile', {
-      cwd: workspace,
-      path: 'unicode.txt',
-      maxBytes: 4,
-    })) as {
+    const response = (await invokeServiceRoute(
+      services,
+      connection(),
+      'fs/readFile',
+      {
+        cwd: workspace,
+        path: 'unicode.txt',
+        maxBytes: 4,
+      },
+    )) as {
       readonly content: string;
       readonly byteCount: number;
       readonly truncated: boolean;
@@ -67,11 +71,16 @@ describe('Server 文件服务契约', () => {
       truncated: true,
     });
     expect(response.content).not.toContain('\uFFFD');
-    const artifact = (await services.dispatch(connection(), 'artifact/read', {
-      artifactId: response.artifactId,
-      offset: 0,
-      maxBytes: 1024,
-    })) as { readonly content: string };
+    const artifact = (await invokeServiceRoute(
+      services,
+      connection(),
+      'artifact/read',
+      {
+        artifactId: response.artifactId,
+        offset: 0,
+        maxBytes: 1024,
+      },
+    )) as { readonly content: string };
     expect(Buffer.from(artifact.content, 'base64').toString('utf8')).toBe(
       content,
     );
@@ -83,7 +92,7 @@ describe('Server 文件服务契约', () => {
     await writeFile(path.join(workspace, 'README.md'), 'readme\n');
 
     await expect(
-      services.dispatch(connection(), 'fs/readDirectory', {
+      invokeServiceRoute(services, connection(), 'fs/readDirectory', {
         cwd: workspace,
         path: '.',
       }),
@@ -94,13 +103,13 @@ describe('Server 文件服务契约', () => {
       ],
     });
     await expect(
-      services.dispatch(connection(), 'fs/getMetadata', {
+      invokeServiceRoute(services, connection(), 'fs/getMetadata', {
         cwd: workspace,
         path: 'src/a.ts',
       }),
     ).resolves.toMatchObject({ kind: 'file', size: 11 });
     await expect(
-      services.dispatch(connection(), 'fs/search', {
+      invokeServiceRoute(services, connection(), 'fs/search', {
         cwd: workspace,
         query: 'a.ts',
         kind: 'file',
@@ -117,13 +126,13 @@ describe('Server 文件服务契约', () => {
     await symlink(outside, path.join(workspace, 'outside-link.txt'));
 
     await expect(
-      services.dispatch(connection(), 'fs/readFile', {
+      invokeServiceRoute(services, connection(), 'fs/readFile', {
         cwd: workspace,
         path: '../outside.txt',
       }),
     ).rejects.toMatchObject({ type: 'pathOutsideWorkspace' });
     await expect(
-      services.dispatch(connection(), 'fs/readFile', {
+      invokeServiceRoute(services, connection(), 'fs/readFile', {
         cwd: workspace,
         path: 'outside-link.txt',
       }),
@@ -138,13 +147,13 @@ describe('Server 文件服务契约', () => {
     );
 
     await expect(
-      services.dispatch(connection(), 'fs/readFile', {
+      invokeServiceRoute(services, connection(), 'fs/readFile', {
         cwd: workspace,
         path: 'binary.txt',
       }),
     ).rejects.toMatchObject({ type: 'invalidParams' });
     await expect(
-      services.dispatch(connection(), 'fs/readFile', {
+      invokeServiceRoute(services, connection(), 'fs/readFile', {
         cwd: workspace,
         path: 'oversized.txt',
       }),
@@ -159,6 +168,31 @@ describe('Server 文件服务契约', () => {
   });
 });
 
-function connection(): ServerConnection {
-  return { id: 'connection-file-service' } as ServerConnection;
+function connection() {
+  return createTestPeer({ connectionId: 'connection-file-service' });
+}
+
+function createFileFeatures(storage: TestStores) {
+  const artifacts = createArtifactFeature(storage.artifacts);
+  const fs = createFsFeature(storage.artifacts);
+  return {
+    routes: { ...artifacts.routes, ...fs.routes },
+    initialize: () => artifacts.initialize(),
+    /**
+     * 停止 测试夹具的 `server-file-service.test` 模块 的异步工作并释放其拥有的资源；关闭完成后不再接受新操作。
+     *
+     * Args:
+     * - 无：操作使用实例或闭包已经持有的稳定状态。
+     *
+     * Returns:
+     * - Promise 在全部已拥有资源完成释放、后台工作停止后兑现；失败会直接拒绝。
+     *
+     * Throws:
+     * - 当 测试夹具的 `server-file-service.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+     */
+    async close(): Promise<void> {
+      await fs.close();
+      await artifacts.close();
+    },
+  };
 }

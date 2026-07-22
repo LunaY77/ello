@@ -1,14 +1,20 @@
+/**
+ * 本文件验证 permissions 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { DeferredApprovalItem } from '../../src/agent/engine/index.js';
-import { evaluatePermission } from '../../src/agent/permissions/engine.js';
-import { RulesStore } from '../../src/agent/permissions/rules-store.js';
-import type { PermissionRule } from '../../src/agent/permissions/types.js';
-import { projectPermissionsFile } from '../../src/config/paths.js';
+import type { DeferredApprovalItem } from '../../src/features/agent/engine/index.js';
+import { projectPermissionsFile } from '../../src/features/config/paths.js';
+import { evaluatePermission } from '../../src/features/tool/permissions/engine.js';
+import { RulesStore } from '../../src/features/tool/permissions/rules-store.js';
+import type { PermissionRule } from '../../src/features/tool/permissions/types.js';
 
 const dirs: string[] = [];
 
@@ -25,6 +31,15 @@ async function tempDir(): Promise<string> {
 }
 
 describe('permission policy', () => {
+  it('未加载磁盘规则时直接拒绝读取', async () => {
+    const cwd = await tempDir();
+    const store = new RulesStore(cwd);
+
+    expect(() => store.rules()).toThrow(
+      'RulesStore.load() must complete before reading user rules.',
+    );
+  });
+
   it('uses the last matching rule', () => {
     const rules: PermissionRule[] = [
       { permission: 'bash', pattern: '**', action: 'allow', scope: 'project' },
@@ -46,6 +61,7 @@ describe('permission policy', () => {
   it('persists project approval rules as YAML using typed metadata', async () => {
     const cwd = await tempDir();
     const store = new RulesStore(cwd);
+    await store.load();
     const item: DeferredApprovalItem = {
       kind: 'approval',
       toolCallId: 'call_1',
@@ -95,8 +111,9 @@ describe('permission policy', () => {
 
   it('项目规则写盘失败时不发布进程内幽灵授权', async () => {
     const cwd = await tempDir();
-    await writeFile(path.join(cwd, '.ello'), 'not a directory', 'utf8');
     const store = new RulesStore(cwd);
+    await store.load();
+    await writeFile(path.join(cwd, '.ello'), 'not a directory', 'utf8');
     const item: DeferredApprovalItem = {
       kind: 'approval',
       toolCallId: 'call_failed_write',

@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 thread-catalog 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,25 +11,22 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  createCodingStorage,
-  type CodingStorage,
-  storageSchema,
-} from '../../src/storage/database/index.js';
+import * as storageSchema from '../../src/infra/database/schema.js';
 import {
   parseThreadRecord,
   type ThreadRecord,
 } from '../../src/storage/threads/thread-record.js';
+import { createTestStores, type TestStores } from '../support/stores.js';
 
 const CREATED_AT = '2026-07-18T00:00:00.000Z';
 
-describe('ThreadCatalogRepository', () => {
+describe('Thread catalog projection', () => {
   let root: string;
-  let storage: CodingStorage;
+  let storage: TestStores;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'ello-thread-catalog-'));
-    storage = createCodingStorage({
+    storage = createTestStores({
       databasePath: join(root, 'state.sqlite'),
       artifactsDir: join(root, 'artifacts'),
     });

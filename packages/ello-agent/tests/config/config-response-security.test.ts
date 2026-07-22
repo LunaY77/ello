@@ -1,39 +1,35 @@
+/**
+ * 本文件验证 config-response-security 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { globalConfigPath } from '../../src/config/index.js';
-import { parseClientResult } from '../../src/protocol/v1/index.js';
-import type { ServerConnection } from '../../src/server/connection/server-connection.js';
-import { sanitizeConfigForResponse } from '../../src/server/methods/config-response.js';
-import { ServerServices } from '../../src/server/methods/server-services.js';
-import type { ThreadManager } from '../../src/server/runtime/thread-manager.js';
+import { globalConfigPath } from '../../src/features/config/index.js';
 import {
-  createCodingStorage,
-  type CodingStorage,
-} from '../../src/storage/database/index.js';
-import type { ThreadLogRepository } from '../../src/storage/threads/thread-log.js';
+  createConfigFeature,
+  sanitizeConfigForResponse,
+} from '../../src/features/config/index.js';
+import { parseClientResult } from '../../src/protocol/v1/index.js';
+import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 
 describe('config RPC credential boundary', () => {
   let previousHome: string | undefined;
   let home: string;
   let cwd: string;
-  let services: ServerServices;
-  let storage: CodingStorage;
+  let services: ReturnType<typeof createConfigFeature>;
 
   beforeEach(async () => {
     previousHome = process.env.ELLO_HOME;
     home = await mkdtemp(join(tmpdir(), 'ello-config-response-home-'));
     cwd = await mkdtemp(join(tmpdir(), 'ello-config-response-project-'));
     process.env.ELLO_HOME = home;
-    storage = createCodingStorage();
-    services = new ServerServices({
-      threads: {} as ThreadManager,
-      logs: {} as ThreadLogRepository,
-      storage,
-    });
+    services = createConfigFeature();
     await writeFile(
       globalConfigPath(),
       [
@@ -61,8 +57,6 @@ describe('config RPC credential boundary', () => {
   });
 
   afterEach(async () => {
-    await services.close();
-    storage.close();
     if (previousHome === undefined) delete process.env.ELLO_HOME;
     else process.env.ELLO_HOME = previousHome;
     await rm(home, { recursive: true, force: true });
@@ -109,8 +103,9 @@ describe('config RPC credential boundary', () => {
   });
 
   it('config/read 的 merged config 与 includeSources 都不返回 credential', async () => {
-    const response = await services.dispatch(
-      {} as ServerConnection,
+    const response = await invokeServiceRoute(
+      services,
+      createTestPeer(),
       'config/read',
       { cwd, includeSources: true },
     );
@@ -147,8 +142,9 @@ describe('config RPC credential boundary', () => {
   });
 
   it('config/settings 暴露敏感字段元数据但不回显 credential', async () => {
-    const response = await services.dispatch(
-      {} as ServerConnection,
+    const response = await invokeServiceRoute(
+      services,
+      createTestPeer(),
       'config/settings',
       { cwd },
     );
@@ -171,8 +167,9 @@ describe('config RPC credential boundary', () => {
   });
 
   it('config/write 完成真实写入，但 response 不回显新旧 credential', async () => {
-    const response = await services.dispatch(
-      {} as ServerConnection,
+    const response = await invokeServiceRoute(
+      services,
+      createTestPeer(),
       'config/write',
       {
         cwd,

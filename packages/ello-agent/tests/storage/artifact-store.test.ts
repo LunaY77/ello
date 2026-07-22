@@ -1,10 +1,16 @@
+/**
+ * 本文件验证 artifact-store 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createCodingStorage } from '../../src/storage/database/index.js';
+import { createTestStores } from '../support/stores.js';
 
 const roots: string[] = [];
 
@@ -17,7 +23,7 @@ afterEach(async () => {
 async function createTestStorage() {
   const root = await mkdtemp(path.join(tmpdir(), 'ello-artifact-'));
   roots.push(root);
-  return createCodingStorage({
+  return createTestStores({
     databasePath: path.join(root, 'state.sqlite'),
     artifactsDir: path.join(root, 'artifacts'),
   });

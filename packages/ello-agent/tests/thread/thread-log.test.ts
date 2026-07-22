@@ -1,30 +1,36 @@
+/**
+ * 本文件验证 thread-log 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { projectThreadSnapshot } from '../../src/domain/projection/thread-snapshot.js';
-import { AppServerError } from '../../src/protocol/errors.js';
+import { projectThreadSnapshot } from '../../src/features/thread/records.js';
 import {
   archivedThreadLogPath,
   threadLeasePath,
   threadLogPath,
-} from '../../src/storage/paths.js';
+} from '../../src/infra/paths.js';
+import { AppServerError } from '../../src/protocol/errors.js';
 import { ThreadLeaseStore } from '../../src/storage/threads/thread-lease.js';
-import { ThreadLogRepository } from '../../src/storage/threads/thread-log.js';
+import { ThreadLogStore } from '../../src/storage/threads/thread-log.js';
 
 const threadId = 'thr_test';
 const turnId = 'turn_test';
 const itemId = 'item_test';
 
-describe('ThreadLogRepository', () => {
+describe('ThreadLogStore', () => {
   let root: string;
-  let repository: ThreadLogRepository;
+  let repository: ThreadLogStore;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'ello-thread-log-'));
-    repository = new ThreadLogRepository({ root });
+    repository = new ThreadLogStore({ root });
   });
 
   afterEach(async () => {
@@ -218,7 +224,7 @@ describe('ThreadLogRepository', () => {
   });
 });
 
-function createThread(repository: ThreadLogRepository) {
+function createThread(repository: ThreadLogStore) {
   return repository.create(threadId, {
     kind: 'thread.created',
     rootId: threadId,

@@ -1,31 +1,37 @@
+/**
+ * 本文件验证 thread-manager 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ThreadTitleGenerator } from '../../src/domain/ports/thread-title-generator.js';
 import type {
-  TurnExecutionEvent,
-  TurnExecutionHandle,
-  TurnExecutionResult,
-  TurnExecutor,
-} from '../../src/domain/ports/turn-executor.js';
+  AgentRun,
+  AgentRunEvent,
+  AgentRunResult,
+  AgentRunRequest,
+} from '../../src/features/agent/index.js';
+import { compactionView } from '../../src/features/thread/compact.js';
+import {
+  createThreadFeature,
+  createThreadStore,
+  type ThreadFeature,
+  type ThreadStore,
+} from '../../src/features/thread/index.js';
+import type { ThreadTitleGenerator } from '../../src/features/thread/title.js';
+import { threadLogPath } from '../../src/infra/paths.js';
 import type {
   ParsedClientParams,
   ThreadSnapshot,
   Usage,
-  UserInput,
 } from '../../src/protocol/v1/index.js';
-import { ThreadManager } from '../../src/server/runtime/thread-manager.js';
-import {
-  createCodingStorage,
-  type CodingStorage,
-} from '../../src/storage/database/index.js';
-import { threadLogPath } from '../../src/storage/paths.js';
-import { ThreadLogRepository } from '../../src/storage/threads/thread-log.js';
 import { parseThreadRecord } from '../../src/storage/threads/thread-record.js';
-import { ThreadTranscriptStore } from '../../src/storage/threads/transcript-store.js';
+import { createTestStores, type TestStores } from '../support/stores.js';
 
 const EMPTY_USAGE: Usage = {
   requests: 0,
@@ -56,26 +62,24 @@ function testSettingsUpdate(
   });
 }
 
-describe('ThreadManager', () => {
+describe('ThreadFeature', () => {
   let root: string;
-  let storage: CodingStorage;
-  let logs: ThreadLogRepository;
-  let executors: FakeExecutorFactory;
-  let manager: ThreadManager;
+  let storage: TestStores;
+  let logs: ThreadStore;
+  let agent: FakeAgent;
+  let manager: ThreadFeature;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'ello-thread-manager-'));
-    storage = createCodingStorage({
+    storage = createTestStores({
       databasePath: join(root, 'state.sqlite'),
       artifactsDir: join(root, 'artifacts'),
     });
-    logs = new ThreadLogRepository({ root });
-    executors = new FakeExecutorFactory();
-    manager = new ThreadManager({
-      root,
-      logs,
-      catalog: storage.threads,
-      executorFactory: (snapshot) => executors.create(snapshot),
+    logs = createThreadStore({ root, database: storage.db });
+    agent = new FakeAgent();
+    manager = createThreadFeature({
+      store: logs,
+      startAgentRun: (input) => agent.startRun(input),
       resolveInitialSettings: testInitialSettings,
       resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
       unloadGraceMs: 1,
@@ -107,8 +111,8 @@ describe('ThreadManager', () => {
       first.runtime.startTurn([{ type: 'text', text: 'first' }]),
       second.runtime.startTurn([{ type: 'text', text: 'second' }]),
     ]);
-    const firstHandle = executors.handle(first.snapshot.thread.id);
-    const secondHandle = executors.handle(second.snapshot.thread.id);
+    const firstHandle = agent.run(first.snapshot.thread.id);
+    const secondHandle = agent.run(second.snapshot.thread.id);
     firstHandle.agentMessage(firstTurn.id, 'first answer');
     secondHandle.agentMessage(secondTurn.id, 'second answer');
     firstHandle.finish({ status: 'completed', usage: EMPTY_USAGE });
@@ -132,7 +136,7 @@ describe('ThreadManager', () => {
     await expect(
       attachment.runtime.startTurn([{ type: 'text', text: 'second' }]),
     ).rejects.toMatchObject({ type: 'threadBusy' });
-    executors.handle(attachment.snapshot.thread.id).finish({
+    agent.run(attachment.snapshot.thread.id).finish({
       status: 'completed',
       usage: EMPTY_USAGE,
     });
@@ -149,7 +153,7 @@ describe('ThreadManager', () => {
     await expect(
       attachment.runtime.interruptTurn('turn_stale'),
     ).rejects.toMatchObject({ type: 'turnMismatch' });
-    executors.handle(attachment.snapshot.thread.id).finish({
+    agent.run(attachment.snapshot.thread.id).finish({
       status: 'completed',
       usage: EMPTY_USAGE,
     });
@@ -160,7 +164,7 @@ describe('ThreadManager', () => {
     const turn = await source.runtime.startTurn([
       { type: 'text', text: 'source' },
     ]);
-    const handle = executors.handle(source.snapshot.thread.id);
+    const handle = agent.run(source.snapshot.thread.id);
     handle.agentMessage(turn.id, 'answer');
     handle.finish({ status: 'completed', usage: EMPTY_USAGE });
     await vi.waitFor(async () => {
@@ -194,7 +198,8 @@ describe('ThreadManager', () => {
       sourceSnapshot.turns[0]?.items[0]?.id,
     );
     expect(
-      await new ThreadTranscriptStore(logs).load(fork.snapshot.thread.id),
+      compactionView(await logs.read(fork.snapshot.thread.id))
+        .projectedMessages,
     ).toEqual([{ role: 'user', content: 'source model history' }]);
     expect(fork.snapshot.goal).toMatchObject({
       objective: sourceGoal.objective,
@@ -225,7 +230,7 @@ describe('ThreadManager', () => {
     };
 
     await attachment.runtime.startTurn([{ type: 'text', text: 'first' }]);
-    executors.handle(attachment.snapshot.thread.id).finish({
+    agent.run(attachment.snapshot.thread.id).finish({
       status: 'completed',
       usage: firstUsage,
     });
@@ -233,7 +238,7 @@ describe('ThreadManager', () => {
       expect((await attachment.runtime.snapshot()).thread.status).toBe('idle');
     });
     await attachment.runtime.startTurn([{ type: 'text', text: 'second' }]);
-    executors.handle(attachment.snapshot.thread.id).finish({
+    agent.run(attachment.snapshot.thread.id).finish({
       status: 'completed',
       usage: secondUsage,
     });
@@ -264,7 +269,7 @@ describe('ThreadManager', () => {
       tokenBudget: 30,
     });
     await attachment.runtime.startTurn([{ type: 'text', text: 'work' }]);
-    executors.handle(attachment.snapshot.thread.id).finish({
+    agent.run(attachment.snapshot.thread.id).finish({
       status: 'completed',
       usage: {
         requests: 1,
@@ -301,14 +306,26 @@ describe('ThreadManager', () => {
     const attachment = await startThread(manager, 'connection-goal-event');
     const goal = await attachment.runtime.setGoal({ objective: '完成工作' });
     await attachment.runtime.startTurn([{ type: 'text', text: 'finish' }]);
-    const handle = executors.handle(attachment.snapshot.thread.id);
+    const handle = agent.run(attachment.snapshot.thread.id);
     handle.emit({
-      type: 'goalUpdated',
-      goal: {
-        ...goal,
-        status: 'complete',
-        updatedAt: new Date().toISOString(),
+      type: 'toolStarted',
+      toolCallId: 'item_goal_update',
+      name: 'update_goal',
+      input: { status: 'complete' },
+      occurredAt: new Date().toISOString(),
+    });
+    handle.emit({
+      type: 'toolCompleted',
+      toolCallId: 'item_goal_update',
+      output: {
+        kind: 'thread-goal-updated',
+        goal: {
+          ...goal,
+          status: 'complete',
+          updatedAt: new Date().toISOString(),
+        },
       },
+      occurredAt: new Date().toISOString(),
     });
     handle.finish({
       status: 'completed',
@@ -335,19 +352,18 @@ describe('ThreadManager', () => {
     const attachment = await startThread(manager, 'connection-1');
     const threadId = attachment.snapshot.thread.id;
     await manager.close();
-    const readFactory = new FakeExecutorFactory();
-    manager = new ThreadManager({
-      root,
-      logs,
-      catalog: storage.threads,
-      executorFactory: (snapshot) => readFactory.create(snapshot),
+    const readAgent = new FakeAgent();
+    manager = createThreadFeature({
+      store: logs,
+      startAgentRun: (input) => readAgent.startRun(input),
+      unloadGraceMs: 30_000,
       resolveInitialSettings: testInitialSettings,
       resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
     });
     await expect(
       manager.read({ threadId, includeTurns: true, includeItems: true }),
     ).resolves.toMatchObject({ thread: { id: threadId } });
-    expect(readFactory.created).toBe(0);
+    expect(readAgent.started).toBe(0);
   });
 
   it('无订阅 Thread 在 grace 后卸载 runtime 并释放 executor', async () => {
@@ -358,7 +374,6 @@ describe('ThreadManager', () => {
     const threadId = attachment.snapshot.thread.id;
 
     await vi.waitFor(async () => expect(await manager.loaded()).toEqual([]));
-    expect(executors.isClosed(threadId)).toBe(true);
     await expect(
       manager.read({ threadId, includeTurns: false, includeItems: false }),
     ).resolves.toMatchObject({ thread: { id: threadId } });
@@ -371,11 +386,9 @@ describe('ThreadManager', () => {
     const resolverGate = new Promise<void>((resolve) => {
       releaseResolver = resolve;
     });
-    manager = new ThreadManager({
-      root,
-      logs,
-      catalog: storage.threads,
-      executorFactory: (snapshot) => executors.create(snapshot),
+    manager = createThreadFeature({
+      store: logs,
+      startAgentRun: (input) => agent.startRun(input),
       resolveInitialSettings: testInitialSettings,
       resolveSettingsUpdate: async (_snapshot, params) => {
         resolverStarted = true;
@@ -406,7 +419,7 @@ describe('ThreadManager', () => {
     const recoveryThreadId = 'thr_recovery';
     const recoveryTurnId = 'turn_recovery';
     const createdAt = new Date().toISOString();
-    await logs.create(recoveryThreadId, {
+    const crashedThread = await logs.create(recoveryThreadId, {
       kind: 'thread.created',
       rootId: recoveryThreadId,
       cwd: '/workspace',
@@ -476,12 +489,12 @@ describe('ThreadManager', () => {
         createdAt,
       },
     });
-    const recoveryFactory = new FakeExecutorFactory();
-    manager = new ThreadManager({
-      root,
-      logs,
-      catalog: storage.threads,
-      executorFactory: (snapshot) => recoveryFactory.create(snapshot),
+    await crashedThread.lease.release();
+    const recoveryAgent = new FakeAgent();
+    manager = createThreadFeature({
+      store: logs,
+      startAgentRun: (input) => recoveryAgent.startRun(input),
+      unloadGraceMs: 30_000,
       resolveInitialSettings: testInitialSettings,
       resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
     });
@@ -499,7 +512,7 @@ describe('ThreadManager', () => {
     ).toMatchObject({ status: 'failed' });
     expect(snapshot.pendingServerRequests).toEqual([]);
     expect(storage.threads.state(recoveryThreadId)?.seq).toBe(snapshot.seq);
-    expect(recoveryFactory.created).toBe(0);
+    expect(recoveryAgent.started).toBe(0);
   });
 
   it('首个成功 Turn 生成并持久化标题，生成前使用用户输入 preview', async () => {
@@ -511,11 +524,10 @@ describe('ThreadManager', () => {
         return Promise.resolve('修复延迟审批响应');
       },
     };
-    manager = new ThreadManager({
-      root,
-      logs,
-      catalog: storage.threads,
-      executorFactory: (snapshot) => executors.create(snapshot),
+    manager = createThreadFeature({
+      store: logs,
+      startAgentRun: (input) => agent.startRun(input),
+      unloadGraceMs: 30_000,
       titleGenerator,
       resolveInitialSettings: testInitialSettings,
       resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
@@ -526,6 +538,7 @@ describe('ThreadManager', () => {
       'connection-title',
       {
         cwd: '/workspace',
+        name: '',
         subscribe: true,
         metadata: {},
       },
@@ -540,7 +553,7 @@ describe('ThreadManager', () => {
       name: '',
       preview: '修复审批流程 并补测试',
     });
-    executors.handle(attachment.snapshot.thread.id).finish({
+    agent.run(attachment.snapshot.thread.id).finish({
       status: 'completed',
       usage: EMPTY_USAGE,
     });
@@ -559,11 +572,10 @@ describe('ThreadManager', () => {
 
     const threadId = attachment.snapshot.thread.id;
     await manager.close();
-    manager = new ThreadManager({
-      root,
-      logs,
-      catalog: storage.threads,
-      executorFactory: (snapshot) => executors.create(snapshot),
+    manager = createThreadFeature({
+      store: logs,
+      startAgentRun: (input) => agent.startRun(input),
+      unloadGraceMs: 30_000,
       resolveInitialSettings: testInitialSettings,
       resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
     });
@@ -584,11 +596,10 @@ describe('ThreadManager', () => {
   it('标题生成失败不改变 Turn 成功终态', async () => {
     await manager.close();
     let attempted = false;
-    manager = new ThreadManager({
-      root,
-      logs,
-      catalog: storage.threads,
-      executorFactory: (snapshot) => executors.create(snapshot),
+    manager = createThreadFeature({
+      store: logs,
+      startAgentRun: (input) => agent.startRun(input),
+      unloadGraceMs: 30_000,
       titleGenerator: {
         generate() {
           attempted = true;
@@ -601,13 +612,14 @@ describe('ThreadManager', () => {
     await manager.initialize();
     const attachment = await manager.start('connection-title-failure', {
       cwd: '/workspace',
+      name: '',
       subscribe: false,
       metadata: {},
     });
     await attachment.runtime.startTurn([
       { type: 'text', text: '仍应成功完成的任务' },
     ]);
-    executors.handle(attachment.snapshot.thread.id).finish({
+    agent.run(attachment.snapshot.thread.id).finish({
       status: 'completed',
       usage: EMPTY_USAGE,
     });
@@ -628,15 +640,18 @@ describe('ThreadManager', () => {
   it('启动时跳过其他 Server 持有的活跃 Thread', async () => {
     const attachment = await startThread(manager, 'connection-owner');
     const threadId = attachment.snapshot.thread.id;
-    const secondStorage = createCodingStorage({
+    const secondStorage = createTestStores({
       databasePath: join(root, 'state.sqlite'),
       artifactsDir: join(root, 'artifacts'),
     });
-    const secondManager = new ThreadManager({
+    const secondThreadStore = createThreadStore({
       root,
-      logs: new ThreadLogRepository({ root }),
-      catalog: secondStorage.threads,
-      executorFactory: (snapshot) => executors.create(snapshot),
+      database: secondStorage.db,
+    });
+    const secondManager = createThreadFeature({
+      store: secondThreadStore,
+      startAgentRun: (input) => agent.startRun(input),
+      unloadGraceMs: 30_000,
       resolveInitialSettings: testInitialSettings,
       resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
     });
@@ -689,7 +704,7 @@ describe('ThreadManager', () => {
       status: 'idle',
     });
     expect(storage.threads.state(threadId)?.archived).toBe(false);
-    await manager.deleteAny(threadId);
+    await manager.delete(threadId);
     expect(storage.threads.state(threadId)).toBeNull();
   });
 
@@ -721,11 +736,10 @@ describe('ThreadManager', () => {
       ),
     );
 
-    manager = new ThreadManager({
-      root,
-      logs,
-      catalog: storage.threads,
-      executorFactory: (snapshot) => executors.create(snapshot),
+    manager = createThreadFeature({
+      store: logs,
+      startAgentRun: (input) => agent.startRun(input),
+      unloadGraceMs: 30_000,
       resolveInitialSettings: testInitialSettings,
       resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
     });
@@ -769,7 +783,7 @@ describe('ThreadManager', () => {
     });
     expect(persistedAtNotification).toBe(true);
     expect(catalogAtNotification).toBe(true);
-    executors.handle(attachment.snapshot.thread.id).finish({
+    agent.run(attachment.snapshot.thread.id).finish({
       status: 'completed',
       usage: EMPTY_USAGE,
     });
@@ -777,20 +791,23 @@ describe('ThreadManager', () => {
 
   it('Server Request 只接受第一条 response', async () => {
     const attachment = await startThread(manager, 'connection-1');
-    const turn = await attachment.runtime.startTurn([
-      { type: 'text', text: 'approval' },
-    ]);
-    const handle = executors.handle(attachment.snapshot.thread.id);
+    await attachment.runtime.startTurn([{ type: 'text', text: 'approval' }]);
+    const handle = agent.run(attachment.snapshot.thread.id);
     handle.emit({
-      type: 'serverRequest',
-      request: {
-        id: 'srvreq_test',
-        method: 'item/commandExecution/requestApproval',
-        threadId: attachment.snapshot.thread.id,
-        turnId: turn.id,
-        itemId: 'item_approval',
-        params: {},
-        createdAt: new Date().toISOString(),
+      type: 'interactionRequired',
+      interaction: {
+        type: 'approval',
+        interactionId: 'item_approval',
+        item: {
+          kind: 'approval',
+          toolCallId: 'item_approval',
+          toolName: 'bash',
+          input: { command: 'pwd' },
+          metadata: {
+            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
+          },
+        },
+        occurredAt: new Date().toISOString(),
       },
     });
     await vi.waitFor(async () => {
@@ -798,15 +815,18 @@ describe('ThreadManager', () => {
         (await attachment.runtime.snapshot()).pendingServerRequests,
       ).toHaveLength(1);
     });
-    await attachment.runtime.resolveServerRequest('srvreq_test', {
+    const requestId = (await attachment.runtime.snapshot())
+      .pendingServerRequests[0]?.id;
+    if (requestId === undefined) throw new Error('Missing Server Request.');
+    await attachment.runtime.resolveServerRequest(requestId, {
       decision: 'accept',
     });
     await expect(
-      attachment.runtime.resolveServerRequest('srvreq_test', {
+      attachment.runtime.resolveServerRequest(requestId, {
         decision: 'accept',
       }),
     ).rejects.toMatchObject({ type: 'requestResolved' });
-    expect(handle.resolutions).toEqual(['srvreq_test']);
+    expect(handle.resolutions).toEqual(['item_approval']);
     handle.finish({ status: 'completed', usage: EMPTY_USAGE });
   });
 
@@ -830,32 +850,74 @@ describe('ThreadManager', () => {
         return Promise.resolve({ decision: 'accept' });
       },
     );
-    const turn = await attachment.runtime.startTurn([
-      { type: 'text', text: 'approval' },
-    ]);
-    const handle = executors.handle(attachment.snapshot.thread.id);
+    await attachment.runtime.startTurn([{ type: 'text', text: 'approval' }]);
+    const handle = agent.run(attachment.snapshot.thread.id);
     handle.emit({
-      type: 'serverRequest',
-      request: {
-        id: 'srvreq_failover',
-        method: 'item/commandExecution/requestApproval',
-        threadId: attachment.snapshot.thread.id,
-        turnId: turn.id,
-        itemId: 'item_approval',
-        params: {},
-        createdAt: new Date().toISOString(),
+      type: 'interactionRequired',
+      interaction: {
+        type: 'approval',
+        interactionId: 'item_approval',
+        item: {
+          kind: 'approval',
+          toolCallId: 'item_approval',
+          toolName: 'bash',
+          input: { command: 'pwd' },
+          metadata: {
+            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
+          },
+        },
+        occurredAt: new Date().toISOString(),
       },
     });
 
     await vi.waitFor(() =>
-      expect(handle.resolutions).toEqual(['srvreq_failover']),
+      expect(handle.resolutions).toEqual(['item_approval']),
     );
     expect(controllers).toEqual(['first', 'second']);
     handle.finish({ status: 'completed', usage: EMPTY_USAGE });
   });
+
+  it('全部 Server Request controller 失败时拒绝 pending interaction', async () => {
+    const attachment = await manager.start(
+      'connection-controller-failed',
+      startParams(),
+      () => undefined,
+      () => Promise.reject(new Error('controller disconnected')),
+    );
+    await attachment.runtime.startTurn([{ type: 'text', text: 'approval' }]);
+    const handle = agent.run(attachment.snapshot.thread.id);
+    handle.emit({
+      type: 'interactionRequired',
+      interaction: {
+        type: 'approval',
+        interactionId: 'item_approval_failed',
+        item: {
+          kind: 'approval',
+          toolCallId: 'item_approval_failed',
+          toolName: 'bash',
+          input: { command: 'pwd' },
+          metadata: {
+            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
+          },
+        },
+        occurredAt: new Date().toISOString(),
+      },
+    });
+
+    await vi.waitFor(() => expect(handle.rejections).toHaveLength(1));
+    expect(handle.rejections[0]).toMatchObject({
+      interactionId: 'item_approval_failed',
+      error: { message: 'controller disconnected' },
+    });
+    await vi.waitFor(async () => {
+      expect(
+        (await attachment.runtime.snapshot()).pendingServerRequests,
+      ).toEqual([]);
+    });
+  });
 });
 
-function startThread(manager: ThreadManager, connectionId: string) {
+function startThread(manager: ThreadFeature, connectionId: string) {
   return manager.start(connectionId, startParams(), () => undefined);
 }
 
@@ -868,136 +930,132 @@ function startParams() {
   } as const;
 }
 
-class FakeExecutorFactory {
-  created = 0;
-  private readonly executors = new Map<string, FakeExecutor>();
+class FakeAgent {
+  started = 0;
+  private readonly runs = new Map<string, FakeAgentRun>();
 
-  create(snapshot: ThreadSnapshot): Promise<TurnExecutor> {
-    this.created += 1;
-    const executor = new FakeExecutor();
-    this.executors.set(snapshot.thread.id, executor);
-    return Promise.resolve(executor);
+  /**
+   * 为一次稳定请求启动独立 Agent run，并把事件流与最终结果的观察权交给调用方。
+   *
+   * Args:
+   * - `input`: `startRun` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
+   *
+   * Returns:
+   * - Promise 兑现为独立 `AgentRun`；其事件流与 `result` 覆盖该运行的完整生命周期。
+   *
+   * Throws:
+   * - 当 测试夹具的 `thread-manager.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
+  startRun(input: AgentRunRequest): Promise<AgentRun> {
+    this.started += 1;
+    const run = new FakeAgentRun();
+    this.runs.set(input.threadId, run);
+    return Promise.resolve(run);
   }
 
-  handle(threadId: string): FakeExecutionHandle {
-    const handle = this.executors.get(threadId)?.lastHandle;
-    if (handle === undefined) throw new Error(`No handle for ${threadId}.`);
-    return handle;
-  }
-
-  isClosed(threadId: string): boolean {
-    return this.executors.get(threadId)?.closed === true;
-  }
-}
-
-class FakeExecutor implements TurnExecutor {
-  lastHandle: FakeExecutionHandle | undefined;
-  closed = false;
-
-  start(): Promise<TurnExecutionHandle> {
-    this.lastHandle = new FakeExecutionHandle();
-    return Promise.resolve(this.lastHandle);
-  }
-
-  close(): Promise<void> {
-    this.closed = true;
-    return Promise.resolve();
+  run(threadId: string): FakeAgentRun {
+    const run = this.runs.get(threadId);
+    if (run === undefined) throw new Error(`No Agent run for ${threadId}.`);
+    return run;
   }
 }
 
-class FakeExecutionHandle implements TurnExecutionHandle {
+class FakeAgentRun implements AgentRun {
   readonly resolutions: string[] = [];
-  readonly events: AsyncIterable<TurnExecutionEvent>;
-  readonly final: Promise<TurnExecutionResult>;
+  readonly rejections: Array<
+    Extract<Parameters<AgentRun['resume']>[0], { type: 'rejected' }>
+  > = [];
+  readonly events: AsyncIterable<AgentRunEvent>;
+  readonly result: Promise<AgentRunResult>;
   private readonly queue = new EventQueue();
-  private readonly resolveFinal: (result: TurnExecutionResult) => void;
+  private readonly resolveResult: (result: AgentRunResult) => void;
   private settled = false;
 
   constructor() {
     this.events = this.queue;
-    let resolveFinal: (result: TurnExecutionResult) => void = () => undefined;
-    this.final = new Promise((resolve) => {
-      resolveFinal = resolve;
+    let resolveResult: ((result: AgentRunResult) => void) | undefined;
+    this.result = new Promise((resolve) => {
+      resolveResult = resolve;
     });
-    this.resolveFinal = resolveFinal;
+    if (resolveResult === undefined) {
+      throw new Error('Fake Agent run did not initialize its result resolver.');
+    }
+    this.resolveResult = resolveResult;
   }
 
-  emit(event: TurnExecutionEvent): void {
+  emit(event: AgentRunEvent): void {
     this.queue.push(event);
   }
 
-  agentMessage(turnId: string, text: string): void {
+  agentMessage(_turnId: string, text: string): void {
     const itemId = `item_${text.replaceAll(' ', '_')}`;
     const createdAt = new Date().toISOString();
     this.emit({
-      type: 'itemStarted',
-      item: {
-        type: 'agentMessage',
-        id: itemId,
-        turnId,
-        createdAt,
-        text: '',
-        phase: 'final',
-        status: 'inProgress',
-      },
+      type: 'messageStarted',
+      messageId: itemId,
+      occurredAt: createdAt,
     });
     this.emit({
-      type: 'itemDelta',
-      itemId,
-      delta: { type: 'agentMessage', text },
+      type: 'messageDelta',
+      messageId: itemId,
+      text,
     });
     this.emit({
-      type: 'itemCompleted',
-      item: {
-        type: 'agentMessage',
-        id: itemId,
-        turnId,
-        createdAt,
-        text,
-        phase: 'final',
-        status: 'completed',
-      },
+      type: 'messageCompleted',
+      messageId: itemId,
+      text,
     });
   }
 
-  finish(result: TurnExecutionResult): void {
+  finish(result: AgentRunResult): void {
     if (this.settled) return;
     this.settled = true;
     this.queue.end();
-    this.resolveFinal(result);
+    this.resolveResult(result);
   }
 
-  steer(_input: readonly UserInput[]): Promise<void> {
-    return Promise.resolve();
-  }
+  steer(_input: string): void {}
 
-  interrupt(reason: string): Promise<void> {
+  interrupt(reason: string): void {
     this.finish({ status: 'interrupted', usage: EMPTY_USAGE, reason });
-    return Promise.resolve();
   }
 
-  resolveServerRequest(requestId: string): Promise<void> {
-    this.resolutions.push(requestId);
-    return Promise.resolve();
-  }
-
-  rejectServerRequest(): Promise<void> {
-    return Promise.resolve();
+  resume(resolution: Parameters<AgentRun['resume']>[0]): void {
+    switch (resolution.type) {
+      case 'approval':
+      case 'toolResult':
+        this.resolutions.push(resolution.interactionId);
+        return;
+      case 'rejected':
+        this.rejections.push(resolution);
+        this.finish({
+          status: 'failed',
+          usage: EMPTY_USAGE,
+          error: {
+            code: String(resolution.error.code),
+            message: resolution.error.message,
+          },
+        });
+        return;
+      default:
+        resolution satisfies never;
+        throw new Error(`Unhandled Agent resolution: ${String(resolution)}`);
+    }
   }
 }
 
-class EventQueue implements AsyncIterable<TurnExecutionEvent> {
-  private readonly values: TurnExecutionEvent[] = [];
+class EventQueue implements AsyncIterable<AgentRunEvent> {
+  private readonly values: AgentRunEvent[] = [];
   private readonly waiters: Array<
-    (result: IteratorResult<TurnExecutionEvent>) => void
+    (result: IteratorResult<AgentRunEvent>) => void
   > = [];
   private ended = false;
 
-  [Symbol.asyncIterator](): AsyncIterator<TurnExecutionEvent> {
+  [Symbol.asyncIterator](): AsyncIterator<AgentRunEvent> {
     return { next: () => this.next() };
   }
 
-  push(event: TurnExecutionEvent): void {
+  push(event: AgentRunEvent): void {
     const waiter = this.waiters.shift();
     if (waiter === undefined) this.values.push(event);
     else waiter({ done: false, value: event });
@@ -1010,7 +1068,7 @@ class EventQueue implements AsyncIterable<TurnExecutionEvent> {
     }
   }
 
-  private next(): Promise<IteratorResult<TurnExecutionEvent>> {
+  private next(): Promise<IteratorResult<AgentRunEvent>> {
     const event = this.values.shift();
     if (event !== undefined)
       return Promise.resolve({ done: false, value: event });

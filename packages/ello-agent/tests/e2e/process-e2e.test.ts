@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 process-e2e 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -12,7 +18,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 
 const packageDir = fileURLToPath(new URL('../../', import.meta.url));
-const entryPath = path.join(packageDir, 'dist/server/entry.js');
+const entryPath = path.join(packageDir, 'dist/main.js');
 const execFile = promisify((await import('node:child_process')).execFile);
 const roots = new Set<string>();
 const children = new Set<ChildProcessWithoutNullStreams>();
@@ -825,6 +831,18 @@ class WebSocketPeer implements RpcPeer {
     return this.messages.next(timeoutMs);
   }
 
+  /**
+   * 停止 测试夹具的 `process-e2e.test` 模块 的异步工作并释放其拥有的资源；关闭完成后不再接受新操作。
+   *
+   * Args:
+   * - 无：操作使用实例或闭包已经持有的稳定状态。
+   *
+   * Returns:
+   * - Promise 在全部已拥有资源完成释放、后台工作停止后兑现；失败会直接拒绝。
+   *
+   * Throws:
+   * - 当 测试夹具的 `process-e2e.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
   async close(): Promise<void> {
     if (this.socket.readyState === WebSocket.CLOSED) return;
     const closed = once(this.socket, 'close');
@@ -980,6 +998,18 @@ class MockChatServer {
     return instance;
   }
 
+  /**
+   * 停止 测试夹具的 `process-e2e.test` 模块 的异步工作并释放其拥有的资源；关闭完成后不再接受新操作。
+   *
+   * Args:
+   * - 无：操作使用实例或闭包已经持有的稳定状态。
+   *
+   * Returns:
+   * - Promise 在全部已拥有资源完成释放、后台工作停止后兑现；失败会直接拒绝。
+   *
+   * Throws:
+   * - 当 测试夹具的 `process-e2e.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
   close(): Promise<void> {
     modelServers.delete(this);
     if (!this.server.listening) return Promise.resolve();
@@ -1060,6 +1090,18 @@ function chatChunks(step: ModelStep, index: number): JsonObject[] {
   ];
 }
 
+/**
+ * 初始化 测试夹具的 `process-e2e.test` 模块 所需的目录、连接或缓存；完成前不得使用依赖这些资源的操作。
+ *
+ * Args:
+ * - `peer`: `initialize` 所需的业务值；函数按声明读取，不补造缺失内容。
+ *
+ * Returns:
+ * - Promise 在依赖资源全部可用后兑现；兑现前实例仍视为未就绪。
+ *
+ * Throws:
+ * - 当 测试夹具的 `process-e2e.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+ */
 async function initialize(peer: RpcPeer): Promise<void> {
   const response = await rpc(peer, 1, 'initialize', {
     clientInfo: { name: 'process-e2e', title: 'Process E2E', version: '1.0.0' },

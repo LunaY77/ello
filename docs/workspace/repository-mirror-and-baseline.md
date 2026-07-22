@@ -114,7 +114,7 @@ sequenceDiagram
 
 ## 源码入口
 
-- [`RepoStore`](../../packages/ello-agent/src/workspace/repo-store.ts)：仓库登记、远端同步、baseline 和导入导出。
-- [`WorkspaceStore.attachRepo()`](../../packages/ello-agent/src/workspace/workspace-store.ts)：branch 与 detached worktree 创建。
-- [`planWorkspaceRepo()`](../../packages/ello-agent/src/workspace/plan.ts)：checkout 路径、角色和模式规划。
+- [`RepoStore`](../../packages/ello-agent/src/features/workspace/repositories.ts)：仓库登记、远端同步、baseline 和导入导出。
+- [`WorkspaceStore`](../../packages/ello-agent/src/features/workspace/workspaces.ts)：branch 与 detached worktree 创建。
+- [`planWorkspaceRepo()`](../../packages/ello-agent/src/features/workspace/plan.ts)：checkout 路径、角色和模式规划。
 - [Workspace 测试](../../packages/ello-agent/tests/workspace/workspace.test.ts)：同步、分支隔离、reference 和 bundle 契约。

@@ -1,59 +1,90 @@
+/**
+ * 本文件验证 app-server 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ConfigValidationError } from '../../src/config/index.js';
-import type {
-  TurnExecutionHandle,
-  TurnExecutor,
-} from '../../src/domain/ports/turn-executor.js';
+import { ConfigValidationError } from '../../src/features/config/index.js';
+import {
+  createThreadFeature,
+  createThreadStore,
+  type ThreadFeature,
+} from '../../src/features/thread/index.js';
 import {
   ELLO_PROTOCOL_VERSION,
   type ParsedClientParams,
   type ThreadSnapshot,
 } from '../../src/protocol/v1/index.js';
-import type { RpcServices } from '../../src/server/methods/server-services.js';
-import { ThreadManager } from '../../src/server/runtime/thread-manager.js';
+import {
+  route,
+  type RpcApplicationRouteTable,
+} from '../../src/server/rpc/route.js';
 import { AgentServer } from '../../src/server/server.js';
 import type { AppServerTransport } from '../../src/server/transport/transport.js';
-import {
-  createCodingStorage,
-  type CodingStorage,
-} from '../../src/storage/database/index.js';
+import { createTestFeatures } from '../support/features.js';
+import { createTestStores, type TestStores } from '../support/stores.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 describe('AgentServer JSON-RPC processor', () => {
   let root: string;
-  let storage: CodingStorage;
-  let threads: ThreadManager;
+  let storage: TestStores;
+  let threads: ThreadFeature;
   let server: AgentServer;
-  let services: TestServices;
+  let configRead: TestConfigReadRoute;
   let transport: TestTransport;
   let connectionTask: Promise<void>;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'ello-app-server-'));
-    storage = createCodingStorage({
+    storage = createTestStores({
       databasePath: join(root, 'state.sqlite'),
       artifactsDir: join(root, 'artifacts'),
     });
-    threads = new ThreadManager({
-      root,
-      catalog: storage.threads,
-      executorFactory: () => Promise.resolve(new IdleExecutor()),
+    const store = createThreadStore({ root, database: storage.db });
+    threads = createThreadFeature({
+      store,
+      startAgentRun: () =>
+        Promise.reject(new Error('Test Agent does not run turns.')),
+      unloadGraceMs: 30_000,
       resolveInitialSettings: testInitialSettings,
       resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
     });
-    services = new TestServices();
+    const services = createTestFeatures({
+      threads,
+      store,
+      storage,
+      compact: () => Promise.reject(new Error('Unexpected compact request.')),
+    });
+    configRead = new TestConfigReadRoute();
+    const routes = {
+      ...services.routes,
+      // @ts-expect-error -- malformed result is required to exercise wire response validation.
+      'config/read': route('read', () => configRead.run()),
+    } satisfies RpcApplicationRouteTable;
     server = new AgentServer({
       version: '1.0.0',
-      threads,
       transports: ['stdio'],
-      services,
+      routes,
+      initialize: async () => {
+        await services.initialize();
+        await threads.initialize();
+      },
+      releaseConnection: async (connectionId) => {
+        await threads.releaseConnection(connectionId);
+        services.releaseConnection(connectionId);
+      },
+      closeResources: async () => {
+        await services.close();
+        await threads.close();
+      },
     });
     transport = new TestTransport();
     await server.start();
@@ -137,7 +168,7 @@ describe('AgentServer JSON-RPC processor', () => {
 
   it('handler 返回值违反响应 schema 时返回独立错误类型', async () => {
     await initialize(transport);
-    services.resolve({ invalid: true });
+    configRead.resolve({ invalid: true });
     await transport.clientSend(
       request(2, 'config/read', { cwd: '/workspace', includeSources: true }),
     );
@@ -156,7 +187,7 @@ describe('AgentServer JSON-RPC processor', () => {
 
   it('配置校验失败时返回 configInvalid 和具体 issues', async () => {
     await initialize(transport);
-    services.reject(
+    configRead.reject(
       new ConfigValidationError('Invalid test config.', [
         { path: ['tools', 'need_approval'], message: 'Expected array.' },
       ]),
@@ -258,6 +289,18 @@ describe('AgentServer JSON-RPC processor', () => {
   });
 });
 
+/**
+ * 初始化 测试夹具的 `app-server.test` 模块 所需的目录、连接或缓存；完成前不得使用依赖这些资源的操作。
+ *
+ * Args:
+ * - `transport`: `initialize` 所需的业务值；函数按声明读取，不补造缺失内容。
+ *
+ * Returns:
+ * - Promise 在依赖资源全部可用后兑现；兑现前实例仍视为未就绪。
+ *
+ * Throws:
+ * - 当 测试夹具的 `app-server.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+ */
 async function initialize(transport: TestTransport): Promise<void> {
   await transport.clientSend(request(1, 'initialize', initializeParams()));
   expect(await transport.clientReceive()).toMatchObject({
@@ -309,16 +352,6 @@ function readThreadId(message: Readonly<Record<string, unknown>>): string {
   return result.thread.id;
 }
 
-class IdleExecutor implements TurnExecutor {
-  start(): Promise<TurnExecutionHandle> {
-    return Promise.reject(new Error('IdleExecutor does not run turns.'));
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve();
-  }
-}
-
 function testInitialSettings(params: ParsedClientParams<'thread/start'>) {
   return Promise.resolve({
     mode: params.mode ?? 'ask-before-changes',
@@ -339,7 +372,7 @@ function testSettingsUpdate(
   });
 }
 
-class TestServices implements RpcServices {
+class TestConfigReadRoute {
   private outcome:
     | { readonly type: 'resolve'; readonly value: unknown }
     | { readonly type: 'reject'; readonly error: unknown }
@@ -353,18 +386,14 @@ class TestServices implements RpcServices {
     this.outcome = { type: 'reject', error };
   }
 
-  dispatch(): Promise<unknown> {
+  run(): Promise<unknown> {
     if (this.outcome?.type === 'resolve') {
       return Promise.resolve(this.outcome.value);
     }
     if (this.outcome?.type === 'reject') {
       return Promise.reject(this.outcome.error);
     }
-    return Promise.reject(new Error('Unexpected non-core RPC method.'));
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve();
+    return Promise.reject(new Error('Unexpected config/read method.'));
   }
 }
 
@@ -384,6 +413,18 @@ class TestTransport implements AppServerTransport {
     return Promise.resolve();
   }
 
+  /**
+   * 停止 测试夹具的 `app-server.test` 模块 的异步工作并释放其拥有的资源；关闭完成后不再接受新操作。
+   *
+   * Args:
+   * - 无：操作使用实例或闭包已经持有的稳定状态。
+   *
+   * Returns:
+   * - Promise 在全部已拥有资源完成释放、后台工作停止后兑现；失败会直接拒绝。
+   *
+   * Throws:
+   * - 当 测试夹具的 `app-server.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
   close(): Promise<void> {
     if (this.closed) return Promise.resolve();
     this.closed = true;

@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 tasks 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -5,26 +11,23 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  createCodingStorage,
-  type CodingStorage,
-} from '../../src/storage/database/index.js';
-import {
   createTaskService,
   TaskEventBus,
   type TaskEvent,
   type TaskService,
-} from '../../src/storage/tasks/index.js';
+} from '../../src/features/task/index.js';
+import { createTestStores, type TestStores } from '../support/stores.js';
 
-describe('TaskBoardRepository', () => {
+describe('TaskBoardStore', () => {
   let oldHome: string | undefined;
   let home: string;
-  let storage: CodingStorage;
+  let storage: TestStores;
 
   beforeEach(async () => {
     oldHome = process.env.ELLO_HOME;
     home = await mkdtemp(path.join(tmpdir(), 'ello-task-board-'));
     process.env.ELLO_HOME = home;
-    storage = createCodingStorage();
+    storage = createTestStores();
   });
 
   afterEach(async () => {
@@ -94,7 +97,7 @@ describe('TaskBoardRepository', () => {
   it('两个 claim 竞争只有一个 owner 成功', async () => {
     const service = sessionService('session-a');
     const task = service.create({ subject: 'claim me' });
-    const secondStorage = createCodingStorage();
+    const secondStorage = createTestStores();
     const secondService = createTaskService(secondStorage.taskBoards, {
       type: 'session',
       sessionId: 'session-a',

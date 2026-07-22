@@ -54,22 +54,20 @@ After that, `ello --help` is available from shells where pnpm's global bin direc
 ## Documentation
 
 - [Chinese technical documentation](docs/README.md)
-- [Functional design and module contracts](docs/functional-design.md)
-- [Test design and contract matrix](docs/test-design.md)
-- [Refactor code review (Chinese)](docs/code-review.md)
+- [Module documentation (Chinese)](docs/README.md)
+- [Test strategy](docs/test-design.md)
+- [Refactor plan (Chinese)](docs/refactor-plan.md)
 - [Coding Agent TUI design](docs/tui/ello-tui-design.md)
 
 ## Development
 
 ```bash
 pnpm typecheck
-pnpm contract:check
 pnpm test
 pnpm lint
 ```
 
 Tests are grouped by business capability under `packages/*/tests/<module>/`.
-Every behavior change must update the functional design, test matrix, and its
-observable contract tests in the same change.
+They verify observable behavior; implementation documentation follows the code.
 
 See [`README-zh.md`](README-zh.md) for the Chinese documentation.

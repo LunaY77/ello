@@ -1,11 +1,17 @@
+/**
+ * 本文件验证 tool-scheduler 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { describe, expect, it } from 'vitest';
 
-import { ToolScheduler } from '../../src/agent/engine/core/tool-scheduler.js';
 import {
   defineDeferredTool,
   defineTool,
   z,
-} from '../../src/agent/engine/index.js';
+} from '../../src/features/agent/engine/index.js';
+import { ToolScheduler } from '../../src/features/agent/engine/tool-scheduler.js';
 
 describe('ToolScheduler', () => {
   it('在审批和执行前统一校验 immediate 工具输入', async () => {

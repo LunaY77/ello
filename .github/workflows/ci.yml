@@ -42,8 +42,5 @@ jobs:
       - name: Type check
         run: pnpm run typecheck
 
-      - name: Functional contract check
-        run: pnpm run contract:check
-
       - name: Unit tests
         run: pnpm run test

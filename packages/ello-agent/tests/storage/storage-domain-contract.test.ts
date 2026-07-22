@@ -1,15 +1,18 @@
+/**
+ * 本文件验证 storage-domain-contract 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { CheckpointStore } from '../../src/agent/change/checkpoint.js';
-import { recordCheckpointChanges } from '../../src/agent/change/recording.js';
-import {
-  createCodingStorage,
-  type CodingStorage,
-} from '../../src/storage/database/index.js';
+import { CheckpointStore } from '../../src/features/agent/change/checkpoint.js';
+import { recordCheckpointChanges } from '../../src/features/agent/change/recording.js';
+import { createTestStores, type TestStores } from '../support/stores.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -24,13 +27,13 @@ afterEach(async () => {
 
 async function createTestStorage(): Promise<{
   readonly root: string;
-  readonly storage: CodingStorage;
+  readonly storage: TestStores;
 }> {
   const root = await mkdtemp(path.join(tmpdir(), 'ello-storage-contract-'));
   temporaryDirectories.push(root);
   return {
     root,
-    storage: createCodingStorage({
+    storage: createTestStores({
       databasePath: path.join(root, 'state.sqlite'),
       artifactsDir: path.join(root, 'artifacts'),
     }),
@@ -605,6 +608,7 @@ function completedModelCall(input: {
     response: {
       text: '',
       messages: [],
+      newMessages: [],
       usage: {
         requests: 1,
         inputTokens: 100,
