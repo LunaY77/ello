@@ -2,6 +2,8 @@
 
 `@ello/tui` is the client-side package for Ello. It owns the CLI, Ink terminal UI, JSON-RPC client, and stdio/WebSocket/Unix transports. It never creates a model, executes a tool, writes server files, or decides permissions.
 
+The client uses `vscode-jsonrpc` for request IDs, pending responses, out-of-order correlation, cancellation, Server Request responses, and connection cleanup. Ello Zod schemas validate every request parameter, result, notification, and Server Request. UI pending approvals remain product state in `ThreadClient`, not a second RPC pending map.
+
 ```bash
 pnpm --filter @ello/tui build
 pnpm --filter @ello/tui run ello --help

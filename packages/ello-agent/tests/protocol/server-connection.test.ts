@@ -1,23 +1,49 @@
+/**
+ * 本文件验证 server-connection 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { describe, expect, it, vi } from 'vitest';
+import type {
+  NotificationMessage,
+  RequestMessage,
+  ResponseMessage,
+} from 'vscode-jsonrpc/node';
 
-import { ServerConnection } from '../../src/server/connection/server-connection.js';
+import {
+  ProtocolMessageWriter,
+  type RpcConnectionLimits,
+} from '../../src/server/server-connection.js';
 import type { AppServerTransport } from '../../src/server/transport/transport.js';
 
 const decoder = new TextDecoder();
 
-describe('ServerConnection outbound ordering', () => {
+const TEST_LIMITS = {
+  maxMessageBytes: 1_024,
+  maxInboundMessages: 8,
+  maxInboundBytes: 8_192,
+  maxOutboundMessages: 8,
+  maxOutboundBytes: 8_192,
+  reservedResponseMessages: 2,
+  reservedResponseBytes: 2_048,
+  backpressureTimeoutMs: 10_000,
+} as const satisfies RpcConnectionLimits;
+
+describe('ProtocolMessageWriter outbound ordering', () => {
   it('先发送 RPC response，再释放 notification 和 Server Request', async () => {
     const transport = new TestTransport();
-    const connection = new ServerConnection(transport, [
-      'read',
-      'submit',
-      'approve',
-    ]);
-    const release = connection.holdUnsolicited();
-    const request = connection.request(
-      'srvreq_test',
-      'item/commandExecution/requestApproval',
-      {
+    const writer = new ProtocolMessageWriter(
+      transport,
+      TEST_LIMITS,
+      () => undefined,
+    );
+    writer.beginResponseBarrier(1);
+    const serverRequest: RequestMessage = {
+      jsonrpc: '2.0',
+      id: 'srvreq_test',
+      method: 'item/commandExecution/requestApproval',
+      params: {
         threadId: 'thr_test',
         turnId: 'turn_test',
         itemId: 'item_test',
@@ -26,19 +52,22 @@ describe('ServerConnection outbound ordering', () => {
         cwd: '/workspace',
         availableDecisions: ['accept', 'decline'],
       },
-    );
-    void request.catch(() => undefined);
-    await connection.sendNotification({
+    };
+    const notification: NotificationMessage = {
+      jsonrpc: '2.0',
       method: 'server/ready',
       params: { protocolVersion: 1 },
-    });
+    };
+    const response: ResponseMessage = {
+      jsonrpc: '2.0',
+      id: 1,
+      result: { ok: true },
+    };
+    await writer.write(serverRequest);
+    await writer.write(notification);
 
-    await connection.sendResult(1, { ok: true });
-    expect(transport.sent).toEqual([
-      { jsonrpc: '2.0', id: 1, result: { ok: true } },
-    ]);
-
-    await release();
+    expect(transport.sent).toEqual([]);
+    await writer.write(response);
     expect(
       transport.sent.map((message) =>
         'method' in message ? message.method : 'response',
@@ -48,22 +77,41 @@ describe('ServerConnection outbound ordering', () => {
       'item/commandExecution/requestApproval',
       'server/ready',
     ]);
-    await connection.close('test complete');
   });
 
-  it('慢连接超过有界队列后主动关闭，不静默丢弃终态消息', async () => {
-    const transport = new TestTransport({ blockSends: true });
-    const connection = new ServerConnection(transport, ['read'], {
-      maxQueuedSends: 2,
+  it('outbox 满后等待背压超时再关闭连接，不静默扩展容量', async () => {
+    const transport = new TestTransport();
+    const limits = {
+      ...TEST_LIMITS,
+      maxOutboundMessages: 3,
+      maxOutboundBytes: 2_048,
+      reservedResponseMessages: 1,
+      reservedResponseBytes: 1_024,
+      backpressureTimeoutMs: 25,
+    } satisfies RpcConnectionLimits;
+    const writer = new ProtocolMessageWriter(transport, limits, (error) => {
+      void transport.close(error.message, true);
     });
-    void connection.sendResult(1, { value: 1 }).catch(() => undefined);
-    void connection.sendResult(2, { value: 2 }).catch(() => undefined);
+    const notification = (sequence: number): NotificationMessage => ({
+      jsonrpc: '2.0',
+      method: 'thread/sequence/advanced',
+      params: { threadId: 'thr_test', seq: sequence },
+    });
+    writer.beginResponseBarrier(99);
+    await writer.write(notification(1));
+    await writer.write(notification(2));
 
-    await expect(connection.sendResult(3, { value: 3 })).rejects.toThrow(
-      'outbound queue exceeds 2 messages',
+    const blocked = writer.write(notification(3));
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    expect(transport.closeReasons).toEqual([]);
+    await expect(blocked).rejects.toThrow(
+      'outbound queue remained full for 25 ms',
     );
     await vi.waitFor(() => expect(transport.closeReasons).toHaveLength(1));
-    expect(transport.closeReasons[0]).toContain('outbound queue exceeds 2');
+    expect(transport.closeReasons[0]).toContain(
+      'outbound queue remained full for 25 ms',
+    );
+    expect(transport.closeForces).toEqual([true]);
   });
 });
 
@@ -72,10 +120,7 @@ class TestTransport implements AppServerTransport {
   readonly connectionId = 'watch_test';
   readonly sent: Array<Record<string, unknown>> = [];
   readonly closeReasons: string[] = [];
-
-  constructor(
-    private readonly options: { readonly blockSends?: boolean } = {},
-  ) {}
+  readonly closeForces: boolean[] = [];
 
   messages(): AsyncIterable<Uint8Array> {
     return {
@@ -89,13 +134,25 @@ class TestTransport implements AppServerTransport {
     this.sent.push(
       JSON.parse(decoder.decode(message)) as Record<string, unknown>,
     );
-    return this.options.blockSends === true
-      ? new Promise(() => undefined)
-      : Promise.resolve();
+    return Promise.resolve();
   }
 
-  close(reason?: string): Promise<void> {
+  /**
+   * 停止 测试夹具的 `server-connection.test` 模块 的异步工作并释放其拥有的资源；关闭完成后不再接受新操作。
+   *
+   * Args:
+   * - `reason`: 可观察的终止或拒绝原因；会随失败状态向上游传播；省略时使用声明中明确的调用语义。
+   * - `force`: 显式控制 `close` 分支的布尔值；只影响当前调用。
+   *
+   * Returns:
+   * - Promise 在全部已拥有资源完成释放、后台工作停止后兑现；失败会直接拒绝。
+   *
+   * Throws:
+   * - 当 测试夹具的 `server-connection.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
+  close(reason?: string, force?: boolean): Promise<void> {
     this.closeReasons.push(reason ?? 'closed');
+    this.closeForces.push(force === true);
     return Promise.resolve();
   }
 }

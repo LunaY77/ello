@@ -1,13 +1,19 @@
+/**
+ * 本文件验证 observability-contract 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import type { Span, Tracer } from '@opentelemetry/api';
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
   AgentRunContext,
   EngineEvent,
-} from '../../src/agent/engine/index.js';
-import { contentAttributes } from '../../src/observability/content-policy.js';
-import { createLangfuseEventRecorder } from '../../src/observability/langfuse-recorder.js';
-import type { LangfuseTracingRuntime } from '../../src/observability/langfuse-runtime.js';
+} from '../../src/features/agent/engine/index.js';
+import { contentAttributes } from '../../src/infra/telemetry/content-policy.js';
+import { createLangfuseEventRecorder } from '../../src/infra/telemetry/langfuse-recorder.js';
+import type { LangfuseTracingRuntime } from '../../src/infra/telemetry/langfuse-runtime.js';
 
 const occurredAt = '2026-07-19T00:00:00.000Z';
 const diagnostics = {

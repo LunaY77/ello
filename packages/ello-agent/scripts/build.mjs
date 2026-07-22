@@ -14,11 +14,11 @@ const distDir = path.join(packageDir, 'dist');
 const buildDir = path.join(packageDir, `.dist-build-${process.pid}`);
 const previousDir = path.join(packageDir, `.dist-previous-${process.pid}`);
 const assets = [
-  ['src/config/templates', 'config/templates'],
+  ['src/features/config/templates', 'features/config/templates'],
   ['src/protocol/v1/fixtures', 'protocol/v1/fixtures'],
-  ['src/agent/context/prompts', 'agent/context/prompts'],
-  ['src/agent/subagents/bundled', 'agent/subagents/bundled'],
-  ['src/storage/migrations', 'storage/migrations'],
+  ['src/features/agent/context/prompts', 'features/agent/context/prompts'],
+  ['src/features/agent/subagents/bundled', 'features/agent/subagents/bundled'],
+  ['src/infra/database/migrations', 'infra/database/migrations'],
 ];
 
 await rm(buildDir, { recursive: true, force: true });
@@ -34,7 +34,7 @@ try {
       recursive: true,
     });
   }
-  await chmod(path.join(buildDir, 'server/entry.js'), 0o755);
+  await chmod(path.join(buildDir, 'main.js'), 0o755);
   await execFileAsync(process.execPath, ['scripts/verify-dist.mjs'], {
     cwd: packageDir,
     env: { ...process.env, ELLO_DIST_DIR: buildDir },

@@ -1,9 +1,11 @@
 import { Static } from 'ink';
+import { memo } from 'react';
 
 import type { HistoryEntry } from '../store/history-entry.js';
 import { HistoryEntryRenderer } from '../store/HistoryRenderer.js';
 
-export function TerminalHistoryOutput({
+/** Static 历史区域只在提交条目或 reset key 改变时重新渲染。 */
+export const TerminalHistoryOutput = memo(function TerminalHistoryOutput({
   entries,
   resetKey,
   cwd,
@@ -28,4 +30,4 @@ export function TerminalHistoryOutput({
       )}
     </Static>
   );
-}
+});

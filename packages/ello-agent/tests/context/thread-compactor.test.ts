@@ -1,14 +1,20 @@
+/**
+ * 验证 Thread 消息压缩策略不接触持久化，并由 Thread 根据报告写入 compaction record。
+ */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createThreadCompactor } from '../../src/agent/context/thread-compactor.js';
-import type { AgentMessage } from '../../src/agent/engine/index.js';
-import { CodingAgentConfigSchema } from '../../src/config/index.js';
-import { ThreadLogRepository } from '../../src/storage/threads/thread-log.js';
-import { ThreadTranscriptStore } from '../../src/storage/threads/transcript-store.js';
+import type { AgentMessage } from '../../src/features/agent/engine/index.js';
+import { CodingAgentConfigSchema } from '../../src/features/config/index.js';
+import {
+  appendThreadCompaction,
+  compactionView,
+  createThreadCompactor,
+} from '../../src/features/thread/compact.js';
+import { ThreadLogStore } from '../../src/storage/threads/thread-log.js';
 
 const roots: string[] = [];
 
@@ -19,27 +25,36 @@ afterEach(async () => {
 });
 
 describe('thread compactor', () => {
-  it('自动压缩超预算历史，并让 transcript 读取 checkpoint 投影', async () => {
+  it('自动压缩超预算历史，并由 Thread 写入 checkpoint 边界', async () => {
     const { logs, threadId } = await createThread();
+    await appendMessages(logs, threadId);
+    const before = compactionView(await logs.read(threadId));
     const compactor = createThreadCompactor({
-      logs,
       config: configFor('/workspace', true),
       profileName: 'main',
-      contextWindow: 10,
       generateCheckpoint: async () => 'checkpoint',
     });
-    await appendMessages(logs, threadId);
 
-    const report = await compactor.maybeCompact(threadId, {
-      metadata: {},
-    } as never);
+    const compacted = await compactor.compact({
+      messages: before.projectedMessages,
+      contextWindow: 10,
+      signal: new AbortController().signal,
+    });
+    if (compacted === null) throw new Error('Expected automatic compaction.');
+    await appendThreadCompaction({
+      store: logs,
+      threadId,
+      turnId: 'turn_2',
+      view: before,
+      report: compacted.report,
+    });
 
-    expect(report).toMatchObject({ compactor: 'ello-thread-compactor' });
+    expect(compacted.report).toMatchObject({
+      compactor: 'ello-thread-compactor',
+    });
     const records = await logs.read(threadId);
     expect(records.some((record) => record.kind === 'compaction')).toBe(true);
-    await expect(
-      new ThreadTranscriptStore(logs).load(threadId),
-    ).resolves.toEqual([
+    expect(compactionView(records).projectedMessages).toEqual([
       {
         role: 'user',
         content: '<compact-checkpoint>\ncheckpoint\n</compact-checkpoint>',
@@ -51,45 +66,51 @@ describe('thread compactor', () => {
 
   it('手动压缩即使 auto 关闭也保留最近一个 user turn', async () => {
     const { logs, threadId } = await createThread();
+    await appendMessages(logs, threadId);
+    const view = compactionView(await logs.read(threadId));
     const compactor = createThreadCompactor({
-      logs,
       config: configFor('/workspace', false),
       profileName: 'main',
-      contextWindow: 10,
+      force: true,
       generateCheckpoint: async () => 'manual checkpoint',
     });
-    await appendMessages(logs, threadId);
 
     await expect(
-      compactor.compactNow(threadId, { force: true, turnId: 'turn_2' }),
-    ).resolves.toMatchObject({ afterMessageCount: 3 });
+      compactor.compact({
+        messages: view.projectedMessages,
+        contextWindow: 10,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      report: { afterMessageCount: 3, keptMessageCount: 2 },
+    });
   });
 
   it('多次压缩以上一次 checkpoint 为锚点并只投影最新边界', async () => {
     const { logs, threadId } = await createThread();
     const calls: Array<{
-      readonly messages: readonly AgentMessage[];
+      readonly messages: ReadonlyArray<AgentMessage>;
       readonly previousCheckpoint?: string;
     }> = [];
-    const compactor = createThreadCompactor({
-      logs,
-      config: configFor('/workspace', false),
-      profileName: 'main',
-      contextWindow: 10,
-      generateCheckpoint: async (messages, previousCheckpoint) => {
-        calls.push({
-          messages,
-          ...(previousCheckpoint === undefined ? {} : { previousCheckpoint }),
-        });
-        return `checkpoint ${calls.length}`;
-      },
-    });
+    const createCompactor = () =>
+      createThreadCompactor({
+        config: configFor('/workspace', false),
+        profileName: 'main',
+        force: true,
+        generateCheckpoint: async (messages, previousCheckpoint) => {
+          calls.push({
+            messages,
+            ...(previousCheckpoint === undefined ? {} : { previousCheckpoint }),
+          });
+          return `checkpoint ${calls.length}`;
+        },
+      });
     await appendMessages(logs, threadId);
-    await compactor.compactNow(threadId, { force: true, turnId: 'turn_2' });
+    await compactAndPersist(logs, threadId, 'turn_2', createCompactor());
     await appendMessage(logs, threadId, 'turn_3', 'user', 'latest question');
     await appendMessage(logs, threadId, 'turn_3', 'assistant', 'latest answer');
 
-    await compactor.compactNow(threadId, { force: true, turnId: 'turn_3' });
+    await compactAndPersist(logs, threadId, 'turn_3', createCompactor());
 
     expect(calls).toHaveLength(2);
     expect(calls[1]).toMatchObject({ previousCheckpoint: 'checkpoint 1' });
@@ -97,47 +118,72 @@ describe('thread compactor', () => {
       'new question',
       'new answer',
     ]);
-    await expect(
-      new ThreadTranscriptStore(logs).load(threadId),
-    ).resolves.toEqual([
-      {
-        role: 'user',
-        content: '<compact-checkpoint>\ncheckpoint 2\n</compact-checkpoint>',
-      },
-      { role: 'user', content: 'latest question' },
-      { role: 'assistant', content: 'latest answer' },
-    ]);
+    expect(compactionView(await logs.read(threadId)).projectedMessages).toEqual(
+      [
+        {
+          role: 'user',
+          content: '<compact-checkpoint>\ncheckpoint 2\n</compact-checkpoint>',
+        },
+        { role: 'user', content: 'latest question' },
+        { role: 'assistant', content: 'latest answer' },
+      ],
+    );
   });
 
   it('短历史没有合法边界时不生成空 checkpoint', async () => {
     const { logs, threadId } = await createThread();
     let generated = false;
     const compactor = createThreadCompactor({
-      logs,
       config: configFor('/workspace', true),
       profileName: 'main',
-      contextWindow: 1,
       generateCheckpoint: async () => {
         generated = true;
         return 'unexpected';
       },
     });
     await appendMessage(logs, threadId, 'turn_1', 'user', 'only message');
+    const view = compactionView(await logs.read(threadId));
 
     await expect(
-      compactor.maybeCompact(threadId, { metadata: {} } as never),
+      compactor.compact({
+        messages: view.projectedMessages,
+        contextWindow: 1,
+        signal: new AbortController().signal,
+      }),
     ).resolves.toBeNull();
     expect(generated).toBe(false);
   });
 });
 
+async function compactAndPersist(
+  logs: ThreadLogStore,
+  threadId: string,
+  turnId: string,
+  compactor: ReturnType<typeof createThreadCompactor>,
+): Promise<void> {
+  const view = compactionView(await logs.read(threadId));
+  const compacted = await compactor.compact({
+    messages: view.projectedMessages,
+    contextWindow: 10,
+    signal: new AbortController().signal,
+  });
+  if (compacted === null) throw new Error('Expected manual compaction.');
+  await appendThreadCompaction({
+    store: logs,
+    threadId,
+    turnId,
+    view,
+    report: compacted.report,
+  });
+}
+
 async function createThread(): Promise<{
-  readonly logs: ThreadLogRepository;
+  readonly logs: ThreadLogStore;
   readonly threadId: string;
 }> {
   const root = await mkdtemp(path.join(tmpdir(), 'ello-compactor-'));
   roots.push(root);
-  const logs = new ThreadLogRepository({ root });
+  const logs = new ThreadLogStore({ root });
   const threadId = 'thr_compactor';
   await logs.create(threadId, {
     kind: 'thread.created',
@@ -156,7 +202,7 @@ async function createThread(): Promise<{
 }
 
 async function appendMessages(
-  logs: ThreadLogRepository,
+  logs: ThreadLogStore,
   threadId: string,
 ): Promise<void> {
   for (const [turnId, role, content] of [
@@ -170,7 +216,7 @@ async function appendMessages(
 }
 
 async function appendMessage(
-  logs: ThreadLogRepository,
+  logs: ThreadLogStore,
   threadId: string,
   turnId: string,
   role: AgentMessage['role'],

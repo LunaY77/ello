@@ -1,4 +1,5 @@
 import { Box, Text } from 'ink';
+import { memo } from 'react';
 
 import type { SubagentRunView, ToolCallView } from '../store/history-entry.js';
 import { useTheme } from '../theme/index.js';
@@ -8,7 +9,8 @@ import { ToolActivityList } from './ToolActivityList.js';
 
 const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
 
-export function LiveViewport({
+/** live 区只接收当前增量状态；已提交历史由 TerminalHistoryOutput 冻结。 */
+export const LiveViewport = memo(function LiveViewport({
   cwd,
   assistantText,
   runningTools,
@@ -47,7 +49,7 @@ export function LiveViewport({
       />
     </Box>
   );
-}
+});
 
 function LiveAssistantText({ text }: { readonly text: string }) {
   const theme = useTheme();

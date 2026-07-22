@@ -1,8 +1,16 @@
+/**
+ * 本文件负责 TUI 的 typed JSON-RPC Client、握手状态和产品级 Server Request 交互。
+ *
+ * `vscode-jsonrpc` 独占 Client Request ID、pending response、乱序关联、Cancellation 和连接清理；
+ * Ello 只保留 Zod 产品协议、initialize 状态、通知订阅以及需要用户延迟决策的 Server Request。
+ */
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import {
   CLIENT_NOTIFICATION_SCHEMAS,
   CLIENT_REQUEST_SCHEMAS,
   ELLO_PROTOCOL_VERSION,
-  RpcMessageSchema,
+  RpcErrorSchema,
   SERVER_NOTIFICATION_SCHEMAS,
   SERVER_REQUEST_SCHEMAS,
   parseClientResult,
@@ -16,14 +24,22 @@ import {
   type ClientResult,
   type InitializeParamsSchema,
   type InitializeResultSchema,
-  type RpcRequestId,
-  type RpcResponse,
   type ServerNotification,
   type ServerNotificationMethod,
   type ServerRequestMethod,
   type ServerRequestParams,
   type ServerRequestResult,
 } from '@ello/agent/protocol';
+import {
+  CancellationTokenSource,
+  ErrorCodes,
+  Message,
+  ResponseError,
+  createMessageConnection,
+  type CancellationToken,
+  type MessageConnection,
+  type MessageStrategy,
+} from 'vscode-jsonrpc/node';
 import type { z } from 'zod';
 
 import {
@@ -33,7 +49,11 @@ import {
   ServerResponseError,
   TransportClosedError,
 } from './request-errors.js';
-import type { ClientTransport } from './transport.js';
+import {
+  ClientMessageReader,
+  ClientMessageWriter,
+  type ClientTransport,
+} from './transport.js';
 
 type InitializeParams = z.input<typeof InitializeParamsSchema>;
 type InitializeResult = z.output<typeof InitializeResultSchema>;
@@ -60,13 +80,6 @@ type ServerRequestListener = (
   request: IncomingServerRequest<ServerRequestMethod>,
 ) => boolean | void | Promise<boolean | void>;
 
-interface PendingRequest {
-  readonly method: ClientMethod;
-  readonly resolve: (value: unknown) => void;
-  readonly reject: (reason: unknown) => void;
-  readonly timer: NodeJS.Timeout;
-}
-
 export type AppServerClientState =
   | 'disconnected'
   | 'connected'
@@ -74,42 +87,92 @@ export type AppServerClientState =
   | 'ready'
   | 'closed';
 
-/**
- * 唯一的 RPC 关联层。UI 和 CLI 只调用 typed request，不接触 id map 或原始 JSON。
- */
+/** UI 和 CLI 的唯一 typed RPC facade；调用方不接触 MessageConnection 或 wire ID。 */
 export class AppServerClient {
   private readonly transport: ClientTransport;
   private readonly requestTimeoutMs: number;
-  private readonly pending = new Map<RpcRequestId, PendingRequest>();
   private readonly notificationListeners = new Set<NotificationListener>();
   private readonly serverRequestListeners = new Set<ServerRequestListener>();
-  private readonly encoder = new TextEncoder();
-  private readonly decoder = new TextDecoder('utf-8', { fatal: true });
-  private nextRequestId = 1;
-  private readTask: Promise<void> | undefined;
+  private readonly serverRequestContext = new AsyncLocalStorage<
+    string | number | null
+  >();
+  private readonly reader: ClientMessageReader;
+  private readonly writer: ClientMessageWriter;
+  private readonly rpc: MessageConnection;
+  private closeTask: Promise<void> | undefined;
   private closeError: Error | undefined;
+  private closeFailure: Error | undefined;
   private currentState: AppServerClientState = 'disconnected';
 
+  /**
+   * 创建并装配一条 Client MessageConnection。
+   *
+   * Args:
+   * - `options`: 完整消息 transport 和单请求超时；超时会关闭连接以清理框架 pending。
+   */
   constructor(options: AppServerClientOptions) {
     this.transport = options.transport;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
+    if (
+      !Number.isSafeInteger(this.requestTimeoutMs) ||
+      this.requestTimeoutMs <= 0
+    ) {
+      throw new Error('App Server request timeout must be a positive integer.');
+    }
+    this.reader = new ClientMessageReader(options.transport);
+    this.writer = new ClientMessageWriter(options.transport);
+    const strategy = {
+      handleMessage: (message, next) => this.handleMessage(message, next),
+    } satisfies MessageStrategy;
+    this.rpc = createMessageConnection(this.reader, this.writer, undefined, {
+      messageStrategy: strategy,
+    });
+    this.rpc.onRequest((method, params, token) =>
+      this.handleServerRequest(method, params, token),
+    );
+    this.rpc.onNotification((method, params) =>
+      this.handleNotification(method, params),
+    );
+    this.rpc.onError(([error]) => this.fail(error));
+    this.rpc.onClose(() => {
+      if (this.currentState !== 'closed') {
+        this.fail(
+          new TransportClosedError('App Server transport ended unexpectedly.'),
+        );
+      }
+    });
   }
 
+  /** 返回当前握手或关闭状态，不改变连接。 */
   get state(): AppServerClientState {
     return this.currentState;
   }
 
+  /**
+   * 启动 MessageConnection 的唯一读取循环。
+   *
+   * Returns:
+   * - Promise 在框架进入监听状态后兑现。
+   */
   async connect(): Promise<void> {
     if (this.currentState !== 'disconnected') {
       throw new ClientProtocolError(
         `Cannot connect App Server client from ${this.currentState}.`,
       );
     }
+    this.rpc.listen();
     this.currentState = 'connected';
-    this.readTask = this.readLoop();
-    void this.readTask.catch((error: unknown) => this.fail(error));
   }
 
+  /**
+   * 执行 initialize -> initialized 握手。
+   *
+   * Args:
+   * - `params`: Client 版本、能力和协议版本声明。
+   *
+   * Returns:
+   * - 返回经过对应 Zod result schema 校验的 Server 能力。
+   */
   async initialize(params: InitializeParams): Promise<InitializeResult> {
     if (this.currentState !== 'connected') {
       throw new ClientProtocolError(
@@ -128,11 +191,21 @@ export class AppServerClient {
       this.currentState = 'ready';
       return result;
     } catch (error) {
-      this.currentState = 'connected';
+      if (this.closeError === undefined) this.currentState = 'connected';
       throw error;
     }
   }
 
+  /**
+   * 发送业务 Client Request。
+   *
+   * Args:
+   * - `method`: 协议 request schema 表中的闭合 method。
+   * - `params`: 从 method 派生的 typed 参数。
+   *
+   * Returns:
+   * - 返回经过 method 对应 result schema 校验的结果。
+   */
   request<M extends Exclude<ClientMethod, 'initialize'>>(
     method: M,
     params: ClientParams<M>,
@@ -147,6 +220,16 @@ export class AppServerClient {
     return this.requestInternal(method, params);
   }
 
+  /**
+   * 发送经过 Client notification schema 校验的通知。
+   *
+   * Args:
+   * - `method`: 协议 notification schema 表中的闭合 method。
+   * - `params`: 从 method 派生的 typed 参数。
+   *
+   * Returns:
+   * - Promise 在框架 Writer 接受通知后兑现。
+   */
   notify<M extends ClientNotificationMethod>(
     method: M,
     params: ClientNotificationParams<M>,
@@ -161,242 +244,334 @@ export class AppServerClient {
     return this.notifyInternal(method, params);
   }
 
+  /**
+   * 注册 Server notification listener。
+   *
+   * Args:
+   * - `listener`: 接收已经通过 Zod schema 校验的闭合 notification。
+   *
+   * Returns:
+   * - 返回只移除当前 listener 的函数。
+   */
   onNotification(listener: NotificationListener): () => void {
     this.notificationListeners.add(listener);
     return () => this.notificationListeners.delete(listener);
   }
 
+  /**
+   * 注册产品级 Server Request listener。
+   *
+   * Args:
+   * - `listener`: 可按 Thread 归属接管审批或用户输入的 listener。
+   *
+   * Returns:
+   * - 返回只移除当前 listener 的函数。
+   */
   onServerRequest(listener: ServerRequestListener): () => void {
     this.serverRequestListeners.add(listener);
     return () => this.serverRequestListeners.delete(listener);
   }
 
+  /**
+   * 关闭框架连接和底层 transport。
+   *
+   * Returns:
+   * - Promise 在 Writer 与 transport 生命周期全部结束后兑现；关闭失败直接抛出。
+   */
   async close(): Promise<void> {
-    if (this.currentState === 'closed') return;
-    this.currentState = 'closed';
-    this.rejectPending(new TransportClosedError());
-    await this.transport.close('client closed');
-    await this.readTask;
+    await this.beginClose('client closed', false);
+    if (this.closeFailure !== undefined) throw this.closeFailure;
   }
 
-  private requestInternal<M extends ClientMethod>(
+  private async requestInternal<M extends ClientMethod>(
     method: M,
     params: ClientParams<M>,
   ): Promise<ClientResult<M>> {
-    if (this.closeError !== undefined) return Promise.reject(this.closeError);
+    if (this.closeError !== undefined) throw this.closeError;
     const parsedParams = CLIENT_REQUEST_SCHEMAS[method].parse(params);
-    const id = this.nextRequestId++;
-    return new Promise<ClientResult<M>>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (!this.pending.delete(id)) return;
-        reject(new RequestTimeoutError(id, method, this.requestTimeoutMs));
-      }, this.requestTimeoutMs);
-      this.pending.set(id, {
+    const cancellation = new CancellationTokenSource();
+    let rawResult: unknown;
+    try {
+      const request = this.rpc.sendRequest<unknown>(
         method,
-        resolve: (value) => resolve(value as ClientResult<M>),
-        reject,
-        timer,
-      });
-      void this.send({
-        jsonrpc: '2.0',
-        id,
-        method,
-        params: parsedParams,
-      }).catch((error: unknown) => {
-        const pending = this.pending.get(id);
-        if (pending === undefined) return;
-        this.pending.delete(id);
-        clearTimeout(pending.timer);
-        reject(error);
-      });
-    });
+        parsedParams,
+        cancellation.token,
+      );
+      rawResult = await this.waitForRequest(method, request, cancellation);
+    } catch (error) {
+      throw this.normalizeRequestError(error);
+    }
+    try {
+      return parseClientResult(method, rawResult);
+    } catch (error) {
+      throw new ResponseValidationError(method, rawResult, { cause: error });
+    }
   }
 
-  private async notifyInternal<M extends ClientNotificationMethod>(
+  private notifyInternal<M extends ClientNotificationMethod>(
     method: M,
     params: ClientNotificationParams<M>,
   ): Promise<void> {
+    if (this.closeError !== undefined) return Promise.reject(this.closeError);
     const parsedParams = CLIENT_NOTIFICATION_SCHEMAS[method].parse(params);
-    await this.send({ jsonrpc: '2.0', method, params: parsedParams });
+    return this.rpc.sendNotification(method, parsedParams);
   }
 
-  private async send(
-    message: Readonly<Record<string, unknown>>,
-  ): Promise<void> {
-    if (this.currentState === 'closed' || this.closeError !== undefined) {
-      throw this.closeError ?? new TransportClosedError();
-    }
-    await this.transport.send(this.encoder.encode(JSON.stringify(message)));
-  }
-
-  private async readLoop(): Promise<void> {
-    for await (const bytes of this.transport.messages()) {
-      const text = this.decoder.decode(bytes);
-      let value: unknown;
-      try {
-        value = JSON.parse(text);
-      } catch (error) {
-        throw new ClientProtocolError('Server sent malformed JSON.', {
-          cause: error,
-        });
-      }
-      const message = RpcMessageSchema.safeParse(value);
-      if (!message.success) {
-        throw new ClientProtocolError(
-          'Server sent an invalid JSON-RPC message.',
-          {
-            cause: message.error,
-          },
-        );
-      }
-      await this.dispatch(message.data);
-    }
-    if (this.currentState !== 'closed') {
-      throw new TransportClosedError(
-        'App Server transport ended unexpectedly.',
-      );
-    }
-  }
-
-  private async dispatch(
-    message: z.output<typeof RpcMessageSchema>,
-  ): Promise<void> {
-    if ('id' in message && !('method' in message)) {
-      this.handleResponse(message);
-      return;
-    }
-    if ('id' in message) {
-      await this.handleServerRequest(message);
-      return;
-    }
-    this.handleNotification(message);
-  }
-
-  private handleResponse(message: RpcResponse): void {
-    if (message.id === null) {
-      throw new ClientProtocolError('Server returned a null response id.');
-    }
-    const pending = this.pending.get(message.id);
-    if (pending === undefined) {
-      throw new ClientProtocolError(
-        `Server returned unknown response id ${String(message.id)}.`,
-      );
-    }
-    this.pending.delete(message.id);
-    clearTimeout(pending.timer);
-    if ('error' in message) {
-      pending.reject(new ServerResponseError(message.error));
-      return;
-    }
-    try {
-      pending.resolve(parseClientResult(pending.method, message.result));
-    } catch (error) {
-      pending.reject(
-        new ResponseValidationError(
-          message.id,
-          pending.method,
-          message.result,
-          { cause: error },
-        ),
-      );
-    }
-  }
-
-  private async handleServerRequest(message: {
-    readonly id: RpcRequestId;
-    readonly method: string;
-    readonly params: Readonly<Record<string, unknown>>;
-  }): Promise<void> {
-    if (typeof message.id !== 'string') {
-      throw new ClientProtocolError('Server Request id must be a string.');
-    }
-    if (!(message.method in SERVER_REQUEST_SCHEMAS)) {
-      await this.send({
-        jsonrpc: '2.0',
-        id: message.id,
-        error: {
-          code: -32601,
-          message: `Unknown Server Request ${message.method}.`,
+  private waitForRequest(
+    method: ClientMethod,
+    request: Promise<unknown>,
+    cancellation: CancellationTokenSource,
+  ): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        const error = new RequestTimeoutError(method, this.requestTimeoutMs);
+        cancellation.cancel();
+        cancellation.dispose();
+        reject(error);
+        this.fail(error);
+      }, this.requestTimeoutMs);
+      request.then(
+        (result) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          cancellation.dispose();
+          resolve(result);
         },
-      });
-      return;
+        (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          cancellation.dispose();
+          reject(error);
+        },
+      );
+    });
+  }
+
+  private handleMessage(
+    message: Message,
+    next: (message: Message) => void | Promise<void>,
+  ): Promise<void> {
+    const handle = async () => {
+      try {
+        await next(message);
+      } finally {
+        this.reader.release(message);
+      }
+    };
+    return Message.isRequest(message)
+      ? this.serverRequestContext.run(message.id, handle)
+      : handle();
+  }
+
+  private handleServerRequest(
+    method: string,
+    params: object | unknown[] | undefined,
+    token: CancellationToken,
+  ): Promise<unknown> {
+    const id = this.serverRequestContext.getStore();
+    if (typeof id !== 'string') {
+      throw new ResponseError(
+        ErrorCodes.InvalidRequest,
+        'Ello Server Request id must be a stable string.',
+      );
     }
-    const method = message.method as ServerRequestMethod;
-    const params = parseServerRequestParams(method, message.params);
+    if (!isServerRequestMethod(method)) {
+      throw new ResponseError(
+        ErrorCodes.MethodNotFound,
+        `Unknown Server Request ${method}.`,
+      );
+    }
+    switch (method) {
+      case 'item/commandExecution/requestApproval':
+      case 'item/fileChange/requestApproval':
+      case 'item/permissions/requestApproval':
+      case 'item/tool/requestUserInput':
+      case 'item/plan/requestApproval':
+        return this.handleTypedServerRequest(
+          id,
+          method,
+          parseServerRequestParams(method, params),
+          token,
+        );
+      default:
+        method satisfies never;
+        throw new ResponseError(
+          ErrorCodes.MethodNotFound,
+          `Unknown Server Request ${String(method)}.`,
+        );
+    }
+  }
+
+  private async handleTypedServerRequest<M extends ServerRequestMethod>(
+    id: string,
+    method: M,
+    params: ServerRequestParams<M>,
+    token: CancellationToken,
+  ): Promise<ServerRequestResult<M>> {
+    const settlement = deferred<ServerRequestResult<M>>();
     let settled = false;
-    const incoming = {
-      id: message.id,
+    const incoming: IncomingServerRequest<M> = {
+      id,
       method,
       params,
-      respond: async (result: ServerRequestResult<typeof method>) => {
+      respond: async (result) => {
         if (settled) {
           throw new ClientProtocolError(
-            `Server Request ${message.id} is already resolved.`,
+            `Server Request ${id} is already resolved.`,
           );
         }
-        settled = true;
         const parsed = parseServerRequestResult(method, result);
-        await this.send({ jsonrpc: '2.0', id: message.id, result: parsed });
+        settled = true;
+        settlement.resolve(parsed);
       },
-      reject: async (error: {
-        readonly code: number;
-        readonly message: string;
-        readonly data?: Readonly<Record<string, unknown>>;
-      }) => {
+      reject: async (error) => {
         if (settled) {
           throw new ClientProtocolError(
-            `Server Request ${message.id} is already resolved.`,
+            `Server Request ${id} is already resolved.`,
           );
         }
         settled = true;
-        await this.send({ jsonrpc: '2.0', id: message.id, error });
+        settlement.reject(
+          new ResponseError(error.code, error.message, error.data),
+        );
       },
-    } as IncomingServerRequest<ServerRequestMethod>;
-    for (const listener of this.serverRequestListeners) {
-      const claimed = await listener(incoming);
-      if (settled || claimed === true) return;
-    }
-    if (!settled) {
-      await incoming.reject({
-        code: -32601,
-        message: `No Client handler accepted ${method}.`,
-      });
+    };
+    const cancellation = token.onCancellationRequested(() => {
+      if (settled) return;
+      settled = true;
+      settlement.reject(
+        new ResponseError(
+          ErrorCodes.InternalError,
+          `Server Request ${id} was cancelled.`,
+        ),
+      );
+    });
+    try {
+      for (const listener of this.serverRequestListeners) {
+        const claimed = await listener(incoming);
+        if (settled || claimed === true) return await settlement.promise;
+      }
+      settled = true;
+      throw new ResponseError(
+        ErrorCodes.MethodNotFound,
+        `No Client handler accepted ${method}.`,
+      );
+    } catch (error) {
+      settled = true;
+      throw error;
+    } finally {
+      cancellation.dispose();
     }
   }
 
-  private handleNotification(message: {
-    readonly method: string;
-    readonly params: Readonly<Record<string, unknown>>;
-  }): void {
-    if (!(message.method in SERVER_NOTIFICATION_SCHEMAS)) {
-      throw new ClientProtocolError(
-        `Server sent unknown notification ${message.method}.`,
+  private handleNotification(
+    method: string,
+    params: object | unknown[] | undefined,
+  ): void {
+    try {
+      if (!isServerNotificationMethod(method)) {
+        throw new ClientProtocolError(
+          `Server sent unknown notification ${method}.`,
+        );
+      }
+      // 动态 schema 表已经按同一 method 完成校验；TypeScript 无法保留索引访问后的键值关联。
+      const notification = {
+        method,
+        params: parseServerNotificationParams(method, params),
+      } as ServerNotification;
+      for (const listener of this.notificationListeners) listener(notification);
+    } catch (error) {
+      const failure =
+        error instanceof Error ? error : new ClientProtocolError(String(error));
+      this.fail(failure);
+      throw failure;
+    }
+  }
+
+  private normalizeRequestError(error: unknown): Error {
+    if (error instanceof ResponseError) {
+      return new ServerResponseError(
+        RpcErrorSchema.parse({
+          code: error.code,
+          message: error.message,
+          ...(error.data === undefined ? {} : { data: error.data }),
+        }),
       );
     }
-    const method = message.method as ServerNotificationMethod;
-    const notification = {
-      method,
-      params: parseServerNotificationParams(method, message.params),
-    } as ServerNotification;
-    for (const listener of this.notificationListeners) listener(notification);
+    if (this.closeError !== undefined) return this.closeError;
+    return error instanceof Error ? error : new Error(String(error));
   }
 
   private fail(reason: unknown): void {
+    if (this.currentState === 'closed') return;
     const error =
       reason instanceof Error
         ? reason
         : new TransportClosedError(String(reason));
     this.closeError = error;
-    this.currentState = 'closed';
-    this.rejectPending(error);
-    void this.transport.close(error.message).catch(() => undefined);
+    void this.beginClose(error.message, true);
   }
 
-  private rejectPending(error: Error): void {
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(error);
-    }
-    this.pending.clear();
+  private beginClose(reason: string, force: boolean): Promise<void> {
+    if (this.closeTask !== undefined) return this.closeTask;
+    this.currentState = 'closed';
+    this.rpc.dispose();
+    this.writer.end();
+    this.closeTask = this.closeConnection(reason, force);
+    return this.closeTask;
   }
+
+  private async closeConnection(reason: string, force: boolean): Promise<void> {
+    const operations = force
+      ? [this.transport.close(reason), this.writer.drain()]
+      : [this.writer.drain().then(() => this.transport.close(reason))];
+    const settled = await Promise.allSettled(operations);
+    const failures = settled
+      .filter(
+        (result): result is PromiseRejectedResult =>
+          result.status === 'rejected',
+      )
+      .map((result) => result.reason);
+    if (failures.length === 0) return;
+    this.closeFailure = new AggregateError(
+      failures,
+      `App Server client close failed: ${reason}`,
+    );
+    this.closeError =
+      this.closeError === undefined
+        ? this.closeFailure
+        : new AggregateError(
+            [this.closeError, this.closeFailure],
+            'App Server client failed and could not close cleanly.',
+          );
+  }
+}
+
+function isServerRequestMethod(method: string): method is ServerRequestMethod {
+  return Object.hasOwn(SERVER_REQUEST_SCHEMAS, method);
+}
+
+function isServerNotificationMethod(
+  method: string,
+): method is ServerNotificationMethod {
+  return Object.hasOwn(SERVER_NOTIFICATION_SCHEMAS, method);
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+  readonly reject: (reason: unknown) => void;
+} {
+  let resolve = (_value: T): void => undefined;
+  let reject = (_reason: unknown): void => undefined;
+  const promise = new Promise<T>((complete, fail) => {
+    resolve = complete;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }

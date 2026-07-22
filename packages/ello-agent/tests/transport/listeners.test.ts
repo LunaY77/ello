@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 listeners 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { request as httpRequest, type RequestOptions } from 'node:http';
 import { createConnection, createServer as createNetServer } from 'node:net';
@@ -7,51 +13,66 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 
-import type {
-  TurnExecutionHandle,
-  TurnExecutor,
-} from '../../src/domain/ports/turn-executor.js';
+import {
+  createThreadFeature,
+  createThreadStore,
+} from '../../src/features/thread/index.js';
 import type {
   ParsedClientParams,
   ThreadSnapshot,
 } from '../../src/protocol/v1/index.js';
-import type { RpcServices } from '../../src/server/methods/server-services.js';
-import { ThreadManager } from '../../src/server/runtime/thread-manager.js';
 import { AgentServer } from '../../src/server/server.js';
 import {
   listenEndpoint,
   type ServerListener,
 } from '../../src/server/transport/listeners.js';
-import {
-  createCodingStorage,
-  type CodingStorage,
-} from '../../src/storage/database/index.js';
+import { createTestFeatures } from '../support/features.js';
+import { createTestStores, type TestStores } from '../support/stores.js';
 
 describe('App Server network listeners', () => {
   let root: string;
-  let storage: CodingStorage;
+  let storage: TestStores;
   let server: AgentServer;
   let listener: ServerListener | undefined;
   let client: WebSocket | undefined;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'ello-listener-'));
-    storage = createCodingStorage({
+    storage = createTestStores({
       databasePath: join(root, 'state.sqlite'),
       artifactsDir: join(root, 'artifacts'),
     });
-    const threads = new ThreadManager({
-      root,
-      catalog: storage.threads,
-      executorFactory: () => Promise.resolve(new IdleExecutor()),
+    const store = createThreadStore({ root, database: storage.db });
+    const threads = createThreadFeature({
+      store,
+      startAgentRun: () =>
+        Promise.reject(new Error('Test Agent does not run turns.')),
+      unloadGraceMs: 30_000,
       resolveInitialSettings: testInitialSettings,
       resolveSettingsUpdate: (_snapshot, params) => testSettingsUpdate(params),
     });
+    const services = createTestFeatures({
+      threads,
+      store,
+      storage,
+      compact: () => Promise.reject(new Error('Unexpected compact request.')),
+    });
     server = new AgentServer({
       version: '1.0.0',
-      threads,
       transports: ['websocket', 'unix'],
-      services: new TestServices(),
+      routes: services.routes,
+      initialize: async () => {
+        await services.initialize();
+        await threads.initialize();
+      },
+      releaseConnection: async (connectionId) => {
+        await threads.releaseConnection(connectionId);
+        services.releaseConnection(connectionId);
+      },
+      closeResources: async () => {
+        await services.close();
+        await threads.close();
+      },
     });
     await server.start();
   });
@@ -279,16 +300,6 @@ async function reserveTcpPort(): Promise<number> {
   return address.port;
 }
 
-class IdleExecutor implements TurnExecutor {
-  start(): Promise<TurnExecutionHandle> {
-    return Promise.reject(new Error('IdleExecutor does not run turns.'));
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve();
-  }
-}
-
 function testInitialSettings(params: ParsedClientParams<'thread/start'>) {
   return Promise.resolve({
     mode: params.mode ?? 'ask-before-changes',
@@ -307,14 +318,4 @@ function testSettingsUpdate(
     ...(params.model === undefined ? {} : { model: params.model }),
     ...(params.agent === undefined ? {} : { agent: params.agent }),
   });
-}
-
-class TestServices implements RpcServices {
-  dispatch(): Promise<unknown> {
-    return Promise.reject(new Error('Unexpected non-core RPC method.'));
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve();
-  }
 }

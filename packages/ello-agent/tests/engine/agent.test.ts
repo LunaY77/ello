@@ -1,20 +1,19 @@
+/**
+ * 本文件验证 agent 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { trimMessages } from '../../src/agent/engine/core/input-transforms.js';
-import {
-  AgentRunControl,
-  DefaultAgentMessageQueue,
-} from '../../src/agent/engine/core/run-control.js';
 import {
   AgentStreamBackpressureError,
   ModelAdapterProtocolError,
   createAgent as createBaseAgent,
-  createLocalEnvironment,
-  createLocalShellEnvironment,
   defineDeferredTool,
   defineTool as defineAgentTool,
   z,
@@ -28,7 +27,13 @@ import {
   type DefineToolOptions,
   type AgentToolDiscovery,
   type ModelAdapter,
-} from '../../src/agent/engine/index.js';
+} from '../../src/features/agent/engine/index.js';
+import { trimMessages } from '../../src/features/agent/engine/model-input.js';
+import {
+  AgentRunControl,
+  DefaultAgentMessageQueue,
+} from '../../src/features/agent/engine/run-control.js';
+import { createLocalEnvironment } from '../../src/features/agent/environment.js';
 
 function defineTool<TInput, TOutput>(
   options: Omit<DefineToolOptions<TInput, TOutput>, 'discovery'> & {
@@ -50,17 +55,24 @@ const testTool = defineTool({
   execute: () => null,
 });
 
+const emptyTestEnvironment: CreateAgentOptions['environment'] = {};
+
 function createAgent(
-  options: Omit<CreateAgentOptions, 'executionTools' | 'modelTools'> & {
+  options: Omit<
+    CreateAgentOptions,
+    'executionTools' | 'modelTools' | 'environment'
+  > & {
     readonly tools?: readonly AnyAgentTool[];
     readonly executionTools?: readonly AnyAgentTool[];
     readonly modelTools?: readonly AnyAgentTool[];
+    readonly environment?: CreateAgentOptions['environment'];
   },
 ) {
-  const { tools, executionTools, modelTools, ...rest } = options;
+  const { tools, executionTools, modelTools, environment, ...rest } = options;
   const selected = tools ?? executionTools ?? [testTool as AnyAgentTool];
   return createBaseAgent({
     ...rest,
+    environment: environment === undefined ? emptyTestEnvironment : environment,
     executionTools: executionTools ?? selected,
     modelTools: modelTools ?? selected,
   });
@@ -71,6 +83,7 @@ class EchoAdapter implements ModelAdapter {
     return {
       text: 'hello',
       messages: [...request.messages, { role: 'assistant', content: 'hello' }],
+      newMessages: [{ role: 'assistant', content: 'hello' }],
       usage: {
         requests: 1,
         inputTokens: 2,
@@ -128,7 +141,6 @@ describe('createAgent', () => {
 
   it('adds ephemeral run instructions to system without persisting them', async () => {
     let request: AgentModelRequest | undefined;
-    const appended: AgentMessage[] = [];
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: {
@@ -157,24 +169,15 @@ describe('createAgent', () => {
           yield { type: 'final', response: await this.generate(input) };
         },
       },
-      transcript: {
-        async load() {
-          return [];
-        },
-        async append(_sessionId, messages) {
-          appended.push(...messages);
-        },
-      },
     });
-    await agent.run('task', {
-      sessionId: 'session',
+    const result = await agent.run('task', {
       ephemeralInstructions: 'temporary skill instructions',
     });
     expect(request?.system).toBe('temporary skill instructions');
     expect(request?.messages).not.toContainEqual(
       expect.objectContaining({ role: 'system' }),
     );
-    expect(appended).not.toContainEqual({
+    expect(result.newMessages).not.toContainEqual({
       role: 'system',
       content: 'temporary skill instructions',
     });
@@ -392,7 +395,7 @@ describe('createAgent', () => {
     ).toThrow("Duplicate tool 'same' in executionTools.");
   });
 
-  it('uses local environment and session store', async () => {
+  it('uses local environment and returns the current run messages', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ello-agent-'));
     dirs.push(dir);
     const environment = createLocalEnvironment({
@@ -401,19 +404,10 @@ describe('createAgent', () => {
     });
     await environment.fileSystem?.writeText('note.txt', 'content');
     const entries = await environment.fileSystem?.listDir('.');
-    const savedMessages: unknown[] = [];
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: new EchoAdapter(),
       environment,
-      transcript: {
-        async load() {
-          return [];
-        },
-        async append(_sessionId, messages) {
-          savedMessages.push(...messages);
-        },
-      },
       tools: [
         defineTool({
           name: 'read_note',
@@ -424,43 +418,42 @@ describe('createAgent', () => {
         }),
       ],
     });
-    await agent.run('remember', { sessionId: 'sess_1' });
+    const result = await agent.run('remember');
 
     expect(entries).toContain('note.txt');
-    expect(savedMessages.length).toBeGreaterThan(0);
+    expect(result.newMessages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+    ]);
     await agent.close();
   });
 
-  it('persists the current run before automatic session compaction', async () => {
-    const persisted: AgentMessage[] = [];
+  it('passes the complete current messages to the pure compactor', async () => {
     let messagesSeenByCompactor: AgentMessage[] = [];
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: new EchoAdapter(),
-      transcript: {
-        async load() {
-          return [];
-        },
-        async append(_sessionId, messages) {
-          persisted.push(...messages);
-        },
-      },
-      compaction: {
+      modelInputBudget: { maxInputTokens: 100 },
+      compactor: {
         name: 'test-compactor',
-        async maybeCompact() {
-          messagesSeenByCompactor = [...persisted];
+        async compact(input) {
+          messagesSeenByCompactor = [...input.messages];
           return {
-            compactor: 'test-compactor',
-            beforeMessageCount: persisted.length,
-            afterMessageCount: persisted.length,
+            messages: input.messages,
+            report: {
+              compactor: 'test-compactor',
+              beforeMessageCount: input.messages.length,
+              afterMessageCount: input.messages.length,
+              summary: 'summary',
+              keptMessageCount: input.messages.length,
+              tokensBefore: 2,
+            },
           };
         },
       },
     });
 
-    const result = await agent.run('current input', {
-      sessionId: 'sess_compaction_order',
-    });
+    const result = await agent.run('current input');
 
     expect(messagesSeenByCompactor.map((message) => message.role)).toEqual([
       'user',
@@ -475,7 +468,10 @@ describe('createAgent', () => {
   it('runs environment lifecycle and resource instructions inside the agent loop', async () => {
     const events: string[] = [];
     const requests: AgentModelRequest[] = [];
-    const environment = createLocalShellEnvironment();
+    const environment = createLocalEnvironment({
+      cwd: process.cwd(),
+      allowedPaths: [process.cwd()],
+    });
     environment.resources?.register('test-resource', {
       setup: () => {
         events.push('resource.setup');
@@ -623,16 +619,52 @@ describe('createAgent', () => {
     });
   });
 
-  it('builds model input with session, observers, and transforms', async () => {
+  it('rejects deferred approval items without a tool name', () => {
+    const control = new AgentRunControl('run_invalid_approval');
+
+    expect(() =>
+      Reflect.apply(control.drainNextTurn, control, [
+        {
+          deferred: [{ kind: 'approval', toolCallId: 'call_write', input: {} }],
+          approvals: { call_write: true },
+          toolResults: { call_write: { written: true } },
+        },
+      ]),
+    ).toThrow();
+  });
+
+  it('rejects structured approval decisions without approved', () => {
+    const control = new AgentRunControl('run_invalid_decision');
+
+    expect(() =>
+      Reflect.apply(control.drainNextTurn, control, [
+        {
+          deferred: [
+            {
+              kind: 'approval',
+              toolCallId: 'call_write',
+              toolName: 'write',
+              input: {},
+            },
+          ],
+          approvals: { call_write: { reason: 'missing decision' } },
+        },
+      ]),
+    ).toThrow();
+  });
+
+  it('rejects interrupted resume items without messages', () => {
+    const control = new AgentRunControl('run_invalid_interrupted');
+
+    expect(() =>
+      Reflect.apply(control.drainNextTurn, control, [
+        { deferred: [{ kind: 'interrupted', reason: 'cancelled' }] },
+      ]),
+    ).toThrow();
+  });
+
+  it('builds model input with explicit history, observers, and transforms', async () => {
     const seenMessages: AgentModelRequest[] = [];
-    let sessionLoads = 0;
-    const session = {
-      async load() {
-        sessionLoads += 1;
-        return [{ role: 'user' as const, content: 'history' }];
-      },
-      async append() {},
-    };
     const observed: string[] = [];
     const agent = createAgent({
       model: 'test:model',
@@ -650,7 +682,6 @@ describe('createAgent', () => {
         },
       },
       instructions: 'Be precise.',
-      transcript: session,
       modelInput: {
         systemSections: [() => 'Working directory: /tmp/project'],
         messageTransforms: [trimMessages({ maxMessages: 3 })],
@@ -667,9 +698,11 @@ describe('createAgent', () => {
         },
       ],
     });
-    const result = await agent.run('current', { sessionId: 'sess_1' });
+    const result = await agent.run({
+      messages: [{ role: 'user', content: 'history' }],
+      prompt: 'current',
+    });
 
-    expect(sessionLoads).toBe(1);
     expect(seenMessages[0]?.system).toContain('Be precise.');
     expect(seenMessages[0]?.system).toContain(
       'Working directory: /tmp/project',
@@ -742,7 +775,7 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('resumes approved tools against persisted session history without missing tool results', async () => {
+  it('resumes approved tools against explicit history without missing tool results', async () => {
     const requests: AgentModelRequest[] = [];
     const persistedToolCall = {
       role: 'assistant',
@@ -755,17 +788,8 @@ describe('createAgent', () => {
         },
       ],
     } as AgentMessage;
-    const appendedMessages: AgentMessage[] = [];
     const agent = createAgent({
       model: 'test:model',
-      transcript: {
-        async load() {
-          return [persistedToolCall];
-        },
-        async append(_sessionId, messages) {
-          appendedMessages.push(...messages);
-        },
-      },
       tools: [
         defineTool({
           name: 'write_file',
@@ -803,8 +827,9 @@ describe('createAgent', () => {
       },
     });
 
-    const stream = agent.resume(
-      {
+    const stream = agent.resume({
+      messages: [persistedToolCall],
+      deferred: {
         deferred: [
           {
             kind: 'approval',
@@ -815,8 +840,7 @@ describe('createAgent', () => {
         ],
         approvals: { call_write: { approved: true } },
       },
-      { sessionId: 'sess_approval' },
-    );
+    });
     for await (const _event of stream) {
       // drive stream
     }
@@ -849,7 +873,7 @@ describe('createAgent', () => {
     );
     expect(assistantToolCalls).toHaveLength(1);
     expect(toolResults).toHaveLength(1);
-    expect(appendedMessages).toEqual(
+    expect(result.newMessages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           role: 'tool',
@@ -986,18 +1010,10 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('loads session history once and does not duplicate it on the second plan', async () => {
+  it('uses explicit history once and does not duplicate it on the second turn', async () => {
     const seen = [] as string[][];
-    let loads = 0;
     const agent = createAgent({
       model: 'test:model',
-      transcript: {
-        async load() {
-          loads += 1;
-          return [{ role: 'user', content: 'history' }];
-        },
-        async append() {},
-      },
       modelAdapter: {
         async generate(request) {
           seen.push(request.messages.map((message) => String(message.content)));
@@ -1029,9 +1045,11 @@ describe('createAgent', () => {
       },
     });
 
-    await agent.run('current', { sessionId: 'sess_1' });
+    await agent.run({
+      messages: [{ role: 'user', content: 'history' }],
+      prompt: 'current',
+    });
 
-    expect(loads).toBe(1);
     expect(seen).toHaveLength(2);
     expect(seen[0]?.filter((content) => content === 'history')).toHaveLength(1);
     expect(seen[1]?.filter((content) => content === 'history')).toHaveLength(1);
@@ -1113,7 +1131,7 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('prefers response.newMessages over diff fallback', async () => {
+  it('uses the adapter-declared new messages', async () => {
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: {
@@ -1412,10 +1430,14 @@ describe('createAgent', () => {
     expect(pending.pending).toEqual([
       expect.objectContaining({ kind: 'tool-call', toolCallId: 'ask-1' }),
     ]);
+    const deferred = pending.pending;
 
     const stream = agent.resume({
-      deferred: pending.pending!,
-      toolResults: { 'ask-1': { selected: 'A' } },
+      messages: pending.messages,
+      deferred: {
+        deferred,
+        toolResults: { 'ask-1': { selected: 'A' } },
+      },
     });
     for await (const _event of stream) {
       // consume
@@ -1423,8 +1445,11 @@ describe('createAgent', () => {
     expect((await stream.final).output).toBe('hello');
 
     const invalid = agent.resume({
-      deferred: pending.pending!,
-      toolResults: { wrong: 'answer' },
+      messages: pending.messages,
+      deferred: {
+        deferred,
+        toolResults: { wrong: 'answer' },
+      },
     });
     await expect(async () => {
       for await (const _event of invalid) {
@@ -1535,22 +1560,6 @@ describe('createAgent', () => {
       2,
     );
     expect(events).toContain('run.completed');
-    await agent.close();
-  });
-
-  it('uses diffNewMessages as a fallback when adapter omits newMessages', async () => {
-    const agent = createAgent({
-      model: 'test:model',
-      modelAdapter: new EchoAdapter(),
-    });
-
-    const result = await agent.run('hi');
-
-    expect(result.messages.at(-1)).toMatchObject({
-      role: 'assistant',
-      content: 'hello',
-    });
-    expect(result.finishReason).toBe('stop');
     await agent.close();
   });
 

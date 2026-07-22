@@ -1,6 +1,12 @@
+/**
+ * 本文件验证 turn-tracing 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createTurnTracing } from '../../src/observability/turn-tracing.js';
+import { createTurnTracing } from '../../src/infra/telemetry/turn-tracing.js';
 
 const originalPublicKey = process.env.LANGFUSE_PUBLIC_KEY;
 const originalSecretKey = process.env.LANGFUSE_SECRET_KEY;

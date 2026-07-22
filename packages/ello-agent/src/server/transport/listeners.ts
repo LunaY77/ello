@@ -1,209 +1,244 @@
+/**
+ * 本文件负责 Fastify HTTP/WebSocket 宿主、鉴权、健康检查和 listener 生命周期。
+ *
+ * Fastify 只处理 upgrade 前的 HTTP 边界；连接建立后立即交给 `ServerConnection`，RPC method、Zod
+ * 校验、顺序屏障和背压不进入 Fastify response pipeline。
+ */
 import { chmod, unlink } from 'node:fs/promises';
-import {
-  createServer,
-  type IncomingMessage,
-  type Server as HttpServer,
-} from 'node:http';
 
-import { WebSocketServer } from 'ws';
+import websocket from '@fastify/websocket';
+import Fastify, {
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from 'fastify';
 
+import type { Capability } from '../../protocol/v1/index.js';
 import { AgentServer } from '../server.js';
 
-import type { AppServerTransport } from './transport.js';
-import { UnixSocketTransport } from './unix-socket.js';
-import { WebSocketTransport } from './websocket.js';
+import { UnixSocketTransport, WebSocketTransport } from './websocket.js';
+
+const MAX_WEBSOCKET_PAYLOAD_BYTES = 8 * 1024 * 1024;
+const MAX_CONNECTIONS = 64;
 
 export interface ListenerOptions {
   readonly endpoint: string;
   readonly authToken?: string;
-  readonly capabilities: readonly import('../../protocol/v1/index.js').Capability[];
+  readonly capabilities: ReadonlyArray<Capability>;
   readonly server: AgentServer;
 }
 
 export interface ServerListener {
+  /**
+   * 停止接受 upgrade，关闭全部 WebSocket 并等待对应 AgentServer connection 释放。
+   *
+   * Args:
+   * - 无：使用 listener 已经拥有的 Fastify 实例和连接任务。
+   *
+   * Returns:
+   * - Promise 在网络句柄、连接任务和 Unix socket 文件全部释放后兑现。
+   */
   close(): Promise<void>;
 }
 
+interface ListenerAddress {
+  readonly kind: 'websocket' | 'unix';
+  readonly routePath: string;
+  readonly host?: string;
+  readonly port?: number;
+  readonly socketPath?: string;
+}
+
+/**
+ * 根据 ws:// 或 unix:// endpoint 创建唯一 Fastify listener。
+ *
+ * Args:
+ * - `options`: endpoint、鉴权 token、连接 capability 和目标 AgentServer。
+ *
+ * Returns:
+ * - Promise 在 Fastify 已开始监听后兑现为可关闭的 listener。
+ */
 export async function listenEndpoint(
   options: ListenerOptions,
 ): Promise<ServerListener> {
-  if (
-    options.endpoint.startsWith('ws://') ||
-    options.endpoint.startsWith('wss://')
-  ) {
-    return listenWebSocket(options);
+  const address = parseListenerAddress(options.endpoint);
+  const app = Fastify({ logger: false });
+  const connections = new Set<Promise<void>>();
+  await registerWebSocketHost(app, address, options, connections);
+  if (address.kind === 'websocket') {
+    await app.listen({
+      host: requireWebSocketHost(address),
+      port: requireWebSocketPort(address),
+    });
+  } else {
+    await app.listen({ path: requireSocketPath(address) });
+    await chmod(requireSocketPath(address), 0o600);
   }
-  if (options.endpoint.startsWith('unix://')) {
-    return listenUnix(options);
-  }
-  throw new Error(`Unsupported listen endpoint: ${options.endpoint}`);
+  return {
+    close: () => closeListener(app, address, connections),
+  };
 }
 
-async function listenWebSocket(
+function requireWebSocketHost(address: ListenerAddress): string {
+  if (address.kind !== 'websocket' || address.host === undefined) {
+    throw new Error('WebSocket listener requires a host.');
+  }
+  return address.host;
+}
+
+function requireWebSocketPort(address: ListenerAddress): number {
+  if (address.kind !== 'websocket' || address.port === undefined) {
+    throw new Error('WebSocket listener requires a port.');
+  }
+  return address.port;
+}
+
+async function registerWebSocketHost(
+  app: FastifyInstance,
+  address: ListenerAddress,
   options: ListenerOptions,
-): Promise<ServerListener> {
-  const url = new URL(options.endpoint);
-  if (url.protocol !== 'ws:')
+  connections: Set<Promise<void>>,
+): Promise<void> {
+  await app.register(websocket, {
+    options: { maxPayload: MAX_WEBSOCKET_PAYLOAD_BYTES },
+    errorHandler(error, socket) {
+      socket.terminate();
+      options.server.logConnectionFailure('websocket.handler.failed', error);
+    },
+  });
+  app.get('/healthz', async (_request, reply) => health(options.server, reply));
+  app.get('/readyz', async (_request, reply) => health(options.server, reply));
+  app.get(
+    address.routePath,
+    {
+      websocket: true,
+      preValidation: async (request, reply) =>
+        authorizeUpgrade(request, reply, address, options, connections.size),
+    },
+    (socket) => {
+      const transport =
+        address.kind === 'unix'
+          ? new UnixSocketTransport(socket)
+          : new WebSocketTransport(socket);
+      const task = options.server
+        .acceptTransport(transport, options.capabilities)
+        .finally(() => connections.delete(task));
+      connections.add(task);
+    },
+  );
+}
+
+function health(server: AgentServer, reply: FastifyReply) {
+  const ready = server.state === 'ready';
+  void reply.code(ready ? 200 : 503);
+  return { status: ready ? 'ready' : server.state };
+}
+
+async function authorizeUpgrade(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  address: ListenerAddress,
+  options: ListenerOptions,
+  connectionCount: number,
+): Promise<void> {
+  if (connectionCount >= MAX_CONNECTIONS) {
+    await reply.code(503).send({ error: 'connection limit exceeded' });
+    return;
+  }
+  if (address.kind === 'websocket' && request.headers.origin !== undefined) {
+    await reply.code(403).send({ error: 'origin is not allowed' });
+    return;
+  }
+  const authToken = options.authToken;
+  if (authToken !== undefined) {
+    if (request.headers.authorization !== `Bearer ${authToken}`) {
+      await reply.code(401).send({ error: 'unauthorized' });
+    }
+    return;
+  }
+  if (address.kind === 'websocket' && !isLoopbackRemote(request.ip)) {
+    await reply.code(403).send({ error: 'remote client is not allowed' });
+  }
+}
+
+function parseListenerAddress(endpoint: string): ListenerAddress {
+  if (endpoint.startsWith('unix://')) {
+    const socketPath = decodeURIComponent(endpoint.slice('unix://'.length));
+    if (socketPath === '') {
+      throw new Error('unix:// endpoint requires a socket path.');
+    }
+    return { kind: 'unix', routePath: '/', socketPath };
+  }
+  const url = new URL(endpoint);
+  if (url.protocol === 'wss:') {
     throw new Error(
       'wss:// server endpoints require TLS configuration and are not enabled.',
     );
-  if (!isLoopbackHost(url.hostname))
+  }
+  if (url.protocol !== 'ws:') {
+    throw new Error(`Unsupported listen endpoint: ${endpoint}`);
+  }
+  if (!isLoopbackHost(url.hostname)) {
     throw new Error('ws:// listeners may only bind to a loopback address.');
-  const httpServer = createServer((request, response) => {
-    if (request.url === '/healthz' || request.url === '/readyz') {
-      const ready = options.server.state === 'ready';
-      response.statusCode = ready ? 200 : 503;
-      response.setHeader('content-type', 'application/json');
-      response.end(
-        JSON.stringify({ status: ready ? 'ready' : options.server.state }),
-      );
-      return;
-    }
-    response.statusCode = 404;
-    response.end('not found');
-  });
-  const sockets = new WebSocketServer({ noServer: true });
-  const transports = new Set<AppServerTransport>();
-  const connections = new Set<Promise<void>>();
-  httpServer.on('upgrade', (request, socket, head) => {
-    if (request.headers.origin !== undefined) {
-      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-    if (!authorize(request, options.authToken)) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
-      socket.destroy();
-      return;
-    }
-    sockets.handleUpgrade(request, socket, head, (webSocket) => {
-      trackConnection(
-        new WebSocketTransport(webSocket),
-        options,
-        transports,
-        connections,
-      );
-    });
-  });
-  await new Promise<void>((resolve, reject) => {
-    httpServer.once('error', reject);
-    httpServer.listen(Number(url.port || 80), url.hostname, () => {
-      httpServer.off('error', reject);
-      resolve();
-    });
-  });
+  }
+  if (url.search !== '' || url.hash !== '') {
+    throw new Error('WebSocket listen endpoint cannot contain query or hash.');
+  }
+  if (url.pathname === '/healthz' || url.pathname === '/readyz') {
+    throw new Error(`WebSocket route ${url.pathname} conflicts with health.`);
+  }
   return {
-    close: async () => {
-      await closeTransports(sockets, transports, connections);
-      await closeHttpServer(httpServer);
-    },
+    kind: 'websocket',
+    routePath: url.pathname,
+    host: url.hostname,
+    port: Number(url.port || 80),
   };
 }
 
-async function listenUnix(options: ListenerOptions): Promise<ServerListener> {
-  const socketPath = decodeURIComponent(
-    options.endpoint.slice('unix://'.length),
-  );
-  if (socketPath === '')
-    throw new Error('unix:// endpoint requires a socket path.');
-  const httpServer = createServer((request, response) => {
-    if (request.url === '/healthz' || request.url === '/readyz') {
-      const ready = options.server.state === 'ready';
-      response.statusCode = ready ? 200 : 503;
-      response.setHeader('content-type', 'application/json');
-      response.end(
-        JSON.stringify({ status: ready ? 'ready' : options.server.state }),
-      );
-      return;
-    }
-    response.statusCode = 404;
-    response.end('not found');
-  });
-  const sockets = new WebSocketServer({ noServer: true });
-  const transports = new Set<AppServerTransport>();
-  const connections = new Set<Promise<void>>();
-  httpServer.on('upgrade', (request, socket, head) => {
-    if (!authorizeUnix(request, options.authToken)) {
-      socket.write(
-        options.authToken === undefined
-          ? 'HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'
-          : 'HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n',
-      );
-      socket.destroy();
-      return;
-    }
-    sockets.handleUpgrade(request, socket, head, (webSocket) => {
-      trackConnection(
-        new UnixSocketTransport(webSocket),
-        options,
-        transports,
-        connections,
-      );
-    });
-  });
-  await new Promise<void>((resolve, reject) => {
-    httpServer.once('error', reject);
-    httpServer.listen(socketPath, () => {
-      httpServer.off('error', reject);
-      resolve();
-    });
-  });
-  await chmod(socketPath, 0o600);
-  return {
-    close: async () => {
-      await closeTransports(sockets, transports, connections);
-      await closeHttpServer(httpServer);
-      await unlink(socketPath).catch(() => undefined);
-    },
-  };
-}
-
-function trackConnection(
-  transport: AppServerTransport,
-  options: ListenerOptions,
-  transports: Set<AppServerTransport>,
-  connections: Set<Promise<void>>,
-): void {
-  transports.add(transport);
-  const task = options.server
-    .acceptTransport(transport, options.capabilities)
-    .finally(() => {
-      transports.delete(transport);
-      connections.delete(task);
-    });
-  connections.add(task);
-}
-
-async function closeTransports(
-  sockets: WebSocketServer,
-  transports: Set<AppServerTransport>,
+async function closeListener(
+  app: FastifyInstance,
+  address: ListenerAddress,
   connections: Set<Promise<void>>,
 ): Promise<void> {
-  sockets.close();
-  await Promise.allSettled(
-    [...transports].map((transport) => transport.close('listener closed')),
+  const failures: unknown[] = [];
+  try {
+    await app.close();
+  } catch (error) {
+    failures.push(error);
+  }
+  const settled = await Promise.allSettled([...connections]);
+  for (const result of settled) {
+    if (result.status === 'rejected') failures.push(result.reason);
+  }
+  if (address.socketPath !== undefined) {
+    try {
+      await unlink(address.socketPath);
+    } catch (error) {
+      if (!isErrnoException(error) || error.code !== 'ENOENT') {
+        failures.push(error);
+      }
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Fastify listener close failed.');
+  }
+}
+
+function requireSocketPath(address: ListenerAddress): string {
+  if (address.socketPath === undefined) {
+    throw new Error('Unix listener address has no socket path.');
+  }
+  return address.socketPath;
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
+}
+
+function isLoopbackRemote(remote: string): boolean {
+  return (
+    remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
   );
-  await Promise.allSettled([...connections]);
-}
-
-function authorize(
-  request: IncomingMessage,
-  authToken: string | undefined,
-): boolean {
-  const remote = request.socket.remoteAddress;
-  const loopback =
-    remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
-  if (authToken === undefined && !loopback) return false;
-  if (authToken === undefined) return true;
-  return request.headers.authorization === `Bearer ${authToken}`;
-}
-
-function authorizeUnix(
-  request: IncomingMessage,
-  authToken: string | undefined,
-): boolean {
-  if (authToken === undefined) return true;
-  return request.headers.authorization === `Bearer ${authToken}`;
 }
 
 function isLoopbackHost(hostname: string): boolean {
@@ -213,8 +248,4 @@ function isLoopbackHost(hostname: string): boolean {
     hostname === '[::1]' ||
     hostname === '::1'
   );
-}
-
-function closeHttpServer(server: HttpServer): Promise<void> {
-  return new Promise((resolve) => server.close(() => resolve()));
 }

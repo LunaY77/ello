@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppServerClient } from '../../src/api/client.js';
@@ -22,6 +26,7 @@ vi.mock('../../src/cli/server-launcher.js', () => ({
 
 describe('CLI contract', () => {
   let stdout: string[];
+  const temporaryRoots: string[] = [];
 
   beforeEach(() => {
     stdout = [];
@@ -35,9 +40,14 @@ describe('CLI contract', () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     delete process.env.ELLO_CLI_TEST_TOKEN;
     vi.restoreAllMocks();
+    await Promise.all(
+      temporaryRoots
+        .splice(0)
+        .map((root) => rm(root, { recursive: true, force: true })),
+    );
   });
 
   it('非交互 help 不建立连接', async () => {
@@ -237,6 +247,106 @@ describe('CLI contract', () => {
       role: 'reference',
       detached: true,
     });
+  });
+
+  it('repository registry 命令由 Workspace 领域注册并调用 repo RPC', async () => {
+    const client = managementClient({ data: [] });
+    mocks.connectClient.mockResolvedValue(connection(client));
+    const { runCli } = await import('../../src/cli/main.js');
+
+    await runCli(['node', 'ello', '--json', 'repo', 'list']);
+
+    expect(client.request).toHaveBeenCalledWith('repo/list', {});
+    expect(client.close).toHaveBeenCalledOnce();
+  });
+
+  it('repo help 暴露完整 registry、remote 和 portability 命令', async () => {
+    const { runCli } = await import('../../src/cli/main.js');
+    vi.spyOn(process, 'exit').mockImplementation((code): never => {
+      throw new Error(`process.exit ${String(code)}`);
+    });
+
+    await expect(runCli(['node', 'ello', 'repo', '--help'])).rejects.toThrow(
+      'process.exit 0',
+    );
+
+    const help = stdout.join('');
+    for (const command of [
+      'add',
+      'list',
+      'show',
+      'rename',
+      'remove',
+      'fetch',
+      'fetch-local',
+      'remote',
+      'export',
+      'import',
+    ]) {
+      expect(help).toContain(command);
+    }
+    expect(mocks.connectClient).not.toHaveBeenCalled();
+  });
+
+  it('repo add 支持 local-only，并只在显式提供时发送 remoteUrl', async () => {
+    const client = managementClient({ repository: { key: 'ello' } });
+    mocks.connectClient.mockResolvedValue(connection(client));
+    const { runCli } = await import('../../src/cli/main.js');
+
+    await runCli([
+      'node',
+      'ello',
+      '--json',
+      'repo',
+      'add',
+      'ello',
+      '/workspace/ello',
+    ]);
+
+    expect(client.request).toHaveBeenCalledWith('repo/add', {
+      key: 'ello',
+      source: '/workspace/ello',
+    });
+    expect(client.close).toHaveBeenCalledOnce();
+  });
+
+  it('repo import 严格读取 JSON document 后调用 typed RPC', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-cli-repo-import-'));
+    temporaryRoots.push(root);
+    const file = path.join(root, 'repos.json');
+    const document = {
+      formatVersion: 1,
+      exportedAt: '2026-07-22T00:00:00.000Z',
+      repositories: [],
+    };
+    await writeFile(file, JSON.stringify(document), 'utf8');
+    const client = managementClient({ data: [] });
+    mocks.connectClient.mockResolvedValue(connection(client));
+    const { runCli } = await import('../../src/cli/main.js');
+
+    await runCli(['node', 'ello', '--json', 'repo', 'import', file]);
+
+    expect(client.request).toHaveBeenCalledWith('repo/import', { document });
+    expect(client.close).toHaveBeenCalledOnce();
+  });
+
+  it('repo export 直接输出可被 repo import 消费的 document', async () => {
+    const document = {
+      formatVersion: 1,
+      exportedAt: '2026-07-22T00:00:00.000Z',
+      repositories: [],
+    };
+    const client = managementClient({ document });
+    mocks.connectClient.mockResolvedValue(connection(client));
+    const { runCli } = await import('../../src/cli/main.js');
+
+    await runCli(['node', 'ello', '--json', 'repo', 'export', 'web', 'api']);
+
+    expect(client.request).toHaveBeenCalledWith('repo/export', {
+      repos: ['web', 'api'],
+    });
+    expect(JSON.parse(stdout.join(''))).toEqual(document);
+    expect(client.close).toHaveBeenCalledOnce();
   });
 });
 

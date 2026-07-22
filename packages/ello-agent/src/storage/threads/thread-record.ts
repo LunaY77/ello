@@ -1,3 +1,9 @@
+/**
+ * 本文件负责持久化层的“thread-record”模块职责。
+ *
+ * 文件、lease 或 record 状态由显式 store 入口拥有；读取结果在离开边界前完成结构校验。
+ * 写入顺序、连续序号和资源释放是持久化不变量，损坏数据与非法状态直接失败。
+ */
 import { z } from 'zod';
 
 import {
@@ -233,6 +239,19 @@ export type NewThreadRecord = ThreadRecord extends infer RecordType
     : never
   : never;
 
+/**
+ * 校验 持久化层的 `thread-record` 模块 的输入并返回已满足领域约束的值。
+ *
+ * Args:
+ * - `value`: 要由 `parseThreadRecord` 读取或写入的单个领域值；所有权仍归调用方。
+ * - `source`: `parseThreadRecord` 所需的业务值；函数按声明读取，不补造缺失内容。
+ *
+ * Returns:
+ * - 返回 `parseThreadRecord` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ *
+ * Throws:
+ * - 当 持久化层的 `thread-record` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+ */
 export function parseThreadRecord(
   value: unknown,
   source: string,

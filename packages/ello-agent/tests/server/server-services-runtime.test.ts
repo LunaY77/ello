@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 server-services-runtime 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,19 +12,18 @@ import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { ThreadSnapshot } from '../../src/protocol/v1/index.js';
-import type { ServerConnection } from '../../src/server/connection/server-connection.js';
-import { ServerServices } from '../../src/server/methods/server-services.js';
-import type { ThreadManager } from '../../src/server/runtime/thread-manager.js';
-import {
-  createCodingStorage,
-  type CodingStorage,
-} from '../../src/storage/database/index.js';
-import type { ThreadLogRepository } from '../../src/storage/threads/thread-log.js';
+import type {
+  ThreadFeature,
+  ThreadStore,
+} from '../../src/features/thread/index.js';
 import {
   RepoStore,
   REPOSITORY_BASELINE_REF,
-} from '../../src/workspace/index.js';
+} from '../../src/features/workspace/index.js';
+import type { ThreadSnapshot } from '../../src/protocol/v1/index.js';
+import { createTestFeatures } from '../support/features.js';
+import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
+import { createTestStores, type TestStores } from '../support/stores.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -26,8 +31,8 @@ describe('ServerServices runtime contracts', () => {
   let oldHome: string | undefined;
   let home: string;
   const roots: string[] = [];
-  const storages: CodingStorage[] = [];
-  const services: ServerServices[] = [];
+  const storages: TestStores[] = [];
+  const services: Array<ReturnType<typeof createTestFeatures>> = [];
 
   beforeEach(async () => {
     oldHome = process.env.ELLO_HOME;
@@ -53,7 +58,8 @@ describe('ServerServices runtime contracts', () => {
       `process.stdout.write('x'.repeat(${fullOutput.length}))`,
     )}`;
 
-    const shell = (await service.dispatch(
+    const shell = (await invokeServiceRoute(
+      service,
       connection('connection-shell'),
       'thread/shellCommand',
       { threadId: 'thr_runtime', command, timeoutMs: 10_000 },
@@ -67,7 +73,8 @@ describe('ServerServices runtime contracts', () => {
     expect(shell.stderr).toBe('');
     expect(shell.artifactId).toBeDefined();
 
-    const artifact = (await service.dispatch(
+    const artifact = (await invokeServiceRoute(
+      service,
       connection('connection-shell'),
       'artifact/read',
       {
@@ -95,24 +102,29 @@ describe('ServerServices runtime contracts', () => {
     const service = createService(storage, threadSnapshot(home));
     const owner = connection('connection-owner');
     const other = connection('connection-other');
-    const result = (await service.dispatch(owner, 'fs/watch', {
+    const result = (await invokeServiceRoute(service, owner, 'fs/watch', {
       cwd: home,
       paths: ['watched.txt'],
     })) as { readonly watchId: string };
 
     await expect(
-      service.dispatch(other, 'fs/unwatch', { watchId: result.watchId }),
+      invokeServiceRoute(service, other, 'fs/unwatch', {
+        watchId: result.watchId,
+      }),
     ).rejects.toMatchObject({ type: 'invalidParams' });
-    service.closeConnection(owner.id);
+    service.releaseConnection(owner.connectionId);
     await expect(
-      service.dispatch(owner, 'fs/unwatch', { watchId: result.watchId }),
+      invokeServiceRoute(service, owner, 'fs/unwatch', {
+        watchId: result.watchId,
+      }),
     ).rejects.toMatchObject({ type: 'invalidParams' });
   });
 
   it('未装配 delegation runner 的 Subagent 在目录中明确标记不可用', async () => {
     const storage = createStorage(home);
     const service = createService(storage, threadSnapshot(home));
-    const response = (await service.dispatch(
+    const response = (await invokeServiceRoute(
+      service,
       connection('connection-agent-catalog'),
       'agent/list',
       { cwd: home },
@@ -144,11 +156,14 @@ describe('ServerServices runtime contracts', () => {
     await initializeRepository(source);
     const sourceStorage = createStorage(home);
     const sourceService = createService(sourceStorage, threadSnapshot(home));
-    await sourceService.dispatch(connection('connection-export'), 'repo/add', {
-      key: 'portable',
-      source,
-    });
-    const exported = (await sourceService.dispatch(
+    await invokeServiceRoute(
+      sourceService,
+      connection('connection-export'),
+      'repo/add',
+      { key: 'portable', source },
+    );
+    const exported = (await invokeServiceRoute(
+      sourceService,
       connection('connection-export'),
       'repo/export',
       { repos: ['portable'] },
@@ -179,29 +194,39 @@ describe('ServerServices runtime contracts', () => {
     );
     const portable = exported.document.repositories[0]!;
     await expect(
-      importedService.dispatch(connection('connection-import'), 'repo/import', {
-        document: {
-          ...exported.document,
-          repositories: [
-            { ...portable, key: 'first' },
-            {
-              ...portable,
-              key: 'broken',
-              bundle: {
-                encoding: 'base64',
-                data: Buffer.from('not a git bundle').toString('base64'),
+      invokeServiceRoute(
+        importedService,
+        connection('connection-import'),
+        'repo/import',
+        {
+          document: {
+            ...exported.document,
+            repositories: [
+              { ...portable, key: 'first' },
+              {
+                ...portable,
+                key: 'broken',
+                bundle: {
+                  encoding: 'base64',
+                  data: Buffer.from('not a git bundle').toString('base64'),
+                },
               },
-            },
-          ],
+            ],
+          },
         },
-      }),
+      ),
     ).rejects.toThrow();
     expect(new RepoStore(importedStorage.repositories).list()).toEqual([]);
 
     await expect(
-      importedService.dispatch(connection('connection-import'), 'repo/import', {
-        document: exported.document,
-      }),
+      invokeServiceRoute(
+        importedService,
+        connection('connection-import'),
+        'repo/import',
+        {
+          document: exported.document,
+        },
+      ),
     ).resolves.toMatchObject({
       data: [{ key: 'portable', sourceUrl: null }],
     });
@@ -222,8 +247,8 @@ describe('ServerServices runtime contracts', () => {
     });
   });
 
-  function createStorage(root: string): CodingStorage {
-    const storage = createCodingStorage({
+  function createStorage(root: string): TestStores {
+    const storage = createTestStores({
       databasePath: path.join(root, 'state', 'ello.sqlite'),
       artifactsDir: path.join(root, 'artifacts'),
     });
@@ -232,15 +257,16 @@ describe('ServerServices runtime contracts', () => {
   }
 
   function createService(
-    storage: CodingStorage,
+    storage: TestStores,
     snapshot: ThreadSnapshot,
-  ): ServerServices {
-    const service = new ServerServices({
+  ): ReturnType<typeof createTestFeatures> {
+    const service = createTestFeatures({
       storage,
       threads: {
         read: () => Promise.resolve(snapshot),
-      } as unknown as ThreadManager,
-      logs: {} as ThreadLogRepository,
+      } as unknown as ThreadFeature,
+      store: {} as ThreadStore,
+      compact: () => Promise.reject(new Error('Unexpected compact request.')),
     });
     services.push(service);
     return service;
@@ -253,8 +279,8 @@ describe('ServerServices runtime contracts', () => {
   }
 });
 
-function connection(id: string): ServerConnection {
-  return { id } as ServerConnection;
+function connection(id: string) {
+  return createTestPeer({ connectionId: id });
 }
 
 function threadSnapshot(cwd: string): ThreadSnapshot {

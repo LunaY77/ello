@@ -1,3 +1,9 @@
+/**
+ * 本文件负责持久化层的“thread-log”模块职责。
+ *
+ * 文件、lease 或 record 状态由显式 store 入口拥有；读取结果在离开边界前完成结构校验。
+ * 写入顺序、连续序号和资源释放是持久化不变量，损坏数据与非法状态直接失败。
+ */
 import {
   mkdir,
   open,
@@ -9,13 +15,14 @@ import {
 } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 
-import { AppServerError } from '../../protocol/errors.js';
+import { errnoCode } from '../../infra/filesystem.js';
 import {
   activeThreadsDir,
   archivedThreadLogPath,
   archivedThreadsDir,
   threadLogPath,
-} from '../paths.js';
+} from '../../infra/paths.js';
+import { AppServerError } from '../../protocol/errors.js';
 
 import {
   parseThreadRecord,
@@ -23,7 +30,7 @@ import {
   type ThreadRecord,
 } from './thread-record.js';
 
-export interface ThreadLogRepositoryOptions {
+export interface ThreadLogStoreOptions {
   readonly root: string;
 }
 
@@ -32,20 +39,47 @@ interface WriterState {
   queue: Promise<void>;
 }
 
+/**
+ * 执行 持久化层的 `thread-log` 模块 定义的 `ThreadRecordListener` 领域操作，输入和副作用均受该边界约束。
+ *
+ * Args:
+ * - `record`: 要由 `ThreadRecordListener` 读取或写入的单个领域值；所有权仍归调用方。
+ *
+ * Returns:
+ * - 持久化层的 `thread-log` 模块 的同步状态变更完成后返回，不产生业务结果。
+ */
 export type ThreadRecordListener = (record: ThreadRecord) => void;
 
 /**
  * Thread JSONL 的唯一写入口。每个 thread 有独立 Promise 队列，不同 thread 可并行。
  */
-export class ThreadLogRepository {
+export class ThreadLogStore {
   private readonly root: string;
   private readonly writers = new Map<string, WriterState>();
   private readonly listeners = new Map<string, ThreadRecordListener>();
 
-  constructor(options: ThreadLogRepositoryOptions) {
+  /**
+   * 创建 `ThreadLogStore`，由该实例独占 持久化层的 `thread-log` 模块 中声明的可变状态和资源生命周期。
+   *
+   * Args:
+   * - `options`: 仅作用于 `constructor ThreadLogStore` 的调用选项；函数只读取该对象，不保留可变引用。
+   */
+  constructor(options: ThreadLogStoreOptions) {
     this.root = options.root;
   }
 
+  /**
+   * 初始化 持久化层的 `thread-log` 模块 所需的目录、连接或缓存；完成前不得使用依赖这些资源的操作。
+   *
+   * Args:
+   * - 无：操作使用实例或闭包已经持有的稳定状态。
+   *
+   * Returns:
+   * - Promise 在依赖资源全部可用后兑现；兑现前实例仍视为未就绪。
+   *
+   * Throws:
+   * - 当 持久化层的 `thread-log` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
   async initialize(): Promise<void> {
     await Promise.all([
       mkdir(activeThreadsDir(this.root), { recursive: true }),
@@ -53,6 +87,19 @@ export class ThreadLogRepository {
     ]);
   }
 
+  /**
+   * 构造 持久化层的 `thread-log` 模块 中的 `create` 结果，并在返回前建立所需的不变量。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   * - `record`: 要由 `create` 读取或写入的单个领域值；所有权仍归调用方。
+   *
+   * Returns:
+   * - Promise 在 持久化层的 `thread-log` 模块 的异步读取或状态变更完成后兑现为声明结果。
+   *
+   * Throws:
+   * - 当 持久化层的 `thread-log` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
   async create(
     threadId: string,
     record: Extract<NewThreadRecord, { readonly kind: 'thread.created' }>,
@@ -90,16 +137,36 @@ export class ThreadLogRepository {
     return fullRecord;
   }
 
+  /**
+   * 按 持久化层的 `thread-log` 模块 的一致性约束执行 `append` 状态变更。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   * - `record`: 要由 `append` 读取或写入的单个领域值；所有权仍归调用方。
+   *
+   * Returns:
+   * - Promise 在 持久化层的 `thread-log` 模块 的异步读取或状态变更完成后兑现为声明结果。
+   *
+   * Throws:
+   * - 当 持久化层的 `thread-log` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
   append(threadId: string, record: NewThreadRecord): Promise<ThreadRecord> {
     const task = this.appendQueued(threadId, record);
     // 队列必须继续可用；当前调用仍会拿到原始 rejection。
-    void task.catch(() => undefined);
+    void task.then(undefined, () => undefined);
     return task;
   }
 
   /**
    * runtime 订阅同一 JSONL writer 的提交结果，保证 transcript 与领域事件严格按
    * 已落盘 seq 更新 snapshot/SQLite；一个 thread 同时只能有一个 runtime owner。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   * - `listener`: 生命周期内调用的回调；回调失败属于当前操作失败，不会被静默吞掉。
+   *
+   * Returns:
+   * - 返回 `subscribe` 计算出的声明结果；返回值不包含未声明的兜底状态。
    */
   subscribe(threadId: string, listener: ThreadRecordListener): () => void {
     if (this.listeners.has(threadId)) {
@@ -113,14 +180,50 @@ export class ThreadLogRepository {
     };
   }
 
+  /**
+   * 读取 持久化层的 `thread-log` 模块 的 `read` 视图，不转移底层状态所有权。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   *
+   * Returns:
+   * - Promise 在 持久化层的 `thread-log` 模块 的异步读取或状态变更完成后兑现为声明结果。
+   *
+   * Throws:
+   * - 当 持久化层的 `thread-log` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
   async read(threadId: string): Promise<readonly ThreadRecord[]> {
+    // 读请求必须观察同一 writer 已提交的完整 JSONL，不能读取正在追加的最后一行。
+    await this.flush(threadId);
     return this.readPath(threadLogPath(threadId, this.root), threadId);
   }
 
+  /**
+   * 读取 持久化层的 `thread-log` 模块 的 `readArchived` 视图，不转移底层状态所有权。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   *
+   * Returns:
+   * - Promise 在 持久化层的 `thread-log` 模块 的异步读取或状态变更完成后兑现为声明结果。
+   *
+   * Throws:
+   * - 当 持久化层的 `thread-log` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
   async readArchived(threadId: string): Promise<readonly ThreadRecord[]> {
+    await this.flush(threadId);
     return this.readPath(archivedThreadLogPath(threadId, this.root), threadId);
   }
 
+  /**
+   * 按 持久化层的 `thread-log` 模块 的一致性约束执行 `archive` 状态变更。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   *
+   * Returns:
+   * - Promise 在 持久化层的 `thread-log` 模块 的异步副作用完整提交后兑现，不返回业务值。
+   */
   async archive(threadId: string): Promise<void> {
     await this.flush(threadId);
     await mkdir(archivedThreadsDir(this.root), { recursive: true });
@@ -131,6 +234,15 @@ export class ThreadLogRepository {
     this.writers.delete(threadId);
   }
 
+  /**
+   * 按 持久化层的 `thread-log` 模块 的一致性约束执行 `unarchive` 状态变更。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   *
+   * Returns:
+   * - Promise 在 持久化层的 `thread-log` 模块 的异步副作用完整提交后兑现，不返回业务值。
+   */
   async unarchive(threadId: string): Promise<void> {
     await mkdir(activeThreadsDir(this.root), { recursive: true });
     await rename(
@@ -139,6 +251,19 @@ export class ThreadLogRepository {
     );
   }
 
+  /**
+   * 按 持久化层的 `thread-log` 模块 的一致性约束执行 `delete` 状态变更。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   * - `archived`: 显式控制 `delete` 分支的布尔值；只影响当前调用。
+   *
+   * Returns:
+   * - Promise 在 持久化层的 `thread-log` 模块 的异步副作用完整提交后兑现，不返回业务值。
+   *
+   * Throws:
+   * - 当 持久化层的 `thread-log` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
   async delete(threadId: string, archived: boolean): Promise<void> {
     await this.flush(threadId);
     await rm(
@@ -150,6 +275,16 @@ export class ThreadLogRepository {
     this.writers.delete(threadId);
   }
 
+  /**
+   * 执行 持久化层的 `thread-log` 模块 定义的 `exists` 领域操作，输入和副作用均受该边界约束。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   * - `archived`: 显式控制 `exists` 分支的布尔值；只影响当前调用。
+   *
+   * Returns:
+   * - Promise 在 持久化层的 `thread-log` 模块 的异步读取或状态变更完成后兑现为声明结果。
+   */
   async exists(threadId: string, archived = false): Promise<boolean> {
     try {
       await stat(
@@ -164,6 +299,15 @@ export class ThreadLogRepository {
     }
   }
 
+  /**
+   * 读取 持久化层的 `thread-log` 模块 的 `listThreadIds` 视图，不转移底层状态所有权。
+   *
+   * Args:
+   * - `archived`: 显式控制 `listThreadIds` 分支的布尔值；只影响当前调用。
+   *
+   * Returns:
+   * - Promise 在 持久化层的 `thread-log` 模块 的异步读取或状态变更完成后兑现为声明结果。
+   */
   async listThreadIds(archived = false): Promise<readonly string[]> {
     const directory = archived
       ? archivedThreadsDir(this.root)
@@ -175,6 +319,15 @@ export class ThreadLogRepository {
       .sort();
   }
 
+  /**
+   * 在 持久化层的 `thread-log` 模块 中执行 `flush` 完整流程，并在返回前完成其必要副作用。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   *
+   * Returns:
+   * - Promise 在 持久化层的 `thread-log` 模块 的异步副作用完整提交后兑现，不返回业务值。
+   */
   async flush(threadId: string): Promise<void> {
     await this.writers.get(threadId)?.queue;
   }
@@ -319,9 +472,5 @@ function isNodeError(
   error: unknown,
   code: string,
 ): error is NodeJS.ErrnoException {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    (error as NodeJS.ErrnoException).code === code
-  );
+  return error instanceof Error && 'code' in error && errnoCode(error) === code;
 }

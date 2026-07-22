@@ -1,3 +1,9 @@
+/**
+ * 本文件负责 Protocol 的“json-rpc”模块职责。
+ *
+ * 模块不持有可变运行状态；wire 数据以 unknown 进入并由 schema 或显式 parser 收窄。
+ * 字段名称、判别值和错误语义属于跨进程协议，调用方不得绕过校验直接构造不完整值。
+ */
 import { z } from 'zod';
 
 import { AppServerErrorTypeSchema, type AppServerError } from './errors.js';
@@ -70,6 +76,15 @@ export type RpcNotification = z.infer<typeof RpcNotificationSchema>;
 export type RpcResponse = z.infer<typeof RpcResponseSchema>;
 export type RpcMessage = z.infer<typeof RpcMessageSchema>;
 
+/**
+ * 执行 JSON-RPC 协议的 `json-rpc` 模块 定义的 `toRpcError` 领域操作，输入和副作用均受该边界约束。
+ *
+ * Args:
+ * - `error`: 上游捕获的失败值；函数保留原始 cause 并转换为当前错误契约。
+ *
+ * Returns:
+ * - 返回 `toRpcError` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ */
 export function toRpcError(error: AppServerError): RpcError {
   return {
     code: error.code,

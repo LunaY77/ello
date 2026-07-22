@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 rpc-capabilities 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -5,14 +11,19 @@ import {
   type Capability,
   type ClientMethod,
 } from '../../src/protocol/v1/index.js';
-import type { ServerConnection } from '../../src/server/connection/server-connection.js';
-import type { RpcServices } from '../../src/server/methods/server-services.js';
+import {
+  assertRouteCapability,
+  dispatchRoute,
+} from '../../src/server/rpc/dispatch.js';
 import {
   capabilityFor,
   CLIENT_METHOD_CAPABILITIES,
-  RpcRouter,
-} from '../../src/server/rpc/router.js';
-import type { ThreadManager } from '../../src/server/runtime/thread-manager.js';
+  isRoutableClientMethod,
+  route,
+  type RoutableClientMethod,
+  type RpcRouteFragment,
+} from '../../src/server/rpc/route.js';
+import { createTestPeer } from '../support/rpc.js';
 
 const READ_METHODS = [
   'server/read',
@@ -51,7 +62,7 @@ const READ_METHODS = [
   'workspace/read',
   'workspace/path',
   'workspace/status',
-] as const satisfies readonly ClientMethod[];
+] as const satisfies ReadonlyArray<ClientMethod>;
 
 describe('RPC capability contract', () => {
   it('逐项覆盖完整 method catalog，且只有握手不需要 capability', () => {
@@ -71,76 +82,44 @@ describe('RPC capability contract', () => {
     ).toEqual([...READ_METHODS].sort());
   });
 
-  it('read-only 连接拒绝所有 submit/write/admin method', async () => {
-    const services = new RecordingServices();
-    const router = createRouter(services);
-    const connection = readOnlyConnection();
+  it('read-only peer 拒绝所有 submit/write/admin method', () => {
+    const peer = createTestPeer({ capabilities: ['read'] });
 
     for (const [method, capability] of Object.entries(
       CLIENT_METHOD_CAPABILITIES,
     ) as Array<[ClientMethod, Capability | null]>) {
+      if (!isRoutableClientMethod(method)) continue;
       if (capability === null || capability === 'read') continue;
-      await expect(
-        router.dispatch(connection, method, {}),
-      ).rejects.toMatchObject({
-        type: 'permissionDenied',
-        details: { method, capability },
-      });
+      expect(() =>
+        assertRouteCapability(peer, method, capability),
+      ).toThrowError(
+        expect.objectContaining({
+          type: 'permissionDenied',
+          details: { method, capability },
+        }),
+      );
     }
-    expect(services.methods).toEqual([]);
   });
 
-  it('read-only 连接可调用 repo/workspace 的真实 read/list 路由', async () => {
-    const services = new RecordingServices();
-    const router = createRouter(services);
-    const connection = readOnlyConnection();
+  it('read-only peer 可调用 repo/workspace 的 typed read route', async () => {
+    const methods: Array<RoutableClientMethod> = [];
+    const routes = {
+      'repo/list': route('read', () => {
+        methods.push('repo/list');
+        return { data: [] };
+      }),
+      'workspace/list': route('read', () => {
+        methods.push('workspace/list');
+        return { data: [] };
+      }),
+    } satisfies RpcRouteFragment<'repo/list' | 'workspace/list'>;
+    const peer = createTestPeer({ capabilities: ['read'] });
 
-    await router.dispatch(connection, 'repo/list', {});
-    await router.dispatch(connection, 'repo/read', { repo: 'repo_test' });
-    await router.dispatch(connection, 'workspace/list', {});
-    await router.dispatch(connection, 'workspace/read', {
-      workspace: 'workspace_test',
-    });
+    await dispatchRoute(routes, peer, 'repo/list', {});
+    await dispatchRoute(routes, peer, 'workspace/list', {});
 
-    expect(services.methods).toEqual([
-      'repo/list',
-      'repo/read',
-      'workspace/list',
-      'workspace/read',
-    ]);
+    expect(methods).toEqual(['repo/list', 'workspace/list']);
     expect(capabilityFor('repo/list')).toBe('read');
     expect(capabilityFor('workspace/status')).toBe('read');
   });
 });
-
-function createRouter(services: RpcServices): RpcRouter {
-  return new RpcRouter({
-    threads: {} as ThreadManager,
-    version: 'test',
-    startedAt: Date.now(),
-    requestShutdown: () => undefined,
-    services,
-  });
-}
-
-function readOnlyConnection(): ServerConnection {
-  return {
-    state: { capabilities: new Set<Capability>(['read']) },
-  } as unknown as ServerConnection;
-}
-
-class RecordingServices implements RpcServices {
-  readonly methods: ClientMethod[] = [];
-
-  dispatch(
-    _connection: ServerConnection,
-    method: ClientMethod,
-  ): Promise<unknown> {
-    this.methods.push(method);
-    return Promise.resolve({});
-  }
-
-  close(): Promise<void> {
-    return Promise.resolve();
-  }
-}
