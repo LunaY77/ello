@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 workspace 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import {
   access,
   mkdtemp,
@@ -13,30 +19,24 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  createCodingStorage,
-  type CodingStorage,
-} from '../../src/storage/database/index.js';
-import { git } from '../../src/workspace/git.js';
-import {
   formatRepoList,
   formatWorkspaceList,
   REPOSITORY_BASELINE_REF,
   RepoStore,
-  WorkspaceStore,
-} from '../../src/workspace/index.js';
-import { resolveWorkspaceMount } from '../../src/workspace/paths.js';
-import {
-  slugify,
-  validateKind,
   validateRepoKey,
-} from '../../src/workspace/slug.js';
+  WorkspaceStore,
+} from '../../src/features/workspace/index.js';
+import { resolveWorkspaceMount } from '../../src/features/workspace/paths.js';
+import { slugify, validateKind } from '../../src/features/workspace/slug.js';
+import { git } from '../../src/infra/git.js';
+import { createTestStores, type TestStores } from '../support/stores.js';
 
 describe('workspace', () => {
   let oldHome: string | undefined;
   let home: string;
   let mount: string;
   let sourceRepo: string;
-  let storage: CodingStorage;
+  let storage: TestStores;
   let repos: RepoStore;
   let workspaces: WorkspaceStore;
 
@@ -46,7 +46,7 @@ describe('workspace', () => {
     mount = await mkdtemp(path.join(tmpdir(), 'ello-workspaces-'));
     sourceRepo = await mkdtemp(path.join(tmpdir(), 'ello-source-'));
     process.env.ELLO_HOME = home;
-    storage = createCodingStorage();
+    storage = createTestStores();
     repos = new RepoStore(storage.repositories);
     workspaces = new WorkspaceStore(storage.workspaces, repos, mount);
   });
@@ -744,7 +744,7 @@ describe('workspace', () => {
     );
     home = importedHome;
     process.env.ELLO_HOME = importedHome;
-    storage = createCodingStorage();
+    storage = createTestStores();
     repos = new RepoStore(storage.repositories);
     const imported = await repos.import(output);
     expect(imported[0]).toMatchObject({
@@ -790,7 +790,7 @@ describe('workspace', () => {
     await rm(home, { recursive: true, force: true });
     home = await mkdtemp(path.join(tmpdir(), 'ello-import-failure-home-'));
     process.env.ELLO_HOME = home;
-    storage = createCodingStorage();
+    storage = createTestStores();
     repos = new RepoStore(storage.repositories);
 
     await expect(repos.import(output)).rejects.toThrow();

@@ -10,14 +10,14 @@ const distDir = path.resolve(
   process.env.ELLO_DIST_DIR ?? path.join(packageDir, 'dist'),
 );
 const required = [
-  'server/entry.js',
+  'main.js',
   'protocol/v1/index.js',
   'protocol/v1/fixtures/catalog.json',
-  'config/templates/config.yaml',
-  'agent/context/prompts/core-behavior.md',
-  'agent/subagents/bundled/explore.md',
-  'storage/migrations/0000_tiny_swordsman.sql',
-  'storage/migrations/meta/_journal.json',
+  'features/config/templates/config.yaml',
+  'features/agent/context/prompts/core-behavior.md',
+  'features/agent/subagents/bundled/explore.md',
+  'infra/database/migrations/0000_tiny_swordsman.sql',
+  'infra/database/migrations/meta/_journal.json',
 ];
 
 for (const asset of required) await access(path.join(distDir, asset));

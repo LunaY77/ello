@@ -1,5 +1,6 @@
 import type { SessionMode } from '../api/protocol-types.js';
 
+/** 将用户输入解析为 typed command；副作用由 TUI command runner 统一执行。 */
 export type TuiOverlayName =
   | 'help'
   | 'agents'
@@ -17,17 +18,12 @@ export type CommandResult =
   | { readonly type: 'open-overlay'; readonly overlay: TuiOverlayName }
   | {
       readonly type: 'runtime-action';
-      readonly action:
-        | 'clear'
-        | 'compact'
-        | 'memory'
-        | 'dream'
-        | 'goal'
-        | 'rewind'
-        | 'fork'
-        | 'export'
-        | 'quit';
-      readonly args?: readonly string[];
+      readonly action: 'clear' | 'compact' | 'dream' | 'quit';
+    }
+  | {
+      readonly type: 'runtime-action';
+      readonly action: 'memory' | 'goal' | 'rewind' | 'fork' | 'export';
+      readonly args: readonly string[];
     }
   | { readonly type: 'set-profile'; readonly profile: string }
   | { readonly type: 'set-mode'; readonly mode: SessionMode }

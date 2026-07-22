@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 memory-contract 覆盖的运行时行为契约。
+ *
+ * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
+ * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ */
 import {
   mkdir,
   mkdtemp,
@@ -11,17 +17,24 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { AgentToolContext } from '../../src/agent/engine/index.js';
+import { createCodingSystemPromptSection } from '../../src/features/agent/context/prompts.js';
+import type {
+  AgentInput,
+  AgentRunContext,
+  AgentToolContext,
+  AnyAgentTool,
+} from '../../src/features/agent/engine/index.js';
+import { CodingAgentConfigSchema } from '../../src/features/config/schema.js';
 import {
+  createMemoryFeature,
+  createMemoryRunRuntime,
+  createMemoryStore,
   MemoryIndexLoader,
-  shouldIgnoreMemory,
-} from '../../src/agent/memory/index-loader.js';
-import { MemoryRepository } from '../../src/agent/memory/repository.js';
-import { createProductionToolRuntime } from '../../src/agent/tools/production.js';
-import { CodingAgentConfigSchema } from '../../src/config/schema.js';
-import type { ServerConnection } from '../../src/server/connection/server-connection.js';
-import { ServerServices } from '../../src/server/methods/server-services.js';
-import { createCodingStorage } from '../../src/storage/database/index.js';
+  type MemoryStore,
+} from '../../src/features/memory/index.js';
+import { createProductionToolRuntime } from '../../src/features/tool/internal/production.js';
+import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
+import { createTestStores } from '../support/stores.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -33,10 +46,10 @@ afterEach(async () => {
   );
 });
 
-async function createRepository(): Promise<MemoryRepository> {
+async function createRepository(): Promise<MemoryStore> {
   const root = await mkdtemp(path.join(tmpdir(), 'ello-memory-contract-'));
   temporaryDirectories.push(root);
-  const repository = new MemoryRepository({
+  const repository = createMemoryStore({
     private: path.join(root, 'private'),
     team: path.join(root, 'team'),
   });
@@ -60,6 +73,18 @@ function topic(input: {
     input.body,
     '',
   ].join('\n');
+}
+
+function memoryRunContext(input: AgentInput): AgentRunContext {
+  return {
+    runId: 'run_memory_prompt',
+    agentName: 'build',
+    input,
+    context: undefined,
+    options: {},
+    environment: {},
+    metadata: {},
+  };
 }
 
 describe('Memory 文件与索引契约', () => {
@@ -329,18 +354,47 @@ describe('Memory 上下文加载契约', () => {
     );
   });
 
-  it('识别字符串、prompt 和用户消息中的忽略记忆指令', () => {
-    expect(shouldIgnoreMemory('Ignore memory for this request.')).toBe(true);
-    expect(shouldIgnoreMemory({ prompt: "Don't use the memories." })).toBe(
-      true,
-    );
-    expect(
-      shouldIgnoreMemory([
+  it('只在用户未要求忽略记忆时加载索引上下文', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-memory-prompt-'));
+    temporaryDirectories.push(root);
+    const config = CodingAgentConfigSchema.parse({
+      cwd: root,
+      session_dir: path.join(root, 'sessions'),
+      initial_mode: 'ask-before-changes',
+      context: {
+        memory: {
+          enabled: true,
+          private_dir: path.join(root, 'private-memory'),
+          team_dir: path.join(root, 'team-memory'),
+        },
+      },
+    });
+    const load = vi.fn().mockResolvedValue({ sources: [] });
+    const section = createCodingSystemPromptSection(config, {
+      model: 'test/model',
+      memory: {
+        loader: { load },
+        roots: {
+          private: path.join(root, 'private-memory'),
+          team: path.join(root, 'team-memory'),
+        },
+      },
+    });
+    const ignoredInputs: ReadonlyArray<AgentInput> = [
+      'Ignore memory for this request.',
+      { prompt: "Don't use the memories." },
+      [
         { role: 'assistant', content: 'ignore memory' },
         { role: 'user', content: 'Please do not use memory.' },
-      ]),
-    ).toBe(true);
-    expect(shouldIgnoreMemory('Use memory when answering.')).toBe(false);
+      ],
+    ];
+    for (const input of ignoredInputs) {
+      await section(memoryRunContext(input));
+    }
+    expect(load).not.toHaveBeenCalled();
+
+    await section(memoryRunContext('Use memory when answering.'));
+    expect(load).toHaveBeenCalledOnce();
   });
 });
 
@@ -348,7 +402,7 @@ describe('Memory 生产装配契约', () => {
   it('启用后同时装配工具和索引上下文，成功写入会失效同一仓储的缓存', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ello-memory-runtime-'));
     temporaryDirectories.push(root);
-    const storage = createCodingStorage({ databasePath: ':memory:' });
+    const storage = createTestStores({ databasePath: ':memory:' });
     try {
       const config = CodingAgentConfigSchema.parse({
         cwd: root,
@@ -362,9 +416,9 @@ describe('Memory 生产装配契约', () => {
           },
         },
       });
-      const runtime = createProductionToolRuntime({
+      const toolRuntime = createProductionToolRuntime({
         config,
-        storage,
+        taskBoards: storage.taskBoards,
         taskBoardScope: { type: 'session', sessionId: 'memory-runtime' },
         mode: () => ({
           mode: 'ask-before-changes',
@@ -373,8 +427,12 @@ describe('Memory 生产装配契约', () => {
           changedAt: '2026-07-19T00:00:00.000Z',
         }),
       });
-      await runtime.initialize();
-      expect(runtime.tools.map((tool) => tool.name)).toEqual(
+      const memory = createMemoryRunRuntime(config, toolRuntime.approval);
+      if (!memory.enabled) {
+        throw new Error('Memory runtime must be enabled by the test config.');
+      }
+      await memory.initialize();
+      expect(memory.tools.map((tool) => tool.name)).toEqual(
         expect.arrayContaining([
           'memory_list',
           'memory_read',
@@ -383,14 +441,14 @@ describe('Memory 生产装配契约', () => {
           'memory_search',
         ]),
       );
-      expect(runtime.tools.every((tool) => tool.discovery.core === true)).toBe(
+      expect(memory.tools.every((tool) => tool.discovery.core === true)).toBe(
         true,
       );
       expect(
-        (await runtime.memoryIndexLoader!.load()).sources[0]?.content,
+        (await memory.indexLoader.load()).sources[0]?.content,
       ).not.toContain('Runtime preference');
 
-      const write = immediateTool(runtime.tools, 'memory_write');
+      const write = immediateTool(memory.tools, 'memory_write');
       await write.execute(
         {
           scope: 'private',
@@ -406,9 +464,9 @@ describe('Memory 生产装配契约', () => {
         TOOL_CONTEXT,
       );
 
-      expect(
-        (await runtime.memoryIndexLoader!.load()).sources[0]?.content,
-      ).toContain('Runtime preference');
+      expect((await memory.indexLoader.load()).sources[0]?.content).toContain(
+        'Runtime preference',
+      );
     } finally {
       storage.close();
     }
@@ -416,7 +474,7 @@ describe('Memory 生产装配契约', () => {
 
   it('Plan 模式把 Memory 写入按 edit 权限拒绝，不从通用工具绕过边界', async () => {
     const repository = await createRepository();
-    const storage = createCodingStorage({ databasePath: ':memory:' });
+    const storage = createTestStores({ databasePath: ':memory:' });
     try {
       const config = CodingAgentConfigSchema.parse({
         cwd: path.dirname(repository.roots.team),
@@ -430,9 +488,9 @@ describe('Memory 生产装配契约', () => {
           },
         },
       });
-      const runtime = createProductionToolRuntime({
+      const toolRuntime = createProductionToolRuntime({
         config,
-        storage,
+        taskBoards: storage.taskBoards,
         taskBoardScope: { type: 'session', sessionId: 'memory-plan' },
         mode: () => ({
           mode: 'plan',
@@ -441,7 +499,11 @@ describe('Memory 生产装配契约', () => {
           changedAt: '2026-07-19T00:00:00.000Z',
         }),
       });
-      const write = immediateTool(runtime.tools, 'memory_write');
+      const memory = createMemoryRunRuntime(config, toolRuntime.approval);
+      if (!memory.enabled) {
+        throw new Error('Memory runtime must be enabled by the test config.');
+      }
+      const write = immediateTool(memory.tools, 'memory_write');
       expect(
         write.approval?.(
           {
@@ -481,13 +543,12 @@ describe('Memory 生产装配契约', () => {
       'utf8',
     );
     const notifications = vi.fn();
-    const services = Object.assign(Object.create(ServerServices.prototype), {
-      artifactGc: Promise.resolve(),
-    }) as ServerServices;
+    const services = createMemoryFeature();
 
     await expect(
-      services.dispatch(
-        { sendNotification: notifications } as unknown as ServerConnection,
+      invokeServiceRoute(
+        services,
+        createTestPeer({ notify: notifications }),
         'memory/dream/start',
         { cwd: root },
       ),
@@ -508,10 +569,7 @@ const TOOL_CONTEXT: AgentToolContext = {
   signal: new AbortController().signal,
 };
 
-function immediateTool(
-  tools: ReturnType<typeof createProductionToolRuntime>['tools'],
-  name: string,
-) {
+function immediateTool(tools: ReadonlyArray<AnyAgentTool>, name: string) {
   const tool = tools.find((candidate) => candidate.name === name);
   if (tool === undefined || tool.execution !== 'immediate') {
     throw new Error(`Missing immediate tool ${name}.`);

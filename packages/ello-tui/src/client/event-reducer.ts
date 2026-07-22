@@ -57,6 +57,7 @@ export function applyNotification(
   snapshot: ThreadSnapshot,
   notification: ServerNotification,
 ): ThreadSnapshot {
+  // 流式 delta 只由 TUI live buffer 展示，完成事件才更新不可变历史快照。
   switch (notification.method) {
     case 'thread/sequence/advanced':
       return snapshot;
@@ -109,21 +110,22 @@ export function applyNotification(
       );
     case 'item/agentMessage/delta':
     case 'item/plan/delta':
-      return appendItemText(
-        snapshot,
-        notification.params.turnId,
-        notification.params.itemId,
-        notification.params.delta,
-      );
     case 'item/commandExecution/outputDelta':
-      return appendCommandOutput(
-        snapshot,
-        notification.params.turnId,
-        notification.params.itemId,
-        notification.params.delta,
-      );
-    default:
+    case 'thread/started':
+    case 'thread/closed':
+    case 'thread/deleted':
+    case 'thread/compaction/updated':
+    case 'turn/diff/updated':
+    case 'serverRequest/resolved':
+    case 'skills/changed':
+    case 'fs/changed':
+    case 'memory/job/updated':
+    case 'warning':
+    case 'server/ready':
       return snapshot;
+    default:
+      notification satisfies never;
+      throw new Error(`Unhandled notification: ${String(notification)}`);
   }
 }
 
@@ -172,52 +174,4 @@ function isSequencedNotification(
   notification: ServerNotification,
 ): notification is SequencedNotification {
   return 'threadId' in notification.params && 'seq' in notification.params;
-}
-
-function appendItemText(
-  snapshot: ThreadSnapshot,
-  turnId: string,
-  itemId: string,
-  delta: string,
-): ThreadSnapshot {
-  const turn = snapshot.turns.find((current) => current.id === turnId);
-  const item = turn?.items.find((current) => current.id === itemId);
-  if (item === undefined) return snapshot;
-  if (item.type === 'agentMessage') {
-    return replaceItem(
-      snapshot,
-      turnId,
-      itemId,
-      { ...item, text: item.text + delta },
-      false,
-    );
-  }
-  if (item.type === 'plan') {
-    return replaceItem(
-      snapshot,
-      turnId,
-      itemId,
-      { ...item, text: item.text + delta },
-      false,
-    );
-  }
-  return snapshot;
-}
-
-function appendCommandOutput(
-  snapshot: ThreadSnapshot,
-  turnId: string,
-  itemId: string,
-  delta: string,
-): ThreadSnapshot {
-  const turn = snapshot.turns.find((current) => current.id === turnId);
-  const item = turn?.items.find((current) => current.id === itemId);
-  if (item?.type !== 'commandExecution') return snapshot;
-  return replaceItem(
-    snapshot,
-    turnId,
-    itemId,
-    { ...item, outputPreview: (item.outputPreview ?? '') + delta },
-    false,
-  );
 }

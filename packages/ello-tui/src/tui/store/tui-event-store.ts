@@ -8,6 +8,7 @@ import type {
   Usage,
   UserInputResolution,
 } from '../../api/protocol-types.js';
+import { isToolItem } from '../../api/protocol-types.js';
 import type { ClientServerRequest } from '../../api/server-requests.js';
 import type { ThreadClientEvent } from '../../client/client-events.js';
 import { applyNotification } from '../../client/event-reducer.js';
@@ -31,6 +32,7 @@ export interface LiveRunState {
   readonly runningSubagents: ReadonlyMap<string, SubagentRunView>;
 }
 
+/** 同时维护已提交 snapshot 与运行中 live 增量；只有完成事件能把两者合并。 */
 export interface TuiEventState {
   readonly snapshot: ThreadSnapshot;
   readonly history: readonly HistoryEntry[];
@@ -149,7 +151,10 @@ function reduceServerNotification(
   )
     return state;
   const before = state.snapshot;
-  const snapshot = applyNotification(before, notification);
+  // 增量通知不复制 turns/items；item 完成或显式 snapshot 才推进持久化投影。
+  const snapshot = isLiveDelta(notification)
+    ? before
+    : applyNotification(before, notification);
   const base: TuiEventState = {
     ...state,
     snapshot,
@@ -225,12 +230,12 @@ function reduceServerNotification(
           `Command output without started item: ${notification.params.itemId}`,
         );
       const runningTools = new Map(next.live.runningTools);
-      const previousOutput = readOutput(tool.output);
+      const previousOutput = parseCommandOutput(tool.output);
       runningTools.set(tool.id, {
         ...tool,
         output: {
-          output: previousOutput + notification.params.delta,
-          metadata: readMetadata(tool.output),
+          output: previousOutput.output + notification.params.delta,
+          metadata: previousOutput.metadata,
         },
       });
       return { ...next, live: { ...next.live, runningTools } };
@@ -274,6 +279,9 @@ function reduceServerNotification(
     case 'warning':
     case 'server/ready':
       return state;
+    default:
+      notification satisfies never;
+      throw new Error(`Unhandled notification: ${String(notification)}`);
   }
 }
 
@@ -281,11 +289,7 @@ function startLiveItem(state: TuiEventState, item: ThreadItem): TuiEventState {
   if (item.type === 'agentMessage' || item.type === 'plan') {
     return { ...state, live: { ...state.live, assistantText: item.text } };
   }
-  if (
-    item.type === 'commandExecution' ||
-    item.type === 'fileChange' ||
-    item.type === 'toolCall'
-  ) {
+  if (isToolItem(item)) {
     const runningTools = new Map(state.live.runningTools);
     runningTools.set(item.id, itemToToolView(item));
     return { ...state, live: { ...state.live, runningTools } };
@@ -302,11 +306,7 @@ function completeItem(state: TuiEventState, item: ThreadItem): TuiEventState {
   let next = state;
   if (item.type === 'agentMessage' || item.type === 'plan') {
     next = { ...next, live: { ...next.live, assistantText: '' } };
-  } else if (
-    item.type === 'commandExecution' ||
-    item.type === 'fileChange' ||
-    item.type === 'toolCall'
-  ) {
+  } else if (isToolItem(item)) {
     const runningTools = new Map(next.live.runningTools);
     runningTools.delete(item.id);
     next = { ...next, live: { ...next.live, runningTools } };
@@ -330,11 +330,7 @@ function liveStateFromSnapshot(snapshot: ThreadSnapshot): LiveRunState {
       if (!('status' in item) || item.status !== 'inProgress') continue;
       if (item.type === 'agentMessage' || item.type === 'plan')
         assistantText = item.text;
-      else if (
-        item.type === 'commandExecution' ||
-        item.type === 'fileChange' ||
-        item.type === 'toolCall'
-      )
+      else if (isToolItem(item))
         runningTools.set(item.id, itemToToolView(item));
       else if (item.type === 'subagent')
         runningSubagents.set(item.id, itemToSubagentView(item));
@@ -382,16 +378,35 @@ function omitGoal(state: TuiEventState): Omit<TuiEventState, 'goal'> {
   return rest;
 }
 
-function readOutput(output: unknown): string {
-  if (typeof output !== 'object' || output === null) return '';
-  const value = (output as { readonly output?: unknown }).output;
-  return typeof value === 'string' ? value : '';
+function isLiveDelta(notification: ServerNotification): boolean {
+  return (
+    notification.method === 'item/agentMessage/delta' ||
+    notification.method === 'item/plan/delta' ||
+    notification.method === 'item/commandExecution/outputDelta'
+  );
 }
 
-function readMetadata(output: unknown): Record<string, unknown> {
-  if (typeof output !== 'object' || output === null) return {};
-  const value = (output as { readonly metadata?: unknown }).metadata;
-  return typeof value === 'object' && value !== null
-    ? (value as Record<string, unknown>)
-    : {};
+interface CommandOutput {
+  readonly output: string;
+  readonly metadata: Record<string, unknown>;
+}
+
+function parseCommandOutput(value: unknown): CommandOutput {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('output' in value) ||
+    typeof value.output !== 'string' ||
+    !('metadata' in value) ||
+    typeof value.metadata !== 'object' ||
+    value.metadata === null ||
+    !isRecord(value.metadata)
+  ) {
+    throw new Error('Command tool output does not match the TUI contract.');
+  }
+  return { output: value.output, metadata: value.metadata };
+}
+
+function isRecord(value: object): value is Record<string, unknown> {
+  return !Array.isArray(value);
 }

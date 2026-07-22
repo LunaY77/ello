@@ -4,15 +4,15 @@ ello 使用 JSON-RPC 2.0 作为 envelope，自定义协议版本为 `1`。协议
 
 ```mermaid
 flowchart LR
-  Bytes[transport bytes] --> Proc[RpcProcessor]
-  Proc --> Envelope[JSON-RPC schema]
-  Envelope --> Init[initialize gate]
-  Init --> Router[RpcRouter + capability]
-  Router --> Services[Thread/Config/Task/Workspace services]
-  Services --> Out[response/notification/server request]
+  Bytes[transport bytes] --> Reader[严格 MessageReader]
+  Reader --> RPC[vscode-jsonrpc MessageConnection]
+  RPC --> Init[initialize gate]
+  Init --> Route[Zod typed route + capability]
+  Route --> Features[Thread/Config/Task/Workspace features]
+  Features --> Writer[barrier + bounded Writer]
 ```
 
 - [JSON-RPC schema 与握手](json-rpc-schema-and-handshake.md)：初始化状态机、能力表、schema 验证和错误映射。
-- [Transport 与 Server Request](transport-and-server-request.md)：stdio/WebSocket/Unix、队列、barrier 和审批 callback。
+- [Transport 与 Server Request](transport-and-server-request.md)：Fastify、stdio/WebSocket/Unix、队列、barrier 和审批 callback。
 
-Protocol schema 同时被 Agent Server 和 TUI package 导入。TUI 不复制资源类型，响应和 Server Request 会在客户端再次解析，防止 UI 使用未验证的字段。
+Server 与 TUI 都使用 `vscode-jsonrpc/node` 承接通用 RPC 机制。Protocol schema 同时被两个 package 导入；TUI 不复制资源类型，响应和 Server Request 会在客户端再次解析，防止 UI 使用未验证的字段。

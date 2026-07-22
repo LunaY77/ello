@@ -6,6 +6,44 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
+const agentFeatureNames = [
+  'agent',
+  'artifact',
+  'config',
+  'fs',
+  'memory',
+  'model',
+  'repo',
+  'skill',
+  'task',
+  'thread',
+  'tool',
+  'workspace',
+];
+
+const publicFeatureEntries = (feature) =>
+  feature === 'agent'
+    ? ['./index.ts', './engine/index.ts', './subagents/index.ts']
+    : ['./index.ts'];
+
+const featureBoundaryZones = agentFeatureNames.flatMap((consumer) =>
+  agentFeatureNames
+    .filter((provider) => provider !== consumer)
+    .map((provider) => ({
+      target: `packages/ello-agent/src/features/${consumer}`,
+      from: `packages/ello-agent/src/features/${provider}`,
+      except: publicFeatureEntries(provider),
+      message: `Feature ${consumer} must import ${provider} through its public entry.`,
+    })),
+);
+
+const appFeatureZones = agentFeatureNames.map((provider) => ({
+  target: 'packages/ello-agent/src/app.ts',
+  from: `packages/ello-agent/src/features/${provider}`,
+  except: publicFeatureEntries(provider),
+  message: `app.ts must compose ${provider} through its public entry.`,
+}));
+
 /**
  * ESLint 配置文件
  *
@@ -52,6 +90,15 @@ export default tseslint.config(
         },
       ],
 
+      // 这些指标只捕捉异常膨胀；协议投影、parser 和状态机允许保持完整的顺序控制流。
+      'max-lines': [
+        'warn',
+        { max: 1000, skipBlankLines: true, skipComments: true },
+      ],
+      'max-lines-per-function': ['warn', { max: 400, skipComments: true }],
+      complexity: ['warn', 60],
+      'max-depth': ['warn', 6],
+
       /**
        * React Hooks 规则
        */
@@ -89,6 +136,8 @@ export default tseslint.config(
         },
       ],
 
+      'import-x/no-cycle': ['error', { ignoreExternal: true }],
+
       /**
        * 导入路径限制规则
        * 强制单向依赖，防止循环依赖
@@ -97,28 +146,21 @@ export default tseslint.config(
         'error',
         {
           zones: [
-            // features 之间不能互相导入
+            ...featureBoundaryZones,
+            ...appFeatureZones,
             {
-              target: './src/features',
-              from: './src/features',
-              except: ['.'],
+              target: 'packages/ello-agent/src/features',
+              from: 'packages/ello-agent/src/app.ts',
+              message: 'Features must not import the App composition root.',
             },
-            // features 不能导入 app
             {
-              target: './src/features',
-              from: './src/app',
-            },
-            // 共享模块不能导入 features 或 app
-            {
-              target: [
-                './src/components',
-                './src/hooks',
-                './src/lib',
-                './src/utils',
-              ],
-              from: ['./src/features', './src/app'],
+              target: 'packages/ello-agent/src/server',
+              from: 'packages/ello-agent/src/features',
+              message:
+                'The generic Server facade must not import product features.',
             },
           ],
+          basePath: process.cwd(),
         },
       ],
 
@@ -142,6 +184,18 @@ export default tseslint.config(
        * 强制使用 kebab-case 命名
        */
       'check-file/folder-naming-convention': 'off',
+    },
+  },
+
+  {
+    files: ['**/*.test.{ts,tsx}', '**/tests/**/*.{ts,tsx}'],
+    rules: {
+      // 测试文件按行为域集中组织，describe 回调和 fixture 不作为生产函数粒度信号。
+      'max-lines': [
+        'warn',
+        { max: 1600, skipBlankLines: true, skipComments: true },
+      ],
+      'max-lines-per-function': ['warn', { max: 1600, skipComments: true }],
     },
   },
 
@@ -170,6 +224,27 @@ export default tseslint.config(
             },
           ],
         },
+      ],
+    },
+  },
+
+  {
+    files: [
+      'packages/ello-agent/src/agent/execution/**/*.{ts,tsx}',
+      'packages/ello-agent/src/server/methods/**/*.{ts,tsx}',
+      'packages/ello-agent/src/server/runtime/**/*.{ts,tsx}',
+      'packages/ello-tui/src/cli/**/*.{ts,tsx}',
+      'packages/ello-tui/src/client/event-reducer.ts',
+      'packages/ello-tui/src/tui/App.tsx',
+      'packages/ello-tui/src/tui/hooks/**/*.{ts,tsx}',
+      'packages/ello-tui/src/tui/store/tui-event-store.ts',
+      'packages/ello-tui/src/tui/component/LiveViewport.tsx',
+      'packages/ello-tui/src/tui/component/TerminalHistoryOutput.tsx',
+    ],
+    rules: {
+      'max-lines': [
+        'error',
+        { max: 1000, skipBlankLines: true, skipComments: true },
       ],
     },
   },

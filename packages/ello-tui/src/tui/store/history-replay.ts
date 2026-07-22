@@ -1,6 +1,8 @@
+import { isToolItem } from '../../api/protocol-types.js';
 import type {
   ThreadItem,
   ThreadSnapshot,
+  ToolThreadItem,
   Turn,
 } from '../../api/protocol-types.js';
 
@@ -45,6 +47,9 @@ export function snapshotToHistoryEntries(
 }
 
 export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
+  if (isToolItem(item)) {
+    return { kind: 'tool', id: item.id, tool: itemToToolView(item) };
+  }
   switch (item.type) {
     case 'userMessage':
       return {
@@ -69,10 +74,6 @@ export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
         entryId: item.id,
         text: item.text,
       };
-    case 'commandExecution':
-    case 'fileChange':
-    case 'toolCall':
-      return { kind: 'tool', id: item.id, tool: itemToToolView(item) };
     case 'subagent':
       return { kind: 'subagent', id: item.id, run: itemToSubagentView(item) };
     case 'contextCompaction':
@@ -92,12 +93,7 @@ export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
   }
 }
 
-export function itemToToolView(
-  item: Extract<
-    ThreadItem,
-    { type: 'commandExecution' | 'fileChange' | 'toolCall' }
-  >,
-): ToolCallView {
+export function itemToToolView(item: ToolThreadItem): ToolCallView {
   if (item.type === 'commandExecution') {
     return {
       id: item.id,

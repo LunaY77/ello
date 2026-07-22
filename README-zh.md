@@ -53,22 +53,19 @@ pnpm add -g .
 
 ## 文档
 
-- [功能设计与模块契约](docs/functional-design.md)
 - [中文技术文档](docs/README.md)
-- [测试设计与契约矩阵](docs/test-design.md)
-- [重构代码审查报告](docs/code-review.md)
+- [测试策略](docs/test-design.md)
+- [重构计划](docs/refactor-plan.md)
 - [Coding Agent TUI 设计](docs/tui/ello-tui-design.md)
 
 ## 开发
 
 ```bash
 pnpm typecheck
-pnpm contract:check
 pnpm test
 pnpm lint
 ```
 
-测试按业务能力统一放在 `packages/*/tests/<功能模块>/`。任何功能变更都必须在同一
-变更中更新功能设计、测试矩阵和对应的行为契约测试。
+测试按业务能力统一放在 `packages/*/tests/<功能模块>/`，断言用户可观察行为；文档以代码为准。
 
 英文文档见 [`README.md`](README.md)。

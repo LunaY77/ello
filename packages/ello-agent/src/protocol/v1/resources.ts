@@ -1,3 +1,9 @@
+/**
+ * 本文件负责 Protocol 的“resources”模块职责。
+ *
+ * 模块不持有可变运行状态；wire 数据以 unknown 进入并由 schema 或显式 parser 收窄。
+ * 字段名称、判别值和错误语义属于跨进程协议，调用方不得绕过校验直接构造不完整值。
+ */
 import { z } from 'zod';
 
 import {

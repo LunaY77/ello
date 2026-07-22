@@ -169,7 +169,7 @@ ello workspace status feature/search-page
 
 ## 源码入口
 
-- [`WorkspaceStore`](../../packages/ello-agent/src/workspace/workspace-store.ts)：创建、重命名、归档、删除、状态和 repair。
-- [`WorkspaceRepository`](../../packages/ello-agent/src/storage/repositories/workspace-repository.ts)：Workspace 与 checkout 的 SQLite 记录。
-- [`planWorkspaceCreate()`](../../packages/ello-agent/src/workspace/plan.ts)：selector、路径和分支规划。
+- [`WorkspaceStore`](../../packages/ello-agent/src/features/workspace/workspaces.ts)：创建、重命名、归档、删除、状态和 repair。
+- [`WorkspaceRecordStore`](../../packages/ello-agent/src/features/workspace/store.ts)：Workspace 与 checkout 的 SQLite 记录。
+- [`planWorkspaceCreate()`](../../packages/ello-agent/src/features/workspace/plan.ts)：selector、路径和分支规划。
 - [Workspace 测试](../../packages/ello-agent/tests/workspace/workspace.test.ts)：生命周期、dirty 保护、归档版本和 repair 契约。

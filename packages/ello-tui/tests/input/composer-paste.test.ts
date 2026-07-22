@@ -151,10 +151,7 @@ describe('resolvePastePlaceholders', () => {
 
   it('空 Map 原样返回', () => {
     expect(
-      resolvePastePlaceholders(
-        '[Pasted Content: 500 chars]',
-        new Map(),
-      ),
+      resolvePastePlaceholders('[Pasted Content: 500 chars]', new Map()),
     ).toBe('[Pasted Content: 500 chars]');
   });
 });

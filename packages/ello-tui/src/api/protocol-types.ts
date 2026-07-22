@@ -19,6 +19,7 @@ export type {
   ServerRequestResult,
   SessionMode,
   ThreadItem,
+  ToolThreadItem,
   ThreadSettings,
   ThreadSnapshot,
   ThreadStatus,
@@ -28,6 +29,8 @@ export type {
   UserInputResolution,
   Usage,
 } from '@ello/agent/protocol';
+
+export { JsonValueSchema } from '@ello/agent/protocol';
 
 import type { ClientResult as ProtocolClientResult } from '@ello/agent/protocol';
 
@@ -44,4 +47,4 @@ export type AgentCatalogEntry =
 export type WorkspaceSummary =
   ProtocolClientResult<'workspace/list'>['data'][number];
 
-export { cycleSessionMode } from '@ello/agent/protocol';
+export { cycleSessionMode, isToolItem } from '@ello/agent/protocol';

@@ -32,11 +32,12 @@ flowchart LR
   User[用户] --> TUI[Ink TUI]
   TUI --> TC[ThreadClient]
   TC --> AC[AppServerClient]
-  AC --> TR[stdio / WebSocket / Unix]
-  TR --> AS[AgentServer]
-  AS --> RP[RpcProcessor]
-  RP --> RR[RpcRouter]
-  RR --> TM[ThreadManager]
+  AC --> CRPC[vscode-jsonrpc Client]
+  CRPC --> TR[stdio / WebSocket / Unix]
+  TR --> FH[Fastify / stdio host]
+  FH --> SRPC[vscode-jsonrpc Server]
+  SRPC --> RR[Zod typed route]
+  RR --> TF[Thread feature]
 ```
 
 分离面向的是单 Client 模式。分离的价值在于：
@@ -64,7 +65,7 @@ this.child = spawn(process.execPath, [
 
 不提供"嵌入模式"（把 Server 作为 npm 包 import 进 TUI 进程）。嵌入模式会重新引入同构架构的所有问题：共享内存、共享事件循环、TUI 崩溃影响 Agent。
 
-三种 transport 共用同一套协议行为。method 解析、schema 校验、能力检查全部在 `RpcProcessor` 和 `RpcRouter` 中完成。
+三种 transport 共用同一套协议行为。严格 envelope parser 位于自定义 MessageReader；通用 request/response 关联由 `vscode-jsonrpc` 完成；产品 schema 与能力检查位于 `dispatchRoute()`。
 
 | Transport | 消息边界          | 场景              | 限制                              |
 | --------- | ----------------- | ----------------- | --------------------------------- |
@@ -74,7 +75,7 @@ this.child = spawn(process.execPath, [
 
 ### 2. 握手是强制步骤
 
-`RpcProcessor` 要求连接严格按状态机推进：
+`ServerConnection` 在 `vscode-jsonrpc` handler 外维护严格握手状态机：
 
 ```mermaid
 stateDiagram-v2
@@ -94,19 +95,13 @@ stateDiagram-v2
 
 普通 RPC 处理过程中，Server 可能在返回 result 之前就产生了 live notification 或 Server Request。如果 notification 先到达 Client，Client 可能把它当作增量更新，覆盖掉旧的 snapshot——而 result 中的完整 snapshot 随后才到，又把新数据覆盖回去。
 
-`ServerConnection.holdUnsolicited()` 在处理 RPC 时暂存 notification：
-
-```ts
-const release =
-  request.method === 'initialize' ? undefined : connection.holdUnsolicited();
-
-await connection.sendResult(request.id, result);
-await release?.();
-```
+`MessageStrategy` 在处理 Client Request 前建立 response barrier。Feature 通过 `RpcPeer` 产生的 notification 与 Server Request 先进入 `ProtocolMessageWriter` outbox；handler 返回后，`vscode-jsonrpc` 生成 response，Writer 先发送该 response，再按原顺序释放 outbox。
 
 `thread/resume` 的到达顺序因此确定：完整 snapshot → pending Server Request → live 事件。Client 不会在 result 返回前收到片段更新。
 
-每个连接有 256 条发送队列上限。超过上限后关闭连接。这个限制防止慢 Client 把 Server 内存变成无界队列。连接关闭时，所有等待中的 Server Request 都被 reject——Client 必须重新订阅以获取未完成的请求。
+每个连接最多排队 256 条、8 MiB UTF-8 JSON，并为 response 保留 32 条和 1 MiB。超过上限或背压超时后关闭连接。这个限制防止慢 Client 把 Server 内存变成无界队列。连接关闭时，所有等待中的 Server Request 都被 reject——Client 必须重新订阅以获取未完成的请求。
+
+TUI Client 同样不再维护 request ID 或 pending response map。`MessageConnection.sendRequest()` 负责关联 response；`ThreadClient` 只保存待用户决策的审批和输入交互。Server Request handler 可以保持 Promise 未完成，直到用户显式选择结果。
 
 ### 4. RPC 能力声明独立于工具权限
 

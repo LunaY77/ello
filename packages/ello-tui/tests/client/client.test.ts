@@ -1,3 +1,9 @@
+/**
+ * 本文件验证 TUI `AppServerClient` 的框架关联、Zod 边界、超时关闭和延迟 Server Request 行为。
+ *
+ * 测试使用完整消息 memory transport，不读取 Client 内部 ID 或 pending state，确保通用 RPC 机制只由
+ * `vscode-jsonrpc` 拥有。
+ */
 import {
   APP_SERVER_ERROR_CODES,
   ELLO_PROTOCOL_VERSION,
@@ -153,14 +159,11 @@ describe('AppServerClient', () => {
     await context.client.close();
   });
 
-  it('请求超时后清理 pending 关联', async () => {
-    vi.useFakeTimers();
+  it('请求超时后取消请求并关闭连接以清理框架 pending', async () => {
     const context = await initializedClient({ requestTimeoutMs: 25 });
     const request = context.client.request('server/read', {});
-    const assertion =
-      expect(request).rejects.toBeInstanceOf(RequestTimeoutError);
-    await vi.advanceTimersByTimeAsync(25);
-    await assertion;
+    await expect(request).rejects.toBeInstanceOf(RequestTimeoutError);
+    expect(context.client.state).toBe('closed');
     await context.client.close();
   });
 
@@ -189,6 +192,31 @@ describe('AppServerClient', () => {
       jsonrpc: '2.0',
       id: 'srvreq_1',
       result: { decision: 'acceptForSession' },
+    });
+    await context.client.close();
+  });
+
+  it('未被产品 listener 接管的 Server Request 返回标准 methodNotFound', async () => {
+    const context = await initializedClient();
+    const serverMessages = context.server.messages()[Symbol.asyncIterator]();
+    await send(context.server, {
+      jsonrpc: '2.0',
+      id: 'srvreq_unhandled',
+      method: 'item/commandExecution/requestApproval',
+      params: {
+        threadId: 'thr_1',
+        turnId: 'turn_1',
+        itemId: 'item_1',
+        reason: 'write',
+        availableDecisions: ['accept', 'decline'],
+        command: ['pnpm', 'test'],
+        cwd: '/workspace',
+      },
+    });
+
+    await expect(readJson(serverMessages)).resolves.toMatchObject({
+      id: 'srvreq_unhandled',
+      error: { code: -32601 },
     });
     await context.client.close();
   });
