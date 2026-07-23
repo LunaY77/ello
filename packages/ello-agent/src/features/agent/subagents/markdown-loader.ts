@@ -97,17 +97,20 @@ function parseMarkdown(
   readonly frontmatter: Record<string, unknown>;
   readonly body: string;
 } {
-  if (!raw.startsWith('---\n')) {
+ // 接受 LF 和 CRLF 行尾；Windows 检出常把 bundled .md 转成 CRLF。
+  const openMatch = /^---\r?\n/u.exec(raw);
+  const openDelimiter = openMatch?.[0];
+  if (openDelimiter === undefined) {
     throw new Error(
       `Agent markdown must start with YAML frontmatter: ${filePath}`,
     );
   }
-  const end = raw.indexOf('\n---', 4);
+  const end = raw.indexOf('\n---', openDelimiter.length);
   if (end === -1) {
     throw new Error(`Agent markdown frontmatter is not closed: ${filePath}`);
   }
   return {
-    frontmatter: parseYamlConfig(raw.slice(4, end)),
+    frontmatter: parseYamlConfig(raw.slice(openDelimiter.length, end)),
     body: raw.slice(end + 4).replace(/^\r?\n/u, ''),
   };
 }
