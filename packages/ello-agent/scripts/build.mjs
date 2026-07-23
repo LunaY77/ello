@@ -27,7 +27,7 @@ try {
   await execFileAsync(
     'pnpm',
     ['exec', 'tsc', '-p', 'tsconfig.json', '--outDir', buildDir],
-    { cwd: packageDir },
+    { cwd: packageDir, shell: process.platform === 'win32' },
   );
   for (const [source, target] of assets) {
     await cp(path.join(packageDir, source), path.join(buildDir, target), {
@@ -40,14 +40,26 @@ try {
     env: { ...process.env, ELLO_DIST_DIR: buildDir },
   });
   const hadPrevious = await exists(distDir);
-  if (hadPrevious) await rename(distDir, previousDir);
   try {
-    await rename(buildDir, distDir);
-  } catch (error) {
-    if (hadPrevious) await rename(previousDir, distDir);
-    throw error;
+    if (hadPrevious) await renameRetry(distDir, previousDir);
+    try {
+      await renameRetry(buildDir, distDir);
+    } catch (error) {
+      if (hadPrevious) {
+        await renameRetry(previousDir, distDir).catch(() => {});
+      }
+      throw error;
+    }
+  } catch {
+    // Atomic rename swap failed, usually because a persistent Windows file
+    // lock (antivirus / search indexer) holds the old dist open. Remove it
+    // in place (rmRetry waits the lock out) and move the fresh build in.
+    await rmRetry(distDir);
+    await renameRetry(buildDir, distDir);
   }
-  await rm(previousDir, { recursive: true, force: true });
+  // swap 成功后清理旧 dist：此时新 dist 已就位，清理失败不影响产物。
+  // 用 rmRetry 等待 Windows 文件锁，仍失败则静默（finally 还会再兜底一次）。
+  await rmRetry(previousDir).catch(() => {});
 } finally {
   await rm(buildDir, { recursive: true, force: true });
   await rm(previousDir, { recursive: true, force: true });
@@ -59,5 +71,50 @@ async function exists(target) {
     return true;
   } catch {
     return false;
+  }
+}
+
+// Windows often holds a transient handle on freshly built files (Defender /
+// search indexer), making a one-shot rename fail with EPERM/EACCES. Retry with
+// exponential backoff so the atomic swap survives that brief contention.
+async function renameRetry(from, to, { attempts = 6, baseDelayMs = 100 } = {}) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await rename(from, to);
+    } catch (error) {
+      const code = error?.code;
+      const retryable =
+        code === 'EPERM' ||
+        code === 'EACCES' ||
+        code === 'ENOTEMPTY' ||
+        code === 'EBUSY';
+      if (!retryable || attempt === attempts) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, baseDelayMs * 2 ** (attempt - 1)),
+      );
+    }
+  }
+}
+
+// Remove a path with retry, mirroring renameRetry so the fallback swap can
+// wait out transient Windows file locks (antivirus / search indexer). `force`
+// keeps it a no-op when the path is already gone.
+async function rmRetry(target, { attempts = 6, baseDelayMs = 100 } = {}) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await rm(target, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = error?.code;
+      const retryable =
+        code === 'EPERM' ||
+        code === 'EACCES' ||
+        code === 'ENOTEMPTY' ||
+        code === 'EBUSY';
+      if (!retryable || attempt === attempts) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, baseDelayMs * 2 ** (attempt - 1)),
+      );
+    }
   }
 }
