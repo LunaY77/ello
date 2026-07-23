@@ -84,7 +84,7 @@ export function applyNotification(
     case 'thread/archived':
       return {
         ...snapshot,
-        thread: { ...snapshot.thread, archived: true, status: 'archived' },
+        thread: { ...snapshot.thread, archived: true },
       };
     case 'thread/unarchived':
       return { ...snapshot, thread: notification.params.thread };

@@ -7,6 +7,7 @@ export type TuiOverlayName =
   | 'models'
   | 'profiles'
   | 'session-selector'
+  | 'archived-session-selector'
   | 'rewind-selector'
   | 'settings'
   | 'skills'
@@ -18,7 +19,7 @@ export type CommandResult =
   | { readonly type: 'open-overlay'; readonly overlay: TuiOverlayName }
   | {
       readonly type: 'runtime-action';
-      readonly action: 'clear' | 'compact' | 'dream' | 'quit';
+      readonly action: 'clear' | 'compact' | 'dream' | 'archive' | 'quit';
     }
   | {
       readonly type: 'runtime-action';
@@ -87,6 +88,14 @@ export const slashCommands: readonly SlashCommand[] = [
   command('resume', 'Open thread selector', () => ({
     type: 'open-overlay',
     overlay: 'session-selector',
+  })),
+  command('archive', 'Archive the current thread', () => ({
+    type: 'runtime-action',
+    action: 'archive',
+  })),
+  command('unarchive', 'Open archived thread selector', () => ({
+    type: 'open-overlay',
+    overlay: 'archived-session-selector',
   })),
   command('tasks', 'Open task list', () => ({
     type: 'open-overlay',

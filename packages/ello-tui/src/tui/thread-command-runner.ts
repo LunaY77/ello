@@ -1,3 +1,4 @@
+import type { ThreadSummary } from '../api/protocol-types.js';
 import {
   handleSlashCommand,
   type CommandResult,
@@ -72,15 +73,11 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
         return;
       }
       case 'session-selector': {
-        const result = await input.thread.request('thread/list', {
-          cwd: input.thread.cwd,
-          archived: false,
-          limit: 50,
-        });
-        input.setOverlay({
-          type: 'session-selector',
-          sessions: result.data.filter(isResumableThread),
-        });
+        await openSessionSelector(false, 'resume');
+        return;
+      }
+      case 'archived-session-selector': {
+        await openSessionSelector(true, 'unarchive');
         return;
       }
       case 'rewind-selector':
@@ -93,6 +90,19 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
         name satisfies never;
         throw new Error(`Unhandled overlay: ${String(name)}`);
     }
+  };
+
+  const openSessionSelector = async (
+    archived: boolean,
+    action: 'resume' | 'unarchive',
+  ): Promise<void> => {
+    const sessions = await listThreads(input.thread, archived);
+    input.setOverlay({
+      type: 'session-selector',
+      action,
+      sessions: sessions.filter(isResumableThread),
+      currentCwd: input.thread.cwd,
+    });
   };
 
   const runShellCommand = async (command: string): Promise<void> => {
@@ -156,4 +166,27 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
   };
 
   return { submitPrompt };
+}
+
+async function listThreads(
+  thread: ThreadClient,
+  archived: boolean,
+): Promise<readonly ThreadSummary[]> {
+  const sessions: ThreadSummary[] = [];
+  const cursors = new Set<string>();
+  let cursor: string | undefined;
+  while (true) {
+    const page = await thread.request('thread/list', {
+      archived,
+      limit: 100,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    sessions.push(...page.data);
+    if (page.nextCursor === undefined) return sessions;
+    if (cursors.has(page.nextCursor)) {
+      throw new Error(`thread/list repeated cursor ${page.nextCursor}.`);
+    }
+    cursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
 }

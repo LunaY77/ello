@@ -417,6 +417,56 @@ describe('App typed client behavior', () => {
     );
   });
 
+  it('/resume 选中 Thread 后由 Server resume，再关闭当前空白 Thread', async () => {
+    const named = summary('thr_named', 'Named session', 'work');
+    const harness = createThreadHarness(snapshot(), { sessions: [named] });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, '/resume');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('Named session'));
+    view.stdin.write('\r');
+
+    await vi.waitFor(() =>
+      expect(harness.resume).toHaveBeenCalledWith('thr_named'),
+    );
+    await vi.waitFor(() => expect(harness.close).toHaveBeenCalledOnce());
+    expect(harness.request).toHaveBeenCalledWith('thread/delete', {
+      threadId: 'thr_1',
+    });
+    view.unmount();
+  });
+
+  it('/unarchive 先提交解除归档，再 resume 并切换 Thread', async () => {
+    const archived = {
+      ...summary('thr_archived', 'Archived session', 'work'),
+      archived: true,
+    };
+    const harness = createThreadHarness(snapshot('thr_current', true), {
+      sessions: [archived],
+    });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, '/unarchive');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('Archived session'),
+    );
+    view.stdin.write('\r');
+
+    await vi.waitFor(() =>
+      expect(harness.request).toHaveBeenCalledWith('thread/unarchive', {
+        threadId: 'thr_archived',
+      }),
+    );
+    expect(harness.resume).toHaveBeenCalledWith('thr_archived');
+    await vi.waitFor(() => expect(harness.close).toHaveBeenCalledOnce());
+    expect(harness.request).not.toHaveBeenCalledWith('thread/delete', {
+      threadId: 'thr_current',
+    });
+    view.unmount();
+  });
+
   it('profile create/delete 使用 profile 叶节点，不覆盖整个配置', async () => {
     const createHarness = createThreadHarness(snapshot());
     const createView = render(<App thread={createHarness.thread} />);
@@ -551,6 +601,7 @@ interface ThreadHarness {
   readonly thread: ThreadClient;
   readonly request: ReturnType<typeof vi.fn>;
   readonly fork: ReturnType<typeof vi.fn>;
+  readonly resume: ReturnType<typeof vi.fn>;
   readonly close: ReturnType<typeof vi.fn>;
   readonly interrupt: ReturnType<typeof vi.fn>;
   readonly setProfile: ReturnType<typeof vi.fn>;
@@ -595,6 +646,9 @@ function createThreadHarness(
         return { config };
       case 'thread/delete':
         return { ok: true };
+      case 'thread/archive':
+      case 'thread/unarchive':
+        return { thread: initialSnapshot.thread };
       case 'config/settings':
         return {
           data: [
@@ -650,6 +704,7 @@ function createThreadHarness(
     }
   });
   const fork = vi.fn();
+  const resume = vi.fn();
   const close = vi.fn(async () => undefined);
   const interrupt = vi.fn(async () => undefined);
   const setProfile = vi.fn(async () => undefined);
@@ -667,16 +722,19 @@ function createThreadHarness(
     loadHistory: async () => undefined,
     request,
     fork,
+    resume,
     close,
     interrupt,
     setProfile,
     setMode,
     submitInput,
   } as unknown as ThreadClient;
+  resume.mockResolvedValue(thread);
   return {
     thread,
     request,
     fork,
+    resume,
     close,
     interrupt,
     setProfile,

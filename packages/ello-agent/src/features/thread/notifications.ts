@@ -74,6 +74,24 @@ export function notificationsFor(
         ];
       }
       return [sequenceAdvanced(record)];
+    case 'thread.archived':
+      return [
+        {
+          method: 'thread/archived',
+          params: { threadId: record.threadId, seq: record.seq },
+        },
+      ];
+    case 'thread.unarchived':
+      return [
+        {
+          method: 'thread/unarchived',
+          params: {
+            threadId: record.threadId,
+            seq: record.seq,
+            thread: snapshot.thread,
+          },
+        },
+      ];
     case 'turn.started':
       return [
         {

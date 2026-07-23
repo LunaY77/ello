@@ -5,6 +5,7 @@
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
 import {
+  AppServerError,
   type PendingServerRequest,
   type ThreadItem,
   type ThreadSnapshot,
@@ -146,6 +147,12 @@ function applyThreadRecord(
     return;
   }
   const snapshot = requireSnapshot(state);
+  if (snapshot.thread.archived && record.kind !== 'thread.unarchived') {
+    throw projectionCorrupt(
+      record.threadId,
+      `${record.kind} cannot follow thread.archived`,
+    );
+  }
   snapshot.seq = record.seq;
   snapshot.thread.updatedAt = record.createdAt;
   switch (record.kind) {
@@ -153,11 +160,25 @@ function applyThreadRecord(
       if (record.name !== undefined) snapshot.thread.name = record.name;
       if (record.preview !== undefined)
         snapshot.thread.preview = record.preview;
-      if (record.archived !== undefined) {
-        snapshot.thread.archived = record.archived;
-        snapshot.thread.status = record.archived ? 'archived' : 'idle';
-      }
       if (record.settings !== undefined) snapshot.settings = record.settings;
+      return;
+    case 'thread.archived':
+      if (snapshot.thread.archived) {
+        throw projectionCorrupt(record.threadId, 'Thread is already archived');
+      }
+      if (activeTurn(snapshot) || snapshot.pendingServerRequests.length > 0) {
+        throw projectionCorrupt(
+          record.threadId,
+          'Thread was archived with active work',
+        );
+      }
+      snapshot.thread.archived = true;
+      return;
+    case 'thread.unarchived':
+      if (!snapshot.thread.archived) {
+        throw projectionCorrupt(record.threadId, 'Thread is not archived');
+      }
+      snapshot.thread.archived = false;
       return;
     case 'thread.status':
       snapshot.thread.status = record.status;
@@ -227,6 +248,14 @@ function applyThreadRecord(
     case 'content.replacement':
       return;
   }
+}
+
+function projectionCorrupt(threadId: string, reason: string): AppServerError {
+  return new AppServerError({
+    type: 'storageCorrupt',
+    message: `Thread ${threadId} record sequence is invalid: ${reason}.`,
+    details: { threadId, reason },
+  });
 }
 
 function requireSnapshot(state: MutableProjection): MutableThreadSnapshot {

@@ -326,8 +326,14 @@ function ReadyThreadScreen({
             onSelectProfileRole={profiles.selectProfileRole}
             onBindProfileRoleModel={profiles.bindProfileRoleModel}
             onSaveProfile={profiles.saveProfile}
-            onSelectSession={(threadId) => {
-              void thread.resume(threadId).then(switchThread).catch(onError);
+            onSelectSession={(threadId, action) => {
+              const resume =
+                action === 'resume'
+                  ? thread.resume(threadId)
+                  : thread
+                      .request('thread/unarchive', { threadId })
+                      .then(() => thread.resume(threadId));
+              void resume.then(switchThread).catch(onError);
             }}
             onSelectRewind={(entryId) => {
               const target = rewindTargets(state.history).find(

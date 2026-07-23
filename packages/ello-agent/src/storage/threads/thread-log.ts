@@ -4,24 +4,11 @@
  * 文件、lease 或 record 状态由显式 store 入口拥有；读取结果在离开边界前完成结构校验。
  * 写入顺序、连续序号和资源释放是持久化不变量，损坏数据与非法状态直接失败。
  */
-import {
-  mkdir,
-  open,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-} from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rm, stat } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 
 import { errnoCode } from '../../infra/filesystem.js';
-import {
-  activeThreadsDir,
-  archivedThreadLogPath,
-  archivedThreadsDir,
-  threadLogPath,
-} from '../../infra/paths.js';
+import { threadLogPath, threadsDir } from '../../infra/paths.js';
 import { AppServerError } from '../../protocol/errors.js';
 
 import {
@@ -81,10 +68,7 @@ export class ThreadLogStore {
    * - 当 持久化层的 `thread-log` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
    */
   async initialize(): Promise<void> {
-    await Promise.all([
-      mkdir(activeThreadsDir(this.root), { recursive: true }),
-      mkdir(archivedThreadsDir(this.root), { recursive: true }),
-    ]);
+    await mkdir(threadsDir(this.root), { recursive: true });
   }
 
   /**
@@ -199,64 +183,10 @@ export class ThreadLogStore {
   }
 
   /**
-   * 读取 持久化层的 `thread-log` 模块 的 `readArchived` 视图，不转移底层状态所有权。
-   *
-   * Args:
-   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
-   *
-   * Returns:
-   * - Promise 在 持久化层的 `thread-log` 模块 的异步读取或状态变更完成后兑现为声明结果。
-   *
-   * Throws:
-   * - 当 持久化层的 `thread-log` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
-   */
-  async readArchived(threadId: string): Promise<readonly ThreadRecord[]> {
-    await this.flush(threadId);
-    return this.readPath(archivedThreadLogPath(threadId, this.root), threadId);
-  }
-
-  /**
-   * 按 持久化层的 `thread-log` 模块 的一致性约束执行 `archive` 状态变更。
-   *
-   * Args:
-   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
-   *
-   * Returns:
-   * - Promise 在 持久化层的 `thread-log` 模块 的异步副作用完整提交后兑现，不返回业务值。
-   */
-  async archive(threadId: string): Promise<void> {
-    await this.flush(threadId);
-    await mkdir(archivedThreadsDir(this.root), { recursive: true });
-    await rename(
-      threadLogPath(threadId, this.root),
-      archivedThreadLogPath(threadId, this.root),
-    );
-    this.writers.delete(threadId);
-  }
-
-  /**
-   * 按 持久化层的 `thread-log` 模块 的一致性约束执行 `unarchive` 状态变更。
-   *
-   * Args:
-   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
-   *
-   * Returns:
-   * - Promise 在 持久化层的 `thread-log` 模块 的异步副作用完整提交后兑现，不返回业务值。
-   */
-  async unarchive(threadId: string): Promise<void> {
-    await mkdir(activeThreadsDir(this.root), { recursive: true });
-    await rename(
-      archivedThreadLogPath(threadId, this.root),
-      threadLogPath(threadId, this.root),
-    );
-  }
-
-  /**
    * 按 持久化层的 `thread-log` 模块 的一致性约束执行 `delete` 状态变更。
    *
    * Args:
    * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
-   * - `archived`: 显式控制 `delete` 分支的布尔值；只影响当前调用。
    *
    * Returns:
    * - Promise 在 持久化层的 `thread-log` 模块 的异步副作用完整提交后兑现，不返回业务值。
@@ -264,14 +194,9 @@ export class ThreadLogStore {
    * Throws:
    * - 当 持久化层的 `thread-log` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
    */
-  async delete(threadId: string, archived: boolean): Promise<void> {
+  async delete(threadId: string): Promise<void> {
     await this.flush(threadId);
-    await rm(
-      archived
-        ? archivedThreadLogPath(threadId, this.root)
-        : threadLogPath(threadId, this.root),
-      { force: false },
-    );
+    await rm(threadLogPath(threadId, this.root), { force: false });
     this.writers.delete(threadId);
   }
 
@@ -280,18 +205,13 @@ export class ThreadLogStore {
    *
    * Args:
    * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
-   * - `archived`: 显式控制 `exists` 分支的布尔值；只影响当前调用。
    *
    * Returns:
    * - Promise 在 持久化层的 `thread-log` 模块 的异步读取或状态变更完成后兑现为声明结果。
    */
-  async exists(threadId: string, archived = false): Promise<boolean> {
+  async exists(threadId: string): Promise<boolean> {
     try {
-      await stat(
-        archived
-          ? archivedThreadLogPath(threadId, this.root)
-          : threadLogPath(threadId, this.root),
-      );
+      await stat(threadLogPath(threadId, this.root));
       return true;
     } catch (error) {
       if (isNodeError(error, 'ENOENT')) return false;
@@ -303,20 +223,33 @@ export class ThreadLogStore {
    * 读取 持久化层的 `thread-log` 模块 的 `listThreadIds` 视图，不转移底层状态所有权。
    *
    * Args:
-   * - `archived`: 显式控制 `listThreadIds` 分支的布尔值；只影响当前调用。
-   *
    * Returns:
    * - Promise 在 持久化层的 `thread-log` 模块 的异步读取或状态变更完成后兑现为声明结果。
    */
-  async listThreadIds(archived = false): Promise<readonly string[]> {
-    const directory = archived
-      ? archivedThreadsDir(this.root)
-      : activeThreadsDir(this.root);
+  async listThreadIds(): Promise<readonly string[]> {
+    const directory = threadsDir(this.root);
     await mkdir(directory, { recursive: true });
-    return (await readdir(directory, { withFileTypes: true }))
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
-      .map((entry) => entry.name.slice(0, -'.jsonl'.length))
-      .sort();
+    const threadIds: string[] = [];
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) {
+        throw corrupt(
+          directory,
+          `unexpected entry ${entry.name}; only Thread JSONL files are allowed`,
+        );
+      }
+      const threadId = entry.name.slice(0, -'.jsonl'.length);
+      try {
+        threadLogPath(threadId, this.root);
+      } catch (error) {
+        throw corrupt(
+          directory,
+          `invalid Thread log name ${entry.name}`,
+          error,
+        );
+      }
+      threadIds.push(threadId);
+    }
+    return threadIds.sort();
   }
 
   /**
@@ -445,6 +378,12 @@ export class ThreadLogStore {
 }
 
 function requiresFlush(record: ThreadRecord): boolean {
+  if (
+    record.kind === 'thread.archived' ||
+    record.kind === 'thread.unarchived'
+  ) {
+    return true;
+  }
   return [
     'turn.completed',
     'turn.interrupted',

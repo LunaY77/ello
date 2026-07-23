@@ -1,0 +1,233 @@
+@import './tokens.css';
+@import 'tailwindcss';
+
+/* Tailwind v4:把设计 token 映射为工具类,组件侧零硬编码色值 */
+@theme inline {
+  --color-canvas: var(--bg-canvas);
+  --color-subtle: var(--bg-subtle);
+  --color-surface-1: var(--bg-surface-1);
+  --color-surface-2: var(--bg-surface-2);
+  --color-surface-3: var(--bg-surface-3);
+  --color-elevated: var(--bg-elevated);
+  --color-overlay: var(--bg-overlay);
+
+  --color-card-bg: var(--card-bg);
+  --color-card-bg-hover: var(--card-bg-hover);
+  --color-card-border: var(--card-border);
+  --color-card-border-accent: var(--card-border-accent);
+
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-active: var(--sidebar-active);
+
+  --color-border-subtle: var(--border-subtle);
+  --color-border-default: var(--border-default);
+  --color-border-strong: var(--border-strong);
+  --color-divider: var(--divider);
+
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-tertiary: var(--text-tertiary);
+  --color-disabled: var(--text-disabled);
+  --color-on-accent: var(--text-on-accent);
+
+  --color-fluent: var(--fluent-blue);
+  --color-fluent-hover: var(--fluent-blue-hover);
+  --color-fluent-active: var(--fluent-blue-active);
+  --color-fluent-subtle: var(--fluent-blue-subtle);
+
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-info: var(--info);
+  --color-info-subtle: var(--info-subtle);
+
+  --color-kind-feature: var(--kind-feature);
+  --color-kind-fix: var(--kind-fix);
+  --color-kind-refactor: var(--kind-refactor);
+  --color-kind-explore: var(--kind-explore);
+
+  --shadow-1: var(--shadow-1);
+  --shadow-2: var(--shadow-2);
+  --shadow-3: var(--shadow-3);
+  --shadow-card: var(--shadow-card);
+  --shadow-fluent: var(--shadow-fluent);
+
+  --font-sans:
+    '-apple-system', 'SF Pro Text', 'Segoe UI', 'BlinkMacSystemFont',
+    'system-ui', 'PingFang SC', 'sans-serif';
+  --font-mono:
+    'JetBrains Mono', 'SF Mono', 'Cascadia Code', 'Fira Code', 'ui-monospace',
+    'Menlo', 'monospace';
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-primary font-sans antialiased;
+    font-size: 13px;
+    line-height: 20px;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: var(--selection);
+  }
+
+  /* 细滚动条:默认透明,hover 容器时显现 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  *:hover {
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *:hover::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* focus ring 不移除,统一 Fluent 样式 */
+  :focus-visible {
+    outline: 2px solid var(--fluent-blue);
+    outline-offset: 1px;
+    border-radius: 4px;
+  }
+
+  kbd {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  /* Acrylic 材质:仅顶栏、浮层、命令面板、审批层使用 */
+  .acrylic {
+    background: var(--acrylic-tint);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    box-shadow: inset 0 0 0 1px var(--highlight-stroke);
+  }
+  .acrylic-strong {
+    background: var(--acrylic-tint-strong);
+    backdrop-filter: blur(24px) saturate(1.5);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    box-shadow: inset 0 0 0 1px var(--highlight-stroke);
+  }
+
+  .syntax-token-keyword { color: var(--tok-keyword); }
+  .syntax-token-string { color: var(--tok-string); }
+  .syntax-token-comment { color: var(--tok-comment); font-style: italic; }
+  .syntax-token-number { color: var(--tok-number); }
+  .syntax-token-function { color: var(--tok-function); }
+  .syntax-token-type { color: var(--tok-type); }
+  .syntax-token-property { color: var(--tok-property); }
+  .syntax-token-builtin { color: var(--tok-builtin); }
+  .syntax-token-operator { color: var(--tok-operator); }
+  .syntax-token-punctuation { color: var(--tok-punctuation); }
+}
+
+@layer utilities {
+  .animate-fade-in {
+    animation: fade-in var(--duration-base) var(--ease-fluent) both;
+  }
+  .animate-slide-up {
+    animation: slide-up var(--duration-base) var(--ease-fluent-decelerate) both;
+  }
+  .animate-scale-in {
+    animation: scale-in var(--duration-base) var(--ease-fluent-decelerate) both;
+  }
+  .animate-pulse-soft {
+    animation: pulse-soft 2s var(--ease-fluent) infinite;
+  }
+  .animate-breathe {
+    animation: breathe 2.4s var(--ease-fluent) infinite;
+  }
+  .animate-spin-slow {
+    animation: spin 1.2s linear infinite;
+  }
+  .animate-shimmer {
+    animation: shimmer 1.6s linear infinite;
+  }
+  .animate-locate-pulse {
+    animation: locate-pulse 1s var(--ease-fluent) 2;
+  }
+
+  /* Tauri 窗口拖拽区 */
+  .drag-region {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 0 0 var(--fluent-blue-subtle); opacity: 1; }
+  50% { box-shadow: 0 0 0 4px var(--fluent-blue-subtle); opacity: 0.72; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes shimmer {
+  from { background-position: -200px 0; }
+  to { background-position: 200px 0; }
+}
+@keyframes locate-pulse {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: var(--fluent-blue-subtle); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-up,
+  .animate-scale-in,
+  .animate-locate-pulse {
+    animation-name: fade-in;
+  }
+  .animate-breathe,
+  .animate-pulse-soft,
+  .animate-shimmer {
+    animation: none;
+  }
+}

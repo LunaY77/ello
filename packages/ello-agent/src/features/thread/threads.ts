@@ -216,6 +216,12 @@ export function createThreads(options: CreateThreadsInput) {
         includeTurns: true,
         includeItems: true,
       });
+      if (source.thread.archived) {
+        throw new AppServerError({
+          type: 'invalidParams',
+          message: `Thread ${source.thread.id} must be unarchived before fork.`,
+        });
+      }
       const sourceRecords = await options.store.read(params.threadId);
       const threadId = createEntityId('thr');
       let created: CreatedThreadData | undefined;
@@ -320,11 +326,25 @@ export function createThreads(options: CreateThreadsInput) {
       pool.releaseConnection(connectionId);
       return Promise.resolve();
     },
-    async archive(threadId: string): Promise<ThreadSummary> {
+    async archive(threadId: string) {
+      const current = await read({
+        threadId,
+        includeTurns: true,
+        includeItems: false,
+      });
+      if (current.thread.archived) {
+        throw new AppServerError({
+          type: 'invalidParams',
+          message: `Thread ${threadId} is already archived.`,
+        });
+      }
+      const result = await pool.withState(threadId, true, (state) =>
+        state.archive(),
+      );
       await pool.unloadNow(threadId);
-      return options.store.archive(threadId);
+      return result;
     },
-    async unarchive(threadId: string): Promise<ThreadSummary> {
+    async unarchive(threadId: string) {
       return options.store.unarchive(threadId);
     },
     async delete(threadId: string): Promise<void> {

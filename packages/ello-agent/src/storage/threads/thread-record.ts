@@ -47,8 +47,21 @@ export const ThreadMetadataRecordSchema = z
     kind: z.literal('thread.metadata'),
     name: z.string().optional(),
     preview: z.string().optional(),
-    archived: z.boolean().optional(),
     settings: ThreadSettingsSchema.optional(),
+  })
+  .strict();
+
+export const ThreadArchivedRecordSchema = z
+  .object({
+    ...RecordBaseShape,
+    kind: z.literal('thread.archived'),
+  })
+  .strict();
+
+export const ThreadUnarchivedRecordSchema = z
+  .object({
+    ...RecordBaseShape,
+    kind: z.literal('thread.unarchived'),
   })
   .strict();
 
@@ -213,6 +226,8 @@ export const UsageRecordSchema = z
 export const ThreadRecordSchema = z.discriminatedUnion('kind', [
   ThreadCreatedRecordSchema,
   ThreadMetadataRecordSchema,
+  ThreadArchivedRecordSchema,
+  ThreadUnarchivedRecordSchema,
   ThreadStatusRecordSchema,
   TurnStartedRecordSchema,
   TurnCompletedRecordSchema,

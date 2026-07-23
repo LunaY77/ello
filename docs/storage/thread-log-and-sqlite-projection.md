@@ -34,6 +34,10 @@ flowchart LR
 
 数据库启用 WAL、foreign keys 和 5 秒 busy timeout。Thread log 与 SQLite 没有跨介质事务，顺序策略是 JSONL 先提交，再由 listener 更新投影。SQLite 更新失败时 JSONL 仍保留事实，启动或 repair 可以重建投影；反向顺序会产生无法从事实源解释的数据库行。
 
+## Thread 与执行目录
+
+Thread 是全局一等资源，不绑定 Workspace。`thread.created.cwd` 是创建时确定的执行目录，fork 继承源 Thread 的 `cwd`，resume 始终使用日志中记录的目录。`thread/list` 可以用 `cwd` 筛选；省略时返回全局 Thread。Workspace 生命周期不会修改、隐藏或删除 Thread。
+
 ## archive 与 delete
 
-archive 先 flush writer，再把 active JSONL rename 到 archived 目录；unarchive 做反向 rename。delete 也先 flush，再删除明确的文件路径。Thread id 使用白名单正则，并验证 resolve 后仍位于目标目录，避免路径穿越。
+每个 Thread 始终只有 `threads/<threadId>.jsonl` 一份日志。archive 与 unarchive 分别 append `thread.archived`、`thread.unarchived`，不移动或重写文件；`archived` 只表示列表归档状态，最后运行状态保持不变。delete 先 flush writer，再删除明确的文件路径。Thread id 使用白名单正则，并验证 resolve 后仍位于目标目录，避免路径穿越。

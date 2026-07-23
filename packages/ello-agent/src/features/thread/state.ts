@@ -30,7 +30,7 @@ import { compactionView } from './compact.js';
 import { createThreadInteractions } from './interactions.js';
 import { notificationsFor } from './notifications.js';
 import { createThreadSnapshotProjection } from './records.js';
-import type { ThreadStore } from './store.js';
+import type { ThreadArchiveMutation, ThreadStore } from './store.js';
 import type { ThreadTitleGenerator } from './title.js';
 import { createTurnOperations, type TurnSettings } from './turns.js';
 
@@ -142,6 +142,19 @@ export interface ThreadState {
    * - 返回谓词判断结果；`true` 与 `false` 分别对应声明中的满足与不满足状态。
    */
   hasPendingServerRequest(): boolean;
+  /**
+   * 持久化归档事实；成功返回前已完成 catalog 投影与订阅通知。
+   *
+   * Args:
+   * - 无：归档当前状态拥有的 Thread。
+   *
+   * Returns:
+   * - Promise 在 JSONL 与 catalog 提交后兑现为归档后的 summary 和对应 seq。
+   *
+   * Throws:
+   * - Thread 已归档、存在 active turn、存在 pending request 或持久化失败时直接抛错。
+   */
+  archive(): Promise<ThreadArchiveMutation>;
   /**
    * 在 Thread 状态 模块 中执行 `startTurn` 完整流程，并在返回前完成其必要副作用。
    *
@@ -300,6 +313,12 @@ export function createThreadState(
   const records = [...options.records];
   const projector = createThreadSnapshotProjection(records);
   const initial = projector.current();
+  if (initial.thread.archived) {
+    throw new AppServerError({
+      type: 'invalidParams',
+      message: `Thread ${initial.thread.id} must be unarchived before resume.`,
+    });
+  }
   const id = initial.thread.id;
   const rootId = initial.thread.rootId;
   const cwd = initial.thread.cwd;
@@ -332,6 +351,12 @@ export function createThreadState(
       throw new AppServerError({
         type: 'threadBusy',
         message: `Thread ${id} is closing.`,
+      });
+    }
+    if (projector.current().thread.archived) {
+      throw new AppServerError({
+        type: 'invalidParams',
+        message: `Thread ${id} must be unarchived before modification.`,
       });
     }
   };
@@ -441,6 +466,21 @@ export function createThreadState(
     hasActiveTurn: () => turns.hasActiveTurn(),
     hasPendingServerRequest: () =>
       projector.current().pendingServerRequests.length > 0,
+    archive() {
+      return enqueue(async () => {
+        assertOpen();
+        if (
+          turns.hasActiveTurn() ||
+          projector.current().pendingServerRequests.length > 0
+        ) {
+          throw new AppServerError({
+            type: 'threadBusy',
+            message: `Thread ${id} cannot be archived while work is active.`,
+          });
+        }
+        return options.store.archive(id);
+      });
+    },
     startTurn: (input, settings) => turns.start(input, settings),
     steerTurn: (turnId, input) => turns.steer(turnId, input),
     interruptTurn: (turnId, reason) =>

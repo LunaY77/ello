@@ -94,6 +94,11 @@ const operationHandlers = {
       includeTurns: false,
       includeItems: false,
     });
+    if (snapshot.thread.archived) {
+      throw invalidParams(
+        `Thread ${params.threadId} must be unarchived before shell execution.`,
+      );
+    }
     if (snapshot.settings.mode === 'plan') {
       throw new AppServerError({
         type: 'permissionDenied',
@@ -260,12 +265,26 @@ export function createThreadRoutes(
       await context.threads.unsubscribe(peer.connectionId, params.threadId);
       return { ok: true };
     }),
-    'thread/archive': route('write', async (_peer, params) => ({
-      thread: await context.threads.archive(params.threadId),
-    })),
-    'thread/unarchive': route('write', async (_peer, params) => ({
-      thread: await context.threads.unarchive(params.threadId),
-    })),
+    'thread/archive': route('write', async (peer, params) => {
+      const result = await context.threads.archive(params.threadId);
+      await peer.notify({
+        method: 'thread/archived',
+        params: { threadId: params.threadId, seq: result.seq },
+      });
+      return { thread: result.thread };
+    }),
+    'thread/unarchive': route('write', async (peer, params) => {
+      const result = await context.threads.unarchive(params.threadId);
+      await peer.notify({
+        method: 'thread/unarchived',
+        params: {
+          threadId: params.threadId,
+          seq: result.seq,
+          thread: result.thread,
+        },
+      });
+      return { thread: result.thread };
+    }),
     'thread/delete': route('write', async (_peer, params) => {
       await context.threads.delete(params.threadId);
       return { ok: true };

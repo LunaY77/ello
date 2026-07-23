@@ -26,6 +26,14 @@ describe('斜杠命令派发', () => {
       type: 'open-overlay',
       overlay: 'settings',
     });
+    expect(handleSlashCommand('/unarchive').command).toEqual({
+      type: 'open-overlay',
+      overlay: 'archived-session-selector',
+    });
+    expect(handleSlashCommand('/archive').command).toEqual({
+      type: 'runtime-action',
+      action: 'archive',
+    });
   });
 
   it('有参数时直接切换 profile，无参数时打开选择界面', () => {

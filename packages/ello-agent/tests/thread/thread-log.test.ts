@@ -4,7 +4,14 @@
  * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
  * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
  */
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,9 +19,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { projectThreadSnapshot } from '../../src/features/thread/records.js';
 import {
-  archivedThreadLogPath,
   threadLeasePath,
   threadLogPath,
+  threadsDir,
 } from '../../src/infra/paths.js';
 import { AppServerError } from '../../src/protocol/errors.js';
 import { ThreadLeaseStore } from '../../src/storage/threads/thread-lease.js';
@@ -161,32 +168,57 @@ describe('ThreadLogStore', () => {
 
   it('archive 与 unarchive 不创建第二份事实源', async () => {
     await createThread(repository);
-    await repository.archive(threadId);
-    await expect(repository.read(threadId)).rejects.toMatchObject({
-      type: 'threadNotFound',
+    await repository.append(threadId, { kind: 'thread.archived' });
+    let records = await repository.read(threadId);
+    expect(records.map((record) => record.seq)).toEqual([1, 2]);
+    expect(projectThreadSnapshot(records).thread).toMatchObject({
+      archived: true,
+      status: 'idle',
     });
-    await expect(repository.readArchived(threadId)).resolves.toHaveLength(1);
-    await repository.unarchive(threadId);
-    await expect(repository.read(threadId)).resolves.toHaveLength(1);
+    expect(await readdir(threadsDir(root))).toEqual([`${threadId}.jsonl`]);
+
+    await repository.append(threadId, { kind: 'thread.unarchived' });
+    records = await repository.read(threadId);
+    expect(records.map((record) => record.seq)).toEqual([1, 2, 3]);
+    expect(projectThreadSnapshot(records).thread).toMatchObject({
+      archived: false,
+      status: 'idle',
+    });
+    expect(await readdir(threadsDir(root))).toEqual([`${threadId}.jsonl`]);
   });
 
-  it('read/archive/delete/unarchive 与路径 helper 拒绝 traversal 且不触碰外部文件', async () => {
+  it.each(['unexpected.txt', 'active'])(
+    '统一目录出现非法 entry %s 时启动扫描失败',
+    async (entry) => {
+      await repository.initialize();
+      const entryPath = join(threadsDir(root), entry);
+      if (entry.includes('.')) await writeFile(entryPath, 'invalid\n', 'utf8');
+      else await mkdir(entryPath);
+
+      await expect(repository.listThreadIds()).rejects.toMatchObject({
+        type: 'storageCorrupt',
+      });
+    },
+  );
+
+  it('read/append/delete 与路径 helper 拒绝 traversal 且不触碰外部文件', async () => {
     const traversalId = '../../sentinel';
     const sentinelPath = join(root, 'sentinel.jsonl');
     const sentinel = 'outside-thread-storage\n';
     await writeFile(sentinelPath, sentinel, 'utf8');
 
     expect(() => threadLogPath(traversalId, root)).toThrow('Unsafe storage id');
-    expect(() => archivedThreadLogPath(traversalId, root)).toThrow(
-      'Unsafe storage id',
-    );
     const operations: readonly [string, () => Promise<unknown>][] = [
       ['read', () => repository.read(traversalId)],
-      ['readArchived', () => repository.readArchived(traversalId)],
-      ['archive', () => repository.archive(traversalId)],
-      ['unarchive', () => repository.unarchive(traversalId)],
-      ['delete active', () => repository.delete(traversalId, false)],
-      ['delete archived', () => repository.delete(traversalId, true)],
+      [
+        'append',
+        () =>
+          repository.append(traversalId, {
+            kind: 'thread.metadata',
+            name: 'unsafe',
+          }),
+      ],
+      ['delete', () => repository.delete(traversalId)],
     ];
     for (const [name, operation] of operations) {
       await expect(operation(), name).rejects.toThrow('Unsafe storage id');

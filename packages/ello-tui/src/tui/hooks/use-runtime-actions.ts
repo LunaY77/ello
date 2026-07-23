@@ -35,6 +35,9 @@ export function useRuntimeActions(input: {
         message(`Context compaction completed (${result.jobId}).`);
         return;
       }
+      case 'archive':
+        await archiveActiveThread(input.thread, input.exit);
+        return;
       case 'fork':
         assertMaximumArguments(command.args, 1, '/fork [entry-id]');
         await input.switchThread(await input.thread.fork(command.args[0]));
@@ -150,6 +153,15 @@ export function useRuntimeActions(input: {
     input.dispatch({ type: 'ui.message', text });
 
   return { runRuntimeAction: run, rewindToTarget };
+}
+
+export async function archiveActiveThread(
+  thread: ThreadClient,
+  exit: () => void,
+): Promise<void> {
+  await thread.request('thread/archive', { threadId: thread.threadId });
+  await thread.close();
+  exit();
 }
 
 export function rewindTargets(

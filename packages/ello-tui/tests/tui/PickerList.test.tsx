@@ -6,12 +6,14 @@ import { InlineSelect } from '../../src/tui/ui/List.js';
 import { overlayCallbacks } from '../support/overlay-fixture.js';
 
 describe('bottom dock pickers', () => {
-  it('renders the session selector as a scrollable window', () => {
+  it('renders the Codex-style session selector collapsed by default', () => {
     const output = renderToString(
       <OverlayHost
         {...overlayCallbacks()}
         overlay={{
           type: 'session-selector',
+          action: 'resume',
+          currentCwd: '/repo',
           sessions: Array.from({ length: 8 }, (_, index) => ({
             id: `session-${index}`,
             rootId: `session-${index}`,
@@ -28,10 +30,14 @@ describe('bottom dock pickers', () => {
       { columns: 100 },
     );
 
-    expect(output).toContain('threads  1-6 of 8');
-    expect(output).toContain('scrollbar  [########--]');
-    expect(output).toContain('session 5');
-    expect(output).not.toContain('session 6');
+    expect(output).toContain('Resume a previous session');
+    expect(output).toContain('Type to search');
+    expect(output).toContain('Cwd [All]');
+    expect(output).toContain('[Updated] Created');
+    expect(output).not.toContain('Session:    session-7');
+    expect(output).not.toContain('Directory:  /repo');
+    expect(output).toContain('Ctrl+E expand/collapse');
+    expect(output).toContain('1 / 8');
   });
 
   it('renders only rewindable user entries in the rewind selector', () => {

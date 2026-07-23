@@ -39,12 +39,17 @@ export function registerRunCommands(program: Command): void {
   program
     .command('resume [threadId]')
     .description('resume a thread')
+    .option('--all', 'select the most recent thread from every directory')
     .option('--json')
     .option('--no-tui')
     .action(
       async (
         threadId: string | undefined,
-        commandOptions: Record<string, unknown>,
+        commandOptions: {
+          readonly all?: boolean;
+          readonly json?: boolean;
+          readonly tui?: boolean;
+        },
         command: Command,
       ) => {
         const global = resolveGlobalOptions(command);
@@ -55,6 +60,9 @@ export function registerRunCommands(program: Command): void {
             (
               await connection.client.request('thread/list', {
                 archived: false,
+                ...(commandOptions.all === true
+                  ? {}
+                  : { cwd: global.root ?? process.cwd() }),
                 limit: 1,
               })
             ).data[0]?.id;

@@ -50,13 +50,6 @@ describe('global coding storage', () => {
           storage.db.$client.pragma('journal_mode', { simple: true }),
         ).toLowerCase(),
       ).toBe('wal');
-      const migration = await readFile(
-        new URL(
-          '../../src/infra/database/migrations/0000_tiny_swordsman.sql',
-          import.meta.url,
-        ),
-        'utf8',
-      );
       const journal = JSON.parse(
         await readFile(
           new URL(
@@ -65,19 +58,41 @@ describe('global coding storage', () => {
           ),
           'utf8',
         ),
-      ) as { readonly entries: readonly { readonly when: number }[] };
+      ) as {
+        readonly entries: readonly {
+          readonly tag: string;
+          readonly when: number;
+        }[];
+      };
+      const migrations = await Promise.all(
+        journal.entries.map((entry) =>
+          readFile(
+            new URL(
+              `../../src/infra/database/migrations/${entry.tag}.sql`,
+              import.meta.url,
+            ),
+            'utf8',
+          ),
+        ),
+      );
       expect(
         storage.db.$client
           .prepare(
             'select hash, created_at as createdAt from __drizzle_migrations',
           )
           .all(),
-      ).toEqual([
-        {
-          hash: createHash('sha256').update(migration).digest('hex'),
-          createdAt: journal.entries[0]!.when,
-        },
-      ]);
+      ).toEqual(
+        journal.entries.map((entry, index) => {
+          const migration = migrations[index];
+          if (migration === undefined) {
+            throw new Error(`Missing migration content for ${entry.tag}.`);
+          }
+          return {
+            hash: createHash('sha256').update(migration).digest('hex'),
+            createdAt: entry.when,
+          };
+        }),
+      );
       expect(
         storage.db.$client
           .prepare(

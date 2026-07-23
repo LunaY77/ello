@@ -22,7 +22,6 @@ export const ThreadStatusSchema = z.enum([
   'awaitingUserInput',
   'interrupted',
   'failed',
-  'archived',
 ]);
 
 export const TurnStatusSchema = z.enum([

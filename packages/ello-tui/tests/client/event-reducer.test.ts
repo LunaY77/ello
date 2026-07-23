@@ -93,6 +93,37 @@ describe('thread notification reducer', () => {
       status: 'completed',
     });
   });
+
+  it('archive 与 unarchive 只更新归档事实，不覆盖运行状态', () => {
+    const fixture = fixtureSnapshot();
+    const interrupted = {
+      ...fixture,
+      thread: { ...fixture.thread, status: 'interrupted' as const },
+    };
+    const archived = reduceNotification(
+      { snapshot: interrupted, stale: false },
+      notification('thread/archived', 2, {}),
+    );
+
+    expect(archived.projection.snapshot.thread).toMatchObject({
+      archived: true,
+      status: 'interrupted',
+    });
+
+    const failed = {
+      ...archived.projection.snapshot.thread,
+      archived: false,
+      status: 'failed' as const,
+    };
+    const unarchived = reduceNotification(
+      archived.projection,
+      notification('thread/unarchived', 3, { thread: failed }),
+    );
+    expect(unarchived.projection.snapshot.thread).toMatchObject({
+      archived: false,
+      status: 'failed',
+    });
+  });
 });
 
 function fixtureSnapshot(): ThreadSnapshot {

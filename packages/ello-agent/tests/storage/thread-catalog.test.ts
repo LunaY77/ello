@@ -43,12 +43,11 @@ describe('Thread catalog projection', () => {
     storage.threads.apply(createdRecord('thr_c', '/other', 'archived'));
     storage.threads.apply(
       threadRecord({
-        kind: 'thread.metadata',
+        kind: 'thread.archived',
         schema: 1,
         seq: 2,
         threadId: 'thr_c',
         createdAt: '2026-07-18T00:01:00.000Z',
-        archived: true,
       }),
     );
 
@@ -80,7 +79,7 @@ describe('Thread catalog projection', () => {
       expect.objectContaining({
         id: 'thr_c',
         archived: true,
-        status: 'archived',
+        status: 'idle',
       }),
     ]);
   });

@@ -82,6 +82,7 @@ describe('CLI contract', () => {
     });
     expect(client.request).toHaveBeenCalledWith('thread/list', {
       archived: false,
+      cwd: process.cwd(),
       limit: 50,
     });
     expect(client.close).toHaveBeenCalledOnce();
@@ -105,6 +106,159 @@ describe('CLI contract', () => {
       'Authentication token environment variable ELLO_CLI_TEST_TOKEN is empty',
     );
     expect(mocks.connectClient).not.toHaveBeenCalled();
+  });
+
+  it('sessions 默认按当前目录列出归档 Thread', async () => {
+    const client = managementClient({ data: [] });
+    mocks.connectClient.mockResolvedValue(connection(client));
+    const { runCli } = await import('../../src/cli/main.js');
+
+    await runCli([
+      'node',
+      'ello',
+      '--root',
+      '/workspace/current',
+      '--json',
+      'sessions',
+      '--archived',
+    ]);
+
+    expect(client.request).toHaveBeenCalledWith('thread/list', {
+      archived: true,
+      cwd: '/workspace/current',
+      limit: 50,
+    });
+  });
+
+  it('sessions --all 显式省略 cwd，并可与 --archived 组合', async () => {
+    const client = managementClient({ data: [] });
+    mocks.connectClient.mockResolvedValue(connection(client));
+    const { runCli } = await import('../../src/cli/main.js');
+
+    await runCli([
+      'node',
+      'ello',
+      '--root',
+      '/workspace/current',
+      '--json',
+      'sessions',
+      '--all',
+      '--archived',
+    ]);
+
+    expect(client.request).toHaveBeenCalledWith('thread/list', {
+      archived: true,
+      limit: 50,
+    });
+  });
+
+  it('resume 无 ID 时只选择当前 cwd 最近的未归档 Thread', async () => {
+    const client = resumeClient();
+    mocks.connectClient.mockResolvedValue({ client });
+    const { runCli } = await import('../../src/cli/main.js');
+
+    await runCli([
+      'node',
+      'ello',
+      '--root',
+      '/workspace/current',
+      '--json',
+      'resume',
+    ]);
+
+    expect(client.request).toHaveBeenNthCalledWith(1, 'thread/list', {
+      archived: false,
+      cwd: '/workspace/current',
+      limit: 1,
+    });
+    expect(client.request).toHaveBeenNthCalledWith(2, 'thread/resume', {
+      threadId: 'thr_cli',
+      subscribe: true,
+    });
+  });
+
+  it('resume --all 从全局选择最近 Thread，显式 ID 不执行列表查询', async () => {
+    const allClient = resumeClient();
+    mocks.connectClient.mockResolvedValue({ client: allClient });
+    const { runCli } = await import('../../src/cli/main.js');
+
+    await runCli(['node', 'ello', '--json', 'resume', '--all']);
+
+    expect(allClient.request).toHaveBeenNthCalledWith(1, 'thread/list', {
+      archived: false,
+      limit: 1,
+    });
+
+    vi.resetModules();
+    const explicitClient = resumeClient();
+    mocks.connectClient.mockResolvedValue({ client: explicitClient });
+    const explicitCli = await import('../../src/cli/main.js');
+    await explicitCli.runCli([
+      'node',
+      'ello',
+      '--json',
+      'resume',
+      'thr_explicit',
+    ]);
+
+    expect(explicitClient.request).toHaveBeenCalledOnce();
+    expect(explicitClient.request).toHaveBeenCalledWith('thread/resume', {
+      threadId: 'thr_explicit',
+      subscribe: true,
+    });
+  });
+
+  it('thread help 暴露正式 archive 和 unarchive 子命令', async () => {
+    const { runCli } = await import('../../src/cli/main.js');
+    vi.spyOn(process, 'exit').mockImplementation((code): never => {
+      throw new Error(`process.exit ${String(code)}`);
+    });
+
+    await expect(runCli(['node', 'ello', 'thread', '--help'])).rejects.toThrow(
+      'process.exit 0',
+    );
+
+    const help = stdout.join('');
+    expect(help).toMatch(/archive \[options\] <threadId>/u);
+    expect(help).toMatch(/unarchive \[options\] <threadId>/u);
+    expect(mocks.connectClient).not.toHaveBeenCalled();
+  });
+
+  it('thread archive 使用文本输出，unarchive 使用 JSON 输出', async () => {
+    const archived = {
+      ...snapshot().thread,
+      archived: true,
+    };
+    const archiveClient = managementClient({ thread: archived });
+    mocks.connectClient.mockResolvedValue(connection(archiveClient));
+    const { runCli } = await import('../../src/cli/main.js');
+
+    await runCli(['node', 'ello', 'thread', 'archive', 'thr_cli']);
+
+    expect(archiveClient.request).toHaveBeenCalledWith('thread/archive', {
+      threadId: 'thr_cli',
+    });
+    expect(stdout.join('')).toContain('"archived": true');
+
+    stdout = [];
+    vi.resetModules();
+    const unarchived = { ...archived, archived: false };
+    const unarchiveClient = managementClient({ thread: unarchived });
+    mocks.connectClient.mockResolvedValue(connection(unarchiveClient));
+    const unarchiveCli = await import('../../src/cli/main.js');
+    await unarchiveCli.runCli([
+      'node',
+      'ello',
+      '--json',
+      'thread',
+      'unarchive',
+      'thr_cli',
+    ]);
+
+    expect(unarchiveClient.request).toHaveBeenCalledWith('thread/unarchive', {
+      threadId: 'thr_cli',
+    });
+    expect(JSON.parse(stdout.join(''))).toEqual({ thread: unarchived });
   });
 
   it('一次性 JSON run 只输出可解析通知，并发送结构化输入', async () => {
@@ -355,6 +509,26 @@ function managementClient(result: unknown, rejects = false) {
     request: rejects
       ? vi.fn().mockRejectedValue(result)
       : vi.fn().mockResolvedValue(result),
+    close: vi.fn().mockResolvedValue(undefined),
+    onNotification: vi.fn(() => () => undefined),
+    onServerRequest: vi.fn(() => () => undefined),
+  };
+}
+
+function resumeClient() {
+  return {
+    request: vi.fn(async (method: string, params: unknown) => {
+      if (method === 'thread/list') return { data: [snapshot().thread] };
+      if (method === 'thread/resume') {
+        const threadId = (params as { threadId: string }).threadId;
+        const result = snapshot();
+        return {
+          ...result,
+          thread: { ...result.thread, id: threadId, rootId: threadId },
+        };
+      }
+      throw new Error(`Unexpected resume request: ${method}`);
+    }),
     close: vi.fn().mockResolvedValue(undefined),
     onNotification: vi.fn(() => () => undefined),
     onServerRequest: vi.fn(() => () => undefined),

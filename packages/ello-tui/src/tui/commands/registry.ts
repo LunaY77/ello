@@ -80,6 +80,18 @@ const META: Record<string, CommandMeta> = {
     title: 'Resume session',
     keywords: ['open'],
   },
+  archive: {
+    id: 'session.archive',
+    group: 'Session',
+    title: 'Archive session',
+    keywords: ['hide'],
+  },
+  unarchive: {
+    id: 'session.unarchive',
+    group: 'Session',
+    title: 'Unarchive session',
+    keywords: ['restore'],
+  },
   tasks: {
     id: 'task.list',
     group: 'Tasks',

@@ -18,7 +18,10 @@
     },
     "server/read": {},
     "server/shutdown": { "reason": "fixture complete" },
-    "thread/start": { "cwd": "/workspace", "subscribe": true },
+    "thread/start": {
+      "cwd": "/workspace",
+      "subscribe": true
+    },
     "thread/resume": { "threadId": "thr_fixture", "subscribe": true },
     "thread/read": {
       "threadId": "thr_fixture",

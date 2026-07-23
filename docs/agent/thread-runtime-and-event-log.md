@@ -144,7 +144,7 @@ this.activeTurn = {
 
 ## Fork 不复制 JSONL 文件
 
-Fork 创建新的 `thread.created` 记录，携带原 Thread 的 `rootId` 和 `forkedFromId`。选定的 Turn、Item 和 transcript 被重新 append 到新 Thread 的 JSONL 文件中，生成从 seq=1 开始的连续序列。Active goal 复制为 paused 状态，使用新的 goal id。
+Fork 创建新的 `thread.created` 记录，携带原 Thread 的 `rootId`、`forkedFromId` 和 `cwd`。选定的 Turn、Item 和 transcript 被重新 append 到新 Thread 的 JSONL 文件中，生成从 seq=1 开始的连续序列。Active goal 复制为 paused 状态，使用新的 goal id。
 
 写入成本高于文件复制（每个 Item 都要重新写入），但换来几个保证：
 

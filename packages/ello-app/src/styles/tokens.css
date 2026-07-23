@@ -1,0 +1,183 @@
+/*
+ * Fluent design tokens — 单一事实源。
+ * 组件只引用 token；主题切换 = 切换 <html data-theme>，无闪烁、无重排。
+ * 取值依据 docs/design/fluent-design.md §2，暗色降低阴影权重、以 border 分层。
+ */
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-canvas: #f3f3f3;
+  --bg-subtle: #f7f7f7;
+  --bg-surface-1: #ffffff;
+  --bg-surface-2: #f9f9f9;
+  --bg-surface-3: #f0f0f0;
+  --bg-elevated: #ffffff;
+  --bg-overlay: rgba(0, 0, 0, 0.28);
+
+  --card-bg: color-mix(in srgb, #ffffff 96%, #0078d4 4%);
+  --card-bg-hover: color-mix(in srgb, #ffffff 92%, #0078d4 8%);
+  --card-border: rgba(0, 0, 0, 0.08);
+  --card-border-accent: rgba(0, 120, 212, 0.48);
+
+  --sidebar-bg: #ebebeb;
+  --sidebar-hover: rgba(0, 0, 0, 0.045);
+  --sidebar-active: rgba(0, 120, 212, 0.12);
+
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-default: rgba(0, 0, 0, 0.12);
+  --border-strong: rgba(0, 0, 0, 0.18);
+  --divider: rgba(0, 0, 0, 0.08);
+
+  --text-primary: #1a1a1a;
+  --text-secondary: #444444;
+  --text-tertiary: #6b6b6b;
+  --text-disabled: #999999;
+  --text-on-accent: #ffffff;
+
+  --fluent-blue: #0078d4;
+  --fluent-blue-hover: #106ebe;
+  --fluent-blue-active: #005a9e;
+  --fluent-blue-subtle: rgba(0, 120, 212, 0.1);
+
+  --success: #107c10;
+  --success-subtle: rgba(16, 124, 16, 0.1);
+  --warning: #b24800;
+  --warning-subtle: rgba(202, 80, 16, 0.1);
+  --danger: #c42b1c;
+  --danger-subtle: rgba(196, 43, 28, 0.09);
+  --info: #0078d4;
+  --info-subtle: rgba(0, 120, 212, 0.1);
+
+  --kind-feature: #5b9bd5;
+  --kind-fix: #e8862e;
+  --kind-refactor: #8f6fc8;
+  --kind-explore: #3fa66a;
+
+  --diff-add-bg: rgba(16, 124, 16, 0.11);
+  --diff-add-gutter: rgba(16, 124, 16, 0.35);
+  --diff-remove-bg: rgba(196, 43, 28, 0.09);
+  --diff-remove-gutter: rgba(196, 43, 28, 0.35);
+  --diff-hunk-bg: rgba(0, 120, 212, 0.07);
+
+  --acrylic-tint: rgba(250, 250, 250, 0.72);
+  --acrylic-tint-strong: rgba(250, 250, 250, 0.86);
+  --highlight-stroke: rgba(255, 255, 255, 0.6);
+
+  --shadow-color: rgba(0, 0, 0, 0.14);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.16);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-fluent: 0 2px 6px rgba(0, 120, 212, 0.35);
+
+  /* 自定义语法高亮（Atom One Light 系，与 Fluent 灰阶协调） */
+  --tok-keyword: #a626a4;
+  --tok-string: #50a14f;
+  --tok-comment: #8a8a8a;
+  --tok-number: #b76b01;
+  --tok-function: #4078f2;
+  --tok-type: #c18401;
+  --tok-property: #e45649;
+  --tok-builtin: #0184bc;
+  --tok-operator: #383a42;
+  --tok-punctuation: #6b6b6b;
+
+  --selection: rgba(0, 120, 212, 0.22);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-canvas: #202020;
+  --bg-subtle: #242424;
+  --bg-surface-1: #2b2b2b;
+  --bg-surface-2: #303030;
+  --bg-surface-3: #383838;
+  --bg-elevated: #3a3a3a;
+  --bg-overlay: rgba(0, 0, 0, 0.52);
+
+  --card-bg: color-mix(in srgb, #2b2b2b 95%, #60cdff 5%);
+  --card-bg-hover: color-mix(in srgb, #2b2b2b 90%, #60cdff 10%);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --card-border-accent: rgba(96, 205, 255, 0.48);
+
+  --sidebar-bg: #252525;
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-active: rgba(96, 165, 250, 0.18);
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --divider: rgba(255, 255, 255, 0.09);
+
+  --text-primary: #ffffff;
+  --text-secondary: #d6d6d6;
+  --text-tertiary: #afafaf;
+  --text-disabled: #707070;
+  --text-on-accent: #1a1a1a;
+
+  --fluent-blue: #60cdff;
+  --fluent-blue-hover: #75d7ff;
+  --fluent-blue-active: #4cc2f1;
+  --fluent-blue-subtle: rgba(96, 205, 255, 0.16);
+
+  --success: #6ccb5f;
+  --success-subtle: rgba(108, 203, 95, 0.14);
+  --warning: #f7b500;
+  --warning-subtle: rgba(247, 181, 0, 0.13);
+  --danger: #ff99a4;
+  --danger-subtle: rgba(255, 153, 164, 0.13);
+  --info: #60cdff;
+  --info-subtle: rgba(96, 205, 255, 0.16);
+
+  --kind-feature: #6fa8dc;
+  --kind-fix: #f0a04b;
+  --kind-refactor: #a78bdb;
+  --kind-explore: #55c080;
+
+  --diff-add-bg: rgba(108, 203, 95, 0.15);
+  --diff-add-gutter: rgba(108, 203, 95, 0.45);
+  --diff-remove-bg: rgba(255, 153, 164, 0.13);
+  --diff-remove-gutter: rgba(255, 153, 164, 0.45);
+  --diff-hunk-bg: rgba(96, 205, 255, 0.08);
+
+  --acrylic-tint: rgba(36, 36, 36, 0.72);
+  --acrylic-tint-strong: rgba(36, 36, 36, 0.88);
+  --highlight-stroke: rgba(255, 255, 255, 0.09);
+
+  --shadow-color: rgba(0, 0, 0, 0.5);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.32);
+  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.44);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.28);
+  --shadow-fluent: 0 2px 6px rgba(96, 205, 255, 0.28);
+
+  /* One Dark 系 */
+  --tok-keyword: #c678dd;
+  --tok-string: #98c379;
+  --tok-comment: #7f848e;
+  --tok-number: #d19a66;
+  --tok-function: #61afef;
+  --tok-type: #e5c07b;
+  --tok-property: #e06c75;
+  --tok-builtin: #56b6c2;
+  --tok-operator: #abb2bf;
+  --tok-punctuation: #8a8f98;
+
+  --selection: rgba(96, 205, 255, 0.28);
+}
+
+/* 动效 token(主题无关) */
+:root {
+  --ease-fluent: cubic-bezier(0.33, 0, 0.67, 1);
+  --ease-fluent-decelerate: cubic-bezier(0, 0, 0, 1);
+  --ease-fluent-accelerate: cubic-bezier(1, 0, 1, 1);
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
+
+  --sidebar-w: 280px;
+  --header-h: 56px;
+  --input-h: 72px;
+}

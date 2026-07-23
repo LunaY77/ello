@@ -18,6 +18,7 @@ import {
   threadTurnCatalog,
 } from '../../infra/database/schema.js';
 import {
+  AppServerError,
   ThreadItemSchema,
   ThreadSummarySchema,
   type ThreadItem,
@@ -191,17 +192,13 @@ function listCatalog(
   database: CodingDatabase,
   options: ThreadCatalogListOptions,
 ): ThreadCatalogPage {
-  const filter =
-    options.cwd === undefined
-      ? eq(threadCatalog.archived, options.archived)
-      : and(
-          eq(threadCatalog.archived, options.archived),
-          eq(threadCatalog.cwd, options.cwd),
-        );
+  const filters = [eq(threadCatalog.archived, options.archived)];
+  if (options.cwd !== undefined)
+    filters.push(eq(threadCatalog.cwd, options.cwd));
   const rows = database
     .select()
     .from(threadCatalog)
-    .where(filter)
+    .where(and(...filters))
     .orderBy(desc(threadCatalog.updatedAt), desc(threadCatalog.id))
     .limit(options.limit + 1)
     .offset(options.offset)
@@ -246,17 +243,18 @@ function applyCatalogRecord(
       `Thread catalog ${record.threadId} is at seq ${current.seq}, cannot apply seq ${record.seq}.`,
     );
   }
+  assertCatalogTransition(database, current, record);
 
   let status: ThreadStatus | undefined;
   switch (record.kind) {
     case 'thread.metadata':
       applyMetadataRecord(database, record);
-      status =
-        record.archived === undefined
-          ? undefined
-          : record.archived
-            ? 'archived'
-            : 'idle';
+      break;
+    case 'thread.archived':
+      setArchived(database, record.threadId, true);
+      break;
+    case 'thread.unarchived':
+      setArchived(database, record.threadId, false);
       break;
     case 'thread.status':
       status = record.status;
@@ -361,11 +359,7 @@ function applyMetadataRecord(
   database: CodingDatabase,
   record: Extract<ThreadRecord, { kind: 'thread.metadata' }>,
 ): void {
-  if (
-    record.name === undefined &&
-    record.preview === undefined &&
-    record.archived === undefined
-  ) {
+  if (record.name === undefined && record.preview === undefined) {
     return;
   }
   database
@@ -373,10 +367,75 @@ function applyMetadataRecord(
     .set({
       ...(record.name === undefined ? {} : { name: record.name }),
       ...(record.preview === undefined ? {} : { preview: record.preview }),
-      ...(record.archived === undefined ? {} : { archived: record.archived }),
     })
     .where(eq(threadCatalog.id, record.threadId))
     .run();
+}
+
+function assertCatalogTransition(
+  database: CodingDatabase,
+  current: ThreadCatalogState,
+  record: ThreadRecord,
+): void {
+  if (current.archived && record.kind !== 'thread.unarchived') {
+    throw catalogCorrupt(
+      record.threadId,
+      `${record.kind} cannot follow thread.archived`,
+    );
+  }
+  if (record.kind === 'thread.unarchived' && !current.archived) {
+    throw catalogCorrupt(record.threadId, 'Thread is not archived');
+  }
+  if (record.kind !== 'thread.archived') return;
+  if (current.archived) {
+    throw catalogCorrupt(record.threadId, 'Thread is already archived');
+  }
+  const activeTurn = database
+    .select({ id: threadTurnCatalog.id })
+    .from(threadTurnCatalog)
+    .where(
+      and(
+        eq(threadTurnCatalog.threadId, record.threadId),
+        eq(threadTurnCatalog.status, 'inProgress'),
+      ),
+    )
+    .get();
+  const pendingRequest = database
+    .select({ id: threadRequestCatalog.id })
+    .from(threadRequestCatalog)
+    .where(
+      and(
+        eq(threadRequestCatalog.threadId, record.threadId),
+        eq(threadRequestCatalog.status, 'pending'),
+      ),
+    )
+    .get();
+  if (activeTurn !== undefined || pendingRequest !== undefined) {
+    throw catalogCorrupt(record.threadId, 'Thread has active work');
+  }
+}
+
+function setArchived(
+  database: CodingDatabase,
+  threadId: string,
+  archived: boolean,
+): void {
+  const result = database
+    .update(threadCatalog)
+    .set({ archived })
+    .where(eq(threadCatalog.id, threadId))
+    .run();
+  if (result.changes !== 1) {
+    throw new Error(`Thread catalog is missing ${threadId}.`);
+  }
+}
+
+function catalogCorrupt(threadId: string, reason: string): AppServerError {
+  return new AppServerError({
+    type: 'storageCorrupt',
+    message: `Thread catalog ${threadId} transition is invalid: ${reason}.`,
+    details: { threadId, reason },
+  });
 }
 
 function insertTurn(

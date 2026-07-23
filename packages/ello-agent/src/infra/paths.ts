@@ -26,29 +26,16 @@ export function elloHomeDir(): string {
 }
 
 /**
- * 执行 基础设施层的 `paths` 模块 定义的 `activeThreadsDir` 领域操作，输入和副作用均受该边界约束。
+ * 执行 基础设施层的 `paths` 模块 定义的 `threadsDir` 领域操作，输入和副作用均受该边界约束。
  *
  * Args:
  * - `root`: 调用方指定的文件系统位置；路径边界和存在性由当前操作显式校验。
  *
  * Returns:
- * - 返回 `activeThreadsDir` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ * - 返回 `threadsDir` 计算出的声明结果；返回值不包含未声明的兜底状态。
  */
-export function activeThreadsDir(root = elloHomeDir()): string {
-  return join(root, 'threads', 'active');
-}
-
-/**
- * 按 基础设施层的 `paths` 模块 的一致性约束执行 `archivedThreadsDir` 状态变更。
- *
- * Args:
- * - `root`: 调用方指定的文件系统位置；路径边界和存在性由当前操作显式校验。
- *
- * Returns:
- * - 返回 `archivedThreadsDir` 计算出的声明结果；返回值不包含未声明的兜底状态。
- */
-export function archivedThreadsDir(root = elloHomeDir()): string {
-  return join(root, 'threads', 'archived');
+export function threadsDir(root = elloHomeDir()): string {
+  return join(root, 'threads');
 }
 
 /**
@@ -62,24 +49,7 @@ export function archivedThreadsDir(root = elloHomeDir()): string {
  * - 返回 `threadLogPath` 计算出的声明结果；返回值不包含未声明的兜底状态。
  */
 export function threadLogPath(threadId: string, root = elloHomeDir()): string {
-  return storageFilePath(activeThreadsDir(root), threadId, '.jsonl');
-}
-
-/**
- * 按 基础设施层的 `paths` 模块 的一致性约束执行 `archivedThreadLogPath` 状态变更。
- *
- * Args:
- * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
- * - `root`: 调用方指定的文件系统位置；路径边界和存在性由当前操作显式校验。
- *
- * Returns:
- * - 返回 `archivedThreadLogPath` 计算出的声明结果；返回值不包含未声明的兜底状态。
- */
-export function archivedThreadLogPath(
-  threadId: string,
-  root = elloHomeDir(),
-): string {
-  return storageFilePath(archivedThreadsDir(root), threadId, '.jsonl');
+  return storageFilePath(threadsDir(root), threadId, '.jsonl');
 }
 
 /**

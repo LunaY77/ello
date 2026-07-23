@@ -21,6 +21,7 @@ import {
   REPOSITORY_BASELINE_REF,
 } from '../../src/features/workspace/index.js';
 import type { ThreadSnapshot } from '../../src/protocol/v1/index.js';
+import type { ServerNotification } from '../../src/protocol/v1/index.js';
 import { createTestFeatures } from '../support/features.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 import { createTestStores, type TestStores } from '../support/stores.js';
@@ -118,6 +119,52 @@ describe('ServerServices runtime contracts', () => {
         watchId: result.watchId,
       }),
     ).rejects.toMatchObject({ type: 'invalidParams' });
+  });
+
+  it('archive 与 unarchive route 在领域提交后向发起连接发布同一 seq', async () => {
+    const storage = createStorage(home);
+    const active = threadSnapshot(home).thread;
+    const archived = { ...active, archived: true };
+    const notifications: ServerNotification[] = [];
+    const service = createTestFeatures({
+      storage,
+      threads: {
+        archive: () => Promise.resolve({ thread: archived, seq: 2 }),
+        unarchive: () => Promise.resolve({ thread: active, seq: 3 }),
+      } as unknown as ThreadFeature,
+      store: {} as ThreadStore,
+      compact: () => Promise.reject(new Error('Unexpected compact request.')),
+    });
+    services.push(service);
+    const peer = createTestPeer({
+      connectionId: 'connection-archive',
+      notify: (notification) => {
+        notifications.push(notification);
+        return Promise.resolve();
+      },
+    });
+
+    await expect(
+      invokeServiceRoute(service, peer, 'thread/archive', {
+        threadId: active.id,
+      }),
+    ).resolves.toEqual({ thread: archived });
+    await expect(
+      invokeServiceRoute(service, peer, 'thread/unarchive', {
+        threadId: active.id,
+      }),
+    ).resolves.toEqual({ thread: active });
+
+    expect(notifications).toEqual([
+      {
+        method: 'thread/archived',
+        params: { threadId: active.id, seq: 2 },
+      },
+      {
+        method: 'thread/unarchived',
+        params: { threadId: active.id, seq: 3, thread: active },
+      },
+    ]);
   });
 
   it('未装配 delegation runner 的 Subagent 在目录中明确标记不可用', async () => {

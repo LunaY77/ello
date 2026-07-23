@@ -23,6 +23,10 @@ import { buildPermissionView } from '../store/permission-view.js';
 import { useTheme } from '../theme/index.js';
 import { InlineSelect, type SelectOption } from '../ui/List.js';
 
+import {
+  SessionSelector,
+  type SessionSelectorAction,
+} from './SessionSelector.js';
 import { SettingsPanel } from './SettingsPanel.js';
 import { UserInputPanel } from './UserInputPanel.js';
 
@@ -68,7 +72,9 @@ export type OverlayState =
     }
   | {
       readonly type: 'session-selector';
+      readonly action: SessionSelectorAction;
       readonly sessions: readonly ThreadSummary[];
+      readonly currentCwd: string;
     }
   | {
       readonly type: 'rewind-selector';
@@ -112,7 +118,7 @@ export interface OverlayHostProps {
   ): void;
   onOpenProfiles(): void;
   onSaveProfile(profile: string): void;
-  onSelectSession(threadId: string): void;
+  onSelectSession(threadId: string, action: SessionSelectorAction): void;
   onSelectRewind(entryId: string): void;
   onUpdateSetting(update: SettingUpdate): Promise<void>;
 }
@@ -288,23 +294,12 @@ export function OverlayHost({
         />
       ) : null}
       {overlay.type === 'session-selector' ? (
-        <Panel title="Resume thread" color={theme.info}>
-          <InlineSelect
-            label="threads"
-            visibleRows={6}
-            options={
-              overlay.sessions.length === 0
-                ? [{ value: '', label: 'No threads found', disabled: true }]
-                : overlay.sessions.map((session) => ({
-                    value: session.id,
-                    label: renderThreadLabel(session),
-                  }))
-            }
-            onChange={(value) => {
-              if (value !== '') onSelectSession(value);
-            }}
-          />
-        </Panel>
+        <SessionSelector
+          action={overlay.action}
+          sessions={overlay.sessions}
+          currentCwd={overlay.currentCwd}
+          onSelect={onSelectSession}
+        />
       ) : null}
       {overlay.type === 'rewind-selector' ? (
         <Panel title="Rewind target" color={theme.info}>
@@ -570,29 +565,6 @@ function approvalLabel(value: string): string {
     default:
       return 'Allow once';
   }
-}
-
-function renderThreadLabel(thread: ThreadSummary): string {
-  const title =
-    thread.name.trim() || thread.preview.trim() || 'Untitled session';
-  const timestamp = formatThreadTimestamp(thread.createdAt);
-  return `${timestamp}  ${clip(title, 58)}`;
-}
-
-function formatThreadTimestamp(value: string): string {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return 'invalid-date';
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(date);
-  const read = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((part) => part.type === type)?.value ?? '';
-  return `${read('year')}-${read('month')}-${read('day')} ${read('hour')}:${read('minute')}`;
 }
 
 function workspaceEntry(workspace: WorkspaceSummary): CatalogEntry {

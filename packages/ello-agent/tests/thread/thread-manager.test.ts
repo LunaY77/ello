@@ -693,19 +693,81 @@ describe('ThreadFeature', () => {
     const threadId = attachment.snapshot.thread.id;
 
     await expect(manager.archive(threadId)).resolves.toMatchObject({
-      id: threadId,
-      archived: true,
-      status: 'archived',
+      thread: { id: threadId, archived: true, status: 'idle' },
+      seq: 2,
     });
     expect(storage.threads.state(threadId)?.archived).toBe(true);
+    await expect(manager.archive(threadId)).rejects.toMatchObject({
+      type: 'invalidParams',
+    });
+    await expect(
+      manager.resume(
+        'connection-archived',
+        { threadId, subscribe: false },
+        undefined,
+      ),
+    ).rejects.toThrow('must be unarchived before resume');
+    await expect(
+      manager.fork(
+        'connection-fork-archived',
+        { threadId, subscribe: false },
+        undefined,
+      ),
+    ).rejects.toThrow('must be unarchived before fork');
+    await expect(
+      attachment.runtime.startTurn([{ type: 'text', text: 'too late' }]),
+    ).rejects.toThrow(`Thread ${threadId} is closing.`);
     await expect(manager.unarchive(threadId)).resolves.toMatchObject({
-      id: threadId,
-      archived: false,
-      status: 'idle',
+      thread: { id: threadId, archived: false, status: 'idle' },
+      seq: 3,
     });
     expect(storage.threads.state(threadId)?.archived).toBe(false);
+    await expect(manager.unarchive(threadId)).rejects.toMatchObject({
+      type: 'invalidParams',
+    });
     await manager.delete(threadId);
     expect(storage.threads.state(threadId)).toBeNull();
+  });
+
+  it('active turn 或 pending Server Request 存在时拒绝 archive', async () => {
+    const attachment = await startThread(manager, 'connection-archive-busy');
+    const threadId = attachment.snapshot.thread.id;
+    await attachment.runtime.startTurn([{ type: 'text', text: 'busy' }]);
+
+    await expect(manager.archive(threadId)).rejects.toMatchObject({
+      type: 'threadBusy',
+    });
+    expect(storage.threads.state(threadId)?.archived).toBe(false);
+
+    const handle = agent.run(threadId);
+    handle.emit({
+      type: 'interactionRequired',
+      interaction: {
+        type: 'approval',
+        interactionId: 'item_archive_pending',
+        item: {
+          kind: 'approval',
+          toolCallId: 'item_archive_pending',
+          toolName: 'bash',
+          input: { command: 'pwd' },
+          metadata: {
+            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
+          },
+        },
+        occurredAt: new Date().toISOString(),
+      },
+    });
+    await vi.waitFor(async () => {
+      expect(
+        (await attachment.runtime.snapshot()).pendingServerRequests,
+      ).toHaveLength(1);
+    });
+
+    await expect(manager.archive(threadId)).rejects.toMatchObject({
+      type: 'threadBusy',
+    });
+    expect(storage.threads.state(threadId)?.archived).toBe(false);
+    handle.finish({ status: 'completed', usage: EMPTY_USAGE });
   });
 
   it('启动时重建偏离 catalog 并删除孤儿目录', async () => {
