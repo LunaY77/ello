@@ -1,4 +1,4 @@
-import { highlight, type Theme } from 'cli-highlight';
+import { DEFAULT_THEME, highlight, type Theme } from 'cli-highlight';
 
 import type { TuiTheme } from '../../theme/types.js';
 
@@ -17,6 +17,7 @@ export function highlightCode(
   theme: TuiTheme,
 ): string {
   if (code === '') return '';
+  const codeColor = hexToAnsi(theme.markdownCode);
   const keywordColor = hexToAnsi(theme.syntaxKeyword);
   const stringColor = hexToAnsi(theme.syntaxString);
   if (language === undefined || language === '') {
@@ -28,7 +29,7 @@ export function highlightCode(
   try {
     return highlight(code, {
       language,
-      theme: buildCliHighlightTheme(keywordColor, stringColor),
+      theme: buildCliHighlightTheme(codeColor, keywordColor, stringColor),
     });
   } catch {
     return code
@@ -39,8 +40,17 @@ export function highlightCode(
 }
 
 /** 把 ello theme token 映射为 cli-highlight 的 Theme（scope → 着色函数）。 */
-function buildCliHighlightTheme(keywordColor: string, stringColor: string): Theme {
+function buildCliHighlightTheme(
+  codeColor: string,
+  keywordColor: string,
+  stringColor: string,
+): Theme {
+  const fallback = (s: string) => colorize(s, codeColor);
   return {
+    ...Object.fromEntries(
+      Object.keys(DEFAULT_THEME).map((scope) => [scope, fallback]),
+    ),
+    default: fallback,
     keyword: (s) => colorize(s, keywordColor),
     built_in: (s) => colorize(s, keywordColor),
     type: (s) => colorize(s, keywordColor),
