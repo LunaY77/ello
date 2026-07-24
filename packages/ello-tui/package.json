@@ -29,8 +29,10 @@
   "dependencies": {
     "@ello/agent": "workspace:*",
     "@inkjs/ui": "^2.0.0",
+    "cli-highlight": "^2.1.11",
     "commander": "^15.0.0",
     "ink": "^6.5.0",
+    "marked": "^18.0.7",
     "react": "^19.2.3",
     "vscode-jsonrpc": "9.0.1",
     "ws": "8.21.1",
