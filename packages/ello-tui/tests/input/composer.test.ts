@@ -271,4 +271,48 @@ describe('Composer', () => {
     expect(changes.at(-1)?.value).toBe('first\nsecond');
     view.unmount();
   });
+
+  it('recalculates visual wrapping after a terminal resize', async () => {
+    const changes: Array<{
+      readonly value: string;
+      readonly cursor: { readonly line: number; readonly column: number };
+    }> = [];
+    const view = render(
+      createElement(Composer, {
+        running: false,
+        onSubmit: () => {},
+        onChange: (
+          value: string,
+          cursor: { readonly line: number; readonly column: number },
+        ) => changes.push({ value, cursor }),
+        onCancel: () => {},
+        onEscape: () => {},
+      }),
+    );
+
+    const pasted = 'x'.repeat(100);
+    view.stdin.write(pasted);
+    // ink-testing-library's stdout defaults to 100 columns; shrink it to 40 so
+    // Composer's responsive width (columns - 10 = 30) changes, then flush the
+    // resize-triggered re-render before driving input that depends on it.
+    Object.defineProperty(view.stdout, 'columns', {
+      configurable: true,
+      value: 40,
+    });
+    view.stdout.emit('resize');
+    // Resize triggers a state update; the resulting re-render rebinds the
+    // useInput callback with the new width. Yield several macrotasks so that
+    // passive effect (rebind) commits before input that relies on it.
+    for (let i = 0; i < 5; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    view.stdin.write('\u001b[A');
+
+    expect(changes.at(-1)).toEqual({
+      value: pasted,
+      cursor: { line: 0, column: 70 },
+    });
+    view.unmount();
+  });
 });

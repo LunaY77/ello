@@ -2,6 +2,7 @@ import { Box } from 'ink';
 import type { ReactNode } from 'react';
 
 import type { Goal, Usage } from '../../api/protocol-types.js';
+import { useTerminalSize } from '../hooks/use-terminal-size.js';
 import type { SubagentRunView, ToolCallView } from '../store/history-entry.js';
 import { tuiTokens } from '../ui/tokens.js';
 
@@ -65,12 +66,4 @@ export function AppShell(props: AppShellProps) {
       />
     </Box>
   );
-}
-
-function useTerminalSize(): {
-  readonly columns: number;
-} {
-  return {
-    columns: process.stdout.columns ?? 100,
-  };
 }

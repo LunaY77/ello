@@ -1,6 +1,7 @@
-import { Box, Text, useInput, useStdout } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useTerminalSize } from '../hooks/use-terminal-size.js';
 import {
   backspace,
   deleteForward,
@@ -60,7 +61,7 @@ export type ComposerSuggestion =
 
 export function Composer(props: ComposerProps) {
   const theme = useTheme();
-  const { stdout } = useStdout();
+  const size = useTerminalSize();
   const { onChange } = props;
   const [buffer, setBuffer] = useState<ComposerBuffer>(emptyBuffer);
   const [cursorVisible, setCursorVisible] = useState(true);
@@ -69,7 +70,7 @@ export function Composer(props: ComposerProps) {
   const bufferRef = useRef(buffer);
   const pastesRef = useRef<Map<number, string>>(new Map());
   const nextPasteIdRef = useRef(1);
-  const wrapWidth = Math.max(1, (stdout.columns ?? 100) - 10);
+  const wrapWidth = Math.max(1, size.columns - 10);
 
   const replaceBuffer = useCallback(
     (next: ComposerBuffer): void => {
