@@ -131,7 +131,7 @@ describe('TerminalHistoryOutput', () => {
     );
 
     expect(output).toContain('> hello');
-    expect(output).toContain('* hi');
+    expect(output).toMatch(/\*[\s\S]*hi/);
     expect(output).toContain('Edited tmp.txt (+1 -1)');
     expect(output).not.toContain('kind edit');
     expect(output).toContain('• Ran pnpm build');

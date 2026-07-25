@@ -4,6 +4,7 @@ import type { UserInputResolution } from '../../api/protocol-types.js';
 import { DiffPreview } from '../presenters/index.js';
 import { useTheme, type TuiTheme } from '../theme/index.js';
 import { glyphs } from '../ui/glyphs.js';
+import { MarkdownText } from '../utils/markdown/MarkdownText.js';
 
 import type {
   HistoryEntry,
@@ -51,11 +52,8 @@ function renderHistoryEntryContent(
     case 'assistant':
       return (
         <Box flexDirection="column">
-          {entry.text.split('\n').map((line, index) => (
-            <Text key={`${entry.id}:${index}`} color={theme.text}>
-              {`${index === 0 ? glyphs.assistant : ' '} ${line}`}
-            </Text>
-          ))}
+          <Text color={theme.text}>{`${glyphs.assistant} `}</Text>
+          <MarkdownText text={entry.text} />
         </Box>
       );
     case 'skill':
