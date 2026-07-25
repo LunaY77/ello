@@ -4,6 +4,7 @@ import { memo } from 'react';
 import type { SubagentRunView, ToolCallView } from '../store/history-entry.js';
 import { useTheme } from '../theme/index.js';
 import { glyphs } from '../ui/glyphs.js';
+import { MarkdownText } from '../utils/markdown/MarkdownText.js';
 
 import { ToolActivityList } from './ToolActivityList.js';
 
@@ -55,11 +56,8 @@ function LiveAssistantText({ text }: { readonly text: string }) {
   const theme = useTheme();
   return (
     <Box flexDirection="column">
-      {text.split('\n').map((line, index) => (
-        <Text key={`${index}:${line}`} color={theme.text} wrap="wrap">
-          {`${index === 0 ? glyphs.assistant : ' '} ${line}`}
-        </Text>
-      ))}
+      <Text color={theme.text}>{`${glyphs.assistant} `}</Text>
+      <MarkdownText text={text} streaming />
     </Box>
   );
 }

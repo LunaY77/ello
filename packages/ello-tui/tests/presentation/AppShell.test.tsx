@@ -235,7 +235,7 @@ describe('AppShell', () => {
       { columns: 100 },
     );
 
-    expect(output).toContain('* I am checking the parser');
+    expect(output).toMatch(/\*[\s\S]*I am checking the parser/);
     expect(output).toContain('working 12s');
   });
 
