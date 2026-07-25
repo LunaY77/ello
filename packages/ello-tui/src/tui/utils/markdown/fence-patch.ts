@@ -21,7 +21,7 @@ function patchCodeFence(text: string): string {
     if (fence !== null) {
       if (openFence !== undefined) {
         // 当前行是一个闭合 fence（只有反引号，无后续内容）
-        if (line.trim() === fence[1]) {
+        if (line.trim() === fence[1] && fence[1].length >= openFence.length) {
           openFence = undefined;
         }
       } else {
@@ -39,18 +39,22 @@ function patchCodeFence(text: string): string {
 /** 统计非 fence 行的反引号数，奇数则末尾补一个。 */
 function patchInlineCode(text: string): string {
   const lines = text.split('\n');
-  let inFence = false;
+  let openFence: string | undefined;
   for (const line of lines) {
     const fence = /^(`{3,})/.exec(line.trimStart());
     if (fence !== null) {
-      if (inFence && line.trim() === fence[1]) {
-        inFence = false;
-      } else if (!inFence) {
-        inFence = true;
+      if (
+        openFence !== undefined &&
+        line.trim() === fence[1] &&
+        fence[1].length >= openFence.length
+      ) {
+        openFence = undefined;
+      } else if (openFence === undefined) {
+        openFence = fence[1];
       }
       continue;
     }
-    if (inFence) continue;
+    if (openFence !== undefined) continue;
     const count = (line.match(/`/gu) ?? []).length;
     if (count % 2 !== 0) {
       return `${text}\``;

@@ -28,12 +28,22 @@ describe('highlightCode', () => {
     expect(out).toContain('\x1b[38;2;158;206;106m"hi"');
   });
 
+  it('未知语言不抛错，并回退到 markdownCode 的 ANSI truecolor', () => {
+    const code = 'plain code';
+    const expected = '\x1b[38;2;125;207;255mplain code\x1b[39m';
+
+    expect(() =>
+      highlightCode(code, 'not-a-real-language', theme),
+    ).not.toThrow();
+    expect(highlightCode(code, 'not-a-real-language', theme)).toBe(expected);
+  });
+
   it('空代码块返回空字符串', () => {
     expect(highlightCode('', 'ts', theme)).toBe('');
   });
 });
 function renderText(node: ReactNode): string {
-  return render(node)?.lastFrame() ?? '';
+  return render(<>{node}</>).lastFrame() ?? '';
 }
 
 describe('renderMarkdown 节点映射', () => {

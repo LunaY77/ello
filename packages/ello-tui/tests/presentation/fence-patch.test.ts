@@ -18,6 +18,16 @@ describe('patchStreamingMarkdown', () => {
     expect(patchStreamingMarkdown(input)).toBe(input);
   });
 
+  it('仅由长度不少于开启 fence 的纯反引号行关闭代码块', () => {
+    const fourBackticks = '````ts\nconst x = 1;\n```';
+    expect(patchStreamingMarkdown(fourBackticks)).toBe(
+      '````ts\nconst x = 1;\n```\n````',
+    );
+
+    const threeBackticks = '```ts\nconst x = 1;\n````';
+    expect(patchStreamingMarkdown(threeBackticks)).toBe(threeBackticks);
+  });
+
   it('奇数反引号的inline code补一个反引号', () => {
     expect(patchStreamingMarkdown('use `code here')).toBe('use `code here`');
     expect(patchStreamingMarkdown('a `b` and `c')).toBe('a `b` and `c`');
