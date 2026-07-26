@@ -44,7 +44,11 @@ export async function runCli(
   await program.parseAsync([...argv]);
 }
 
-if (process.argv[1] !== undefined && process.argv[1].endsWith('/cli/main.js')) {
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  process.argv[1].replace(/\\/g, '/').endsWith('/cli/main.js');
+
+if (invokedDirectly) {
   runCli().catch((error: unknown) => {
     process.stderr.write(
       `${error instanceof Error ? error.message : String(error)}\n`,
