@@ -24,7 +24,6 @@ class DefaultModelRegistry implements ModelRegistry {
           apiModel: model.api_model,
           baseUrl: model.base_url,
           apiKeyEnv: model.api_key_env,
-          apiKey: requireApiKey(model.api_key_env),
           ...(model.http_headers === undefined
             ? {}
             : { httpHeaders: model.http_headers }),
@@ -60,7 +59,7 @@ class DefaultModelRegistry implements ModelRegistry {
       ...(model.endpoint === undefined ? {} : { endpoint: model.endpoint }),
       modelId: model.apiModel,
       baseURL: model.baseUrl,
-      apiKey: model.apiKey,
+      apiKey: requireApiKey(model.apiKeyEnv),
       ...(model.httpHeaders === undefined
         ? {}
         : { headers: model.httpHeaders }),

@@ -27,19 +27,6 @@ try {
     cwd: packageDir,
     env: { ...process.env, ELLO_DIST_DIR: buildDir },
   });
-  await execFileAsync(
-    process.execPath,
-    ['../../scripts/write-build-manifest.mjs'],
-    {
-      cwd: packageDir,
-      env: {
-        ...process.env,
-        ELLO_BUILD_PACKAGE_DIR: packageDir,
-        ELLO_DIST_DIR: buildDir,
-        ELLO_BUILD_ENTRIES: 'index.js,cli/main.js',
-      },
-    },
-  );
   const hadPrevious = await exists(distDir);
   try {
     if (hadPrevious) await renameRetry(distDir, previousDir);

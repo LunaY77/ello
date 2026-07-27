@@ -252,7 +252,6 @@ function runtimeModel(
     apiModel: 'model-a',
     baseUrl: 'https://api.example.test/v1',
     apiKeyEnv: 'TEST_API_KEY',
-    apiKey: 'test-key',
     contextWindow: 100_000,
     maxOutputTokens: 10_000,
     reasoningEffort: 'medium',

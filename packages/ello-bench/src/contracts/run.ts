@@ -13,24 +13,6 @@ import {
   ProcessResultSchema,
 } from './evidence.js';
 
-export const BuildManifestSchema = z
-  .object({
-    schema: z.literal('ello.build-manifest.v1'),
-    packageName: z.string().min(1),
-    packageVersion: z.string().min(1),
-    gitRevision: z.string().regex(/^[0-9a-f]{40}$/u),
-    gitTree: z.string().regex(/^[0-9a-f]{40}$/u),
-    sourceClean: z.boolean(),
-    lockfileSha256: z.string().regex(/^[0-9a-f]{64}$/u),
-    nodeVersion: z.string().min(1),
-    pnpmVersion: z.string().min(1),
-    entries: z.record(z.string().min(1), z.string().regex(/^[0-9a-f]{64}$/u)),
-    builtAt: z.string().datetime(),
-  })
-  .strict();
-
-export type BuildManifest = z.infer<typeof BuildManifestSchema>;
-
 const HarnessProvenanceBase = {
   elloRevision: z.string().regex(/^[0-9a-f]{40}$/u),
   sourceTree: z.string().regex(/^[0-9a-f]{40}$/u),
@@ -45,16 +27,7 @@ const BenchOnlyProvenanceSchema = z
   .object({
     ...HarnessProvenanceBase,
     scope: z.literal('bench-only'),
-    packages: z
-      .object({
-        bench: z.string().min(1),
-      })
-      .strict(),
-    builds: z
-      .object({
-        bench: BuildManifestSchema,
-      })
-      .strict(),
+    packages: z.object({ bench: z.string().min(1) }).strict(),
   })
   .strict();
 
@@ -67,13 +40,6 @@ const ElloProvenanceSchema = z
         agent: z.string().min(1),
         tui: z.string().min(1),
         bench: z.string().min(1),
-      })
-      .strict(),
-    builds: z
-      .object({
-        agent: BuildManifestSchema,
-        tui: BuildManifestSchema,
-        bench: BuildManifestSchema,
       })
       .strict(),
   })

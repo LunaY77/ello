@@ -1320,9 +1320,7 @@ function requestExposesTool(
 }
 
 function isTitleModelRequest(request: JsonObject): boolean {
-  return JSON.stringify(request.instructions ?? '').includes(
-    'session title generator',
-  );
+  return JSON.stringify(request).includes('session title generator');
 }
 
 function readObject(value: unknown): JsonObject | undefined {

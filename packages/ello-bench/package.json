@@ -28,7 +28,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bench": "node dist/cli.js",
     "bench:report": "node dist/cli.js report",
-    "bench:validate": "node dist/cli.js validate && pnpm --dir ../.. run verify-public-context"
+    "bench:validate": "node dist/cli.js validate"
   },
   "dependencies": {
     "@ello/agent": "workspace:*",

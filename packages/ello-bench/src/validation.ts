@@ -212,7 +212,7 @@ async function validateAttempt(
   const task = required(run.task, 'task', run);
   const provenance = required(run.provenance, 'provenance', run);
   if (run.agent?.kind === 'ello' && provenance.scope !== 'ello') {
-    throw new Error(`Ello run requires Ello harness builds: ${run.attemptId}`);
+    throw new Error(`Ello run requires Ello harness provenance: ${run.attemptId}`);
   }
   if (task.taskId !== run.job.taskId) {
     throw new Error(`Resolved task mismatch: ${run.attemptId}`);

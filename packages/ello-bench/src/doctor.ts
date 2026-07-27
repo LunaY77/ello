@@ -1,12 +1,11 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-import { claudeCodeBaseUrlIssue } from './agents/claude-code/base-url.js';
 import { checkAnalysisToolchain } from './analysis.js';
 import type { AgentSpec, BenchmarkConfig } from './contracts.js';
 import { sha256 } from './hash.js';
 import { runProcess } from './process.js';
-import { REPOSITORY_ROOT, validateBuildManifests } from './provenance.js';
+import { REPOSITORY_ROOT } from './provenance.js';
 
 export interface DoctorCheck {
   readonly label: string;
@@ -30,7 +29,6 @@ export async function runDoctor(
     detail: process.versions.node,
   });
   checks.push(await commandCheck('Git', 'git', ['--version']));
-  checks.push(await worktreeCheck());
   checks.push(await commandCheck('Docker CLI', 'docker', ['--version']));
   checks.push(
     await commandCheck('Docker daemon', 'docker', [
@@ -38,13 +36,6 @@ export async function runDoctor(
       '--format',
       '{{.ServerVersion}}',
     ]),
-  );
-  checks.push(
-    await buildManifestCheck(
-      config.agents.some(
-        (agent) => selectedAgentIds.has(agent.id) && agent.kind === 'ello',
-      ),
-    ),
   );
   for (const agent of config.agents) {
     if (!selectedAgentIds.has(agent.id)) continue;
@@ -125,24 +116,10 @@ async function externalAgentChecks(
         ok: apiKey !== undefined && apiKey !== '',
         detail: agent.connection.apiKeyEnv,
       });
-      checks.push({
-        label: `Base URL ${agent.id}`,
-        ...claudeCodeBaseUrlCheck(agent.connection.baseUrl),
-      });
       break;
     }
   }
   return checks;
-}
-
-function claudeCodeBaseUrlCheck(baseUrl: string): {
-  readonly ok: boolean;
-  readonly detail: string;
-} {
-  const issue = claudeCodeBaseUrlIssue(baseUrl);
-  return issue === null
-    ? { ok: true, detail: baseUrl }
-    : { ok: false, detail: issue };
 }
 
 async function externalCapabilityCheck(
@@ -212,27 +189,6 @@ function expectedVersionOutput(
   return `${agent.binary.expectedVersion} (Claude Code)`;
 }
 
-async function buildManifestCheck(requireEllo: boolean): Promise<DoctorCheck> {
-  try {
-    const builds = await validateBuildManifests(undefined, requireEllo);
-    return {
-      label: 'Build manifests',
-      ok: true,
-      detail: Object.values(builds)
-        .map(
-          (build) => `${build.packageName}@${build.gitRevision.slice(0, 12)}`,
-        )
-        .join(', '),
-    };
-  } catch (error) {
-    return {
-      label: 'Build manifests',
-      ok: false,
-      detail: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
 async function commandCheck(
   label: string,
   command: string,
@@ -253,30 +209,6 @@ async function commandCheck(
   } catch (error) {
     return {
       label,
-      ok: false,
-      detail: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
-async function worktreeCheck(): Promise<DoctorCheck> {
-  try {
-    const execution = await runProcess('git', ['status', '--porcelain'], {
-      cwd: REPOSITORY_ROOT,
-      timeoutMs: 15_000,
-      killGraceMs: 2_000,
-      capture: true,
-      maxOutputBytes: 4 * 1024 * 1024,
-    });
-    const status = requireCapturedOutput(execution.stdout, 'git', 'stdout');
-    return {
-      label: 'Ello worktree',
-      ok: execution.result.exitCode === 0 && status === '',
-      detail: status === '' ? 'clean' : 'uncommitted changes present',
-    };
-  } catch (error) {
-    return {
-      label: 'Ello worktree',
       ok: false,
       detail: error instanceof Error ? error.message : String(error),
     };

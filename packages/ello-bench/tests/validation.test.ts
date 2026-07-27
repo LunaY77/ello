@@ -329,11 +329,6 @@ async function createFixture(): Promise<{
       platform: 'linux',
       architecture: 'x64',
       packages: { agent: '1.0.0', tui: '1.0.0', bench: '1.0.0' },
-      builds: {
-        agent: buildManifest('@ello/agent'),
-        tui: buildManifest('@ello/tui'),
-        bench: buildManifest('@ello/bench'),
-      },
     },
     task: resolvedTask(),
     imageId: 'sha256:image',
@@ -385,22 +380,6 @@ async function createFixture(): Promise<{
     runRoot,
     runPath,
     reportPath: path.join(runRoot, 'results', 'suite-report.json'),
-  };
-}
-
-function buildManifest(packageName: string) {
-  return {
-    schema: 'ello.build-manifest.v1' as const,
-    packageName,
-    packageVersion: '1.0.0',
-    gitRevision: '7'.repeat(40),
-    gitTree: '6'.repeat(40),
-    sourceClean: true,
-    lockfileSha256: '5'.repeat(64),
-    nodeVersion: '24.0.0',
-    pnpmVersion: '11.0.0',
-    entries: { 'index.js': '4'.repeat(64) },
-    builtAt: '2026-07-23T00:00:00.000Z',
   };
 }
 

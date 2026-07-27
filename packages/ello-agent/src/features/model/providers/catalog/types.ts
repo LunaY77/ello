@@ -13,7 +13,6 @@ export interface RuntimeModel {
   readonly apiModel: string;
   readonly baseUrl: string;
   readonly apiKeyEnv: string;
-  readonly apiKey: string;
   readonly httpHeaders?: Readonly<Record<string, string>>;
   /** Anthropic's credential HTTP scheme; other protocols use their wire-standard bearer scheme. */
   readonly authScheme?: AnthropicAuthScheme;

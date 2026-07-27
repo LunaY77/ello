@@ -547,19 +547,26 @@ describe('Memory 生产装配契约', () => {
     );
     const notifications = vi.fn();
     const services = createMemoryFeature();
+    const previousHome = process.env.ELLO_HOME;
+    process.env.ELLO_HOME = root;
 
-    await expect(
-      invokeServiceRoute(
-        services,
-        createTestPeer({ notify: notifications }),
-        'memory/dream/start',
-        { cwd: root },
-      ),
-    ).rejects.toMatchObject({
-      type: 'invalidParams',
-      message: expect.stringContaining('no production dream runner'),
-    });
-    expect(notifications).not.toHaveBeenCalled();
+    try {
+      await expect(
+        invokeServiceRoute(
+          services,
+          createTestPeer({ notify: notifications }),
+          'memory/dream/start',
+          { cwd: root },
+        ),
+      ).rejects.toMatchObject({
+        type: 'invalidParams',
+        message: expect.stringContaining('no production dream runner'),
+      });
+      expect(notifications).not.toHaveBeenCalled();
+    } finally {
+      if (previousHome === undefined) delete process.env.ELLO_HOME;
+      else process.env.ELLO_HOME = previousHome;
+    }
   });
 });
 

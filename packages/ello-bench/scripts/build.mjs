@@ -24,17 +24,4 @@ await cp(path.join(packageDir, 'config'), path.join(distDir, 'config'), {
 });
 await chmod(path.join(distDir, 'cli.js'), 0o755);
 await chmod(path.join(distDir, 'server-entry.js'), 0o755);
-await execFileAsync(
-  process.execPath,
-  ['../../scripts/write-build-manifest.mjs'],
-  {
-    cwd: packageDir,
-    env: {
-      ...process.env,
-      ELLO_BUILD_PACKAGE_DIR: packageDir,
-      ELLO_DIST_DIR: distDir,
-      ELLO_BUILD_ENTRIES: 'index.js,cli.js,server-entry.js',
-    },
-  },
-);
 if (process.platform === 'win32') process.stdout.write('');
