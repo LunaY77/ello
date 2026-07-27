@@ -39,8 +39,10 @@ export function createShellTools(
   return [
     defineCodingTool({
       name: 'bash',
-      description:
-        'Run a shell command in the workspace with timeout and captured stdout/stderr.',
+      description: `Run one shell command in the workspace and return its stdout followed by its stderr under a 'stderr:' heading.
+'timeoutMs' defaults to 30000 and cannot exceed 120000; on timeout the process is killed and whatever it had already written is still returned, so a killed test run is reported as a timeout rather than as a failure. A nonzero exit is a normal result, not a tool error: read the output to decide what to do.
+Long output is truncated in the middle, keeping the head and the tail, because test runners print their failure summary last. When output is truncated, narrow the command instead of rerunning it unchanged: name a single test file, choose a terser reporter, or pipe through 'tail'.
+Use bash for builds, tests, lint, typecheck, code generation, and git inspection. Prefer read, grep, and glob over 'cat', 'grep', and 'find' so results come back structured, and prefer edit or apply_patch over 'sed -i' and shell redirection so file changes are reported.`,
       discovery: {
         aliases: ['shell', 'terminal', 'command'],
         risk: 'external',
@@ -90,9 +92,16 @@ export function createShellTools(
         ]
           .filter(Boolean)
           .join('\n');
+        // 超时进程被终止，输出通常缺少测试 runner 的失败摘要；不给出收窄建议
+        // 时调用方倾向原样重跑，再次撞满同一超时。
+        const body = result.timedOut
+          ? `${timeoutNotice(timeoutMs)}\n${output}`
+          : output;
+        // 退出码必须进入模型可见文本：metadata 只流向 UI，模型看不到。
+        // 截断只作用于命令输出，退出码行始终完整保留在首行。
         return createCodingToolResult({
           title: `bash ${command}`,
-          output: truncate(output),
+          output: `${exitCodeLine(result.exitCode)}\n${truncate(body)}`,
           metadata: {
             kind: 'shell',
             command,
@@ -106,6 +115,34 @@ export function createShellTools(
       },
     }),
   ];
+}
+
+/**
+ * 生成超时提示行，附加在被终止命令的输出之前。
+ *
+ * Args:
+ * - `timeoutMs`: 本次调用生效的超时上限；提示中回显该值供调用方判断收窄幅度。
+ *
+ * Returns:
+ * - 返回 `timeoutNotice` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ */
+/**
+ * 生成退出码行。`-1` 表示进程被信号终止（超时），没有正常退出码。
+ *
+ * Args:
+ * - `exitCode`: 被执行命令的真实退出码，已由 shell 层的 `pipefail` 保证不被管道吞掉。
+ *
+ * Returns:
+ * - 返回置于输出首行的单行退出码描述。
+ */
+function exitCodeLine(exitCode: number): string {
+  return exitCode === -1
+    ? 'exit code: killed by signal (no exit code)'
+    : `exit code: ${exitCode}`;
+}
+
+function timeoutNotice(timeoutMs: number): string {
+  return `Note: the command was killed after exceeding its ${timeoutMs} ms timeout, so the output below is incomplete and any test summary is missing. Do not rerun it unchanged: narrow the scope to a single test file or directory, choose a terser reporter such as --reporter=basic, or pipe through 'tail' to keep only the summary.`;
 }
 
 function shellMetadata(

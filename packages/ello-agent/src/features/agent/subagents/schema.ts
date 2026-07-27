@@ -7,13 +7,13 @@
 import { z } from 'zod';
 
 import {
+  AgentModelSelectorSchema,
   AgentModeSchema,
-  AgentRoleSchema,
   PermissionRuleSchema,
+  type AgentModelSelector,
   type AgentConfigEntry,
   type PermissionRule,
 } from '../../config/index.js';
-import type { ModelRole } from '../../model/index.js';
 
 /** agent 运行形态。 */
 export type CodingAgentMode = z.infer<typeof AgentModeSchema>;
@@ -29,8 +29,7 @@ export type CodingAgentSource =
 /**
  * 统一的 agent 定义。
  *
- * primary / subagent / internal agent 用同一套结构建模：绑定一个 profile
- * suite 的 `role`（而非独立 profile），声明 prompt、工具名白名单、approval 预设
+ * primary / subagent / internal agent 用同一套结构建模：每个 definition 显式选择一个全局模型引用，声明 prompt、工具名白名单、approval 预设
  * 与静态权限。运行时由 agent-runner 把它装配成一个 `@ello/agent` 的 Agent。
  */
 export interface CodingAgentDefinition {
@@ -42,15 +41,13 @@ export interface CodingAgentDefinition {
   readonly hidden?: boolean;
   /** 追加到系统提示的指令正文。 */
   readonly prompt?: string;
-  /** 绑定 profile suite 中的哪个 role；默认 primary（= 继承主模型）。 */
-  readonly role: ModelRole;
-  /** 极少数情况显式锁定模型 ref，优先级高于 role 解析。 */
-  readonly modelRef?: string;
+  /** 只允许读取全局 primary_model 或 auxiliary_model。 */
+  readonly model: AgentModelSelector;
   /** 工具名白名单；未声明时产品装配层暴露当前可用的完整工具集。 */
   readonly tools?: readonly string[];
   /** 静态 permission 规则（与派生规则、运行期规则合并）。 */
   readonly permission?: readonly PermissionRule[];
-  readonly maxTurns: number;
+  readonly maxTurns?: number;
   readonly color?: string;
   readonly source: CodingAgentSource;
 }
@@ -63,7 +60,7 @@ export const MarkdownAgentFrontmatterSchema = z
     name: z.string().optional(),
     description: z.string(),
     mode: AgentModeSchema.optional(),
-    role: AgentRoleSchema.optional(),
+    model: AgentModelSelectorSchema,
     tools: z.union([z.array(z.string()), z.string()]).optional(),
     'inherit-tools': z.boolean().optional(),
     inheritTools: z.boolean().optional(),
@@ -116,12 +113,11 @@ export function agentDefinitionFromConfigEntry(
   return {
     name,
     mode: entry.mode,
-    role: entry.role,
+    model: entry.model,
     description: entry.description ?? name,
     source,
     ...(entry.hidden !== undefined ? { hidden: entry.hidden } : {}),
     ...(entry.prompt !== undefined ? { prompt: entry.prompt } : {}),
-    ...(entry.model !== undefined ? { modelRef: entry.model } : {}),
     ...(entry.tools !== undefined ? { tools: entry.tools } : {}),
     ...(entry.permission !== undefined ? { permission: entry.permission } : {}),
     maxTurns: entry.max_turns,
@@ -167,7 +163,7 @@ export function agentDefinitionFromMarkdown(input: {
   return {
     name: frontmatter.name ?? defaultName,
     mode: frontmatter.mode ?? 'subagent',
-    role: frontmatter.role ?? 'primary',
+    model: frontmatter.model,
     description: frontmatter.description,
     source,
     ...(prompt !== '' ? { prompt } : {}),

@@ -296,8 +296,6 @@ export function createThreadRoutes(
     ),
     'turn/start': route('submit', async (_peer, params) => ({
       turn: await context.threads.startTurn(params.threadId, params.input, {
-        ...(params.model === undefined ? {} : { model: params.model }),
-        ...(params.profile === undefined ? {} : { profile: params.profile }),
         ...(params.mode === undefined ? {} : { mode: params.mode }),
       }),
     })),

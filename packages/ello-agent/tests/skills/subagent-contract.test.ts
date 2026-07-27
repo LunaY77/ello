@@ -40,7 +40,7 @@ async function createRegistry(
 const subagentDefinition: CodingAgentDefinition = {
   name: 'tester',
   mode: 'subagent',
-  role: 'small',
+  model: 'auxiliary_model',
   description: '测试代理',
   source: 'builtin',
   maxTurns: 4,
@@ -53,6 +53,7 @@ describe('Subagent 注册与隔离契约', () => {
     expect(registry.selectablePrimaries().map((agent) => agent.name)).toContain(
       'build',
     );
+    expect(registry.get('build').maxTurns).toBeUndefined();
     expect(
       registry.selectablePrimaries().map((agent) => agent.name),
     ).not.toContain('explore');
@@ -78,7 +79,7 @@ describe('Subagent 注册与隔离契约', () => {
       `---
 description: 项目专用探索代理
 mode: subagent
-role: primary
+model: primary_model
 max-turns: 6
 tools:
   - read
@@ -98,7 +99,7 @@ tools:
     expect(registry.get('explore')).toMatchObject({
       source: 'project',
       description: '项目专用探索代理',
-      role: 'primary',
+      model: 'primary_model',
       tools: ['read', 'grep'],
       prompt: '只读取并分析项目。',
     });
@@ -108,7 +109,7 @@ tools:
     const registry = await createRegistry({
       reviewer: {
         mode: 'subagent',
-        role: 'review',
+        model: 'primary_model',
         description: '代码审查',
         max_turns: 8,
       },
@@ -116,7 +117,7 @@ tools:
     expect(registry.get('reviewer')).toMatchObject({
       source: 'config',
       description: '代码审查',
-      role: 'review',
+      model: 'primary_model',
     });
 
     const cwd = await mkdtemp(path.join(tmpdir(), 'ello-subagent-invalid-'));

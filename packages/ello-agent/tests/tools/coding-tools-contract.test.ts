@@ -463,7 +463,9 @@ describe('Meta Tool 路由契约', () => {
     ).rejects.toThrow('recursively');
     await expect(
       proxy.execute({ name: 'read', arguments: {} }, agentToolContext),
-    ).rejects.toThrow("Invalid arguments for tool 'read': path");
+    ).rejects.toThrow(
+      "Invalid arguments for tool 'read': 'path' is invalid: Invalid input: expected string, received undefined",
+    );
     expect(() => createCallTool([tools[0]!, tools[0]!])).toThrow(
       'Duplicate call_tool target',
     );

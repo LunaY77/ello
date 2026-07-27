@@ -24,8 +24,6 @@ export function normalizeOptions(input: unknown): Record<string, unknown> {
   const values = input;
   return {
     ...(typeof values.thread === 'string' ? { thread: values.thread } : {}),
-    ...(typeof values.model === 'string' ? { model: values.model } : {}),
-    ...(typeof values.profile === 'string' ? { profile: values.profile } : {}),
     ...(typeof values.mode === 'string' ? { mode: values.mode } : {}),
     ...(values.json === true ? { json: true } : {}),
     ...(values.tui === false ? { noTui: true } : {}),

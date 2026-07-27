@@ -224,6 +224,115 @@ describe('ToolScheduler', () => {
     expect(result.pending).toEqual([]);
     expect(result.messages).toHaveLength(2);
   });
+
+  it('并发执行连续的 parallel 工具，并按原调用顺序回灌结果', async () => {
+    const active: number[] = [];
+    let peak = 0;
+    const makeReader = (name: string) =>
+      defineTool({
+        name,
+        description: 'Read',
+        discovery: { aliases: [], risk: 'readonly' },
+        input: z.object({}).strict(),
+        concurrency: 'parallel',
+        execute: async () => {
+          active.push(1);
+          peak = Math.max(peak, active.length);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          active.pop();
+          return name;
+        },
+      });
+    const writer = defineTool({
+      name: 'write',
+      description: 'Write',
+      discovery: { aliases: [], risk: 'workspace-write' },
+      input: z.object({}).strict(),
+      execute: () => 'write',
+    });
+    const tools = [makeReader('read'), makeReader('grep'), writer];
+    const scheduler = new ToolScheduler({
+      runId: 'run-parallel',
+      turnIndex: () => 0,
+      tools,
+      callableToolNames: new Set(tools.map((tool) => tool.name)),
+      environment: {},
+      metadata: {},
+      signal: new AbortController().signal,
+    });
+
+    const result = await scheduler.schedule(
+      [
+        { id: 'c1', name: 'read', input: {} },
+        { id: 'c2', name: 'grep', input: {} },
+        { id: 'c3', name: 'write', input: {} },
+      ],
+      sink([]),
+    );
+
+    expect(peak).toBe(2);
+    expect(result.toolCalls.map((call) => call.id)).toEqual([
+      'c1',
+      'c2',
+      'c3',
+    ]);
+  });
+
+  it('写工具切断并发段，其前后的只读工具不与它同时执行', async () => {
+    const order: string[] = [];
+    const reader = (name: string) =>
+      defineTool({
+        name,
+        description: 'Read',
+        discovery: { aliases: [], risk: 'readonly' },
+        input: z.object({}).strict(),
+        concurrency: 'parallel',
+        execute: async () => {
+          order.push(`${name}:start`);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          order.push(`${name}:end`);
+        },
+      });
+    const writer = defineTool({
+      name: 'write',
+      description: 'Write',
+      discovery: { aliases: [], risk: 'workspace-write' },
+      input: z.object({}).strict(),
+      execute: async () => {
+        order.push('write:start');
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        order.push('write:end');
+      },
+    });
+    const tools = [reader('read'), writer, reader('grep')];
+    const scheduler = new ToolScheduler({
+      runId: 'run-segment',
+      turnIndex: () => 0,
+      tools,
+      callableToolNames: new Set(tools.map((tool) => tool.name)),
+      environment: {},
+      metadata: {},
+      signal: new AbortController().signal,
+    });
+
+    await scheduler.schedule(
+      [
+        { id: 'c1', name: 'read', input: {} },
+        { id: 'c2', name: 'write', input: {} },
+        { id: 'c3', name: 'grep', input: {} },
+      ],
+      sink([]),
+    );
+
+    expect(order).toEqual([
+      'read:start',
+      'read:end',
+      'write:start',
+      'write:end',
+      'grep:start',
+      'grep:end',
+    ]);
+  });
 });
 
 function sink(events: string[]) {

@@ -97,7 +97,6 @@ export const CLIENT_METHOD_CAPABILITIES = {
   'config/init': 'write',
   'config/sources': 'read',
   'model/list': 'read',
-  'provider/list': 'read',
   'agent/list': 'read',
   'tool/list': 'read',
   'skills/list': 'read',

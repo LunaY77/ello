@@ -242,15 +242,19 @@ class LangfuseEventRecorder {
     );
     const span = startChildSpan(
       this.runtime.tracer,
-      `llm.${event.identity.provider}/${event.identity.model}`,
+      `llm.${event.identity.protocol}/${event.identity.apiModel}`,
       turn,
       event.occurredAt,
     );
     span.setAttributes({
       [LANGFUSE_ATTRIBUTES.observationType]: 'generation',
-      [LANGFUSE_ATTRIBUTES.observationModel]: event.identity.model,
+      [LANGFUSE_ATTRIBUTES.observationModel]: event.identity.apiModel,
       'ello.model.call.id': event.identity.modelCallId,
-      'ello.model.provider': event.identity.provider,
+      'ello.model.agent.name': event.identity.agentName,
+      'ello.model.selector': event.identity.modelSelector,
+      'ello.model.configured': event.identity.configuredModel,
+      'ello.model.protocol': event.identity.protocol,
+      'ello.model.api': event.identity.apiModel,
       'ello.model.turn.index': event.identity.turnIndex,
       'ello.model.fingerprints': JSON.stringify(event.diagnostics),
       ...contentAttributes(this.runtime.config.content, 'input', event.request),

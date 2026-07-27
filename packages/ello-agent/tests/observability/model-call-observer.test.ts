@@ -32,7 +32,7 @@ const testTool = defineTool({
 function createAgent(
   options: Omit<
     CreateAgentOptions,
-    'executionTools' | 'modelTools' | 'environment'
+    'executionTools' | 'modelTools' | 'environment' | 'modelCall'
   > & {
     readonly tools?: readonly AnyAgentTool[];
   },
@@ -41,6 +41,13 @@ function createAgent(
   const selected = tools ?? [testTool as AnyAgentTool];
   return createBaseAgent({
     ...rest,
+    modelCall: {
+      agentName: 'test-agent',
+      modelSelector: 'primary_model',
+      configuredModel: 'test-model',
+      protocol: 'openai',
+      apiModel: 'model-a',
+    },
     environment: {},
     executionTools: selected,
     modelTools: selected,
@@ -94,7 +101,14 @@ describe('model-call lifecycle', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      identity: { turnIndex: 0, provider: 'test', model: 'model-a' },
+      identity: {
+        turnIndex: 0,
+        agentName: 'test-agent',
+        modelSelector: 'primary_model',
+        configuredModel: 'test-model',
+        protocol: 'openai',
+        apiModel: 'model-a',
+      },
       response: { finishReason: 'stop', usage },
       diagnostics: { compactionBoundary: false },
     });

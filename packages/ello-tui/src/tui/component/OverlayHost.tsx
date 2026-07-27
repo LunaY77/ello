@@ -17,7 +17,6 @@ import type {
   ApprovalServerRequest,
   ClientServerRequest,
 } from '../../api/server-requests.js';
-import type { ProfileRole, TuiProfile } from '../profile-types.js';
 import type { SettingUpdate, TuiSetting } from '../settings/types.js';
 import { buildPermissionView } from '../store/permission-view.js';
 import { useTheme } from '../theme/index.js';
@@ -38,25 +37,11 @@ export type OverlayState =
     }
   | {
       readonly type: 'models';
+      readonly selector: 'primary_model' | 'auxiliary_model';
       readonly title: string;
       readonly options: readonly SelectOption[];
     }
-  | { readonly type: 'profiles'; readonly options: readonly SelectOption[] }
-  | { readonly type: 'profile-create'; readonly sourceProfile: string }
-  | { readonly type: 'profile-delete-confirm'; readonly profile: string }
-  | {
-      readonly type: 'profile-detail';
-      readonly profile: TuiProfile;
-      readonly options: readonly SelectOption[];
-    }
-  | {
-      readonly type: 'profile-model-catalog';
-      readonly target: {
-        readonly profileName: string;
-        readonly role: ProfileRole;
-      };
-      readonly options: readonly SelectOption[];
-    }
+  | { readonly type: 'model-selector' }
   | { readonly type: 'help' }
   | { readonly type: 'settings'; readonly settings: readonly TuiSetting[] }
   | { readonly type: 'agents'; readonly agents: readonly AgentCatalogEntry[] }
@@ -97,21 +82,8 @@ export interface OverlayHostProps {
   onChatAboutPlan(requestId: string, prompt: string): void;
   onDenyPlan(requestId: string): void;
   onClosePlanPreview(): void;
+  onSelectModelSelector(selector: 'primary_model' | 'auxiliary_model'): void;
   onSelectModel(model: string): void;
-  onSelectProfile(profile: string): void;
-  onCreateProfile(sourceProfile: string): void;
-  onRequestDeleteProfile(profile: string): void;
-  onConfirmDeleteProfile(profile: string): void;
-  onActivateProfile(profile: string): void;
-  onSubmitNewProfile(name: string, sourceProfile: string): void;
-  onSelectProfileRole(profile: string, role: ProfileRole): void;
-  onBindProfileRoleModel(
-    profile: string,
-    role: ProfileRole,
-    model: string,
-  ): void;
-  onOpenProfiles(): void;
-  onSaveProfile(profile: string): void;
   onSelectSession(threadId: string): void;
   onSelectRewind(entryId: string): void;
   onUpdateSetting(update: SettingUpdate): Promise<void>;
@@ -131,30 +103,13 @@ export function OverlayHost({
   onChatAboutPlan,
   onDenyPlan,
   onClosePlanPreview,
+  onSelectModelSelector,
   onSelectModel,
-  onSelectProfile,
-  onCreateProfile,
-  onRequestDeleteProfile,
-  onConfirmDeleteProfile,
-  onActivateProfile,
-  onSubmitNewProfile,
-  onSelectProfileRole,
-  onBindProfileRoleModel,
   onSelectSession,
   onSelectRewind,
   onUpdateSetting,
-  onOpenProfiles,
-  onSaveProfile,
 }: OverlayHostProps) {
   const theme = useTheme();
-  useInput(
-    (input) => {
-      if (overlay.type === 'profile-detail' && input === 's') {
-        onSaveProfile(overlay.profile.name);
-      }
-    },
-    { isActive: overlay.type === 'profile-detail' },
-  );
   if (overlay.type === 'none') return null;
   return (
     <Box flexDirection="column" marginTop={marginTop}>
@@ -198,75 +153,20 @@ export function OverlayHost({
           <InlineSelect options={overlay.options} onChange={onSelectModel} />
         </Panel>
       ) : null}
-      {overlay.type === 'profiles' ? (
-        <Panel title="Profiles" color={theme.info}>
-          <InlineSelect
-            options={overlay.options}
-            onChange={onSelectProfile}
-            onShortcut={(input, profile) => {
-              if (input === 'c') onCreateProfile(profile);
-              else if (input === 'd') onRequestDeleteProfile(profile);
-              else if (input === 'f') onActivateProfile(profile);
-            }}
-          />
-          <Text color={theme.textMuted}>
-            Enter: open c: create d: delete f: active
-          </Text>
-        </Panel>
-      ) : null}
-      {overlay.type === 'profile-create' ? (
-        <ProfileCreatePanel
-          sourceProfile={overlay.sourceProfile}
-          onSubmit={onSubmitNewProfile}
-        />
-      ) : null}
-      {overlay.type === 'profile-delete-confirm' ? (
-        <Panel title="Delete profile" color={theme.error}>
-          <Text>{`Profile: ${overlay.profile}`}</Text>
+      {overlay.type === 'model-selector' ? (
+        <Panel title="Select model reference" color={theme.info}>
           <InlineSelect
             options={[
-              { value: 'delete', label: 'Delete' },
-              { value: 'cancel', label: 'Cancel' },
+              { value: 'primary_model', label: 'primary_model' },
+              { value: 'auxiliary_model', label: 'auxiliary_model' },
             ]}
             onChange={(value) => {
-              if (value === 'delete') onConfirmDeleteProfile(overlay.profile);
-              else onOpenProfiles();
+              if (value === 'primary_model' || value === 'auxiliary_model') {
+                onSelectModelSelector(value);
+                return;
+              }
+              throw new Error(`Unsupported model selector: ${value}`);
             }}
-          />
-        </Panel>
-      ) : null}
-      {overlay.type === 'profile-detail' ? (
-        <Panel title={`Profile: ${overlay.profile.name}`} color={theme.info}>
-          <Text>{`Label: ${overlay.profile.label ?? overlay.profile.name}`}</Text>
-          <Text color={theme.textMuted}>
-            {overlay.profile.description ?? ''}
-          </Text>
-          <Text color={theme.textMuted}>Role Model</Text>
-          <InlineSelect
-            options={overlay.options}
-            onChange={(role) =>
-              onSelectProfileRole(overlay.profile.name, role as ProfileRole)
-            }
-          />
-          <Text color={theme.textMuted}>
-            Enter: change model s: save Esc: back
-          </Text>
-        </Panel>
-      ) : null}
-      {overlay.type === 'profile-model-catalog' ? (
-        <Panel
-          title={`Select ${overlay.target.role} model for ${overlay.target.profileName}`}
-          color={theme.info}
-        >
-          <InlineSelect
-            options={overlay.options}
-            onChange={(model) =>
-              onBindProfileRoleModel(
-                overlay.target.profileName,
-                overlay.target.role,
-                model,
-              )
-            }
           />
         </Panel>
       ) : null}
@@ -447,36 +347,6 @@ function PlanApprovalPanel({
   );
 }
 
-function ProfileCreatePanel({
-  sourceProfile,
-  onSubmit,
-}: {
-  readonly sourceProfile: string;
-  readonly onSubmit: OverlayHostProps['onSubmitNewProfile'];
-}) {
-  const theme = useTheme();
-  const [name, setName] = useState('');
-  useInput((input, key) => {
-    if (key.return && name.trim() !== '') {
-      onSubmit(name.trim(), sourceProfile);
-      return;
-    }
-    if (key.backspace || key.delete) {
-      setName((value) => value.slice(0, -1));
-      return;
-    }
-    if (!key.ctrl && !key.meta && input.length > 0) {
-      setName((value) => value + input);
-    }
-  });
-  return (
-    <Panel title="Create profile" color={theme.info}>
-      <Text color={theme.textMuted}>{`Copy from ${sourceProfile}`}</Text>
-      <Text>{`Name: ${name}_`}</Text>
-    </Panel>
-  );
-}
-
 function Panel({
   title,
   color,
@@ -504,7 +374,7 @@ function HelpPanel() {
   return (
     <Panel title="Commands" color={theme.accent}>
       <Text wrap="wrap">
-        /help /mode /models /profiles /settings /resume /fork /tasks /skills
+        /help /mode /models /settings /resume /fork /tasks /skills
         /goal /compact /quit
       </Text>
       <Text color={theme.textMuted}>

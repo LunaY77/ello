@@ -11,7 +11,15 @@ import {
 } from '../../../agent/engine/index.js';
 import type { CodingAgentConfig } from '../../../config/index.js';
 
-import type { AnyCodingTool, CodingToolContext } from './coding-tool.js';
+import type {
+  AnyCodingTool,
+  CodingToolContext,
+  CodingToolResult,
+} from './coding-tool.js';
+import {
+  duplicateCommandNotice,
+  ShellCommandHistory,
+} from './command-history.js';
 import {
   persistLargeOutput,
   type ToolOutputLimits,
@@ -21,6 +29,8 @@ import {
 export interface CodingToolAdapterOptions {
   readonly config: CodingAgentConfig;
   readonly outputStore: ToolOutputStore;
+  /** 跨工具共享的命令轮次记录；同一批工具必须共用同一实例才能识别重复。 */
+  readonly commandHistory: ShellCommandHistory;
 }
 
 /**
@@ -43,6 +53,9 @@ export function adaptCodingTool(
     description: tool.description,
     discovery: tool.discovery,
     input: tool.input,
+    ...(tool.concurrency === undefined
+      ? {}
+      : { concurrency: tool.concurrency }),
     approval:
       approval === undefined
         ? undefined
@@ -50,8 +63,11 @@ export function adaptCodingTool(
     execute: async (input, ctx) => {
       const codingContext = createContext(ctx, options.config);
       const result = await tool.execute(input, codingContext);
+      const notice = recordRound(options.commandHistory, result.metadata);
+      const output =
+        notice === undefined ? result.output : `${notice}\n${result.output}`;
       const persisted = await persistLargeOutput({
-        output: result.output,
+        output,
         limits: outputLimits(options.config),
         store: options.outputStore,
         sessionId: codingContext.sessionId,
@@ -60,7 +76,7 @@ export function adaptCodingTool(
         preferredName: `${tool.name}.txt`,
       });
       if (!persisted.truncated) {
-        return result;
+        return { ...result, output };
       }
       return {
         ...result,
@@ -90,6 +106,32 @@ export function adaptCodingTools(
   options: CodingToolAdapterOptions,
 ): AnyAgentTool[] {
   return tools.map((tool) => adaptCodingTool(tool, options));
+}
+
+/**
+ * 按本次结果的元数据推进命令轮次，并在命令重复时返回提示行。
+ *
+ * shell 结果携带 `command`，编辑类结果携带 `fileChanges`；两者共用同一轮次
+ * 计数，才能判断「同一命令之间是否发生过文件变更」。
+ */
+function recordRound(
+  history: ShellCommandHistory,
+  metadata: CodingToolResult['metadata'],
+): string | undefined {
+  if (metadata.kind === 'shell') {
+    const command = metadata.command;
+    if (typeof command !== 'string') {
+      throw new Error('Shell tool result metadata is missing its command.');
+    }
+    const duplicate = history.recordCommand(command);
+    return duplicate === null ? undefined : duplicateCommandNotice(duplicate);
+  }
+  if (metadata.fileChanges !== undefined && metadata.fileChanges.length > 0) {
+    history.recordFileChange();
+    return undefined;
+  }
+  history.recordOtherCall();
+  return undefined;
 }
 
 function createContext(

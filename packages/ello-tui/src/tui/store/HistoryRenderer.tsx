@@ -122,16 +122,12 @@ function SessionHeader({
         <Text color={theme.success}>ready</Text>
       </Box>
       <Text>
-        <Text color={theme.textMuted}>profile: </Text>
-        <Text color={theme.text}>{entry.profile}</Text>
-      </Text>
-      <Text>
         <Text color={theme.textMuted}>directory: </Text>
         <Text color={theme.text}>{compactPath(entry.cwd)}</Text>
       </Text>
       <Text>
-        <Text color={theme.textMuted}>model: </Text>
-        <Text color={theme.text}>{entry.model}</Text>
+        <Text color={theme.textMuted}>agent: </Text>
+        <Text color={theme.text}>{entry.agent}</Text>
       </Text>
       <Text>
         <Text color={theme.textMuted}>mode: </Text>

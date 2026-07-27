@@ -10,7 +10,6 @@ import type {
   CreateAgentFeatureInput,
 } from './contracts.js';
 import { createAgent, type Agent } from './engine/index.js';
-import { createRuntimeEnvironment } from './environment.js';
 
 /**
  * 为一次 Thread turn 装配产品 Agent。
@@ -41,7 +40,7 @@ export async function buildAgent(
     definition,
     context,
   });
-  const tracing = dependencies.createTracing({
+  const tracing = dependencies.runtime.createTracing({
     config: definition.config,
     threadId: request.threadId,
   });
@@ -49,35 +48,30 @@ export async function buildAgent(
   try {
     const compactor = dependencies.createCompactor({
       config: definition.config,
-      profileName: request.selection.profile,
       contextWindow: model.contextWindow,
       agentRegistry: definition.agentRegistry,
     });
     engine = createAgent({
       name: `ello-${definition.definition.name}`,
       model: model.model,
+      modelCall: model.modelCall,
       modelAdapter: model.modelAdapter,
       modelSettings: model.modelSettings,
       ...(definition.definition.prompt === undefined
         ? {}
         : { instructions: definition.definition.prompt }),
-      environment: createRuntimeEnvironment(
-        definition.config,
-        () => request.permission.rules(),
-        () => request.permission.externalPaths(),
-        context.readRoots,
-      ),
+      environment: dependencies.runtime.createEnvironment({
+        config: definition.config,
+        permission: request.permission,
+        skillReadRoots: context.readRoots,
+      }),
       executionTools: tools.executionTools,
       modelTools: tools.modelTools,
       compactor,
       ...(tracing.eventRecorder === undefined
         ? {}
         : { eventRecorder: tracing.eventRecorder }),
-      sessionWindow: { maxMessages: 200 },
-      modelInputBudget: {
-        maxInputTokens: definition.config.context.max_input_tokens,
-        reservedOutputTokens: definition.config.context.reserved_output_tokens,
-      },
+      modelInputBudget: model.modelInputBudget,
       modelInput: {
         systemSections: context.createSystemSections({
           ...(tools.memoryIndexLoader === undefined

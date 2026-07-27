@@ -8,6 +8,7 @@ ello is a TypeScript workspace for a process-isolated coding agent. `@ello/agent
 
 - [`@ello/agent`](packages/ello-agent/README.md) — Server: model execution, tools, permissions, storage, workspace, skills, memory, and protocol.
 - [`@ello/tui`](packages/ello-tui/README.md) — Client: CLI, Ink TUI, local stdio launcher, WebSocket, and Unix transports.
+- [`@ello/bench`](packages/ello-bench/README.md) — Reproducible task execution, Docker isolation, evidence capture, verifier scoring, recovery, and reports.
 
 ## Architecture
 
@@ -26,7 +27,7 @@ flowchart TD
 
 ## Quick start
 
-Requirements: Node.js 22+, pnpm 10+.
+Requirements: Node.js 24+, pnpm 11.11.0.
 
 ```bash
 pnpm install

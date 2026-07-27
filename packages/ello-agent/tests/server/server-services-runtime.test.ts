@@ -298,8 +298,6 @@ function threadSnapshot(cwd: string): ThreadSnapshot {
     },
     settings: {
       mode: 'ask-before-changes',
-      profile: 'test',
-      model: 'test:model',
       agent: 'build',
     },
     turns: [],

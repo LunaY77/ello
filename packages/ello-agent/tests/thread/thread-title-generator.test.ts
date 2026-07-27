@@ -8,7 +8,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   AgentModelEvent,
@@ -22,30 +22,35 @@ import {
 } from '../../src/features/config/index.js';
 import {
   generateThreadTitle,
-  renderTitleConversation,
+  renderTitleMessage,
 } from '../../src/features/thread/title.js';
 import type { ThreadSnapshot } from '../../src/protocol/v1/index.js';
 
 const roots: string[] = [];
+let previousTestApiKey: string | undefined;
+
+beforeEach(() => {
+  previousTestApiKey = process.env.TEST_API_KEY;
+  process.env.TEST_API_KEY = 'test-key';
+});
 
 afterEach(async () => {
+  if (previousTestApiKey === undefined) delete process.env.TEST_API_KEY;
+  else process.env.TEST_API_KEY = previousTestApiKey;
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
 });
 
 describe('Thread title generator', () => {
-  it('使用 title role 生成并规范化会话标题', async () => {
+  it('uses the title agent auxiliary model to generate and normalize a title', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ello-title-generator-'));
     roots.push(root);
     const adapter = new TitleAdapter('  "修复延迟审批响应"  ');
     const title = await generateThreadTitle({
       snapshot: snapshot(root),
-      messages: [
-        { role: 'user', content: '修复审批按钮无法确认的问题' },
-        { role: 'assistant', content: '我会检查请求生命周期。' },
-      ],
-      config: config(root),
+      message: { role: 'user', content: '修复审批按钮无法确认的问题' },
+      config: config(root, true),
       modelAdapter: adapter,
     });
 
@@ -59,24 +64,56 @@ describe('Thread title generator', () => {
       throw new Error('Title model was not resolved to a LanguageModel.');
     }
     expect(request.model.modelId).toBe('title-model');
-    expect(request.system).toContain('session title generator');
+    expect(request.instructions).toContain('session title generator');
     expect(JSON.stringify(request.messages)).toContain(
       '修复审批按钮无法确认的问题',
     );
   });
 
-  it('只把最近十二条消息送入标题上下文', () => {
-    const rendered = renderTitleConversation(
-      Array.from({ length: 14 }, (_, index) => ({
-        role: 'user' as const,
-        content: `message-${index}`,
-      })),
-    );
+  it('关闭模型生成时直接使用第一条用户消息', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-title-generator-'));
+    roots.push(root);
+    const adapter = new TitleAdapter('不应调用模型');
+    const title = await generateThreadTitle({
+      snapshot: snapshot(root),
+      message: {
+        role: 'user',
+        content: '  修复审批按钮\n无法确认的问题  ',
+      },
+      config: config(root, false),
+      modelAdapter: adapter,
+    });
 
-    expect(rendered).not.toContain('message-0\n');
-    expect(rendered).not.toContain('message-1\n');
-    expect(rendered).toContain('message-2');
-    expect(rendered).toContain('message-13');
+    expect(title).toBe('修复审批按钮 无法确认的问题');
+    expect(adapter.requests).toHaveLength(0);
+  });
+
+  it('标题模型输入只包含首条用户消息', () => {
+    expect(renderTitleMessage({ role: 'user', content: 'first message' })).toBe(
+      '### user\nfirst message',
+    );
+    expect(() =>
+      renderTitleMessage({ role: 'assistant', content: 'not user input' }),
+    ).toThrow('must be a user message');
+  });
+
+  it('Server 关闭中止标题模型时正常结束', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-title-generator-'));
+    roots.push(root);
+    const adapter = new BlockingTitleAdapter();
+    const controller = new AbortController();
+    const task = generateThreadTitle({
+      snapshot: snapshot(root),
+      message: { role: 'user', content: '修复审批按钮无法确认的问题' },
+      config: config(root, true),
+      modelAdapter: adapter,
+      signal: controller.signal,
+    });
+
+    await vi.waitFor(() => expect(adapter.started).toBe(true));
+    controller.abort('thread runtime closing');
+
+    await expect(task).resolves.toBeUndefined();
   });
 });
 
@@ -94,6 +131,37 @@ class TitleAdapter implements ModelAdapter {
     const result = await this.generate(request);
     yield { type: 'text-delta', text: this.title };
     yield { type: 'final', response: result };
+  }
+}
+
+class BlockingTitleAdapter implements ModelAdapter {
+  started = false;
+
+  generate(_request: AgentModelRequest): Promise<AgentModelResponse> {
+    throw new Error('Blocking title adapter only supports streaming.');
+  }
+
+  stream(request: AgentModelRequest): AsyncIterable<AgentModelEvent> {
+    const signal = request.signal;
+    if (signal === undefined) {
+      throw new Error('Blocking title request requires an abort signal.');
+    }
+    return {
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          this.started = true;
+          return new Promise<IteratorResult<AgentModelEvent>>(
+            (_resolve, reject) => {
+              signal.addEventListener(
+                'abort',
+                () => reject(new Error('Title request aborted.')),
+                { once: true },
+              );
+            },
+          );
+        },
+      }),
+    };
   }
 }
 
@@ -118,37 +186,35 @@ function response(
   };
 }
 
-function config(cwd: string): CodingAgentConfig {
+function config(cwd: string, titleGeneration: boolean): CodingAgentConfig {
   return CodingAgentConfigSchema.parse({
     cwd,
     initial_mode: 'ask-before-changes',
-    active_profile: 'main',
-    provider: {
-      mock: {
-        kind: 'openai-compatible',
-        api_key: 'test-key',
-      },
-    },
+    title_generation: titleGeneration,
     models: {
-      mock: {
-        'title-model': {
-          provider: 'mock',
-          api_id: 'title-model',
-          endpoint: 'chat',
-        },
+      'primary-model': {
+        protocol: 'openai-compatible',
+        endpoint: 'chat',
+        api_model: 'primary-model',
+        base_url: 'https://api.example.test/v1',
+        api_key_env: 'TEST_API_KEY',
+        context_window: 128_000,
+        max_output_tokens: 16_000,
+        reasoning_effort: 'medium',
+      },
+      'title-model': {
+        protocol: 'openai-compatible',
+        endpoint: 'chat',
+        api_model: 'title-model',
+        base_url: 'https://api.example.test/v1',
+        api_key_env: 'TEST_API_KEY',
+        context_window: 128_000,
+        max_output_tokens: 16_000,
+        reasoning_effort: 'low',
       },
     },
-    profile: {
-      main: {
-        models: {
-          primary: 'mock/title-model',
-          small: 'mock/title-model',
-          compact: 'mock/title-model',
-          title: 'mock/title-model',
-          review: 'mock/title-model',
-        },
-      },
-    },
+    primary_model: 'primary-model',
+    auxiliary_model: 'title-model',
   });
 }
 
@@ -168,8 +234,6 @@ function snapshot(cwd: string): ThreadSnapshot {
     },
     settings: {
       mode: 'ask-before-changes',
-      profile: 'main',
-      model: 'mock/title-model',
       agent: 'build',
     },
     turns: [],

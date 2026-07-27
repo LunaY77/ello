@@ -31,13 +31,13 @@ describe('thread compactor', () => {
     const before = compactionView(await logs.read(threadId));
     const compactor = createThreadCompactor({
       config: configFor('/workspace', true),
-      profileName: 'main',
+      contextWindow: 10,
       generateCheckpoint: async () => 'checkpoint',
     });
 
     const compacted = await compactor.compact({
       messages: before.projectedMessages,
-      contextWindow: 10,
+      contextWindow: 100,
       signal: new AbortController().signal,
     });
     if (compacted === null) throw new Error('Expected automatic compaction.');
@@ -70,7 +70,6 @@ describe('thread compactor', () => {
     const view = compactionView(await logs.read(threadId));
     const compactor = createThreadCompactor({
       config: configFor('/workspace', false),
-      profileName: 'main',
       force: true,
       generateCheckpoint: async () => 'manual checkpoint',
     });
@@ -95,7 +94,6 @@ describe('thread compactor', () => {
     const createCompactor = () =>
       createThreadCompactor({
         config: configFor('/workspace', false),
-        profileName: 'main',
         force: true,
         generateCheckpoint: async (messages, previousCheckpoint) => {
           calls.push({
@@ -135,7 +133,6 @@ describe('thread compactor', () => {
     let generated = false;
     const compactor = createThreadCompactor({
       config: configFor('/workspace', true),
-      profileName: 'main',
       generateCheckpoint: async () => {
         generated = true;
         return 'unexpected';
@@ -192,8 +189,6 @@ async function createThread(): Promise<{
     name: '',
     settings: {
       mode: 'ask-before-changes',
-      profile: 'main',
-      model: 'mock/model',
       agent: 'primary',
     },
     metadata: {},
@@ -234,6 +229,20 @@ function configFor(cwd: string, auto: boolean) {
   return CodingAgentConfigSchema.parse({
     cwd,
     initial_mode: 'ask-before-changes',
+    models: {
+      compact: {
+        protocol: 'openai',
+        endpoint: 'responses',
+        api_model: 'compact-model',
+        base_url: 'https://api.example.test/v1',
+        api_key_env: 'TEST_API_KEY',
+        context_window: 100,
+        max_output_tokens: 10,
+        reasoning_effort: 'low',
+      },
+    },
+    primary_model: 'compact',
+    auxiliary_model: 'compact',
     context: {
       max_input_tokens: 100,
       reserved_output_tokens: 10,

@@ -1,0 +1,43 @@
+{
+  "name": "@ello/bench",
+  "version": "1.0.0",
+  "description": "Reproducible coding-agent benchmark runner for Ello",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ello-bench": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "config",
+    "analysis",
+    "README.md",
+    "README-zh.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "bench": "node dist/cli.js",
+    "bench:report": "node dist/cli.js report",
+    "bench:validate": "node dist/cli.js validate && pnpm --dir ../.. run verify-public-context"
+  },
+  "dependencies": {
+    "@ello/agent": "workspace:*",
+    "yaml": "^2.9.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.0.15"
+  }
+}

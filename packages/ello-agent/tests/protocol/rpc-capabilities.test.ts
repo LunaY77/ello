@@ -41,7 +41,6 @@ const READ_METHODS = [
   'config/settings',
   'config/sources',
   'model/list',
-  'provider/list',
   'agent/list',
   'tool/list',
   'skills/list',

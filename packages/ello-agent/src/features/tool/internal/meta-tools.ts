@@ -4,12 +4,13 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
-import { z, ZodError } from 'zod';
+import { z } from 'zod';
 
 import { isRecord } from '../../../protocol/json-value.js';
 import {
   createAgentMessage,
   defineTool,
+  parseToolInput,
   type AgentApprovalDecision,
   type AgentMessage,
   type AgentTool,
@@ -244,22 +245,10 @@ export function createCallTool(
         ].join(', ')}`,
       );
     }
-    try {
-      return { target, input: target.input.parse(input.arguments) };
-    } catch (error) {
-      if (error instanceof ZodError) {
-        const issues = error.issues
-          .map(
-            (issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`,
-          )
-          .join('; ');
-        throw new Error(
-          `Invalid arguments for tool '${input.name}': ${issues}`,
-          { cause: error },
-        );
-      }
-      throw error;
-    }
+    return {
+      target,
+      input: parseToolInput(target.input, input.name, input.arguments),
+    };
   };
 
   return defineTool({

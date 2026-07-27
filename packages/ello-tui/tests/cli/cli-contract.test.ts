@@ -425,8 +425,6 @@ function snapshot(): ThreadSnapshot {
     },
     settings: {
       mode: 'ask-before-changes',
-      profile: 'main',
-      model: 'mock/model',
       agent: 'build',
     },
     turns: [],

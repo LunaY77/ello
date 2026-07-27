@@ -41,8 +41,13 @@ describe('AI SDK model adapter', () => {
       ),
     );
 
-    expect(events.map((event) => event.type)).toEqual(['final']);
-    const final = events[0];
+    // 镜像文本最终不作为正文输出，但 provider 确实已经开始流式产出，
+    // 因此首字延迟仍应被记录。
+    expect(events.map((event) => event.type)).toEqual([
+      'stream-start',
+      'final',
+    ]);
+    const final = events[1];
     expect(final?.type).toBe('final');
     if (final?.type !== 'final') {
       throw new Error('expected final event');
@@ -86,6 +91,7 @@ describe('AI SDK model adapter', () => {
     );
 
     expect(events).toMatchObject([
+      { type: 'stream-start' },
       { type: 'text-delta', text: 'he' },
       { type: 'text-delta', text: 'llo' },
       { type: 'final', response: { text: 'hello' } },
@@ -150,6 +156,7 @@ describe('AI SDK model adapter', () => {
     );
 
     expect(events).toMatchObject([
+      { type: 'stream-start' },
       { type: 'text-delta', text: '{"answer"' },
       { type: 'text-delta', text: ':"ok"}' },
       { type: 'final', response: { text: '{"answer":"ok"}' } },

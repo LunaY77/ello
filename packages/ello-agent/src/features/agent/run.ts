@@ -57,7 +57,7 @@ interface RunningAgentOptions {
   readonly cwd: string;
   readonly history: ReadonlyArray<AgentMessage>;
   readonly input: string;
-  readonly maxTurns: number;
+  readonly maxTurns: number | undefined;
 }
 
 /**
@@ -231,7 +231,9 @@ class RunningAgent implements AgentRun {
 
   private runOptions() {
     return {
-      maxTurns: this.options.maxTurns,
+      ...(this.options.maxTurns === undefined
+        ? {}
+        : { maxTurns: this.options.maxTurns }),
       metadata: {
         threadId: this.options.threadId,
         turnId: this.options.turnId,

@@ -48,7 +48,7 @@ describe.sequential('actual App Server process', () => {
 
     await initialize(processPeer);
     const read = await rpc(processPeer, 2, 'server/read', {});
-    expect(read.result).toMatchObject({ state: 'ready', protocolVersion: 1 });
+    expect(read.result).toMatchObject({ state: 'ready', protocolVersion: 2 });
 
     processPeer.endInput();
     const [code, signal] = await processPeer.exited();
@@ -668,9 +668,11 @@ describe.sequential('actual App Server process', () => {
       cwd,
       includeSources: true,
     });
-    expect(config.result).toMatchObject({ config: { active_profile: 'main' } });
+    expect(config.result).toMatchObject({
+      config: { primary_model: 'mock-test', auxiliary_model: 'mock-test' },
+    });
     const models = await rpc(resumedController, 9, 'model/list', { cwd });
-    expect(readDataIds(models)).toContain('mock/test');
+    expect(readDataIds(models)).toContain('mock-test');
     const task = await rpc(resumedController, 10, 'task/create', {
       boardId: 'process-e2e',
       subject: 'verify RPC',
@@ -1105,7 +1107,7 @@ function chatChunks(step: ModelStep, index: number): JsonObject[] {
 async function initialize(peer: RpcPeer): Promise<void> {
   const response = await rpc(peer, 1, 'initialize', {
     clientInfo: { name: 'process-e2e', title: 'Process E2E', version: '1.0.0' },
-    protocolVersion: 1,
+    protocolVersion: 2,
     capabilities: {
       experimentalApi: false,
       supportsServerRequests: true,
@@ -1114,11 +1116,11 @@ async function initialize(peer: RpcPeer): Promise<void> {
       platform: 'automation',
     },
   });
-  expect(response.result).toMatchObject({ protocolVersion: 1 });
+  expect(response.result).toMatchObject({ protocolVersion: 2 });
   await peer.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
   expect(await peer.next()).toMatchObject({
     method: 'server/ready',
-    params: { protocolVersion: 1 },
+    params: { protocolVersion: 2 },
   });
 }
 
@@ -1318,7 +1320,7 @@ function requestExposesTool(
 }
 
 function isTitleModelRequest(request: JsonObject): boolean {
-  return JSON.stringify(request.messages ?? '').includes(
+  return JSON.stringify(request.instructions ?? '').includes(
     'session title generator',
   );
 }
@@ -1333,29 +1335,21 @@ async function writeConfig(root: string, baseUrl: string): Promise<void> {
   await writeFile(
     path.join(root, 'config.yaml'),
     [
-      'active_profile: main',
-      'provider:',
-      '  mock:',
-      '    kind: openai-compatible',
-      '    api_key: test',
-      `    base_url: ${baseUrl}`,
       'models:',
-      '  mock:',
-      '    test:',
-      '      provider: mock',
-      '      api_id: test',
-      '      endpoint: chat',
-      '      tool_call: true',
-      'profile:',
-      '  main:',
-      '    models:',
-      '      primary: mock/test',
-      '      small: mock/test',
-      '      compact: mock/test',
-      '      title: mock/test',
-      '      review: mock/test',
+      '  mock-test:',
+      '    protocol: openai-compatible',
+      '    endpoint: chat',
+      '    api_model: test',
+      `    base_url: ${baseUrl}`,
+      '    api_key_env: TEST_MODEL_API_KEY',
+      '    context_window: 128000',
+      '    max_output_tokens: 16000',
+      '    reasoning_effort: medium',
+      'primary_model: mock-test',
+      'auxiliary_model: mock-test',
       `workspace:\n  mount: ${path.join(root, 'workspaces')}`,
       'initial_mode: ask-before-changes',
+      'title_generation: true',
       '',
     ].join('\n'),
     'utf8',
@@ -1368,7 +1362,12 @@ function spawnServer(
   environment: NodeJS.ProcessEnv = {},
 ): ChildProcessWithoutNullStreams {
   const child = spawn(process.execPath, [entryPath, ...args], {
-    env: { ...process.env, ...environment, ELLO_HOME: root },
+    env: {
+      ...process.env,
+      TEST_MODEL_API_KEY: 'test',
+      ...environment,
+      ELLO_HOME: root,
+    },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   children.add(child);

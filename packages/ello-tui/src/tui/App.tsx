@@ -19,29 +19,26 @@ import type { CatalogLoadState } from './hooks/use-catalogs.js';
 import { useComposerState } from './hooks/use-composer-state.js';
 import { useComposerSuggestions } from './hooks/use-composer-suggestions.js';
 import { useOverlay } from './hooks/use-overlay.js';
-import { useProfileSettings } from './hooks/use-profile-settings.js';
 import { useRequestResolution } from './hooks/use-request-resolution.js';
 import {
   rewindTargets,
   useRuntimeActions,
 } from './hooks/use-runtime-actions.js';
 import { useRuntimeEvents } from './hooks/use-runtime-events.js';
+import { useSettings } from './hooks/use-settings.js';
 import { useStableInput } from './hooks/use-stable-input.js';
 import { useSubmission } from './hooks/use-submission.js';
 import { useThemeState } from './hooks/use-theme-state.js';
-import {
-  buildModelCatalogOptions,
-  buildProfileSelectorOptions,
-} from './model-selectors.js';
-import {
-  activeProfileFromConfig,
-  bypassEnabledFromConfig,
-} from './profile-config.js';
+import { buildModelCatalogOptions } from './model-selectors.js';
 import {
   isDisposableThread,
   isShiftTab,
   overlayForRequest,
 } from './screen-utils.js';
+import {
+  bypassEnabledFromConfig,
+  globalModelSelectionsFromConfig,
+} from './settings/config.js';
 import { resolveTheme, ThemeProvider } from './theme/index.js';
 import { createThreadCommandRunner } from './thread-command-runner.js';
 
@@ -132,22 +129,17 @@ function ReadyThreadScreen({
     useComposerState(initialDraft);
   const { themeName, themeEpoch, setThemeName, setThemeEpoch } =
     useThemeState(onError);
-  const activeProfile = activeProfileFromConfig(catalogs.config);
   const bypassEnabled = bypassEnabledFromConfig(catalogs.config);
+  const globalModelSelections = globalModelSelectionsFromConfig(catalogs.config);
   const modelOptions = useMemo(
-    () => buildModelCatalogOptions(catalogs.models, catalogs.providers),
-    [catalogs.models, catalogs.providers],
-  );
-  const profileOptions = useMemo(
-    () => buildProfileSelectorOptions(catalogs.profiles, activeProfile),
-    [activeProfile, catalogs.profiles],
+    () => buildModelCatalogOptions(catalogs.models, globalModelSelections),
+    [catalogs.models, globalModelSelections],
   );
   const suggestions = useComposerSuggestions({
     thread,
     draft,
     cursor,
     fileSearch,
-    profiles: catalogs.profiles,
     skills: catalogs.skills,
     setFileSearch,
     onError,
@@ -201,8 +193,6 @@ function ReadyThreadScreen({
     thread,
     state,
     catalogs,
-    modelOptions,
-    profileOptions,
     runtime,
     dispatch,
     setOverlay,
@@ -214,19 +204,13 @@ function ReadyThreadScreen({
     onError,
     submitPrompt,
   });
-  const profiles = useProfileSettings({
+  const settings = useSettings({
     thread,
-    profiles: catalogs.profiles,
-    activeProfile,
-    currentProfile: state.settings.profile,
-    modelOptions,
     themeName,
-    setProfiles: catalogs.setProfiles,
     setConfig: catalogs.setConfig,
     setOverlay,
     setThemeName,
     setThemeEpoch,
-    onError,
   });
 
   const handleCancel = (): void => {
@@ -270,7 +254,11 @@ function ReadyThreadScreen({
 
   const contextPercent = contextRemainingPercent(
     catalogs.models,
-    state.settings.model,
+    selectedModelForAgent(
+      catalogs.agents,
+      state.settings.agent,
+      globalModelSelections,
+    ),
     state.usage.inputTokens + state.usage.outputTokens,
   );
   const ctrlCInterrupts = running || submission.submissionPending;
@@ -284,7 +272,7 @@ function ReadyThreadScreen({
       />
       <AppShell
         cwd={thread.cwd}
-        model={state.settings.model}
+        model={`primary: ${globalModelSelections.primaryModel} · auxiliary: ${globalModelSelections.auxiliaryModel}`}
         mode={{ mode: state.settings.mode }}
         {...(contextPercent === undefined ? {} : { contextPercent })}
         pendingPlanApproval={effectiveOverlay.type === 'plan-approval'}
@@ -311,21 +299,32 @@ function ReadyThreadScreen({
             onChatAboutPlan={requests.onChatAboutPlan}
             onDenyPlan={requests.onDenyPlan}
             onClosePlanPreview={() => setOverlay({ type: 'none' })}
+            onSelectModelSelector={(selector) => {
+              setOverlay({
+                type: 'models',
+                selector,
+                title: `Select ${selector}`,
+                options: modelOptions,
+              });
+            }}
             onSelectModel={(model) => {
+              if (effectiveOverlay.type !== 'models') {
+                throw new Error('Model selection requires a model overlay.');
+              }
               void thread
-                .setModel(model)
-                .then(() => setOverlay({ type: 'none' }))
+                .request('config/write', {
+                  cwd: thread.cwd,
+                  source: 'global',
+                  path: [effectiveOverlay.selector],
+                  operation: 'set',
+                  value: model,
+                })
+                .then((result) => {
+                  catalogs.setConfig(result.config);
+                  setOverlay({ type: 'none' });
+                })
                 .catch(onError);
             }}
-            onSelectProfile={profiles.openProfile}
-            onCreateProfile={profiles.createProfile}
-            onRequestDeleteProfile={profiles.requestDeleteProfile}
-            onConfirmDeleteProfile={profiles.confirmDeleteProfile}
-            onActivateProfile={profiles.activateProfile}
-            onSubmitNewProfile={profiles.submitNewProfile}
-            onSelectProfileRole={profiles.selectProfileRole}
-            onBindProfileRoleModel={profiles.bindProfileRoleModel}
-            onSaveProfile={profiles.saveProfile}
             onSelectSession={(threadId) => {
               void thread.resume(threadId).then(switchThread).catch(onError);
             }}
@@ -337,8 +336,7 @@ function ReadyThreadScreen({
                 void runtime.rewindToTarget(target).catch(onError);
               }
             }}
-            onUpdateSetting={profiles.updateSetting}
-            onOpenProfiles={profiles.openProfiles}
+            onUpdateSetting={settings.updateSetting}
           />
         }
         composer={
@@ -382,13 +380,29 @@ function contextRemainingPercent(
   model: string,
   used: number,
 ): number | undefined {
-  const contextWindow = models.find((entry) => entry.id === model)?.metadata
-    .context;
+  const selected = models.find((entry) => entry.id === model);
+  if (selected === undefined) return undefined;
+  const contextWindow = selected.metadata.contextWindow;
   if (typeof contextWindow !== 'number' || contextWindow <= 0) return undefined;
   return Math.max(
     0,
     Math.round(((contextWindow - used) / contextWindow) * 100),
   );
+}
+
+function selectedModelForAgent(
+  agents: ReadyCatalogs['agents'],
+  agentName: string,
+  references: { readonly primaryModel: string; readonly auxiliaryModel: string },
+): string {
+  const agent = agents.find((entry) => entry.id === agentName);
+  if (agent === undefined) {
+    throw new Error(`Selected Agent is absent from the catalog: ${agentName}`);
+  }
+  const selector = agent.metadata.model;
+  if (selector === 'primary_model') return references.primaryModel;
+  if (selector === 'auxiliary_model') return references.auxiliaryModel;
+  throw new Error(`Agent ${agentName} has an invalid model selector.`);
 }
 
 function notify(

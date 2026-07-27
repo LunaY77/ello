@@ -50,8 +50,6 @@ export const ThreadStartParamsSchema = z
   .object({
     cwd: z.string().min(1),
     name: z.string().default(''),
-    profile: z.string().min(1).optional(),
-    model: z.string().min(1).optional(),
     mode: SessionModeSchema.optional(),
     agent: z.string().min(1).optional(),
     subscribe: z.boolean().default(true),
@@ -89,8 +87,6 @@ export const TurnStartParamsSchema = z
   .object({
     threadId: OpaqueIdSchema,
     input: z.array(UserInputSchema).min(1).readonly(),
-    model: z.string().min(1).optional(),
-    profile: z.string().min(1).optional(),
     mode: SessionModeSchema.optional(),
     metadata: z.record(z.string(), z.string()).optional(),
   })
@@ -217,16 +213,12 @@ export const CLIENT_REQUEST_SCHEMAS = {
     .object({
       threadId: OpaqueIdSchema,
       mode: SessionModeSchema.optional(),
-      profile: z.string().min(1).optional(),
-      model: z.string().min(1).optional(),
       agent: z.string().min(1).optional(),
     })
     .strict()
     .refine(
       (value) =>
         value.mode !== undefined ||
-        value.profile !== undefined ||
-        value.model !== undefined ||
         value.agent !== undefined,
       'At least one setting is required.',
     ),
@@ -255,7 +247,6 @@ export const CLIENT_REQUEST_SCHEMAS = {
     .strict(),
   'config/sources': CwdParamsSchema,
   'model/list': CwdParamsSchema,
-  'provider/list': CwdParamsSchema,
   'agent/list': OptionalThreadParamsSchema,
   'tool/list': OptionalThreadParamsSchema,
   'skills/list': OptionalThreadParamsSchema.extend({

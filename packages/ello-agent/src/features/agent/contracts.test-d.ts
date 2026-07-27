@@ -42,8 +42,6 @@ const request = {
   cwd: '/workspace',
   selection: {
     mode: 'ask-before-changes',
-    profile: 'main',
-    model: 'provider/model',
     agent: 'build',
   },
   history: [{ role: 'user', content: '已有消息' }],

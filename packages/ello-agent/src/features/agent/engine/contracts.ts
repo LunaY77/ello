@@ -13,6 +13,7 @@ import type {
 import type {
   AgentMessage,
   AgentModel,
+  ModelCallConfiguration,
   AgentModelSettings,
   MessageTransform,
   ModelAdapter,
@@ -130,6 +131,8 @@ export interface AgentShellResult {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
+  /** 进程是否因超出 `timeout` 被终止；超时与普通非零退出的处置方式不同。 */
+  readonly timedOut: boolean;
 }
 
 export interface AgentShell {
@@ -595,6 +598,8 @@ export interface AgentTurnDiagnostics {
 
 export interface CreateAgentOptions<TContext = unknown> {
   readonly model: AgentModel;
+  /** 每次调用必须携带装配时固定的 Agent 与模型解析身份。 */
+  readonly modelCall: ModelCallConfiguration;
   readonly name?: string;
   readonly instructions?: string;
   readonly modelSettings?: AgentModelSettings;
@@ -610,7 +615,6 @@ export interface CreateAgentOptions<TContext = unknown> {
   readonly stream?: { readonly maxBufferedEvents: number };
   readonly compactor?: MessageCompactor;
   readonly metadata?: Record<string, unknown>;
-  readonly sessionWindow?: { readonly maxMessages: number };
   readonly modelInputBudget?: {
     readonly maxInputTokens: number;
     readonly reservedOutputTokens?: number;

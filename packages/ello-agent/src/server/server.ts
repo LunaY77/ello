@@ -42,7 +42,7 @@ export interface AgentServerOptions {
 
 /** Server 进程的唯一生命周期所有者。 */
 export class AgentServer {
-  readonly protocolVersion = 1;
+  readonly protocolVersion = 2;
   private currentState: AgentServerState = 'starting';
   private readonly connections = new Map<string, ServerConnection>();
   private readonly routes: RpcRouteTable;
@@ -64,7 +64,7 @@ export class AgentServer {
     });
     this.routes = {
       'server/read': route('read', (peer) => ({
-        protocolVersion: 1,
+        protocolVersion: 2,
         version: this.options.version,
         state: this.currentState,
         uptimeMs: Date.now() - this.startedAt,

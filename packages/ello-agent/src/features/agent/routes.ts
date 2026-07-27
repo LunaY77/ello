@@ -30,7 +30,7 @@ const agentHandlers = {
           enabled: primaryAvailable,
           metadata: {
             mode: agent.mode,
-            role: agent.role,
+            model: agent.model,
             source: agent.source,
             runtime: primaryAvailable
               ? 'primary'

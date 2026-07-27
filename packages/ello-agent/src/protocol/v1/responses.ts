@@ -302,7 +302,6 @@ export const CLIENT_RESPONSE_SCHEMAS = {
     })
     .strict(),
   'model/list': CatalogResultSchema,
-  'provider/list': CatalogResultSchema,
   'agent/list': CatalogResultSchema,
   'tool/list': CatalogResultSchema,
   'skills/list': CatalogResultSchema,

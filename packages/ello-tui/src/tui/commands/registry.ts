@@ -62,12 +62,6 @@ const META: Record<string, CommandMeta> = {
     title: 'Switch model',
     keywords: ['catalog'],
   },
-  profiles: {
-    id: 'model.profile',
-    group: 'Model',
-    title: 'Switch profile',
-    keywords: ['suite'],
-  },
   settings: {
     id: 'config.open',
     group: 'General',

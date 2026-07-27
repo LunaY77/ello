@@ -20,6 +20,7 @@ import type {
   AgentModelRequest,
   AgentModelResponse,
   MaybePromise,
+  ModelCallConfiguration,
 } from './model.js';
 import type { AgentTraceEvent, InternalAgentRunContext } from './run-state.js';
 import type { AgentEventStream } from './stream.js';
@@ -31,12 +32,10 @@ export interface AgentEventMetadata {
   readonly occurredAt: string;
 }
 
-export interface ModelCallIdentity {
+export interface ModelCallIdentity extends ModelCallConfiguration {
   readonly runId: string;
   readonly turnIndex: number;
   readonly modelCallId: string;
-  readonly provider: string;
-  readonly model: string;
 }
 
 export interface ModelCallDiagnostics {
@@ -315,6 +314,15 @@ export interface AgentEventRecorder<TContext = unknown> {
 export class AgentEventDispatcher {
   private readonly observerToolCalls = new Map<string, AgentToolCall>();
   private sequence = 0;
+  /**
+   * 串行化 emit 的尾指针。
+   *
+   * sequence 在 enrich 中同步分配，但 observer 与 recorder 都是异步的：并发
+   * emit（同一 turn 内并行执行的工具各自发事件）会让分配顺序与落盘顺序脱钩，
+   * 产出序号非递增的事件流。把「分配序号 + 交付下游」整体串进一条链，使
+   * 「sequence 递增即交付顺序」成为不依赖调用方并发模式的不变量。
+   */
+  private tail: Promise<void> = Promise.resolve();
 
   /**
    * 创建 `AgentEventDispatcher`，由该实例独占 产品 Agent Agent engine 事件 模块 中声明的可变状态和资源生命周期。
@@ -340,11 +348,22 @@ export class AgentEventDispatcher {
    * - Promise 在 产品 Agent Agent engine 事件 模块 的异步副作用完整提交后兑现，不返回业务值。
    */
   async emit(input: AgentEventInput): Promise<void> {
-    const event = this.enrich(input);
-    this.recordTrace(event);
-    this.stream.emit(event);
-    await this.emitObserverEvent(event);
-    await this.config.eventRecorder?.record(event, this.ctx);
+    // 整个临界区（含 enrich 的序号分配）排在前一次 emit 之后，因此并发调用者
+    // 拿到的序号顺序与下游看到的交付顺序始终一致。
+    const delivered = this.tail.then(async () => {
+      const event = this.enrich(input);
+      this.recordTrace(event);
+      this.stream.emit(event);
+      await this.emitObserverEvent(event);
+      await this.config.eventRecorder?.record(event, this.ctx);
+    });
+    // 尾指针吸收失败，避免一次 emit 出错后续 emit 全部连带拒绝；失败本身仍
+    // 通过 delivered 抛给发起该次 emit 的调用方。
+    this.tail = delivered.then(
+      () => undefined,
+      () => undefined,
+    );
+    await delivered;
   }
 
   /**
@@ -380,15 +399,24 @@ export class AgentEventDispatcher {
   async fail(
     event: Extract<AgentEventInput, { type: 'run.failed' }>,
   ): Promise<Extract<EngineEvent, { type: 'run.failed' }>> {
-    const emitted = this.enrich(event);
-    if (emitted.type !== 'run.failed') {
-      throw new Error(`Expected run.failed event, received ${emitted.type}.`);
-    }
-    this.recordTrace(emitted);
-    await this.emitObserverEvent(emitted);
-    await this.config.eventRecorder?.record(emitted, this.ctx);
-    await this.config.eventRecorder?.flush?.(this.ctx);
-    return emitted;
+    // 与 emit 共用尾指针：run.failed 也参与序号分配，必须排在尚未落盘的事件
+    // 之后，否则终局事件会插到并发工具事件中间。
+    const delivered = this.tail.then(async () => {
+      const emitted = this.enrich(event);
+      if (emitted.type !== 'run.failed') {
+        throw new Error(`Expected run.failed event, received ${emitted.type}.`);
+      }
+      this.recordTrace(emitted);
+      await this.emitObserverEvent(emitted);
+      await this.config.eventRecorder?.record(emitted, this.ctx);
+      await this.config.eventRecorder?.flush?.(this.ctx);
+      return emitted;
+    });
+    this.tail = delivered.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await delivered;
   }
 
   private enrich(input: AgentEventInput): EngineEvent {

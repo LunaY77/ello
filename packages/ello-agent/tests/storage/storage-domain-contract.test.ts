@@ -602,8 +602,11 @@ function completedModelCall(input: {
       runId: 'run-model-calls',
       turnIndex: input.turnIndex,
       modelCallId: `call-${input.turnIndex}`,
-      provider: 'openai',
-      model: 'gpt-5.4',
+      agentName: 'build',
+      modelSelector: 'primary_model' as const,
+      configuredModel: 'openai-gpt-5.4',
+      protocol: 'openai' as const,
+      apiModel: 'gpt-5.4',
     },
     response: {
       text: '',

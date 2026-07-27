@@ -10,10 +10,9 @@ import type { CatalogData } from './hooks/use-catalogs.js';
 import { rewindTargets } from './hooks/use-runtime-actions.js';
 import type { useRuntimeActions } from './hooks/use-runtime-actions.js';
 import type { useRuntimeEvents } from './hooks/use-runtime-events.js';
-import { loadSettings } from './profile-config.js';
 import { isResumableThread } from './screen-utils.js';
+import { loadSettings } from './settings/config.js';
 import type { TuiEventState } from './store/tui-event-store.js';
-import type { SelectOption } from './ui/List.js';
 
 type Dispatch = ReturnType<typeof useRuntimeEvents>['dispatch'];
 type RuntimeActions = ReturnType<typeof useRuntimeActions>;
@@ -22,8 +21,6 @@ interface ThreadCommandRunnerInput {
   readonly thread: ThreadClient;
   readonly state: TuiEventState;
   readonly catalogs: Pick<CatalogData, 'agents' | 'skills' | 'tasks'>;
-  readonly modelOptions: readonly SelectOption[];
-  readonly profileOptions: readonly SelectOption[];
   readonly runtime: RuntimeActions;
   readonly dispatch: Dispatch;
   setOverlay(overlay: OverlayState): void;
@@ -42,14 +39,7 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
         input.setOverlay({ type: 'help' });
         return;
       case 'models':
-        input.setOverlay({
-          type: 'models',
-          title: 'Model catalog',
-          options: input.modelOptions,
-        });
-        return;
-      case 'profiles':
-        input.setOverlay({ type: 'profiles', options: input.profileOptions });
+        input.setOverlay({ type: 'model-selector' });
         return;
       case 'settings':
         input.setOverlay({
@@ -121,9 +111,6 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
         return;
       case 'set-mode':
         await input.thread.setMode(command.mode);
-        return;
-      case 'set-profile':
-        await input.thread.setProfile(command.profile);
         return;
       case 'open-overlay':
         await openOverlay(command.overlay);

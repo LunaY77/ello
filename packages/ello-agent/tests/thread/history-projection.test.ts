@@ -13,8 +13,6 @@ import { ThreadLogStore } from '../../src/storage/threads/thread-log.js';
 const roots: string[] = [];
 const THREAD_SETTINGS = {
   mode: 'ask-before-changes',
-  profile: 'main',
-  model: 'openai/gpt-5.5',
   agent: 'build',
 } as const;
 

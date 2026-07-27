@@ -15,8 +15,7 @@ export const TerminalHistoryOutput = memo(function TerminalHistoryOutput({
   readonly resetKey: number;
   readonly cwd: string;
   readonly settings: {
-    readonly profile: string;
-    readonly model: string;
+    readonly agent: string;
     readonly mode: string;
   };
 }) {

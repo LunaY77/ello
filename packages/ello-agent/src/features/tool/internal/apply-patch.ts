@@ -11,7 +11,7 @@ import { errnoCode } from '../../../infra/filesystem.js';
 import type { AgentFileSystem } from '../../agent/engine/index.js';
 
 import { createFileChange, type FileChange } from './file-change.js';
-import { resolveRuntimePath } from './shared.js';
+import { findNearestLine, resolveRuntimePath } from './shared.js';
 
 const BEGIN_PATCH = '*** Begin Patch';
 const END_PATCH = '*** End Patch';
@@ -81,11 +81,23 @@ export function parseApplyPatch(patchText: string): ApplyPatch {
   while (lines.length > 0 && lines.at(-1)?.trim() === '') {
     lines.pop();
   }
-  if (lines[0]?.trim() !== BEGIN_PATCH) {
-    throw new Error(`Invalid patch: first line must be '${BEGIN_PATCH}'.`);
+  if (lines.length === 0) {
+    throw new Error('Invalid patch: patch text is empty.');
   }
-  if (lines.at(-1)?.trim() !== END_PATCH) {
-    throw new Error(`Invalid patch: last line must be '${END_PATCH}'.`);
+  const firstLine = lines[0];
+  const lastLine = lines.at(-1);
+  if (firstLine === undefined || lastLine === undefined) {
+    throw new Error('Invalid patch: patch lines lost their boundaries.');
+  }
+  if (firstLine.trim() !== BEGIN_PATCH) {
+    throw new Error(
+      `Invalid patch: first line must be '${BEGIN_PATCH}'. Offending line: ${JSON.stringify(firstLine)}.`,
+    );
+  }
+  if (lastLine.trim() !== END_PATCH) {
+    throw new Error(
+      `Invalid patch: last line must be '${END_PATCH}'. Offending line: ${JSON.stringify(lastLine)}.`,
+    );
   }
 
   const operations: ApplyPatchOperation[] = [];
@@ -93,7 +105,7 @@ export function parseApplyPatch(patchText: string): ApplyPatch {
   while (index < lines.length - 1) {
     const line = lines[index];
     if (line === undefined) {
-      throw invalidLine(index, 'patch ended before the end marker');
+      throw invalidLine(index, 'patch ended before the end marker', line);
     }
     const marker = line.trim();
     if (marker === '') {
@@ -125,6 +137,7 @@ export function parseApplyPatch(patchText: string): ApplyPatch {
     throw invalidLine(
       index,
       `expected '${ADD_FILE.trim()}', '${DELETE_FILE.trim()}', or '${UPDATE_FILE.trim()}'`,
+      line,
     );
   }
   if (operations.length === 0) {
@@ -243,11 +256,12 @@ function parseAdd(
       throw invalidLine(
         index,
         `add file hunk for '${path}' ended unexpectedly`,
+        line,
       );
     }
     if (isOperationLine(line)) break;
     if (!line.startsWith('+')) {
-      throw invalidLine(index, `added file lines must start with '+'`);
+      throw invalidLine(index, `added file lines must start with '+'`, line);
     }
     content.push(line.slice(1));
     index += 1;
@@ -280,6 +294,7 @@ function parseUpdate(
       throw invalidLine(
         index,
         `update file hunk for '${path}' ended unexpectedly`,
+        line,
       );
     }
     if (isOperationLine(line)) break;
@@ -313,7 +328,7 @@ function parseChunk(
   let changeContext: string | undefined;
   const firstLine = lines[index];
   if (firstLine === undefined) {
-    throw invalidLine(index, 'update chunk is missing');
+    throw invalidLine(index, 'update chunk is missing', firstLine);
   }
   const header = firstLine.trim();
   if (header === '@@' || header.startsWith('@@ ')) {
@@ -327,7 +342,7 @@ function parseChunk(
   while (index < lines.length - 1) {
     const line = lines[index];
     if (line === undefined) {
-      throw invalidLine(index, 'update chunk ended unexpectedly');
+      throw invalidLine(index, 'update chunk ended unexpectedly', line);
     }
     if (isOperationLine(line) || line === '@@' || line.startsWith('@@ ')) {
       break;
@@ -348,12 +363,16 @@ function parseChunk(
     } else if (marker === '+') {
       newLines.push(content);
     } else {
-      throw invalidLine(index, `update lines must start with ' ', '+', or '-'`);
+      throw invalidLine(
+        index,
+        `update lines must start with ' ', '+', or '-'`,
+        line,
+      );
     }
     index += 1;
   }
   if (oldLines.length === 0 && newLines.length === 0) {
-    throw invalidLine(start, 'update chunk is empty');
+    throw invalidLine(start, 'update chunk is empty', lines[start]);
   }
   return {
     chunk: {
@@ -393,7 +412,7 @@ function applyUpdateChunks(
       );
       if (contextIndex === undefined) {
         throw new Error(
-          `Failed to find context '${chunk.changeContext}' in ${path}`,
+          `Failed to find context '${chunk.changeContext}' in ${path} at or after line ${lineIndex + 1}. ${nearestLineReport(lines, chunk.changeContext)}`,
         );
       }
       lineIndex = contextIndex + 1;
@@ -418,8 +437,12 @@ function applyUpdateChunks(
       found = seekSequence(lines, pattern, lineIndex, chunk.isEndOfFile);
     }
     if (found === undefined) {
+      const expected = chunk.oldLines[0];
+      if (expected === undefined) {
+        throw new Error(`Patch chunk for ${path} lost its expected lines.`);
+      }
       throw new Error(
-        `Failed to find expected lines in ${path}:\n${chunk.oldLines.join('\n')}`,
+        `Failed to find expected lines in ${path}:\n${chunk.oldLines.join('\n')}\n${nearestLineReport(lines, expected)} Re-read ${path} and copy the context lines from its current content.`,
       );
     }
     replacements.push({
@@ -439,6 +462,17 @@ function applyUpdateChunks(
     );
   }
   return `${lines.join('\n')}\n`;
+}
+
+/** 把最近似行渲染成错误句子；没有近似行时说明原因，不合成假位置。 */
+function nearestLineReport(
+  lines: readonly string[],
+  expected: string,
+): string {
+  const nearest = findNearestLine(lines, expected);
+  return nearest === undefined
+    ? 'No line in the file shares a prefix with the expected content.'
+    : `Nearest actual line is ${nearest.line}: ${JSON.stringify(nearest.text)}.`;
 }
 
 function seekSequence(
@@ -507,13 +541,24 @@ function normalizeUnicode(value: string): string {
 function readPath(line: string, prefix: string, index: number): string {
   const path = line.slice(prefix.length).trim();
   if (path === '') {
-    throw invalidLine(index, 'file path is empty');
+    throw invalidLine(index, 'file path is empty', line);
   }
   return path;
 }
 
-function invalidLine(index: number, message: string): Error {
-  return new Error(`Invalid patch at line ${index + 1}: ${message}.`);
+/**
+ * 构造解析失败错误。`line` 为该行的实际内容，回显后调用方无需重新推断问题行；
+ * 行已越界时用显式标记说明 patch 提前结束，而不是伪造一个空行。
+ */
+function invalidLine(
+  index: number,
+  message: string,
+  line: string | undefined,
+): Error {
+  const actual = line === undefined ? '<past end of patch>' : JSON.stringify(line);
+  return new Error(
+    `Invalid patch at line ${index + 1}: ${message}. Offending line: ${actual}.`,
+  );
 }
 
 async function readOptional(

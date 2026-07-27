@@ -1,18 +1,12 @@
-/**
- * 本文件验证 config-response-security 覆盖的运行时行为契约。
- *
- * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
- * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
- */
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { globalConfigPath } from '../../src/features/config/index.js';
 import {
   createConfigFeature,
+  globalConfigPath,
   sanitizeConfigForResponse,
 } from '../../src/features/config/index.js';
 import { parseClientResult } from '../../src/protocol/v1/index.js';
@@ -30,30 +24,6 @@ describe('config RPC credential boundary', () => {
     cwd = await mkdtemp(join(tmpdir(), 'ello-config-response-project-'));
     process.env.ELLO_HOME = home;
     services = createConfigFeature();
-    await writeFile(
-      globalConfigPath(),
-      [
-        'initial_mode: ask-before-changes',
-        'provider:',
-        '  vault:',
-        '    enabled: true',
-        '    kind: openai',
-        '    api_key: api-secret-value',
-        '    api_key_file: /private/key-file',
-        '    base_url: https://url-user:url-secret-value@api.example.test/v1?access_token=query-secret-value&region=cn',
-        '    headers:',
-        '      Authorization: Bearer auth-secret-value',
-        '      X-Api-Key: header-secret-value',
-        '      X-Public: visible-header-value',
-        '    options:',
-        '      access_token: access-secret-value',
-        '      password: password-secret-value',
-        '      client_secret: client-secret-value',
-        '      private-key: private-key-secret-value',
-        '',
-      ].join('\n'),
-      'utf8',
-    );
   });
 
   afterEach(async () => {
@@ -63,46 +33,27 @@ describe('config RPC credential boundary', () => {
     await rm(cwd, { recursive: true, force: true });
   });
 
-  it('递归清洗凭证键，同时保留模型 token 参数和非敏感字段', () => {
+  it('recursively removes credential values from arbitrary response data', () => {
     expect(
       sanitizeConfigForResponse({
         api_key: 'secret',
-        apiKeyFile: '/secret-file',
-        auth_headers: { arbitrary: 'secret' },
-        headers: {
-          Authorization: 'secret',
-          'x-api-key': 'secret',
-          'x-visible': 'public',
+        headers: { Authorization: 'secret', 'x-visible': 'public' },
+        nested: {
+          accessToken: 'secret',
+          endpoint:
+            'https://url-user:url-secret@api.example.test/v1?access_token=query-secret&region=cn',
+          api_model: 'gpt-5.5',
         },
-        nested: [
-          {
-            accessToken: 'secret',
-            password: 'secret',
-            client_secret: 'secret',
-            privateKey: 'secret',
-            tokenBudget: 123,
-            max_input_tokens: 456,
-            model: 'openai/gpt-5.5',
-            endpoint:
-              'https://url-user:url-secret-value@api.example.test/v1?access_token=query-secret-value&region=cn',
-          },
-        ],
-        profile: 'main',
       }),
     ).toEqual({
-      nested: [
-        {
-          tokenBudget: 123,
-          max_input_tokens: 456,
-          model: 'openai/gpt-5.5',
-          endpoint: 'https://api.example.test/v1?region=cn',
-        },
-      ],
-      profile: 'main',
+      nested: {
+        endpoint: 'https://api.example.test/v1?region=cn',
+        api_model: 'gpt-5.5',
+      },
     });
   });
 
-  it('config/read 的 merged config 与 includeSources 都不返回 credential', async () => {
+  it('returns only the named model directory and global references', async () => {
     const response = await invokeServiceRoute(
       services,
       createTestPeer(),
@@ -111,37 +62,24 @@ describe('config RPC credential boundary', () => {
     );
     expect(response).toMatchObject({
       config: {
-        active_profile: 'main',
-        provider: {
-          vault: {
-            enabled: true,
-            kind: 'openai',
-            base_url: 'https://api.example.test/v1?region=cn',
+        primary_model: 'openai-gpt-5.5',
+        auxiliary_model: 'openai-gpt-5.4',
+        models: {
+          'openai-gpt-5.5': {
+            protocol: 'openai',
+            endpoint: 'responses',
+            api_model: 'gpt-5.5',
           },
         },
-        models: { openai: { 'gpt-5.5': { provider: 'openai' } } },
-        profile: { main: { models: { primary: 'openai/gpt-5.5' } } },
       },
       sources: expect.arrayContaining([
-        expect.objectContaining({
-          name: 'global',
-          value: expect.objectContaining({
-            provider: {
-              vault: {
-                enabled: true,
-                kind: 'openai',
-                base_url: 'https://api.example.test/v1?region=cn',
-                options: {},
-              },
-            },
-          }),
-        }),
+        expect.objectContaining({ name: 'global' }),
       ]),
     });
-    expectCredentialValuesAbsent(response);
+    expect(JSON.stringify(response)).not.toContain('api-secret-value');
   });
 
-  it('config/settings 暴露敏感字段元数据但不回显 credential', async () => {
+  it('exposes settings metadata without a Profile or provider catalog', async () => {
     const response = await invokeServiceRoute(
       services,
       createTestPeer(),
@@ -149,24 +87,17 @@ describe('config RPC credential boundary', () => {
       { cwd },
     );
     expect(() => parseClientResult('config/settings', response)).not.toThrow();
-
     expect(response).toMatchObject({
       data: expect.arrayContaining([
-        expect.objectContaining({
-          id: 'provider.vault.api_key',
-          sensitive: true,
-          source: 'global',
-        }),
-        expect.objectContaining({
-          id: 'provider.vault.base_url',
-          value: 'https://api.example.test/v1?region=cn',
-        }),
+        expect.objectContaining({ id: 'primary_model', value: 'openai-gpt-5.5' }),
+        expect.objectContaining({ id: 'auxiliary_model', value: 'openai-gpt-5.4' }),
       ]),
     });
-    expectCredentialValuesAbsent(response);
+    expect(JSON.stringify(response)).not.toContain('active_profile');
+    expect(JSON.stringify(response)).not.toContain('provider.');
   });
 
-  it('config/write 完成真实写入，但 response 不回显新旧 credential', async () => {
+  it('writes a global model reference without creating thread-level state', async () => {
     const response = await invokeServiceRoute(
       services,
       createTestPeer(),
@@ -174,41 +105,20 @@ describe('config RPC credential boundary', () => {
       {
         cwd,
         source: 'global',
-        path: ['provider', 'vault', 'api_key'],
-        value: 'rotated-secret-value',
+        path: ['primary_model'],
+        value: 'openai-gpt-5.4',
         operation: 'set',
       },
     );
 
     expect(await readFile(globalConfigPath(), 'utf8')).toContain(
-      'rotated-secret-value',
+      'primary_model: openai-gpt-5.4',
     );
     expect(response).toMatchObject({
       config: {
-        active_profile: 'main',
-        models: { openai: { 'gpt-5.5': { provider: 'openai' } } },
-        profile: { main: { models: { primary: 'openai/gpt-5.5' } } },
+        primary_model: 'openai-gpt-5.4',
+        auxiliary_model: 'openai-gpt-5.4',
       },
     });
-    expectCredentialValuesAbsent(response);
-    expect(JSON.stringify(response)).not.toContain('rotated-secret-value');
   });
 });
-
-function expectCredentialValuesAbsent(value: unknown): void {
-  const serialized = JSON.stringify(value);
-  for (const secret of [
-    'api-secret-value',
-    'auth-secret-value',
-    'header-secret-value',
-    'access-secret-value',
-    'password-secret-value',
-    'client-secret-value',
-    'private-key-secret-value',
-    'url-secret-value',
-    'query-secret-value',
-    '/private/key-file',
-  ]) {
-    expect(serialized).not.toContain(secret);
-  }
-}

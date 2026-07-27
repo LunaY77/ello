@@ -47,8 +47,12 @@ export function createSearchTools(
   return [
     defineCodingTool({
       name: 'grep',
-      description:
-        'Search UTF-8 file contents with a Unicode regular expression. Skips binary files, ignored directories, and files larger than 2 MiB.',
+      // 无副作用只读工具：允许与同批其他只读调用并发执行。
+      concurrency: 'parallel',
+      description: `Search UTF-8 file contents with a Unicode regular expression and return 'path:line:text' for every match.
+'filePath' accepts either a directory or a single file: a directory is walked recursively, a file is searched on its own so you can scan one known file without inventing a glob. 'glob' filters candidate paths relative to the search root. 'limit' caps the number of returned match lines; hitting the cap stops the walk, so raise it or narrow 'filePath' when results look cut off.
+The pattern is a JavaScript RegExp with the 'u' flag, matched per line, case sensitive; an invalid pattern fails the call instead of returning nothing. Binary files, files above 2 MiB, symlinked directories, and .git/node_modules/dist/build/coverage are skipped, so a file inside them is only searched when named directly. No match is a success with empty output, not an error.
+Use grep to find where text occurs; use glob to find paths by name without reading contents; use read once you know the file and want surrounding lines.`,
       discovery: {
         aliases: ['search text', 'find content', 'regex'],
         risk: 'readonly',
@@ -59,12 +63,17 @@ export function createSearchTools(
             .string()
             .min(1)
             .describe('Regular expression pattern to search for'),
-          filePath: z.string().default('.').describe('Directory to search in'),
+          filePath: z
+            .string()
+            .default('.')
+            .describe('File or directory to search in'),
           glob: z
             .string()
             .min(1)
             .optional()
-            .describe('Glob pattern to filter files'),
+            .describe(
+              'Glob pattern filtering candidate paths relative to the search root',
+            ),
           limit: z
             .number()
             .int()
@@ -91,11 +100,15 @@ export function createSearchTools(
         ),
       execute: async ({ pattern, filePath: targetPath, glob, limit }, ctx) => {
         const fs = requireFs(ctx.agent);
-        const root = resolveRuntimePath(fs, targetPath);
+        const resolved = resolveRuntimePath(fs, targetPath);
+        const info = await statRuntimePath(fs, targetPath);
+        // 单文件搜索以其所在目录为 root，输出仍是相对路径形式的 'path:line:text'。
+        const root = info.isDirectory() ? resolved : path.dirname(resolved);
         const output = await searchFiles({
           fs,
           root,
           pattern,
+          ...(info.isDirectory() ? {} : { file: resolved }),
           ...(glob !== undefined ? { glob } : {}),
           limit,
           ...(ctx.abortSignal !== undefined ? { signal: ctx.abortSignal } : {}),
@@ -116,8 +129,12 @@ export function createSearchTools(
     }),
     defineCodingTool({
       name: 'glob',
-      description:
-        'Find files using * and ** glob syntax. Does not traverse symlinked directories and ignores .git, node_modules, dist, build, and coverage.',
+      // 无副作用只读工具：允许与同批其他只读调用并发执行。
+      concurrency: 'parallel',
+      description: `Find files by path shape and return paths relative to 'filePath', sorted lexicographically.
+'pattern' must match the whole relative path: '*' matches within one segment, '**/' matches any number of leading directories, so use '**/*.ts' rather than '*.ts' to reach nested files. Only files are returned, never directories. 'filePath' must be a directory; pass a file path to read or grep instead. 'limit' caps returned paths after sorting, so the result stays the lexicographic prefix of all matches.
+Symlinked directories are not traversed and .git, node_modules, dist, build, and coverage are ignored, so build artifacts and dependencies never appear. No match is a success with empty output.
+Use glob when you know part of a name or extension; use grep when you know text inside the file; use read on a directory path for a single non-recursive listing with sizes.`,
       discovery: {
         aliases: ['find files', 'match paths', 'files'],
         risk: 'readonly',
@@ -127,8 +144,13 @@ export function createSearchTools(
           pattern: z
             .string()
             .min(1)
-            .describe('Glob pattern to match file paths'),
-          filePath: z.string().default('.').describe('Directory to search in'),
+            .describe(
+              "Glob pattern matched against the whole relative path, e.g. '**/*.ts'",
+            ),
+          filePath: z
+            .string()
+            .default('.')
+            .describe('Directory to search in'),
           limit: z
             .number()
             .int()
@@ -182,16 +204,16 @@ async function searchFiles(input: {
   readonly fs: AgentFileSystem;
   readonly root: string;
   readonly pattern: string;
+  /** 显式单文件目标；给出时跳过目录遍历，只搜索该文件。 */
+  readonly file?: string;
   readonly glob?: string;
   readonly limit: number;
   readonly signal?: AbortSignal;
 }): Promise<string> {
-  const files = await walk(
-    input.fs,
-    input.root,
-    input.limit * 200,
-    input.signal,
-  );
+  const files =
+    input.file === undefined
+      ? await walk(input.fs, input.root, input.limit * 200, input.signal)
+      : [input.file];
   let pattern: RegExp;
   try {
     pattern = new RegExp(input.pattern, 'u');

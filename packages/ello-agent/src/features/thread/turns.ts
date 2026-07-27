@@ -221,8 +221,6 @@ export interface TurnOperations {
 }
 
 export interface TurnSettings {
-  readonly model?: string;
-  readonly profile?: string;
   readonly mode?: ThreadSnapshot['settings']['mode'];
 }
 
@@ -412,8 +410,6 @@ async function applySettings(
 ): Promise<void> {
   if (settings === undefined) return;
   if (
-    settings.model === undefined &&
-    settings.profile === undefined &&
     settings.mode === undefined
   ) {
     return;
@@ -423,8 +419,6 @@ async function applySettings(
     kind: 'thread.metadata',
     settings: {
       ...snapshot.settings,
-      ...(settings.model === undefined ? {} : { model: settings.model }),
-      ...(settings.profile === undefined ? {} : { profile: settings.profile }),
       ...(settings.mode === undefined ? {} : { mode: settings.mode }),
     },
   });

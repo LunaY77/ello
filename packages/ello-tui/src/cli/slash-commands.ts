@@ -5,7 +5,6 @@ export type TuiOverlayName =
   | 'help'
   | 'agents'
   | 'models'
-  | 'profiles'
   | 'session-selector'
   | 'rewind-selector'
   | 'settings'
@@ -25,7 +24,6 @@ export type CommandResult =
       readonly action: 'memory' | 'goal' | 'rewind' | 'fork' | 'export';
       readonly args: readonly string[];
     }
-  | { readonly type: 'set-profile'; readonly profile: string }
   | { readonly type: 'set-mode'; readonly mode: SessionMode }
   | { readonly type: 'submit'; readonly prompt: string };
 
@@ -75,11 +73,6 @@ export const slashCommands: readonly SlashCommand[] = [
     type: 'open-overlay',
     overlay: 'agents',
   })),
-  command('profiles', 'Switch profile', (args) =>
-    args[0] === undefined
-      ? { type: 'open-overlay', overlay: 'profiles' }
-      : { type: 'set-profile', profile: args[0] },
-  ),
   command('settings', 'Open settings', () => ({
     type: 'open-overlay',
     overlay: 'settings',
@@ -189,7 +182,6 @@ function renderCommandResult(result: CommandResult): string {
   if (result.type === 'open-overlay') return `Open overlay: ${result.overlay}`;
   if (result.type === 'runtime-action')
     return `Runtime action: ${result.action}`;
-  if (result.type === 'set-profile') return `Switch profile: ${result.profile}`;
   if (result.type === 'set-mode') return `Set mode: ${result.mode}`;
   return result.prompt;
 }

@@ -1,5 +1,5 @@
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "clientRequests": {
     "initialize": {
       "clientInfo": {
@@ -7,7 +7,7 @@
         "title": "Fixture Client",
         "version": "1.0.0"
       },
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "capabilities": {
         "experimentalApi": false,
         "supportsServerRequests": true,
@@ -85,14 +85,13 @@
     "config/write": {
       "cwd": "/workspace",
       "source": "project",
-      "path": ["active_profile"],
+      "path": ["primary_model"],
       "operation": "set",
-      "value": "main"
+      "value": "openai-gpt-5.5"
     },
     "config/init": { "cwd": "/workspace", "force": false },
     "config/sources": { "cwd": "/workspace" },
     "model/list": { "cwd": "/workspace" },
-    "provider/list": { "cwd": "/workspace" },
     "agent/list": { "cwd": "/workspace" },
     "tool/list": { "cwd": "/workspace" },
     "skills/list": { "cwd": "/workspace", "query": "fixture" },
@@ -250,7 +249,7 @@
     "serverNotification": {
       "jsonrpc": "2.0",
       "method": "server/ready",
-      "params": { "protocolVersion": 1 }
+      "params": { "protocolVersion": 2 }
     },
     "serverRequest": {
       "jsonrpc": "2.0",

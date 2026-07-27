@@ -26,6 +26,7 @@ import {
   PLAN_EXIT_TOOL_NAME,
   recordCheckpointChanges,
   type CreateAgentTools,
+  type AgentRuntime,
   type LoadAgentContext,
   type ResolveAgentDefinition,
   type ResolveAgentModel,
@@ -42,11 +43,10 @@ import {
 } from './features/memory/index.js';
 import {
   createAiSdkModelAdapter,
-  createProviderRegistry,
-  modelSettingsFromRole,
+  createModelRegistry,
+  modelInputBudgetFromRuntimeModel,
+  modelSettingsFromRuntimeModel,
   prepareModelInputForRuntimeModel,
-  providerOptionsForRole,
-  type RuntimeRoleModel,
 } from './features/model/index.js';
 import { createModelFeature } from './features/model/index.js';
 import {
@@ -86,7 +86,6 @@ import {
 } from './features/workspace/index.js';
 import { openDatabase } from './infra/database/index.js';
 import { artifactsDir, elloHomeDir, stateDatabasePath } from './infra/paths.js';
-import { createTurnTracing } from './infra/telemetry/turn-tracing.js';
 import {
   AppServerError,
   type ParsedClientParams,
@@ -99,6 +98,7 @@ export interface CreateAppOptions {
   readonly root?: string;
   readonly stderr?: Writable;
   readonly transports: readonly ('stdio' | 'websocket' | 'unix')[];
+  readonly agentRuntime: AgentRuntime;
 }
 
 /**
@@ -153,15 +153,13 @@ export async function createApp(
     createTools: createAgentTools(taskBoards),
     createCompactor: (compactorOptions) =>
       createThreadCompactor(compactorOptions),
-    createTracing: ({ config: agentConfig, threadId }) =>
-      createTurnTracing(agentConfig.observability?.langfuse, threadId),
+    runtime: options.agentRuntime,
   });
   const threads = createThreadFeature({
     store: threadStore,
     startAgentRun: agent.startRun,
     unloadGraceMs: 30_000,
     titleGenerator: createThreadTitleGenerator({
-      store: threadStore,
       modelAdapter: createAiSdkModelAdapter(),
     }),
     resolveInitialSettings,
@@ -259,38 +257,32 @@ const resolveAgentDefinition: ResolveAgentDefinition = async (request) => {
   return { config, definition, agentRegistry };
 };
 
-const resolveAgentModel: ResolveAgentModel = async ({
-  request,
-  definition,
-}) => {
-  const providerRegistry = createProviderRegistry(definition.config);
-  const profileBinding = providerRegistry.resolveRole(
-    request.selection.profile,
-    'primary',
+const resolveAgentModel: ResolveAgentModel = async ({ definition }) => {
+  const registry = createModelRegistry(definition.config);
+  const model = registry.resolveSelector(definition.definition.model);
+  const modelInputBudget = modelInputBudgetFromRuntimeModel(
+    model,
+    definition.config.context,
   );
-  const binding: RuntimeRoleModel = {
-    ...profileBinding,
-    ref: request.selection.model,
-    model: providerRegistry.getModel(request.selection.model),
-  };
-  if (!binding.model.capabilities.toolCall) {
-    throw new Error(
-      `Coding model '${binding.ref}' does not support tool calls.`,
-    );
-  }
   return {
-    modelRef: binding.ref,
-    model: providerRegistry.resolveLanguageModel(binding.ref),
+    modelCall: {
+      agentName: definition.definition.name,
+      modelSelector: definition.definition.model,
+      configuredModel: model.name,
+      protocol: model.protocol,
+      apiModel: model.apiModel,
+    },
+    model: registry.resolveLanguageModel(model.name),
     modelAdapter: createAiSdkModelAdapter(),
-    modelSettings: modelSettingsFromRole(binding),
-    contextWindow: Math.min(
-      binding.model.limit.context,
-      definition.config.context.max_input_tokens,
-    ),
-    providerOptions: () => providerOptionsForRole(binding),
+    modelSettings: modelSettingsFromRuntimeModel(model),
+    modelInputBudget,
+    contextWindow:
+      modelInputBudget.maxInputTokens -
+      (modelInputBudget.reservedOutputTokens ?? 0),
+    providerOptions: () => undefined,
     prepareModelInput: (modelInput) =>
       Promise.resolve(
-        prepareModelInputForRuntimeModel(binding.model, modelInput, {
+        prepareModelInputForRuntimeModel(model, modelInput, {
           promptProfile: definition.config.context.system_prompt_profile,
           cwdIdentity: definition.config.cwd,
         }),
@@ -314,7 +306,7 @@ const loadAgentContext: LoadAgentContext = async ({ definition, model }) => {
     }) => [
       skillIndexContext({ skills, contextWindow: model.contextWindow }),
       createCodingSystemPromptSection(definition.config, {
-        model: model.modelRef,
+        model: model.modelCall.configuredModel,
         ...(memoryIndexLoader === undefined
           ? {}
           : {
@@ -462,7 +454,6 @@ async function resolveInitialSettings(
   params: ParsedClientParams<'thread/start'>,
 ) {
   const config = await loadCodingAgentConfig({ cwd: params.cwd });
-  const profile = params.profile ?? config.active_profile;
   const mode = params.mode ?? config.initial_mode;
   if (mode === 'bypass' && !config.bypass_enabled) {
     throw new AppServerError({
@@ -472,10 +463,6 @@ async function resolveInitialSettings(
   }
   return {
     mode,
-    profile,
-    model:
-      params.model ??
-      createProviderRegistry(config).resolveRole(profile, 'primary').ref,
     agent: params.agent ?? config.default_agent,
   };
 }
@@ -493,17 +480,6 @@ async function resolveSettingsUpdate(
   }
   return {
     ...(params.mode === undefined ? {} : { mode: params.mode }),
-    ...(params.profile === undefined ? {} : { profile: params.profile }),
-    ...(params.model !== undefined
-      ? { model: params.model }
-      : params.profile === undefined
-        ? {}
-        : {
-            model: createProviderRegistry(config).resolveRole(
-              params.profile,
-              'primary',
-            ).ref,
-          }),
     ...(params.agent === undefined ? {} : { agent: params.agent }),
   };
 }

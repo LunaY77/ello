@@ -28,17 +28,6 @@ describe('斜杠命令派发', () => {
     });
   });
 
-  it('有参数时直接切换 profile，无参数时打开选择界面', () => {
-    expect(handleSlashCommand('/profiles main').command).toEqual({
-      type: 'set-profile',
-      profile: 'main',
-    });
-    expect(handleSlashCommand('/profiles').command).toEqual({
-      type: 'open-overlay',
-      overlay: 'profiles',
-    });
-  });
-
   it('校验会话模式，并为无效值返回明确用法', () => {
     expect(handleSlashCommand('/mode plan').command).toEqual({
       type: 'set-mode',

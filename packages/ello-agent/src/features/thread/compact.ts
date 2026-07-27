@@ -24,7 +24,7 @@ import {
 } from '../config/index.js';
 import {
   createAiSdkModelAdapter,
-  createProviderRegistry,
+  createModelRegistry,
 } from '../model/index.js';
 
 import type { ThreadStore } from './store.js';
@@ -35,8 +35,9 @@ const CHECKPOINT_SUFFIX = '\n</compact-checkpoint>';
 
 export interface ThreadCompactorOptions {
   readonly config: CodingAgentConfig;
-  readonly profileName: string;
   readonly agentRegistry?: AgentRegistry;
+  /** 产品装配阶段解析出的有效窗口；用于防止调用方传入更大的运行时窗口。 */
+  readonly contextWindow?: number;
   readonly force?: boolean;
   /**
    * 在 Thread `compact` 模块 中执行 `generateCheckpoint` 完整流程，并在返回前完成其必要副作用。
@@ -82,7 +83,7 @@ export interface ThreadCompactionService {
  * 创建不接触 Thread 持久化的消息压缩器。
  *
  * Args:
- * - `options`: 已验证配置、运行 profile、可选 agent registry 和 checkpoint 生成函数。
+ * - `options`: 已验证配置、可选 agent registry 和 checkpoint 生成函数。
  *
  * Returns:
  * - 返回只依赖消息快照、上下文窗口和中断信号的压缩器。
@@ -109,7 +110,7 @@ export function createThreadCompactor(
       return options.generateCheckpoint(messages, previousCheckpoint, signal);
     }
     const registry = await getRegistry();
-    const providerRegistry = createProviderRegistry(options.config);
+    const modelRegistry = createModelRegistry(options.config);
     const conversation = messages
       .map((message) => `### ${message.role}\n${messageText(message)}`)
       .join('\n\n');
@@ -121,9 +122,8 @@ export function createThreadCompactor(
     return runInternalAgent({
       definition: registry.get('compact'),
       prompt,
-      profileName: options.profileName,
       config: options.config,
-      providerRegistry,
+      modelRegistry,
       modelAdapter: createAiSdkModelAdapter(),
       signal,
     });
@@ -132,6 +132,10 @@ export function createThreadCompactor(
   return {
     name: COMPACTION_NAME,
     async compact(input) {
+      const contextWindow = Math.min(
+        input.contextWindow,
+        options.contextWindow ?? input.contextWindow,
+      );
       const checkpoint = splitCheckpoint(input.messages);
       const tokensBefore = input.messages.reduce(
         (total, message) => total + estimateTokens(message),
@@ -141,7 +145,7 @@ export function createThreadCompactor(
         options.force !== true &&
         !shouldCompact(
           tokensBefore,
-          input.contextWindow,
+          contextWindow,
           options.config.context.compaction,
         )
       ) {
@@ -202,8 +206,7 @@ export async function createProductionThreadCompactor(options: {
     cwd: options.snapshot.thread.cwd,
     initial_mode: options.snapshot.settings.mode,
   });
-  const providerRegistry = createProviderRegistry(config);
-  const model = providerRegistry.getModel(options.snapshot.settings.model);
+  const model = createModelRegistry(config).resolveSelector('auxiliary_model');
 
   return {
     async compactNow(threadId, manual = {}) {
@@ -211,12 +214,11 @@ export async function createProductionThreadCompactor(options: {
       const view = compactionView(records);
       const compactor = createThreadCompactor({
         config,
-        profileName: options.snapshot.settings.profile,
         force: manual.force === true,
       });
       const compacted = await compactor.compact({
         messages: view.projectedMessages,
-        contextWindow: model.limit.context,
+        contextWindow: model.contextWindow,
         signal: new AbortController().signal,
       });
       if (compacted === null) return null;

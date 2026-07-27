@@ -19,6 +19,7 @@ import type { PermissionRule } from '../permissions/types.js';
 
 import { createFsTools } from './fs.js';
 import { adaptCodingTools } from './runtime/adapter.js';
+import { ShellCommandHistory } from './runtime/command-history.js';
 import { SessionToolOutputStore } from './runtime/output-store.js';
 import { createSearchTools } from './search.js';
 import { createShellTools } from './shell.js';
@@ -101,6 +102,8 @@ export function createCodingTools(
   const disabled = new Set(config.tools.disabled);
   const outputStore = new SessionToolOutputStore(config.session_dir);
   const tasks = createTaskService(options.taskBoards, options.taskBoardScope);
+  // 全部 coding 工具共用一份轮次记录，重复命令判定才能看到期间的文件变更。
+  const commandHistory = new ShellCommandHistory();
 
   const codingTools = [
     ...createFsTools(config, decide),
@@ -109,7 +112,7 @@ export function createCodingTools(
   ];
 
   return [
-    ...adaptCodingTools(codingTools, { config, outputStore }),
+    ...adaptCodingTools(codingTools, { config, outputStore, commandHistory }),
     ...createTaskTools(approval, tasks),
   ].filter((tool) => !disabled.has(tool.name));
 }

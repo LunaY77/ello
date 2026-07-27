@@ -11,6 +11,7 @@ import type { ContextSourceLoadResult } from './context/source-registry.js';
 import type {
   Agent as EngineAgent,
   AgentEventRecorder,
+  AgentEnvironment,
   AgentMessage,
   AgentModel,
   AgentProviderOptions,
@@ -22,6 +23,7 @@ import type {
   DeferredToolCallItem,
   MessageCompactor,
   ModelAdapter,
+  ModelCallConfiguration,
   ModelInput,
   SystemSection,
 } from './engine/index.js';
@@ -30,8 +32,6 @@ import type { CodingAgentDefinition } from './subagents/schema.js';
 
 export interface AgentRunSelection {
   readonly mode: SessionMode;
-  readonly profile: string;
-  readonly model: string;
   readonly agent: string;
 }
 
@@ -228,7 +228,7 @@ export interface PermissionSessionView {
 
 export interface BuiltAgent {
   readonly engine: EngineAgent;
-  readonly maxTurns: number;
+  readonly maxTurns: number | undefined;
   /**
    * 更新工具执行读取的 session mode。
    *
@@ -352,9 +352,41 @@ export type CreateAgentTracing = (input: {
   readonly threadId: string;
 }) => AgentTracing;
 
+export interface AgentEnvironmentInput {
+  readonly config: CodingAgentConfig;
+  readonly permission: PermissionSessionView;
+  /**
+   * 读取当前 run 已加载 Skill 的只读根目录。
+   *
+   * Args:
+   * - 无：根目录由当前 run 的 context 持有。
+   *
+   * Returns:
+   * - 返回当前 Skill 内容可读取的路径快照。
+   */
+  readonly skillReadRoots: () => ReadonlyArray<string>;
+}
+
+/**
+ * 为指定 run 创建文件系统、shell 和资源生命周期环境。
+ *
+ * Args:
+ * - `input`: 已解析配置、当前 permission view 和动态 Skill 只读根。
+ *
+ * Returns:
+ * - 返回与单次 Agent run 生命周期一致的环境。
+ */
+export type CreateAgentEnvironment = (
+  input: AgentEnvironmentInput,
+) => AgentEnvironment;
+
+export interface AgentRuntime {
+  readonly createEnvironment: CreateAgentEnvironment;
+  readonly createTracing: CreateAgentTracing;
+}
+
 export interface AgentCompactorInput {
   readonly config: CodingAgentConfig;
-  readonly profileName: string;
   readonly contextWindow: number;
   readonly agentRegistry: AgentRegistry;
 }
@@ -363,7 +395,7 @@ export interface AgentCompactorInput {
  * 创建单次运行使用的上下文压缩器。
  *
  * Args:
- * - `input`: 已解析的配置、profile、上下文窗口和当前 agent registry。
+ * - `input`: 已解析的配置、上下文窗口和当前 agent registry。
  *
  * Returns:
  * - 返回与当前 run 生命周期一致的压缩端口。
@@ -379,10 +411,14 @@ export interface ResolvedAgentDefinition {
 }
 
 export interface ResolvedAgentModel {
-  readonly modelRef: string;
+  readonly modelCall: ModelCallConfiguration;
   readonly model: AgentModel;
   readonly modelAdapter: ModelAdapter;
   readonly modelSettings: NonNullable<CreateAgentOptions['modelSettings']>;
+  /** 已应用 model context window 与 context 配置上限的唯一输入预算。 */
+  readonly modelInputBudget: NonNullable<
+    CreateAgentOptions['modelInputBudget']
+  >;
   readonly contextWindow: number;
   /**
    * 读取当前 model role 对应的 provider options。
@@ -479,7 +515,7 @@ export interface AgentRunTools {
  * 解析运行请求选中的产品 Agent definition 与可用 subagent registry。
  *
  * Args:
- * - `request`: Thread 提供的完整运行请求；只读取 agent/profile 选择和工作目录。
+ * - `request`: Thread 提供的完整运行请求；只读取 agent 选择和工作目录。
  *
  * Returns:
  * - Promise 兑现为同源配置、definition 和 registry；三者在该 run 内保持稳定。
@@ -539,5 +575,5 @@ export interface CreateAgentFeatureInput {
   readonly loadContext: LoadAgentContext;
   readonly createTools: CreateAgentTools;
   readonly createCompactor: CreateAgentCompactor;
-  readonly createTracing: CreateAgentTracing;
+  readonly runtime: AgentRuntime;
 }

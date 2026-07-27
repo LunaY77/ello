@@ -28,6 +28,7 @@ import {
   type AgentModelEvent,
   type AgentModelRequest,
   type AgentModelResponse,
+  type ConversationMessage,
   type ModelAdapter,
 } from '../../../agent/engine/index.js';
 
@@ -68,10 +69,13 @@ export function createAiSdkModelAdapter(): ModelAdapter {
 async function generateWithAiSdk(
   request: AgentModelRequest,
 ): Promise<AgentModelResponse> {
+  assertConversationMessages(request.messages);
   const result = await generateText({
     ...request.modelSettings,
     model: resolveLanguageModel(request.model),
-    ...(request.system !== undefined ? { system: request.system } : {}),
+    ...(request.instructions === undefined
+      ? {}
+      : { instructions: request.instructions }),
     messages: request.messages,
     tools: request.tools,
     ...(request.activeTools !== undefined
@@ -117,10 +121,13 @@ async function generateWithAiSdk(
 async function* streamWithAiSdk(
   request: AgentModelRequest,
 ): AsyncIterable<AgentModelEvent> {
+  assertConversationMessages(request.messages);
   const result = streamText({
     ...request.modelSettings,
     model: resolveLanguageModel(request.model),
-    ...(request.system !== undefined ? { system: request.system } : {}),
+    ...(request.instructions === undefined
+      ? {}
+      : { instructions: request.instructions }),
     messages: request.messages,
     tools: request.tools,
     ...(request.activeTools !== undefined
@@ -140,7 +147,14 @@ async function* streamWithAiSdk(
   let usage = createEmptyUsage();
   let finishReason: AgentFinishReason = 'unknown';
   const toolCalls: NormalizedAiSdkToolCall[] = [];
+  let announcedStreamStart = false;
   for await (const part of result.fullStream) {
+    // 首个承载内容的 part 决定 time-to-first-token，无论它是正文、推理还是
+    // 工具调用；只在正文上计时会让纯工具轮和推理优先的轮次完全没有该指标。
+    if (!announcedStreamStart && carriesContent(part.type)) {
+      announcedStreamStart = true;
+      yield { type: 'stream-start' };
+    }
     if (part.type === 'text-delta') {
       text += part.text;
       if (bufferingPotentialMirror) {
@@ -193,6 +207,16 @@ async function* streamWithAiSdk(
   };
 }
 
+function assertConversationMessages(
+  messages: readonly { readonly role: string }[],
+): void {
+  for (const message of messages) {
+    if (message.role === 'system') {
+      throw new Error('AI SDK messages must not contain a system role.');
+    }
+  }
+}
+
 /**
  * 为流式 tool call 构造唯一 assistant 消息，并保留 provider reasoning parts。
  *
@@ -209,7 +233,7 @@ async function* streamWithAiSdk(
 function createStreamToolCallMessages(
   responseMessages: readonly ModelMessage[],
   calls: readonly NormalizedAiSdkToolCall[],
-): ModelMessage[] {
+): ConversationMessage[] {
   const reasoningParts = responseMessages.flatMap((message) => {
     if (message.role !== 'assistant' || !Array.isArray(message.content)) {
       return [];
@@ -234,7 +258,7 @@ function createStreamToolCallMessages(
  * 将 AI SDK 累计 response messages 标准化为 core 可保存的消息。
  *
  * 工具路径必须保留 assistant tool-call 和 tool-result 消息；否则下一轮模型
- * 看不到工具结果，会重复调用同一个工具直到 maxTurns。
+ * 看不到工具结果，会重复调用同一个工具并阻止 run 自然完成。
  *
  * Args:
  * - `messages`: AI SDK 返回的外部消息数组，元素在进入 engine 前仍按 `unknown` 处理。
@@ -245,11 +269,17 @@ function createStreamToolCallMessages(
  * Throws:
  * - 响应为空或任一消息不满足 AI SDK message schema 时直接抛错。
  */
-function parseResponseMessages(messages: readonly unknown[]): ModelMessage[] {
+function parseResponseMessages(
+  messages: readonly unknown[],
+): ConversationMessage[] {
   if (messages.length === 0) {
     throw new Error('AI SDK response must contain at least one message.');
   }
-  return modelMessageSchema.array().parse(messages);
+  const parsed = modelMessageSchema.array().parse(messages);
+  assertConversationMessages(parsed);
+  return parsed.filter(
+    (message): message is ConversationMessage => message.role !== 'system',
+  );
 }
 
 /**
@@ -388,6 +418,37 @@ function isToolCallMirrorText(
       Reflect.get(item, 'toolName') === expected.name
     );
   });
+}
+
+/**
+ * 承载模型输出内容的 stream part 类型。
+ *
+ * 只列举首个到达即说明模型已开始产出的类型：正文、推理、工具调用及其入参。
+ * `start` / `start-step` / `model-call-start` 等生命周期 part 在模型产出前
+ * 就会到达，用它们计时会把请求开销算进 first-token 延迟。
+ */
+const CONTENT_PART_TYPES: ReadonlySet<string> = new Set([
+  'text-delta',
+  'text-start',
+  'reasoning-delta',
+  'reasoning-start',
+  'tool-call',
+  'tool-input-start',
+  'tool-input-delta',
+  'dynamic-tool',
+]);
+
+/**
+ * 判断某个 stream part 是否承载模型输出内容。
+ *
+ * Args:
+ * - `type`: AI SDK stream part 的 `type` 字段。
+ *
+ * Returns:
+ * - part 承载正文、推理或工具调用内容时返回 `true`，生命周期 part 返回 `false`。
+ */
+function carriesContent(type: string): boolean {
+  return CONTENT_PART_TYPES.has(type);
 }
 
 /**

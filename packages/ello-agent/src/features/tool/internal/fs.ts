@@ -21,6 +21,7 @@ import {
   defineCodingTool,
 } from './runtime/coding-tool.js';
 import {
+  findNearestLine,
   requireFs,
   resolveRuntimePath,
   statRuntimePath,
@@ -50,8 +51,12 @@ export function createFsTools(
   return [
     defineCodingTool({
       name: 'read',
-      description:
-        'Read a UTF-8 text file with optional offset and limit. Output includes line numbers.',
+      // 无副作用只读工具：允许与同批其他只读调用并发执行。
+      concurrency: 'parallel',
+      description: `Read a UTF-8 text file, or list one directory, at 'filePath'.
+File output is line-numbered in a right-aligned gutter followed by two spaces; the gutter is display only, so never copy it into edit or apply_patch. 'offset' is the 1-based first line and 'limit' the maximum number of lines, default 400 and at most 2000; the result reports the line range and total line count so you can page through a long file with successive offsets. A directory path returns one non-recursive listing of 'name<TAB>kind<TAB>size'. A binary file returns a byte count and is attached as an artifact rather than inlined.
+A missing path, an unreadable path, or a path outside the allowed roots fails the call. Very long output is truncated in the middle, keeping the head and the tail.
+Read a file before editing it: edit and apply_patch match text literally, so they need the exact current content. Use grep to find which file contains some text, and glob to find files by name.`,
       discovery: { aliases: ['file', 'directory', 'cat'], risk: 'readonly' },
       input: z
         .object({
@@ -167,8 +172,9 @@ export function createFsTools(
     }),
     defineCodingTool({
       name: 'write',
-      description:
-        'Create or overwrite a file. Requires approval outside bypass or accept-edits mode.',
+      description: `Create a new file, or replace an existing file whole, with 'content' as its complete new text.
+Use this for new files. Do not use it to change a file that already exists just to alter a few lines: sending a whole file costs output proportional to its size and loses the rest of the file if your copy is stale. Use edit for one fragment and apply_patch for several fragments or several files.
+Overwriting an existing file requires 'expectedContent' to equal its current content exactly; the call fails when 'expectedContent' is missing or stale, which means re-read the file. Parent directories are created as needed. Writing outside the allowed roots fails, and the call requires approval unless the session runs in bypass or accept-edits mode.`,
       discovery: {
         aliases: ['create file', 'overwrite file'],
         risk: 'workspace-write',
@@ -176,11 +182,13 @@ export function createFsTools(
       input: z
         .object({
           filePath: z.string().min(1).describe('File path to write'),
-          content: z.string().describe('File content to write'),
+          content: z.string().describe('Complete new file content'),
           expectedContent: z
             .string()
             .optional()
-            .describe('Expected current content for safe overwrite'),
+            .describe(
+              'Exact current content; required to overwrite an existing file',
+            ),
           reason: z
             .string()
             .optional()
@@ -225,8 +233,10 @@ export function createFsTools(
     }),
     defineCodingTool({
       name: 'edit',
-      description:
-        'Replace a unique text fragment in a file. Fails when the old text is not unique.',
+      description: `Replace one exact text fragment in an existing file. This is the preferred way to change a file that already exists: it sends only the changed region instead of the whole file, so prefer it over write for every modification.
+Read the file first and copy 'oldText' verbatim from what read returned, without the line-number gutter. 'oldText' must appear exactly once in the file, matched literally with no regex and no whitespace normalization; include enough surrounding lines to make it unique. 'newText' replaces it verbatim and may be empty to delete the fragment.
+Failures are precise and recoverable: several occurrences report the count and the line number of each match, zero occurrences report the nearest partial match with its line number and text. Both mean re-read the file or extend 'oldText'; neither is a reason to rewrite the file.
+Boundaries: use write only to create a new file or to replace a file whole; use edit for a single fragment in one file; use apply_patch for several fragments at once, several files in one atomic change, or file creation, deletion, and renames.`,
       discovery: {
         aliases: ['replace text', 'modify file'],
         risk: 'workspace-write',
@@ -234,8 +244,15 @@ export function createFsTools(
       input: z
         .object({
           filePath: z.string().min(1).describe('File path to edit'),
-          oldText: z.string().min(1).describe('Text to find and replace'),
-          newText: z.string().describe('Replacement text'),
+          oldText: z
+            .string()
+            .min(1)
+            .describe(
+              'Exact text to replace, copied from the file and unique within it',
+            ),
+          newText: z
+            .string()
+            .describe('Replacement text; empty deletes the fragment'),
           reason: z.string().optional().describe('Reason for this edit'),
         })
         .strict(),
@@ -256,13 +273,7 @@ export function createFsTools(
       ) => {
         const fs = requireFs(ctx.agent);
         const current = await fs.readText(targetPath);
-        const first = current.indexOf(oldText);
-        if (first === -1) {
-          throw new Error(`Text not found in ${targetPath}`);
-        }
-        if (current.indexOf(oldText, first + oldText.length) !== -1) {
-          throw new Error(`Text is not unique in ${targetPath}`);
-        }
+        const first = locateUniqueMatch(targetPath, current, oldText);
         const next =
           current.slice(0, first) +
           newText +
@@ -286,15 +297,17 @@ export function createFsTools(
     }),
     defineCodingTool({
       name: 'apply_patch',
-      description: `Apply file changes using the structured patch protocol.
-The patch must start with *** Begin Patch and end with *** End Patch. Use explicit *** Add File:, *** Delete File:, or *** Update File: operations. Added file content and inserted update lines start with +; removed lines start with -; unchanged context lines start with a space. Do not use unified diff ---/+++ file headers.
+      description: `Apply file changes using the structured patch protocol. All operations in one patch are previewed in memory and then written together, so a patch either fully applies or changes nothing.
+The patch must start with *** Begin Patch and end with *** End Patch. Use explicit *** Add File:, *** Delete File:, or *** Update File: operations, optionally followed by *** Move to: for a rename. Added file content and inserted update lines start with +; removed lines start with -; unchanged context lines start with a space. Do not use unified diff ---/+++ file headers and do not write @@ -1,4 +1,6 @@ line ranges; a bare @@, or @@ followed by a context line to anchor from, is all that is supported.
+Removed and context lines must reproduce the file's current text, so read the file first. A line whose first character is none of ' ', '+', '-' fails the parse and the error echoes that line. Update hunks that cannot be located fail and the error echoes the expected lines.
 Example:
 *** Begin Patch
 *** Update File: src/example.ts
 @@
 -old line
 +new line
-*** End Patch`,
+*** End Patch
+Boundaries: use write to create a single new file, edit for one fragment in one file, and apply_patch when a change spans several fragments or several files, or when it deletes or renames files.`,
       discovery: {
         aliases: ['patch', 'structured patch', 'multi file edit'],
         risk: 'workspace-write',
@@ -353,6 +366,69 @@ Example:
       },
     }),
   ];
+}
+
+/**
+ * 定位 `oldText` 的唯一匹配位置，非唯一或缺失时抛出可直接行动的错误。
+ *
+ * 唯一性是 edit 的核心不变量：多匹配必须报告数量和全部命中行号，零匹配必须
+ * 报告最接近的部分匹配及其行号，否则调用方只能靠整文件重写绕过。
+ */
+function locateUniqueMatch(
+  targetPath: string,
+  content: string,
+  oldText: string,
+): number {
+  const offsets = collectMatchOffsets(content, oldText);
+  if (offsets.length === 1) {
+    const only = offsets[0];
+    if (only === undefined) {
+      throw new Error(`Match offset list lost its only entry: ${targetPath}`);
+    }
+    return only;
+  }
+  if (offsets.length > 1) {
+    const lines = offsets.map((offset) => lineNumberAt(content, offset));
+    throw new Error(
+      `oldText occurs ${offsets.length} times in ${targetPath}, at lines ${lines.join(', ')}; edit requires exactly one occurrence. Extend oldText with surrounding lines until it is unique, or apply one edit per occurrence.`,
+    );
+  }
+  const firstNeedleLine = oldText.split('\n')[0];
+  if (firstNeedleLine === undefined) {
+    throw new Error(`oldText has no lines to match against ${targetPath}.`);
+  }
+  const nearest = findNearestLine(content.split('\n'), firstNeedleLine);
+  if (nearest === undefined) {
+    throw new Error(
+      `oldText occurs 0 times in ${targetPath} and no line of it matches any line in the file. Re-read ${targetPath} and copy oldText from the returned content; whitespace, indentation, or line endings may differ from what you assumed.`,
+    );
+  }
+  throw new Error(
+    `oldText occurs 0 times in ${targetPath}. Nearest partial match is line ${nearest.line}: ${JSON.stringify(nearest.text)}. Re-read ${targetPath} and copy oldText from the returned content; whitespace, indentation, or line endings may differ from what you assumed.`,
+  );
+}
+
+function collectMatchOffsets(content: string, oldText: string): number[] {
+  const offsets: number[] = [];
+  let from = 0;
+  for (;;) {
+    const found = content.indexOf(oldText, from);
+    if (found === -1) {
+      return offsets;
+    }
+    offsets.push(found);
+    from = found + oldText.length;
+  }
+}
+
+function lineNumberAt(content: string, offset: number): number {
+  let line = 1;
+  for (let index = 0; index < offset; index += 1) {
+    if (content[index] === '\n') {
+      line += 1;
+    }
+  }
+  return line;
 }
 
 /** 读文件，文件不存在时返回 null（供 write 生成 diff 用）。 */
@@ -425,13 +501,7 @@ async function editMetadata(
   ctx: Parameters<DecideApproval>[1],
 ): Promise<Extract<PermissionMetadata, { kind: 'edit' }>> {
   const current = await requireFs(ctx).readText(input.filePath);
-  const first = current.indexOf(input.oldText);
-  if (first === -1) {
-    throw new Error(`Text not found in ${input.filePath}`);
-  }
-  if (current.indexOf(input.oldText, first + input.oldText.length) !== -1) {
-    throw new Error(`Text is not unique in ${input.filePath}`);
-  }
+  const first = locateUniqueMatch(input.filePath, current, input.oldText);
   const next =
     current.slice(0, first) +
     input.newText +

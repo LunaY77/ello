@@ -40,8 +40,6 @@ export type MemoryStatus = ProtocolClientResult<'memory/status'>;
 export type AgentSkill = ProtocolClientResult<'skills/list'>['data'][number];
 export type ModelCatalogEntry =
   ProtocolClientResult<'model/list'>['data'][number];
-export type ProviderCatalogEntry =
-  ProtocolClientResult<'provider/list'>['data'][number];
 export type AgentCatalogEntry =
   ProtocolClientResult<'agent/list'>['data'][number];
 export type WorkspaceSummary =

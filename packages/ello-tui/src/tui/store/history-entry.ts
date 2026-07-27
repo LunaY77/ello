@@ -41,8 +41,7 @@ export type HistoryEntry =
       readonly id: string;
       readonly threadId: string;
       readonly cwd: string;
-      readonly profile: string;
-      readonly model: string;
+      readonly agent: string;
       readonly mode: string;
       readonly version?: string;
     }

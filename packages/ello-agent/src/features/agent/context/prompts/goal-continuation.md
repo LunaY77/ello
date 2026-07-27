@@ -38,6 +38,7 @@ Continuation behavior:
 - Match the verification scope to the requirement's scope; do not use a narrow check to support a broad claim.
 - Treat tests, manifests, verifiers, green checks, and search results as evidence only after confirming they cover the relevant requirement.
 - Treat uncertain or indirect evidence as not achieved; gather stronger evidence or continue the work.
+- A test run counts as evidence only when its process exit code was 0 and its scope was unfiltered. A green summary line read out of filtered output is not evidence; neither is your own recollection of what a run printed.
 - The audit must prove completion, not merely fail to find obvious remaining work.
   Do not rely on intent, partial progress, memory of earlier work, or a plausible final answer as proof of completion. Marking the goal complete is a claim that the full objective has been finished and can withstand requirement-by-requirement scrutiny. Only mark the goal achieved when current evidence proves every requirement has been satisfied and no required work remains. If the evidence is incomplete, weak, indirect, merely consistent with completion, or leaves any requirement missing, incomplete, or unverified, keep working instead of marking the goal complete. If the achieved goal has a token budget, report the final consumed token budget to the user after `update_goal` succeeds.
   Blocked audit:

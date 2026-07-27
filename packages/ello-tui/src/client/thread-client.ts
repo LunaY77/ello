@@ -176,14 +176,6 @@ export class ThreadClient {
     await this.updateSettings({ mode });
   }
 
-  async setProfile(profile: string): Promise<void> {
-    await this.updateSettings({ profile });
-  }
-
-  async setModel(model: string): Promise<void> {
-    await this.updateSettings({ model });
-  }
-
   async startNewThread(): Promise<ThreadClient> {
     const snapshot = await this.server.request('thread/start', {
       cwd: this.cwd,

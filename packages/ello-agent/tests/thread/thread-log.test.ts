@@ -137,7 +137,7 @@ describe('ThreadLogStore', () => {
       'seq gap',
       (content: string) =>
         `${content}${JSON.stringify({
-          schema: 1,
+          schema: 2,
           seq: 3,
           threadId,
           createdAt: new Date().toISOString(),
@@ -232,8 +232,6 @@ function createThread(repository: ThreadLogStore) {
     name: 'test',
     settings: {
       mode: 'ask-before-changes',
-      profile: 'main',
-      model: 'test:model',
       agent: 'primary',
     },
     metadata: {},

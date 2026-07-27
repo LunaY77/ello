@@ -8,6 +8,7 @@ ello 是一个进程隔离的 coding agent TypeScript workspace。`@ello/agent` 
 
 - [`@ello/agent`](packages/ello-agent/README-zh.md) —— Server：模型执行、工具、权限、存储、工作区、技能、记忆和协议。
 - [`@ello/tui`](packages/ello-tui/README.md) —— Client：CLI、Ink TUI、本地 stdio、WebSocket 和 Unix transport。
+- [`@ello/bench`](packages/ello-bench/README-zh.md) —— Benchmark：可复现任务执行、Docker 隔离、证据归档、verifier 评分、恢复和报告。
 
 ## 架构
 
@@ -26,7 +27,7 @@ flowchart TD
 
 ## 快速开始
 
-环境要求：Node.js 22+、pnpm 10+。
+环境要求：Node.js 24+、pnpm 11.11.0。
 
 ```bash
 pnpm install

@@ -9,6 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { createApp } from './app.js';
+import type { AgentRuntime } from './features/agent/contracts.js';
+import { createRuntimeEnvironment } from './features/environment/index.js';
+import { createTurnTracing } from './infra/telemetry/turn-tracing.js';
 import type { Capability } from './protocol/v1/index.js';
 import {
   listenEndpoint,
@@ -52,6 +55,7 @@ export async function runAppServer(
   const capabilities = parseCapabilities(values.capabilities);
   const server = await createApp({
     transports: [kind],
+    agentRuntime: createProductionAgentRuntime(),
     ...(values.root === undefined ? {} : { root: values.root }),
   });
   let stopping = false;
@@ -92,6 +96,20 @@ export async function runAppServer(
     process.off('SIGTERM', onSigterm);
     process.off('SIGINT', onSigint);
   }
+}
+
+function createProductionAgentRuntime(): AgentRuntime {
+  return {
+    createEnvironment: ({ config, permission, skillReadRoots }) =>
+      createRuntimeEnvironment(
+        config,
+        () => permission.rules(),
+        () => permission.externalPaths(),
+        skillReadRoots,
+      ),
+    createTracing: ({ config, threadId }) =>
+      createTurnTracing(config.observability?.langfuse, threadId),
+  };
 }
 
 function endpointKind(listen: string): 'stdio' | 'websocket' | 'unix' {

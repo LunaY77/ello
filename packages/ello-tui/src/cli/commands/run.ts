@@ -14,8 +14,6 @@ export function registerRunCommands(program: Command): void {
     .command('run [prompt...]')
     .description('start a thread turn')
     .option('--thread <threadId>')
-    .option('--model <model>')
-    .option('--profile <profile>')
     .option(
       '--mode <mode>',
       'ask-before-changes, accept-edits, plan, or bypass',
@@ -90,8 +88,6 @@ export async function runPrompt(
   prompt: string,
   options: GlobalCliOptions & {
     thread?: string;
-    model?: string;
-    profile?: string;
     mode?: string;
   },
 ): Promise<void> {
@@ -136,8 +132,6 @@ export async function runPrompt(
       notifications.push(notification);
       if (options.json === true) writeJson(notification);
     });
-    if (options.model !== undefined) await thread.setModel(options.model);
-    if (options.profile !== undefined) await thread.setProfile(options.profile);
     if (options.mode !== undefined) {
       await thread.setMode(parseMode(options.mode));
     }

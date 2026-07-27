@@ -163,7 +163,7 @@ export const SERVER_NOTIFICATION_SCHEMAS = {
       details: z.record(z.string(), JsonValueSchema).optional(),
     })
     .strict(),
-  'server/ready': z.object({ protocolVersion: z.literal(1) }).strict(),
+  'server/ready': z.object({ protocolVersion: z.literal(2) }).strict(),
 } as const;
 
 export type ClientNotificationMethod = keyof typeof CLIENT_NOTIFICATION_SCHEMAS;

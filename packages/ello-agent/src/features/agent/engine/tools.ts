@@ -6,7 +6,7 @@
  */
 
 import { tool, type ToolSet } from 'ai';
-import type { z } from 'zod';
+import { ZodError, type z } from 'zod';
 
 import type { AgentError } from './contracts.js';
 import type { AgentEnvironment } from './contracts.js';
@@ -63,6 +63,13 @@ export interface AgentTool<TInput = unknown, TOutput = unknown> {
   /** 工具发现信息必须随工具定义声明，不能由名称或独立 registry 推断。 */
   readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<TInput>;
+  /**
+   * 声明该工具可与同批次的其他 `parallel` 工具并发执行。
+   *
+   * 只有无副作用、且不依赖同批其他调用结果的工具才能声明。写文件、执行命令、
+   * 需要人工审批的工具必须省略此字段，由调度器串行执行以保证顺序与审批语义。
+   */
+  readonly concurrency?: 'parallel';
   /**
    * 在 产品 Agent Agent engine 工具执行 模块 中执行 `execute` 完整流程，并在返回前完成其必要副作用。
    *
@@ -160,6 +167,7 @@ export interface DefineToolOptions<TInput, TOutput> {
     ctx: AgentToolContext,
   ) => MaybePromise<TOutput>;
   readonly approval?: AgentTool<TInput, TOutput>['approval'];
+  readonly concurrency?: AgentTool<TInput, TOutput>['concurrency'];
 }
 
 /**
@@ -181,6 +189,9 @@ export function defineTool<TInput, TOutput>(
     discovery: options.discovery,
     input: options.input,
     execute: options.execute,
+    ...(options.concurrency === undefined
+      ? {}
+      : { concurrency: options.concurrency }),
     ...(options.approval !== undefined ? { approval: options.approval } : {}),
   };
 }
@@ -205,6 +216,9 @@ export function defineAnyTool<TInput, TOutput>(
     discovery: options.discovery,
     input: options.input,
     execute: (input, ctx) => options.execute(options.input.parse(input), ctx),
+    ...(options.concurrency === undefined
+      ? {}
+      : { concurrency: options.concurrency }),
     ...(approval === undefined
       ? {}
       : {
@@ -212,6 +226,68 @@ export function defineAnyTool<TInput, TOutput>(
             approval(options.input.parse(input), ctx),
         }),
   };
+}
+
+/**
+ * 用工具自带 schema 解析模型给出的参数，并把校验失败翻译成自然语言。
+ *
+ * 模型只能读到 tool-result 文本，原始 ZodError 的 JSON issue 数组要求它反解
+ * Zod 内部字段才能知道哪个参数越界；因此边界上必须输出「参数名 + 约束」句子。
+ *
+ * Args:
+ * - `toolInput`: 该工具声明的输入 schema；是擦除类型后恢复具体输入的唯一运行时边界。
+ * - `toolName`: 目标工具名；出现在错误句子中供模型定位重试对象。
+ * - `input`: 模型给出的原始参数；未通过校验时不会被部分接受。
+ *
+ * Returns:
+ * - 返回通过 schema 校验的参数；返回值不包含未声明的兜底状态。
+ *
+ * Throws:
+ * - 校验失败时抛出携带自然语言说明的错误，并保留原始 ZodError 作为 cause。
+ */
+export function parseToolInput(
+  toolInput: z.ZodType<unknown>,
+  toolName: string,
+  input: unknown,
+): unknown {
+  try {
+    return toolInput.parse(input);
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new Error(
+        `Invalid arguments for tool '${toolName}': ${describeZodIssues(error)}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * 把 ZodError 的全部 issue 渲染成一句自然语言说明。
+ *
+ * Args:
+ * - `error`: schema 校验失败产生的 ZodError；至少包含一个 issue。
+ *
+ * Returns:
+ * - 返回 `describeZodIssues` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ *
+ * Throws:
+ * - ZodError 不含任何 issue 时直接抛错，说明校验结果本身不满足契约。
+ */
+export function describeZodIssues(error: ZodError): string {
+  if (error.issues.length === 0) {
+    throw new Error('ZodError carries no issues to describe.');
+  }
+  return error.issues
+    .map((issue) => {
+      const target =
+        issue.path.length === 0
+          ? 'the arguments object'
+          : `'${issue.path.join('.')}'`;
+      return `${target} is invalid: ${issue.message}`;
+    })
+    .join('; ');
 }
 
 export interface DefineDeferredToolOptions<TInput> {

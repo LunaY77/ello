@@ -9,8 +9,7 @@ import { presenterFor } from '../../src/tui/presenters/index.js';
 import { overlayCallbacks } from '../support/overlay-fixture.js';
 
 const DISPLAY_SETTINGS = {
-  profile: 'main',
-  model: 'openai-chat:test',
+  agent: 'build',
   mode: 'ask-before-changes',
 } as const;
 
@@ -58,8 +57,7 @@ describe('TerminalHistoryOutput', () => {
             id: 'header',
             threadId: 'thread-header',
             cwd: '/tmp/ello-workspace',
-            profile: 'main',
-            model: 'openai-chat:test',
+            agent: 'build',
             mode: 'ask',
           },
         ]}
@@ -68,9 +66,8 @@ describe('TerminalHistoryOutput', () => {
     );
 
     expect(output).toContain('Ello Coding Agent');
-    expect(output).toContain('profile: main');
     expect(output).toContain('directory: /tmp/ello-workspace');
-    expect(output).toContain('model: openai-chat:test');
+    expect(output).toContain('agent: build');
     expect(output).toContain('mode: ask-before-changes');
   });
 
@@ -214,6 +211,38 @@ describe('AppShell', () => {
     expect(output).not.toContain('Ello Coding Agent');
     expect(output).toContain('main');
     expect(output).toContain('bypass');
+  });
+
+  it('keeps model references separate from runtime status on narrow terminals', () => {
+    const output = renderToString(
+      <AppShell
+        cwd="/workspace"
+        model="primary: deepseek-v4-pro · auxiliary: deepseek-v4-flash"
+        mode={{ mode: 'bypass' }}
+        contextPercent={100}
+        usage={{
+          requests: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          toolCalls: 0,
+        }}
+        liveAssistantText=""
+        runningTools={[]}
+        runningSubagents={[]}
+        running={false}
+        overlay={null}
+        composer={null}
+      />,
+      { columns: 60 },
+    );
+
+    expect(output).toContain('primary: deepseek-v4-pro');
+    expect(output).toContain('auxiliary: deepseek-v4-flash');
+    expect(output.split('\n').some((line) =>
+      line.includes('auxiliary:') && line.includes('bypass'),
+    )).toBe(false);
   });
 
   it('shows running status in the live viewport', () => {

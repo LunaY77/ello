@@ -27,6 +27,10 @@ import {
   type EngineEvent,
 } from './events.js';
 import { normalizeInput } from './messages.js';
+import {
+  availableModelInputTokens,
+  type MessageBudgetAnchor,
+} from './model-input.js';
 import type {
   AgentMessage,
   AgentModelResponse,
@@ -194,7 +198,7 @@ export interface RunState {
   readonly tools: ReturnType<typeof buildToolSet>;
   readonly toolScheduler: ToolScheduler;
   readonly events: AgentEventDispatcher;
-  readonly maxTurns: number;
+  readonly maxTurns: number | undefined;
   initialHistoryLength: number;
   resumeForFirstTurn: DeferredRunResults | undefined;
   turns: import('./contracts.js').AgentTurnDiagnostics[];
@@ -204,6 +208,8 @@ export interface RunState {
   stopReason: LoopStopReason;
   lastTurnNewMessages: AgentMessage[];
   lastTurnResponse: AgentModelResponse | undefined;
+  /** 跨回合共享的前缀锚点，保证 provider 缓存断点下标稳定。 */
+  readonly messageBudgetAnchor: MessageBudgetAnchor;
 }
 
 /**
@@ -226,6 +232,13 @@ export function createRunState(options: {
   readonly environment: AgentEnvironment;
   readonly modelAdapter: ModelAdapter;
 }): RunState {
+  const maxTurns = options.runOptions.maxTurns;
+  if (
+    maxTurns !== undefined &&
+    (!Number.isInteger(maxTurns) || maxTurns <= 0)
+  ) {
+    throw new Error('maxTurns must be a positive integer.');
+  }
   const abortController = new AbortController();
   bridgeAbortSignal(options.runOptions.signal, abortController);
   const runId = options.runOptions.runId ?? randomUUID();
@@ -299,7 +312,7 @@ export function createRunState(options: {
     tools,
     toolScheduler,
     events,
-    maxTurns: Math.max(1, options.runOptions.maxTurns ?? 8),
+    maxTurns,
     initialHistoryLength: 0,
     resumeForFirstTurn: undefined,
     turns: [],
@@ -309,6 +322,7 @@ export function createRunState(options: {
     stopReason: 'no-progress',
     lastTurnNewMessages: [],
     lastTurnResponse: undefined,
+    messageBudgetAnchor: { index: 0 },
   };
 }
 
@@ -351,7 +365,10 @@ export async function initializeRunState(run: RunState): Promise<void> {
  * - 返回谓词判断结果；`true` 与 `false` 分别对应声明中的满足与不满足状态。
  */
 export function canBeginRunTurn(run: RunState): boolean {
-  return run.turns.length < run.maxTurns && run.stopReason !== 'error';
+  return (
+    (run.maxTurns === undefined || run.turns.length < run.maxTurns) &&
+    run.stopReason !== 'error'
+  );
 }
 
 /**
@@ -480,7 +497,7 @@ export function shouldStopRun(run: RunState): boolean {
     run.stopReason = 'waiting-tool-result';
     return true;
   }
-  if (run.turns.length >= run.maxTurns) {
+  if (run.maxTurns !== undefined && run.turns.length >= run.maxTurns) {
     run.stopReason = 'max-turns';
     return true;
   }
@@ -617,12 +634,13 @@ async function compactRunMessages(
 ): Promise<ReadonlyArray<MessageCompactionReport>> {
   const compactor = run.config.compactor;
   if (compactor === undefined) return [];
-  const contextWindow = run.config.modelInputBudget?.maxInputTokens;
-  if (contextWindow === undefined) {
+  const modelInputBudget = run.config.modelInputBudget;
+  if (modelInputBudget === undefined) {
     throw new Error(
       'Message compaction requires modelInputBudget.maxInputTokens.',
     );
   }
+  const contextWindow = availableModelInputTokens(modelInputBudget);
   const compacted = await compactor.compact({
     messages: [...run.state.messages],
     contextWindow,

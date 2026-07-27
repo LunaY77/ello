@@ -45,9 +45,9 @@ export function BottomDock({
       >
         {composer}
       </Box>
-      <Box justifyContent="space-between">
+      <Box flexDirection="column">
+        <Text color={theme.textMuted}>{model}</Text>
         <Box gap={1}>
-          <Text color={theme.textMuted}>{model}</Text>
           <Text color={modeColor(theme, mode.mode)}>
             {modeLabel(mode.mode)}
           </Text>

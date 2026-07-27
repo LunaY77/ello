@@ -69,7 +69,10 @@ describe('observability contract', () => {
     expect(generation?.attributes).toMatchObject({
       'langfuse.observation.type': 'generation',
       'langfuse.observation.model.name': 'model-a',
-      'ello.model.provider': 'test',
+      'ello.model.protocol': 'openai',
+      'ello.model.selector': 'primary_model',
+      'ello.model.configured': 'model-a',
+      'ello.model.api': 'model-a',
       'ello.model.fingerprints': JSON.stringify(diagnostics),
       'ello.model.finish_reason': 'stop',
     });
@@ -165,8 +168,11 @@ function successfulEvents(): EngineEvent[] {
     runId: 'run_obs',
     turnIndex: 0,
     modelCallId: 'model_call_obs',
-    provider: 'test',
-    model: 'model-a',
+    agentName: 'build',
+    modelSelector: 'primary_model' as const,
+    configuredModel: 'model-a',
+    protocol: 'openai' as const,
+    apiModel: 'model-a',
   };
   const metadata = (sequence: number) => ({
     runId: 'run_obs',
@@ -183,7 +189,7 @@ function successfulEvents(): EngineEvent[] {
       request: {
         runId: 'run_obs',
         model: 'test:model-a',
-        system: 'private prompt',
+        instructions: 'private prompt',
         messages: [{ role: 'user', content: 'Bearer secret-token' }],
         tools: {},
         modelSettings: {},

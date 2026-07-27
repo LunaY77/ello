@@ -1,8 +1,5 @@
 /**
- * 本文件验证 config 覆盖的运行时行为契约。
- *
- * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
- * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ * 验证配置文件初始化、分层加载、模型引用与跨字段校验的公开契约。
  */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,7 +7,6 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { AgentToolContext } from '../../src/features/agent/engine/index.js';
 import {
   ensureGlobalConfig,
   ensureProjectConfig,
@@ -27,10 +23,7 @@ import {
   parseYamlConfig,
   stringifyYamlConfig,
 } from '../../src/features/config/yaml.js';
-import { createProviderRegistry } from '../../src/features/model/providers/catalog/index.js';
-import { createCodingTools } from '../../src/features/tool/internal/index.js';
-import { makeApprovalPolicy } from '../../src/features/tool/permissions/policy.js';
-import { createTestStores } from '../support/stores.js';
+import { createModelRegistry } from '../../src/features/model/providers/catalog/index.js';
 
 describe('loadCodingAgentConfig', () => {
   let previousHome: string | undefined;
@@ -45,536 +38,215 @@ describe('loadCodingAgentConfig', () => {
   });
 
   afterEach(async () => {
-    if (previousHome === undefined) {
-      delete process.env.ELLO_HOME;
-    } else {
-      process.env.ELLO_HOME = previousHome;
-    }
+    if (previousHome === undefined) delete process.env.ELLO_HOME;
+    else process.env.ELLO_HOME = previousHome;
     await rm(home, { recursive: true, force: true });
     await rm(cwd, { recursive: true, force: true });
   });
 
-  it('初始化时复制 YAML profile suite 模板', async () => {
+  it('initializes a named model directory and two explicit references', async () => {
     await ensureGlobalConfig();
 
     const globalConfig = await readFile(globalConfigPath(), 'utf8');
-    expect(globalConfig).toContain('active_profile: main');
-    expect(globalConfig).toContain('workspace:');
-    expect(globalConfig).toContain('mount: ~/.ello');
-    expect(globalConfig).toContain('provider:');
-    expect(globalConfig).toContain('openai:');
-    expect(globalConfig).toContain('anthropic:');
-    expect(globalConfig).not.toContain('openai-compatible:');
-    expect(globalConfig).toContain('profile:');
-    expect(globalConfig).toContain('primary: openai/gpt-5.5');
-    expect(globalConfig).toContain('compact: openai/gpt-5.4');
-    expect(globalConfig).toContain('review: anthropic/claude-sonnet-4.6');
+    expect(globalConfig).toContain('models:');
+    expect(globalConfig).toContain('primary_model: openai-gpt-5.5');
+    expect(globalConfig).toContain('auxiliary_model: openai-gpt-5.4');
+    expect(globalConfig).not.toContain('active_profile');
+    expect(globalConfig).not.toContain('\nprofile:');
     expect(await readFile(globalMcpPath(), 'utf8')).toContain('"servers"');
   });
 
-  it('默认配置只内置指定的 OpenAI 和 Anthropic 模型', async () => {
+  it('resolves a selected reference through the complete model directory', async () => {
     const previous = process.env.OPENAI_API_KEY;
     process.env.OPENAI_API_KEY = 'test-openai-key';
     try {
       const config = await loadCodingAgentConfig({ cwd });
-      const registry = createProviderRegistry(config);
+      const registry = createModelRegistry(config);
 
-      expect(config.active_profile).toBe('main');
-      expect(config.workspace.mount).toBe('~/.ello');
-      expect(registry.getProvider('openai').apiKey).toBe('test-openai-key');
-      expect(
-        registry
-          .listModels()
-          .map((model) => model.ref)
-          .sort(),
-      ).toEqual([
-        'anthropic/claude-haiku-4.5',
-        'anthropic/claude-opus-4.6',
-        'anthropic/claude-opus-4.7',
-        'anthropic/claude-opus-4.8',
-        'anthropic/claude-sonnet-4.6',
-        'openai/gpt-5.4',
-        'openai/gpt-5.5',
-      ]);
-      expect(registry.resolveRole('main', 'primary').ref).toBe(
-        'openai/gpt-5.5',
-      );
-      expect(registry.resolveRole('main', 'compact').ref).toBe(
-        'openai/gpt-5.4',
-      );
-      expect(registry.resolveRole('main', 'review').ref).toBe(
-        'anthropic/claude-sonnet-4.6',
-      );
-    } finally {
-      if (previous === undefined) {
-        delete process.env.OPENAI_API_KEY;
-      } else {
-        process.env.OPENAI_API_KEY = previous;
-      }
-    }
-  });
-
-  it('按目标创建项目 YAML 配置文件', async () => {
-    await ensureProjectConfig(cwd);
-
-    expect(projectConfigPath(cwd).endsWith('config.yaml')).toBe(true);
-    expect(await readFile(projectConfigPath(cwd), 'utf8')).toBe('');
-  });
-
-  it('round-trips provider/models/profile suite YAML', () => {
-    const text = stringifyYamlConfig({
-      active_profile: 'fast',
-      provider: {
-        hiyo: {
-          enabled: true,
-          kind: 'openai',
-          api_key_env: 'HIYO_API_KEY',
-          base_url: 'https://codex.hiyo.top',
-          options: {},
-          headers: { 'x-ello': '1' },
-        },
-      },
-      models: {
-        hiyo: {
-          flash: customModel('hiyo', 'flash', 'chat'),
-        },
-      },
-      profile: {
-        fast: customProfile('hiyo/flash'),
-      },
-    });
-    expect(text).toContain('provider:');
-    expect(text).toContain('x-ello: "1"');
-    expect(parseYamlConfig(text)).toMatchObject({
-      active_profile: 'fast',
-      provider: {
-        hiyo: {
-          base_url: 'https://codex.hiyo.top',
-          headers: { 'x-ello': '1' },
-        },
-      },
-      models: {
-        hiyo: {
-          flash: {
-            provider: 'hiyo',
-            endpoint: 'chat',
-          },
-        },
-      },
-      profile: {
-        fast: {
-          models: {
-            primary: 'hiyo/flash',
-          },
-        },
-      },
-    });
-  });
-
-  it('从全局 profile suite 解析项目 provider/model', async () => {
-    await writeProjectConfig({
-      provider: {
-        hiyo: {
-          enabled: true,
-          kind: 'openai',
-          api_key_env: 'HIYO_API_KEY',
-          base_url: 'https://codex.hiyo.top',
-          headers: {},
-          options: {},
-        },
-      },
-      models: {
-        hiyo: {
-          fast: customModel('hiyo', 'fast', 'chat'),
-          deep: customModel('hiyo', 'deep', 'responses'),
-        },
-      },
-    });
-    await writeGlobalConfig({
-      active_profile: 'deep',
-      profile: {
-        deep: {
-          models: {
-            primary: 'hiyo/deep',
-            small: 'hiyo/fast',
-            compact: 'hiyo/fast',
-            title: 'hiyo/fast',
-            review: 'hiyo/deep',
-          },
-          settings: {
-            primary: { reasoning_effort: 'high' },
-            compact: { reasoning_effort: 'low' },
-          },
-        },
-      },
-    });
-
-    const config = await loadCodingAgentConfig({ cwd });
-    const registry = createProviderRegistry(config);
-
-    expect(config.active_profile).toBe('deep');
-    expect(registry.resolveRole('deep', 'primary').ref).toBe('hiyo/deep');
-    expect(registry.resolveRole('deep', 'compact').ref).toBe('hiyo/fast');
-    expect(
-      registry.resolveRole('deep', 'primary').settings.reasoningEffort,
-    ).toBe('high');
-  });
-
-  it('项目级 profile 配置直接报错', async () => {
-    await writeProjectConfig({
-      profile: {
-        deep: customProfile('openai/gpt-5.5'),
-      },
-    });
-
-    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
-      'Project config must not define profile',
-    );
-  });
-
-  it('项目级 active_profile 配置直接报错', async () => {
-    await writeProjectConfig({ active_profile: 'main' });
-
-    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
-      'Project config must not define active_profile',
-    );
-  });
-
-  it('项目级 default_agent 配置直接报错', async () => {
-    await writeProjectConfig({ default_agent: 'plan' });
-
-    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
-      'Project config must not define default_agent',
-    );
-  });
-
-  it('解析并应用 tools 与顶层运行配置', async () => {
-    await writeGlobalConfig({
-      active_profile: 'main',
-      initial_mode: 'plan',
-      tui: false,
-      tools: {
-        disabled: ['grep'],
-        need_approval: ['bash'],
-        routing_enabled: false,
-        search: {
-          result_limit: 4,
-          max_result_bytes: 12000,
-        },
-      },
-    });
-
-    const config = await loadCodingAgentConfig({ cwd });
-
-    expect(config.initial_mode).toBe('plan');
-    expect(config.tui).toBe(false);
-    expect(config.tools).toEqual({
-      disabled: ['grep'],
-      need_approval: ['bash'],
-      routing_enabled: false,
-      search: {
-        result_limit: 4,
-        max_result_bytes: 12000,
-      },
-    });
-
-    const storage = createTestStores({ databasePath: ':memory:' });
-    try {
-      const tools = createCodingTools({
-        config,
-        taskBoards: storage.taskBoards,
-        taskBoardScope: { type: 'session', sessionId: 'config-test' },
-        mode: () => ({
-          mode: 'ask-before-changes',
-          previousMode: null,
-          source: 'resume',
-          changedAt: new Date(0).toISOString(),
-        }),
+      expect(config.primary_model).toBe('openai-gpt-5.5');
+      expect(config.auxiliary_model).toBe('openai-gpt-5.4');
+      expect(config.context).toMatchObject({
+        max_input_tokens: 1_000_000,
+        reserved_output_tokens: 64_000,
       });
-      expect(tools.map((tool) => tool.name)).not.toContain('grep');
+      expect(registry.listModels().map((model) => model.name)).toEqual([
+        'openai-gpt-5.4',
+        'openai-gpt-5.5',
+      ]);
+      expect(registry.resolveSelector('primary_model')).toMatchObject({
+        name: 'openai-gpt-5.5',
+        apiModel: 'gpt-5.5',
+        protocol: 'openai',
+        endpoint: 'responses',
+      });
+      expect(registry.resolveSelector('auxiliary_model')).toMatchObject({
+        name: 'openai-gpt-5.4',
+        apiModel: 'gpt-5.4',
+      });
     } finally {
-      storage.close();
+      if (previous === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previous;
     }
-
-    const decide = makeApprovalPolicy(
-      config,
-      () => [
-        {
-          permission: 'bash',
-          pattern: '**',
-          action: 'allow',
-          scope: 'session',
-        },
-      ],
-      () => ({
-        mode: 'ask-before-changes',
-        previousMode: null,
-        source: 'resume',
-        changedAt: new Date(0).toISOString(),
-      }),
-    );
-    expect(
-      decide(
-        {
-          permission: 'bash',
-          patterns: ['echo ok'],
-          always: ['echo ok'],
-          metadata: {
-            kind: 'shell',
-            command: 'echo ok',
-            cwd,
-            risk: 'normal',
-          },
-        },
-        {} as AgentToolContext,
-      ),
-    ).toMatchObject({ action: 'required' });
   });
 
-  it('camelCase 配置键直接校验失败', async () => {
-    await mkdir(path.dirname(globalConfigPath()), { recursive: true });
-    await writeFile(
-      globalConfigPath(),
-      'initialMode: default\nbypassEnabled: false\n',
-      'utf8',
-    );
-
-    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
-      'initial_mode',
-    );
-  });
-
-  it('initial_mode bypass 必须显式开启 bypass_enabled', async () => {
+  it('permits both references to name the same explicit model', async () => {
     await writeGlobalConfig({
-      active_profile: 'main',
-      initial_mode: 'bypass',
-      bypass_enabled: false,
+      models: { solo: model('openai', 'solo', 'responses') },
+      primary_model: 'solo',
+      auxiliary_model: 'solo',
     });
 
-    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
-      'bypass_enabled must be true',
-    );
-  });
-
-  it('tools 未配置时使用完整默认值', async () => {
-    await writeGlobalText(['active_profile: main', '']);
-
-    const config = await loadCodingAgentConfig({ cwd });
-
-    expect(config.tools).toEqual({
-      disabled: [],
-      need_approval: [],
-      routing_enabled: false,
-      search: { result_limit: 6, max_result_bytes: 24000 },
+    await expect(loadCodingAgentConfig({ cwd })).resolves.toMatchObject({
+      primary_model: 'solo',
+      auxiliary_model: 'solo',
     });
   });
 
-  it('支持按 source 读取和 dotted path 写入', async () => {
-    await setConfigValue(
-      cwd,
-      'project',
-      'provider.openai.headers.x-ello',
-      'yes',
-    );
-
-    expect(
-      await getConfigValue(cwd, 'provider.openai.headers.x-ello', 'project'),
-    ).toBe('yes');
-    expect(await readFile(projectConfigPath(cwd), 'utf8')).toContain(
-      'x-ello: yes',
-    );
-  });
-
-  it('路径级写入 YAML 时保留未触达注释', async () => {
-    await writeGlobalText([
-      '# header comment',
-      'active_profile: main',
-      '# profile comment',
-      'profile:',
-      '  main:',
-      '    label: Main',
-      '    description: main profile',
-      '    models:',
-      '      primary: openai/gpt-5.5',
-      '      small: openai/gpt-5.4',
-      '      compact: openai/gpt-5.4',
-      '      title: openai/gpt-5.4',
-      '      review: anthropic/claude-sonnet-4.6',
-      '',
-    ]);
-
-    await setConfigValue(cwd, 'global', 'active_profile', 'main');
-
-    const text = await readFile(globalConfigPath(), 'utf8');
-    expect(text).toContain('# header comment');
-    expect(text).toContain('# profile comment');
-  });
-
-  it('支持原子写入 active_profile 与完整 profile map', async () => {
-    await ensureGlobalConfig();
-    const config = await setConfigValues(cwd, 'global', [
-      { key: 'active_profile', value: 'deep' },
-      {
-        key: 'profile',
-        value: {
-          deep: customProfile('openai/gpt-5.5'),
+  it('rejects context reservations that exceed a selected model window', async () => {
+    await writeGlobalConfig({
+      models: {
+        small: {
+          ...model('openai', 'small', 'responses'),
+          context_window: 8_000,
+          max_output_tokens: 4_000,
         },
       },
-    ]);
+      primary_model: 'small',
+      auxiliary_model: 'small',
+    });
 
-    expect(config.active_profile).toBe('deep');
-    expect(Object.keys(config.profile)).toEqual(['deep']);
-    expect(
-      createProviderRegistry(config).resolveRole('deep', 'primary').ref,
-    ).toBe('openai/gpt-5.5');
+    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
+      "reserved_tokens: must be below effective input capacity 4000 for model 'small'",
+    );
   });
 
-  it('候选配置校验失败时不替换旧文件', async () => {
+  it('round-trips named models without provider or profile suites', () => {
+    const pro = {
+      ...model('anthropic', 'vendor-pro'),
+      http_headers: { 'X-Gateway-Route': 'benchmark' },
+    };
+    const text = stringifyYamlConfig({
+      models: {
+        pro,
+        flash: model('openai-compatible', 'vendor-flash', 'chat'),
+      },
+      primary_model: 'pro',
+      auxiliary_model: 'flash',
+    });
+
+    expect(parseYamlConfig(text)).toEqual({
+      models: {
+        pro,
+        flash: model('openai-compatible', 'vendor-flash', 'chat'),
+      },
+      primary_model: 'pro',
+      auxiliary_model: 'flash',
+    });
+  });
+
+  it('rejects project model configuration and default agent selection', async () => {
+    for (const key of [
+      'models',
+      'primary_model',
+      'auxiliary_model',
+      'default_agent',
+    ] as const) {
+      await writeProjectConfig({ [key]: key === 'models' ? {} : 'value' });
+      await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
+        `Project config must not define ${key}`,
+      );
+    }
+  });
+
+  it('rejects legacy profile fields and malformed protocol branches', async () => {
+    await writeGlobalConfig({ profile: { main: {} } });
+    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow('profile');
+
+    await writeGlobalConfig({
+      models: {
+        invalidOpenAi: {
+          ...model('openai', 'invalid', 'responses'),
+          endpoint: undefined,
+        },
+      },
+      primary_model: 'invalidOpenAi',
+      auxiliary_model: 'invalidOpenAi',
+    });
+    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow('endpoint');
+
+    await writeGlobalConfig({
+      models: {
+        invalidAnthropic: {
+          ...model('anthropic', 'invalid'),
+          endpoint: 'chat',
+        },
+      },
+      primary_model: 'invalidAnthropic',
+      auxiliary_model: 'invalidAnthropic',
+    });
+    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow('endpoint');
+
+    await writeGlobalConfig({
+      models: {
+        invalidAnthropic: {
+          ...model('anthropic', 'invalid'),
+          auth_scheme: undefined,
+        },
+      },
+      primary_model: 'invalidAnthropic',
+      auxiliary_model: 'invalidAnthropic',
+    });
+    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow('auth_scheme');
+
+    await writeGlobalConfig({
+      models: {
+        invalidHeader: {
+          ...model('anthropic', 'invalid'),
+          auth_scheme: 'bearer',
+          http_headers: { Authorization: 'Bearer another-key' },
+        },
+      },
+      primary_model: 'invalidHeader',
+      auxiliary_model: 'invalidHeader',
+    });
+    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
+      'must not override provider authentication header authorization',
+    );
+  });
+
+  it('rejects an unknown reference before committing a config write', async () => {
     await ensureGlobalConfig();
     const before = await readFile(globalConfigPath(), 'utf8');
 
     await expect(
-      writeConfigPath(cwd, 'global', ['context', 'reserved_output_tokens'], {
-        type: 'set',
-        value: 200_000,
-      }),
-    ).rejects.toThrow('must be below max_input_tokens');
-
-    await expect(readFile(globalConfigPath(), 'utf8')).resolves.toBe(before);
-    await expect(loadCodingAgentConfig({ cwd })).resolves.toMatchObject({
-      context: { reserved_output_tokens: 8_000 },
-    });
-
-    await expect(
-      writeConfigPath(cwd, 'global', ['profile', 'main', 'models', 'primary'], {
-        type: 'set',
-        value: 'missing/model',
-      }),
+      setConfigValue(cwd, 'global', 'primary_model', 'missing'),
     ).rejects.toThrow('references unknown model');
     await expect(readFile(globalConfigPath(), 'utf8')).resolves.toBe(before);
   });
 
-  it('profile 引用未知模型时直接报错', async () => {
-    await writeGlobalConfig({
-      active_profile: 'bad',
-      profile: {
-        bad: customProfile('missing/model'),
-      },
-    });
+  it('writes both model references atomically and reads dotted model fields', async () => {
+    await ensureGlobalConfig();
+    const config = await setConfigValues(cwd, 'global', [
+      { key: 'primary_model', value: 'openai-gpt-5.4' },
+      { key: 'auxiliary_model', value: 'openai-gpt-5.5' },
+    ]);
+    expect(config.primary_model).toBe('openai-gpt-5.4');
+    expect(await getConfigValue(cwd, 'primary_model')).toBe('openai-gpt-5.4');
 
-    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
-      'references unknown model',
-    );
+    await expect(
+      writeConfigPath(
+        cwd,
+        'global',
+        ['models', 'openai-gpt-5.5', 'max_output_tokens'],
+        { type: 'set', value: 500_000 },
+      ),
+    ).rejects.toThrow('must not exceed context_window');
   });
 
-  it('model table provider 与路径不一致时直接报错', async () => {
-    await writeProjectConfig({
-      models: {
-        openai: {
-          bad: {
-            ...customModel('anthropic', 'bad', 'responses'),
-            temperature: false,
-            reasoning: false,
-          },
-        },
-      },
-    });
-    await writeGlobalConfig({
-      active_profile: 'bad',
-      profile: {
-        bad: customProfile('openai/bad'),
-      },
-    });
-
-    await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
-      'declares provider anthropic; expected openai',
-    );
-  });
-
-  it('支持用户自定义 OpenAI-compatible provider 与模型', async () => {
-    await writeProjectConfig({
-      provider: {
-        gateway: {
-          enabled: true,
-          kind: 'openai-compatible',
-          api_key_env: 'GATEWAY_API_KEY',
-          base_url: 'https://gateway.example.test/v1',
-          headers: {},
-          options: {},
-        },
-      },
-      models: {
-        gateway: {
-          'deepseek-v4-flash': customModel(
-            'gateway',
-            'deepseek-v4-flash',
-            'chat',
-          ),
-        },
-      },
-    });
-    await writeGlobalConfig({
-      active_profile: 'gateway',
-      profile: {
-        gateway: customProfile('gateway/deepseek-v4-flash'),
-      },
-    });
-
-    const registry = createProviderRegistry(
-      await loadCodingAgentConfig({ cwd }),
-    );
-
-    expect(registry.getModel('gateway/deepseek-v4-flash').providerKind).toBe(
-      'openai-compatible',
-    );
-    expect(() =>
-      registry.resolveLanguageModel('gateway/deepseek-v4-flash'),
-    ).not.toThrow();
-  });
-
-  it('用户自定义模型可只声明真实 API 映射和必要能力', async () => {
-    await writeProjectConfig({
-      provider: {
-        venus: {
-          enabled: true,
-          kind: 'openai-compatible',
-          api_key_env: 'OPENAI_API_KEY',
-          base_url: 'https://venus.example.test/v1',
-          headers: {
-            'Venus-Sticky-Routing': 'token',
-          },
-        },
-      },
-      models: {
-        venus: {
-          deepseek: {
-            provider: 'venus',
-            api_id: 'deepseek-v4-flash',
-            endpoint: 'chat',
-            cost: 'zeroCost',
-            tool_call: true,
-          },
-        },
-      },
-    });
-    await writeGlobalConfig({
-      active_profile: 'venus',
-      profile: {
-        venus: customProfile('venus/deepseek'),
-      },
-    });
-
-    const registry = createProviderRegistry(
-      await loadCodingAgentConfig({ cwd }),
-    );
-    const model = registry.getModel('venus/deepseek');
-
-    expect(model.limit).toEqual({ context: 128000, output: 16000 });
-    expect(model.pricing?.input).toBe(0);
-    expect(model.capabilities.input).toEqual(['text']);
-    expect(model.capabilities.output).toEqual(['text']);
-    expect(model.capabilities.reasoning).toBe(false);
-    expect(model.capabilities.toolCall).toBe(true);
+  it('creates an empty project config file', async () => {
+    await ensureProjectConfig(cwd);
+    expect(projectConfigPath(cwd).endsWith('config.yaml')).toBe(true);
+    expect(await readFile(projectConfigPath(cwd), 'utf8')).toBe('');
   });
 
   async function writeProjectConfig(value: Record<string, unknown>) {
@@ -590,57 +262,23 @@ describe('loadCodingAgentConfig', () => {
       'utf8',
     );
   }
-
-  async function writeGlobalText(lines: readonly string[]) {
-    await mkdir(path.dirname(globalConfigPath()), { recursive: true });
-    await writeFile(
-      globalConfigPath(),
-      ['initial_mode: ask-before-changes', ...lines].join('\n'),
-      'utf8',
-    );
-  }
 });
 
-function customModel(
-  provider: string,
-  id: string,
-  endpoint: 'chat' | 'responses',
+function model(
+  protocol: 'openai' | 'anthropic' | 'openai-compatible',
+  apiModel: string,
+  endpoint?: 'responses' | 'chat',
 ) {
   return {
-    provider,
-    api_id: id,
-    endpoint,
-    status: 'active',
-    context: 128000,
-    output: 16000,
-    cost: {
-      input: 0,
-      output: 0,
-      cache_read: 0,
-      cache_write: 0,
-    },
-    temperature: true,
-    reasoning: true,
-    tool_call: true,
-    input_modalities: ['text'],
-    output_modalities: ['text'],
-    headers: {},
-    options: {},
-    variants: {},
-  };
-}
-
-function customProfile(model: string) {
-  return {
-    models: {
-      primary: model,
-      small: model,
-      compact: model,
-      title: model,
-      review: model,
-    },
-    settings: {
-      primary: { reasoning_effort: 'low' },
-    },
+    protocol,
+    ...(protocol === 'anthropic'
+      ? { auth_scheme: 'api-key' as const }
+      : { endpoint }),
+    api_model: apiModel,
+    base_url: 'https://api.example.test/v1',
+    api_key_env: 'TEST_API_KEY',
+    context_window: 128_000,
+    max_output_tokens: 16_000,
+    reasoning_effort: 'medium',
   };
 }

@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 
 import type {
   JSONValue,
+  Instructions,
   LanguageModel,
   LanguageModelCallOptions,
   ModelMessage as AiModelMessage,
@@ -24,6 +25,10 @@ import { ModelAdapterProtocolError, normalizeAgentError } from './errors.js';
 import { interruptRunState, type RunState } from './run-state.js';
 import type { AgentToolCall } from './tools.js';
 
+export type ConversationMessage = Exclude<
+  AiModelMessage,
+  { readonly role: 'system' }
+>;
 export type AgentMessage = AiModelMessage;
 export type UserMessage = Extract<AiModelMessage, { role: 'user' }>;
 export type AssistantMessage = Extract<AiModelMessage, { role: 'assistant' }>;
@@ -36,9 +41,20 @@ export type AgentProviderOptions = Record<string, AgentProviderOptionObject>;
 export type AgentToolSet = ToolSet;
 export type AgentToolChoice = ToolChoice<ToolSet>;
 
+/**
+ * 模型调用的不可变配置身份。它在 Agent 装配时完成两级引用解析，并在每次调用事件中原样保留。
+ */
+export interface ModelCallConfiguration {
+  readonly agentName: string;
+  readonly modelSelector: 'primary_model' | 'auxiliary_model';
+  readonly configuredModel: string;
+  readonly protocol: 'openai' | 'anthropic' | 'openai-compatible';
+  readonly apiModel: string;
+}
+
 export interface ModelInput {
-  readonly system?: string;
-  readonly messages: AgentMessage[];
+  readonly instructions?: Instructions;
+  readonly messages: ConversationMessage[];
   readonly tools: AgentToolSet;
   readonly activeTools?: readonly string[];
   readonly toolChoice?: AgentToolChoice;
@@ -118,8 +134,8 @@ export type PrepareModelInput<TContext = unknown> = (
 export interface AgentModelRequest {
   readonly runId: string;
   readonly model: AgentModel;
-  readonly system?: string;
-  readonly messages: AgentMessage[];
+  readonly instructions?: Instructions;
+  readonly messages: ConversationMessage[];
   readonly tools: ToolSet;
   readonly activeTools?: readonly string[];
   readonly toolChoice?: AgentToolChoice;
@@ -130,8 +146,8 @@ export interface AgentModelRequest {
 
 export interface AgentModelResponse {
   readonly text: string;
-  readonly messages: AgentMessage[];
-  readonly newMessages: AgentMessage[];
+  readonly messages: ConversationMessage[];
+  readonly newMessages: ConversationMessage[];
   readonly toolCalls?: AgentToolCall[];
   readonly toolResults?: unknown[];
   readonly usage: AgentUsage;
@@ -140,6 +156,12 @@ export interface AgentModelResponse {
 }
 
 export type AgentModelEvent =
+  /**
+   * 模型产出的第一段内容已到达。reasoning 与 tool-call 增量不经过
+   * `text-delta`，若只在 `text-delta` 上计时，纯工具轮与推理轮会完全没有首字
+   * 延迟。适配器必须在首个承载模型内容的增量上恰好发出一次本事件。
+   */
+  | { type: 'stream-start' }
   | { type: 'text-delta'; text: string }
   | { type: 'final'; response: AgentModelResponse };
 
@@ -203,7 +225,7 @@ export async function callModel(
   });
   const request = createModelRequest(run, input);
   const identity = {
-    ...modelIdentity(run.config.model),
+    ...run.config.modelCall,
     runId: run.runId,
     turnIndex: run.state.turn,
     modelCallId: randomUUID(),
@@ -232,7 +254,15 @@ export async function callModel(
         );
       }
       switch (event.type) {
+        case 'stream-start':
+          if (firstTokenAt === undefined) {
+            firstTokenAt = new Date().toISOString();
+            await run.events.emit({ type: 'model.first_token', identity });
+          }
+          break;
         case 'text-delta':
+          // 正文 delta 也可能是本轮第一个内容事件（适配器未上报 stream-start
+          // 时），first-token 必须在两条路径上都成立且只计一次。
           if (firstTokenAt === undefined) {
             firstTokenAt = new Date().toISOString();
             await run.events.emit({ type: 'model.first_token', identity });
@@ -308,29 +338,6 @@ function modelCallDiagnostics(
   };
 }
 
-function modelIdentity(model: AgentModel): {
-  readonly provider: string;
-  readonly model: string;
-} {
-  if (typeof model === 'string') {
-    const separator = model.includes('/') ? '/' : ':';
-    const [provider, ...modelParts] = model.split(separator);
-    if (provider === undefined || provider === '' || modelParts.length === 0) {
-      throw new Error(`Invalid string model identity: ${model}`);
-    }
-    return { provider, model: modelParts.join(separator) };
-  }
-  if (
-    typeof model.provider !== 'string' ||
-    model.provider === '' ||
-    typeof model.modelId !== 'string' ||
-    model.modelId === ''
-  ) {
-    throw new Error('Language model must expose provider and modelId.');
-  }
-  return { provider: model.provider, model: model.modelId };
-}
-
 function createModelRequest(
   run: RunState,
   input: ModelInput,
@@ -338,7 +345,9 @@ function createModelRequest(
   return {
     runId: run.runId,
     model: run.config.model,
-    ...(input.system === undefined ? {} : { system: input.system }),
+    ...(input.instructions === undefined
+      ? {}
+      : { instructions: input.instructions }),
     messages: input.messages,
     tools: input.tools,
     ...(input.activeTools === undefined

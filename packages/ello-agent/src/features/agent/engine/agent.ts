@@ -16,7 +16,11 @@ import type {
   CreateAgentOptions,
 } from './contracts.js';
 import { closeAgentResources } from './events.js';
-import { buildModelInput } from './model-input.js';
+import {
+  availableModelInputTokens,
+  buildModelInput,
+  estimateMessagesTokens,
+} from './model-input.js';
 import { callModel, type ModelAdapter } from './model.js';
 import {
   beginRunTurn,
@@ -215,6 +219,8 @@ async function runAgentLoop(run: RunState): Promise<void> {
       if (shouldStopRun(run)) {
         break;
       }
+
+      await compactMidLoop(run);
     }
 
     await completeRunState(run);
@@ -313,4 +319,39 @@ function uniqueNames(
     names.add(tool.name);
   }
   return names;
+}
+
+const MID_LOOP_COMPACTION_THRESHOLD = 0.75;
+
+async function compactMidLoop(run: RunState): Promise<void> {
+  const compactor = run.config.compactor;
+  if (compactor === undefined) return;
+  const modelInputBudget = run.config.modelInputBudget;
+  if (modelInputBudget === undefined) return;
+  const contextWindow = availableModelInputTokens(modelInputBudget);
+
+  const currentTokens = estimateMessagesTokens(run.state.messages);
+  if (currentTokens <= contextWindow * MID_LOOP_COMPACTION_THRESHOLD) return;
+
+  const compacted = await compactor.compact({
+    messages: [...run.state.messages],
+    contextWindow,
+    signal: run.signal,
+  });
+  if (compacted === null) return;
+
+  run.state.messages.splice(
+    0,
+    run.state.messages.length,
+    ...compacted.messages,
+  );
+  await run.events.emit({
+    type: 'context.compaction',
+    beforeMessageCount: compacted.report.beforeMessageCount,
+    afterMessageCount: compacted.report.afterMessageCount,
+    compactor: compacted.report.compactor,
+    ...(compacted.report.metadata === undefined
+      ? {}
+      : { metadata: compacted.report.metadata }),
+  });
 }

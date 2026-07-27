@@ -303,8 +303,6 @@ async function reserveTcpPort(): Promise<number> {
 function testInitialSettings(params: ParsedClientParams<'thread/start'>) {
   return Promise.resolve({
     mode: params.mode ?? 'ask-before-changes',
-    profile: params.profile ?? 'test',
-    model: params.model ?? 'test:model',
     agent: params.agent ?? 'build',
   } as const);
 }
@@ -314,8 +312,6 @@ function testSettingsUpdate(
 ): Promise<Partial<ThreadSnapshot['settings']>> {
   return Promise.resolve({
     ...(params.mode === undefined ? {} : { mode: params.mode }),
-    ...(params.profile === undefined ? {} : { profile: params.profile }),
-    ...(params.model === undefined ? {} : { model: params.model }),
     ...(params.agent === undefined ? {} : { agent: params.agent }),
   });
 }

@@ -20,7 +20,7 @@ import type {
   AgentToolContext,
   AnyAgentTool,
 } from './tools.js';
-import { createToolResultMessage } from './tools.js';
+import { createToolResultMessage, parseToolInput } from './tools.js';
 
 /** 构造 {@link ToolScheduler} 的入参。 */
 export interface ToolSchedulerOptions {
@@ -198,7 +198,7 @@ export class ToolScheduler {
       }
       let input: unknown;
       try {
-        input = tool.input.parse(call.input);
+        input = parseToolInput(tool.input, call.name, call.input);
       } catch (error) {
         const normalized =
           error instanceof Error ? error : new Error(String(error));
@@ -221,7 +221,40 @@ export class ToolScheduler {
       await sink.onToolDeferred(item);
       return { messages, toolCalls, pending };
     }
-    for (const call of calls) {
+    // 连续的 parallel 工具合并成一个并发段，其余工具各自独占一段。段间串行，
+     // 段内并发；结果按原 call 顺序落回 messages，模型看到的顺序与请求一致。
+    for (const segment of parallelSegments(calls, (call) =>
+      this.isParallel(call),
+    )) {
+      const outcomes = await mapWithConcurrency(
+        segment,
+        maxToolConcurrency(),
+        (call) => this.runCall(call, sink),
+      );
+      for (const outcome of outcomes) {
+        messages.push(...outcome.messages);
+        toolCalls.push(...outcome.toolCalls);
+        pending.push(...outcome.pending);
+      }
+    }
+    return { messages, toolCalls, pending };
+  }
+
+  private isParallel(call: AgentToolCall): boolean {
+    const tool = this.options.callableToolNames.has(call.name)
+      ? this.byName.get(call.name)
+      : undefined;
+    return tool?.execution === 'immediate' && tool.concurrency === 'parallel';
+  }
+
+  private async runCall(
+    call: AgentToolCall,
+    sink: ToolSchedulerEventSink,
+  ): Promise<ToolScheduleResult> {
+    const messages: AgentMessage[] = [];
+    const toolCalls: AgentToolCall[] = [];
+    const pending: ToolScheduleResult['pending'] = [];
+    {
       const tool = this.options.callableToolNames.has(call.name)
         ? this.byName.get(call.name)
         : undefined;
@@ -234,14 +267,14 @@ export class ToolScheduler {
         messages.push(
           createToolResultMessage(call, { error: error.message }, 'error'),
         );
-        continue;
+        return { messages, toolCalls, pending };
       }
       if (tool.execution !== 'immediate') {
         throw new Error(`Deferred tool escaped batch preflight: ${call.name}`);
       }
       let input: unknown;
       try {
-        input = tool.input.parse(call.input);
+        input = parseToolInput(tool.input, call.name, call.input);
       } catch (error) {
         const normalized =
           error instanceof Error ? error : new Error(String(error));
@@ -251,7 +284,7 @@ export class ToolScheduler {
         messages.push(
           createToolResultMessage(call, { error: normalized.message }, 'error'),
         );
-        continue;
+        return { messages, toolCalls, pending };
       }
       const ctx = this.createContext(call.id);
       // 执行前先跑工具自带的审批策略（若有），据其结果决定拒绝 / 挂起 / 放行。
@@ -271,7 +304,7 @@ export class ToolScheduler {
         messages.push(
           createToolResultMessage(call, { error: normalized.message }, 'error'),
         );
-        continue;
+        return { messages, toolCalls, pending };
       }
       if (decision.action === 'denied') {
         const error = new Error(
@@ -288,7 +321,7 @@ export class ToolScheduler {
             'denied',
           ),
         );
-        continue;
+        return { messages, toolCalls, pending };
       }
       // 需要人工审批：仅入队挂起并通知，不执行，等待产品层批准后再重放。
       if (decision.action === 'required') {
@@ -305,7 +338,7 @@ export class ToolScheduler {
         pending.push(item);
         await sink.onToolStarted(call.id, call.name, input);
         await sink.onApprovalRequired(item);
-        continue;
+        return { messages, toolCalls, pending };
       }
       // 放行：正常执行工具，捕获异常并归一化，单个工具失败不影响整批其余调用。
       await sink.onToolStarted(call.id, call.name, input);
@@ -368,7 +401,7 @@ export class ToolScheduler {
     }
     let input: unknown;
     try {
-      input = tool.input.parse(call.input);
+      input = parseToolInput(tool.input, call.name, call.input);
     } catch (error) {
       const normalized =
         error instanceof Error ? error : new Error(String(error));
@@ -420,4 +453,87 @@ function normalizeApprovalDecision(
     ...(decision.reason !== undefined ? { reason: decision.reason } : {}),
     ...(decision.metadata !== undefined ? { metadata: decision.metadata } : {}),
   };
+}
+
+/**
+ * 把一批 call 切成执行段：连续可并发的合并为一段，其余各自独占一段。
+ *
+ * Args:
+ * - `calls`: 模型本轮返回的调用序列，顺序即模型意图顺序。
+ * - `isParallel`: 判定单个 call 是否可与相邻可并发 call 同时执行。
+ *
+ * Returns:
+ * - 返回按原顺序划分的执行段；段内可并发，段间必须串行。
+ */
+const DEFAULT_MAX_TOOL_CONCURRENCY = 10;
+
+/**
+ * 读取单个并发段内允许同时执行的工具上限。
+ *
+ * Returns:
+ * - 返回并发上限；环境变量缺失或非正整数时返回默认值。
+ */
+function maxToolConcurrency(): number {
+  const configured = Number.parseInt(
+    process.env.ELLO_MAX_TOOL_CONCURRENCY ?? '',
+    10,
+  );
+  return Number.isInteger(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_TOOL_CONCURRENCY;
+}
+
+/**
+ * 以固定并发上限映射一批输入，并按输入顺序返回结果。
+ *
+ * 模型单轮可以返回任意多个并发安全调用；无上限地全部同时启动会同时打满文件
+ * 描述符与内存。上限只约束同时在飞的数量，不改变结果顺序。
+ *
+ * Args:
+ * - `items`: 待处理的输入序列，结果按其下标对齐。
+ * - `limit`: 同时在飞的最大任务数，必须为正整数。
+ * - `run`: 单个输入的执行函数。
+ *
+ * Returns:
+ * - Promise 兑现为与 `items` 等长、下标对齐的结果数组。
+ */
+async function mapWithConcurrency<TItem, TResult>(
+  items: readonly TItem[],
+  limit: number,
+  run: (item: TItem) => Promise<TResult>,
+): Promise<TResult[]> {
+  if (items.length <= limit) {
+    return await Promise.all(items.map((item) => run(item)));
+  }
+  const results = new Array<TResult>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: limit }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      const item = items[index];
+      if (item === undefined) {
+        throw new Error(`Tool call batch lost its item at index ${index}.`);
+      }
+      results[index] = await run(item);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+function parallelSegments(
+  calls: readonly AgentToolCall[],
+  isParallel: (call: AgentToolCall) => boolean,
+): AgentToolCall[][] {
+  const segments: AgentToolCall[][] = [];
+  for (const call of calls) {
+    const last = segments.at(-1);
+    if (isParallel(call) && last !== undefined && isParallel(last[0]!)) {
+      last.push(call);
+      continue;
+    }
+    segments.push([call]);
+  }
+  return segments;
 }

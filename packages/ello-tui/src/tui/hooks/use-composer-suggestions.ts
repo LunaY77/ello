@@ -5,7 +5,6 @@ import { useEffect, useMemo } from 'react';
 import type { AgentSkill } from '../../api/protocol-types.js';
 import type { ThreadClient } from '../../client/thread-client.js';
 import { completeInput } from '../completion.js';
-import type { TuiProfile } from '../profile-types.js';
 import { detectTrigger } from '../store/autocomplete.js';
 
 const NO_FILE_SUGGESTIONS: readonly string[] = [];
@@ -18,7 +17,6 @@ export function useComposerSuggestions(input: {
   readonly fileSearch:
     | { readonly query: string; readonly suggestions: readonly string[] }
     | undefined;
-  readonly profiles: readonly TuiProfile[];
   readonly skills: readonly AgentSkill[];
   setFileSearch(value: {
     readonly query: string;
@@ -31,7 +29,6 @@ export function useComposerSuggestions(input: {
     draft,
     cursor,
     fileSearch,
-    profiles,
     skills,
     setFileSearch,
     onError,
@@ -79,12 +76,11 @@ export function useComposerSuggestions(input: {
     () =>
       completeInput(
         draft,
-        profiles.map((profile) => profile.name),
         fileSuggestions,
         skills,
         cursor,
       ),
-    [fileSuggestions, cursor, draft, profiles, skills],
+    [fileSuggestions, cursor, draft, skills],
   );
 }
 

@@ -225,7 +225,7 @@ describe('tui-event-store', () => {
     state = reduceTuiEvent(state, {
       type: 'notification',
       notification: notification('thread/settings/updated', 1, {
-        settings: fixtureSettings({ mode: 'plan', profile: 'work' }),
+        settings: fixtureSettings({ mode: 'plan', agent: 'build' }),
       }),
     });
     state = reduceTuiEvent(state, {
@@ -260,7 +260,7 @@ describe('tui-event-store', () => {
     });
 
     expect(state.settings.mode).toBe('plan');
-    expect(state.settings.profile).toBe('work');
+    expect(state.settings.agent).toBe('build');
     expect(state.goal).toEqual(goal);
     expect(state.snapshot.plan).toEqual(plan);
     expect(state.usage.outputTokens).toBe(3);

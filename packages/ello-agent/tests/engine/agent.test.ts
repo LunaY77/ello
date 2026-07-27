@@ -28,12 +28,11 @@ import {
   type AgentToolDiscovery,
   type ModelAdapter,
 } from '../../src/features/agent/engine/index.js';
-import { trimMessages } from '../../src/features/agent/engine/model-input.js';
 import {
   AgentRunControl,
   DefaultAgentMessageQueue,
 } from '../../src/features/agent/engine/run-control.js';
-import { createLocalEnvironment } from '../../src/features/agent/environment.js';
+import { createLocalEnvironment } from '../../src/features/environment/index.js';
 
 function defineTool<TInput, TOutput>(
   options: Omit<DefineToolOptions<TInput, TOutput>, 'discovery'> & {
@@ -60,7 +59,7 @@ const emptyTestEnvironment: CreateAgentOptions['environment'] = {};
 function createAgent(
   options: Omit<
     CreateAgentOptions,
-    'executionTools' | 'modelTools' | 'environment'
+    'executionTools' | 'modelTools' | 'environment' | 'modelCall'
   > & {
     readonly tools?: readonly AnyAgentTool[];
     readonly executionTools?: readonly AnyAgentTool[];
@@ -72,6 +71,13 @@ function createAgent(
   const selected = tools ?? executionTools ?? [testTool as AnyAgentTool];
   return createBaseAgent({
     ...rest,
+    modelCall: {
+      agentName: 'test-agent',
+      modelSelector: 'primary_model',
+      configuredModel: 'test-model',
+      protocol: 'openai',
+      apiModel: 'model',
+    },
     environment: environment === undefined ? emptyTestEnvironment : environment,
     executionTools: executionTools ?? selected,
     modelTools: modelTools ?? selected,
@@ -173,7 +179,7 @@ describe('createAgent', () => {
     const result = await agent.run('task', {
       ephemeralInstructions: 'temporary skill instructions',
     });
-    expect(request?.system).toBe('temporary skill instructions');
+    expect(request?.instructions).toBe('temporary skill instructions');
     expect(request?.messages).not.toContainEqual(
       expect.objectContaining({ role: 'system' }),
     );
@@ -530,10 +536,10 @@ describe('createAgent', () => {
     expect(events).toContain('close');
     expect(events).toContain('resource.close');
     expect(shellResult?.stdout.trim()).toBe('shell-ok');
-    expect(requests[0]?.system).toContain('<environment-context>');
-    expect(requests[0]?.system).toContain('<file-system>');
-    expect(requests[0]?.system).toContain('<shell>');
-    expect(requests[0]?.system).toContain('Resource instruction.');
+    expect(requests[0]?.instructions).toContain('<environment-context>');
+    expect(requests[0]?.instructions).toContain('<file-system>');
+    expect(requests[0]?.instructions).toContain('<shell>');
+    expect(requests[0]?.instructions).toContain('Resource instruction.');
   });
 
   it('drains message queues in stable modes and run-control order', () => {
@@ -684,7 +690,7 @@ describe('createAgent', () => {
       instructions: 'Be precise.',
       modelInput: {
         systemSections: [() => 'Working directory: /tmp/project'],
-        messageTransforms: [trimMessages({ maxMessages: 3 })],
+        messageTransforms: [async (messages) => messages.slice(-3)],
         providerOptions: () => ({ test: { enabled: true } }),
       },
       observers: [
@@ -703,8 +709,8 @@ describe('createAgent', () => {
       prompt: 'current',
     });
 
-    expect(seenMessages[0]?.system).toContain('Be precise.');
-    expect(seenMessages[0]?.system).toContain(
+    expect(seenMessages[0]?.instructions).toContain('Be precise.');
+    expect(seenMessages[0]?.instructions).toContain(
       'Working directory: /tmp/project',
     );
     expect(seenMessages[0]?.providerOptions).toEqual({
@@ -1092,6 +1098,63 @@ describe('createAgent', () => {
 
     expect(calls).toBe(1);
     expect(result.finishReason).toBe('length');
+    await agent.close();
+  });
+
+  it('does not impose a turn limit when maxTurns is omitted', async () => {
+    let calls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          calls += 1;
+          const complete = calls === 101;
+          const content = complete ? 'done' : `continue-${calls}`;
+          return {
+            text: content,
+            messages: [...request.messages, { role: 'assistant', content }],
+            newMessages: [{ role: 'assistant', content }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: complete ? 'stop' : 'tool-calls',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('hi');
+
+    expect(calls).toBe(101);
+    expect(result.finishReason).toBe('stop');
+    await agent.close();
+  });
+
+  it('rejects an invalid maxTurns value', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate() {
+          throw new Error('Model must not be called.');
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    await expect(agent.run('hi', { maxTurns: 0 })).rejects.toThrow(
+      'maxTurns must be a positive integer.',
+    );
     await agent.close();
   });
 

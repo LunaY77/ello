@@ -42,20 +42,6 @@ describe('App typed client behavior', () => {
     view.unmount();
   });
 
-  it('/profiles 补全使用 profile 名称而不是模型 ID', async () => {
-    const harness = createThreadHarness(snapshot());
-    const view = render(<App thread={harness.thread} />);
-    await waitForCatalogs(harness);
-
-    view.stdin.write('/profiles rev');
-
-    await vi.waitFor(() =>
-      expect(view.lastFrame()).toContain('/profiles reviewer'),
-    );
-    expect(view.lastFrame()).not.toContain('/profiles mock/new');
-    view.unmount();
-  });
-
   it('@file 仅提交结构化文件引用，不在 Client 读取文件内容', async () => {
     const harness = createThreadHarness(snapshot());
     const view = render(<App thread={harness.thread} />);
@@ -159,54 +145,29 @@ describe('App typed client behavior', () => {
     view.unmount();
   });
 
-  it('profile role 与 active profile 使用各自的精确 global config path', async () => {
+  it('/models 只改写明确选择的全局模型引用', async () => {
     const harness = createThreadHarness(snapshot());
     const view = render(<App thread={harness.thread} />);
     await waitForCatalogs(harness);
 
-    await submitCommand(view, '/profiles');
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('main [active]'));
-    view.stdin.write('\r');
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('Profile: main'));
+    await submitCommand(view, '/models');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('Select model reference'),
+    );
     view.stdin.write('\r');
     await vi.waitFor(() =>
-      expect(view.lastFrame()).toContain('Select primary model for main'),
+      expect(view.lastFrame()).toContain('Select primary_model'),
     );
     view.stdin.write('\r');
     await vi.waitFor(() =>
       expect(harness.request).toHaveBeenCalledWith('config/write', {
         cwd: '/workspace',
         source: 'global',
-        path: ['profile', 'main', 'models', 'primary'],
+        path: ['primary_model'],
         operation: 'set',
         value: 'mock/new',
       }),
     );
-    await vi.waitFor(() => {
-      expect(view.lastFrame()).not.toContain('Select primary model for main');
-      expect(view.lastFrame()).toContain('Profile: main');
-    });
-
-    view.stdin.write('\u001b');
-    await vi.waitFor(() =>
-      expect(view.lastFrame()).not.toContain('Profile: main'),
-    );
-    await submitCommand(view, '/profiles');
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('main [active]'));
-    view.stdin.write('\u001b[B');
-    await vi.waitFor(() => expect(view.lastFrame()).toMatch(/›\s+reviewer/u));
-    view.stdin.write('f');
-    await vi.waitFor(() => {
-      expect(harness.request).toHaveBeenCalledWith('config/write', {
-        cwd: '/workspace',
-        source: 'global',
-        path: ['active_profile'],
-        operation: 'set',
-        value: 'reviewer',
-      });
-      expect(harness.setProfile).not.toHaveBeenCalled();
-      expect(view.lastFrame()).toContain('reviewer [active]');
-    });
     view.unmount();
   });
 
@@ -215,14 +176,11 @@ describe('App typed client behavior', () => {
     const view = render(<App thread={harness.thread} />);
     await waitForCatalogs(harness);
 
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('profile: main'));
-    expect(view.lastFrame()).toContain('model: mock/new');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('agent: build'));
+    expect(view.lastFrame()).toContain('primary: mock/new · auxiliary:');
+    expect(view.lastFrame()).toContain('mock/flash');
     expect(view.lastFrame()).toContain('mode: ask-before-changes');
-    expect(view.lastFrame()).not.toContain('profile: default');
-    expect(view.lastFrame()).not.toContain('model: default');
     expect(view.lastFrame()?.match(/Ello Coding Agent/gu)).toHaveLength(1);
-    await submitCommand(view, '/profiles');
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('main [active]'));
     view.unmount();
   });
 
@@ -417,61 +375,6 @@ describe('App typed client behavior', () => {
     );
   });
 
-  it('profile create/delete 使用 profile 叶节点，不覆盖整个配置', async () => {
-    const createHarness = createThreadHarness(snapshot());
-    const createView = render(<App thread={createHarness.thread} />);
-    await waitForCatalogs(createHarness);
-    await submitCommand(createView, '/profiles');
-    await vi.waitFor(() =>
-      expect(createView.lastFrame()).toContain('main [active]'),
-    );
-    createView.stdin.write('c');
-    await vi.waitFor(() =>
-      expect(createView.lastFrame()).toContain('Create profile'),
-    );
-    createView.stdin.write('new_profile');
-    await vi.waitFor(() =>
-      expect(createView.lastFrame()).toContain('Name: new_profile_'),
-    );
-    createView.stdin.write('\r');
-    await vi.waitFor(() =>
-      expect(createHarness.request).toHaveBeenCalledWith('config/write', {
-        cwd: '/workspace',
-        source: 'global',
-        path: ['profile', 'new_profile'],
-        operation: 'set',
-        value: profileConfig().profile.main,
-      }),
-    );
-    createView.unmount();
-
-    const deleteHarness = createThreadHarness(snapshot());
-    const deleteView = render(<App thread={deleteHarness.thread} />);
-    await waitForCatalogs(deleteHarness);
-    await submitCommand(deleteView, '/profiles');
-    await vi.waitFor(() =>
-      expect(deleteView.lastFrame()).toContain('reviewer'),
-    );
-    deleteView.stdin.write('\u001b[B');
-    await vi.waitFor(() =>
-      expect(selectedLine(deleteView.lastFrame(), 'reviewer')).toContain('›'),
-    );
-    deleteView.stdin.write('d');
-    await vi.waitFor(() =>
-      expect(deleteView.lastFrame()).toContain('Delete profile'),
-    );
-    deleteView.stdin.write('\r');
-    await vi.waitFor(() =>
-      expect(deleteHarness.request).toHaveBeenCalledWith('config/write', {
-        cwd: '/workspace',
-        source: 'global',
-        path: ['profile', 'reviewer'],
-        operation: 'delete',
-      }),
-    );
-    deleteView.unmount();
-  });
-
   it('/settings 中的 theme 立即生效并写入 Client 本地 tui.json', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ello-tui-app-'));
     roots.push(root);
@@ -553,7 +456,6 @@ interface ThreadHarness {
   readonly fork: ReturnType<typeof vi.fn>;
   readonly close: ReturnType<typeof vi.fn>;
   readonly interrupt: ReturnType<typeof vi.fn>;
-  readonly setProfile: ReturnType<typeof vi.fn>;
   readonly setMode: ReturnType<typeof vi.fn>;
   readonly submitInput: ReturnType<typeof vi.fn>;
   emit(notification: ServerNotification): void;
@@ -567,7 +469,7 @@ function createThreadHarness(
     readonly sessions?: readonly ThreadSummary[];
   } = {},
 ): ThreadHarness {
-  const config = profileConfig();
+  const config = modelConfig();
   const request = vi.fn(async (method: string, _params?: unknown) => {
     switch (method) {
       case 'model/list':
@@ -578,18 +480,31 @@ function createThreadHarness(
               name: 'new',
               title: 'New model',
               enabled: true,
-              metadata: { provider: 'mock' },
+              metadata: { protocol: 'openai', contextWindow: 200000 },
+            },
+            {
+              id: 'mock/flash',
+              name: 'flash',
+              title: 'Flash model',
+              enabled: true,
+              metadata: { protocol: 'openai', contextWindow: 200000 },
             },
           ],
         };
-      case 'provider/list':
-        return {
-          data: [{ id: 'mock', name: 'Mock', enabled: true, metadata: {} }],
-        };
       case 'skills/list':
-      case 'agent/list':
       case 'task/list':
         return { data: [] };
+      case 'agent/list':
+        return {
+          data: [
+            {
+              id: 'build',
+              name: 'build',
+              enabled: true,
+              metadata: { mode: 'primary', model: 'primary_model' },
+            },
+          ],
+        };
       case 'config/read':
       case 'config/write':
         return { config };
@@ -652,7 +567,6 @@ function createThreadHarness(
   const fork = vi.fn();
   const close = vi.fn(async () => undefined);
   const interrupt = vi.fn(async () => undefined);
-  const setProfile = vi.fn(async () => undefined);
   const setMode = vi.fn(async () => undefined);
   const submitInput = vi.fn(options.submitInput ?? (async () => 'turn_new'));
   const listeners = new Set<(event: ThreadClientEvent) => void>();
@@ -669,7 +583,6 @@ function createThreadHarness(
     fork,
     close,
     interrupt,
-    setProfile,
     setMode,
     submitInput,
   } as unknown as ThreadClient;
@@ -679,7 +592,6 @@ function createThreadHarness(
     fork,
     close,
     interrupt,
-    setProfile,
     setMode,
     submitInput,
     emit: (notification: ServerNotification) => {
@@ -705,9 +617,7 @@ function snapshot(threadId = 'thr_1', withHistory = false): ThreadSnapshot {
     },
     settings: {
       mode: 'ask-before-changes',
-      profile: 'main',
-      model: 'mock/new',
-      agent: 'primary',
+      agent: 'build',
     },
     turns: withHistory
       ? [
@@ -744,33 +654,12 @@ function snapshot(threadId = 'thr_1', withHistory = false): ThreadSnapshot {
   };
 }
 
-function profileConfig() {
+function modelConfig() {
   return {
-    active_profile: 'main',
     initial_mode: 'ask-before-changes',
     bypass_enabled: true,
-    profile: {
-      main: {
-        label: 'Main',
-        models: {
-          primary: 'mock/old',
-          small: 'mock/old',
-          compact: 'mock/old',
-          title: 'mock/old',
-          review: 'mock/old',
-        },
-      },
-      reviewer: {
-        label: 'Reviewer',
-        models: {
-          primary: 'mock/old',
-          small: 'mock/old',
-          compact: 'mock/old',
-          title: 'mock/old',
-          review: 'mock/old',
-        },
-      },
-    },
+    primary_model: 'mock/new',
+    auxiliary_model: 'mock/flash',
   };
 }
 

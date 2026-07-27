@@ -160,8 +160,6 @@ export function createThreads(options: CreateThreadsInput) {
         const snapshot = await state.snapshot();
         const update = await options.resolveSettingsUpdate(snapshot, {
           ...(params.mode === undefined ? {} : { mode: params.mode }),
-          ...(params.profile === undefined ? {} : { profile: params.profile }),
-          ...(params.model === undefined ? {} : { model: params.model }),
           ...(params.agent === undefined ? {} : { agent: params.agent }),
         });
         return state.updateSettings(update);

@@ -113,6 +113,12 @@ export interface DefineCodingToolOptions<TInput> {
     input: TInput,
     ctx: CodingToolContext,
   ): MaybePromise<AgentApprovalDecision>;
+  /**
+   * 声明该工具可与同批次的其他 `parallel` 工具并发执行。
+   *
+   * 只有无副作用、且不依赖同批其他调用结果的工具才能声明。
+   */
+  readonly concurrency?: 'parallel';
 }
 
 export type CodingTool<TInput = unknown> = DefineCodingToolOptions<TInput>;
@@ -130,6 +136,8 @@ export type AnyCodingTool = {
     input: unknown,
     ctx: CodingToolContext,
   ): MaybePromise<AgentApprovalDecision>;
+
+  readonly concurrency?: 'parallel';
 };
 
 /**
@@ -151,6 +159,9 @@ export function defineCodingTool<TInput>(
     discovery: options.discovery,
     input: options.input,
     execute: (input, ctx) => options.execute(options.input.parse(input), ctx),
+    ...(options.concurrency === undefined
+      ? {}
+      : { concurrency: options.concurrency }),
     ...(approval === undefined
       ? {}
       : {

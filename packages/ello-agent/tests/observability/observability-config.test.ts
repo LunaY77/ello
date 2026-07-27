@@ -12,6 +12,7 @@ describe('Langfuse observability config', () => {
   it('allows disabled tracing without valid connection fields', () => {
     const config = CodingAgentConfigSchema.parse({
       initial_mode: 'ask-before-changes',
+      ...modelConfig(),
       observability: {
         langfuse: {
           enabled: false,
@@ -28,6 +29,7 @@ describe('Langfuse observability config', () => {
     expect(() =>
       CodingAgentConfigSchema.parse({
         initial_mode: 'ask-before-changes',
+        ...modelConfig(),
         observability: { langfuse: { enabled: true } },
       }),
     ).toThrow();
@@ -37,8 +39,28 @@ describe('Langfuse observability config', () => {
     expect(() =>
       CodingAgentConfigSchema.parse({
         initial_mode: 'ask-before-changes',
+        ...modelConfig(),
         tools: { routing_enabled: 'yes' },
       }),
     ).toThrow('expected boolean');
   });
 });
+
+function modelConfig() {
+  return {
+    models: {
+      test: {
+        protocol: 'openai' as const,
+        endpoint: 'responses' as const,
+        api_model: 'test-model',
+        base_url: 'https://api.example.test/v1',
+        api_key_env: 'TEST_API_KEY',
+        context_window: 128_000,
+        max_output_tokens: 16_000,
+        reasoning_effort: 'medium' as const,
+      },
+    },
+    primary_model: 'test',
+    auxiliary_model: 'test',
+  };
+}

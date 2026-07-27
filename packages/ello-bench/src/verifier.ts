@@ -1,0 +1,77 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+import {
+  HarnessReportSchema,
+  type HarnessReport,
+  type PatchArtifact,
+} from './contracts.js';
+import { sha256 } from './hash.js';
+import { errorMessage } from './io.js';
+import type { ResolvedTaskFiles } from './task-corpus.js';
+import {
+  executeVerifierProcess,
+  VerifierExecutionError,
+} from './verifier-process.js';
+import { prepareVerifierWorkspace } from './verifier-workspace.js';
+
+export async function runVerifier(options: {
+  readonly attemptId: string;
+  readonly harnessRoot: string;
+  readonly taskFiles: ResolvedTaskFiles;
+  readonly patch: PatchArtifact;
+}): Promise<HarnessReport> {
+  const task = options.taskFiles.task;
+  const prepared = await prepareVerifierWorkspace(options);
+  const process = await executeVerifierProcess({
+    attemptId: options.attemptId,
+    harnessRoot: prepared.harnessRoot,
+    workspace: prepared.workspace,
+    tests: prepared.tests,
+    logs: prepared.logs,
+    task,
+  });
+  try {
+    const reward = await readReward(prepared.verifierOutput);
+    const verifierCapturedPatchSha256 = sha256(
+      await readFile(path.join(prepared.artifacts, 'model.patch')),
+    );
+    if (verifierCapturedPatchSha256 !== options.patch.sha256) {
+      throw new Error(
+        `Verifier-captured patch checksum mismatch: ${verifierCapturedPatchSha256} versus ${options.patch.sha256}.`,
+      );
+    }
+    return HarnessReportSchema.parse({
+      schema: 'ello.benchmark.harness.v1',
+      taskId: task.taskId,
+      status: reward === 1 ? 'passed' : 'failed',
+      reward,
+      verifierProcess: process.reference,
+      verifierImage: task.environment.image,
+      verifierImageId: prepared.imageId,
+      modelPatchSha256: options.patch.sha256,
+      appliedPatchSha256: prepared.appliedPatchSha256,
+      verifierCapturedPatchSha256,
+      baselineTestExitCode: process.baselineExitCode,
+      newTestsExitCode: process.newTestsExitCode,
+      hiddenPatchChangedFiles: prepared.hiddenPatchChangedFiles,
+      patchConflictFiles: prepared.patchConflictFiles,
+      reportPath: path.join(prepared.harnessRoot, 'report.json'),
+      completedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    throw new VerifierExecutionError(errorMessage(error), process.reference);
+  }
+}
+
+async function readReward(directory: string): Promise<0 | 1> {
+  const value = (
+    await readFile(path.join(directory, 'reward.txt'), 'utf8')
+  ).trim();
+  if (value !== '0' && value !== '1') {
+    throw new Error(
+      `Verifier reward must be 0 or 1, received ${JSON.stringify(value)}.`,
+    );
+  }
+  return value === '1' ? 1 : 0;
+}

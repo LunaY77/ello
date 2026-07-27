@@ -22,7 +22,7 @@ import {
 } from '../../protocol/v1/index.js';
 
 const RecordBaseShape = {
-  schema: z.literal(1),
+  schema: z.literal(2),
   seq: z.number().int().positive(),
   threadId: OpaqueIdSchema,
   createdAt: IsoDateTimeSchema,

@@ -361,6 +361,7 @@ describe('Memory 上下文加载契约', () => {
       cwd: root,
       session_dir: path.join(root, 'sessions'),
       initial_mode: 'ask-before-changes',
+      ...modelConfig(),
       context: {
         memory: {
           enabled: true,
@@ -408,6 +409,7 @@ describe('Memory 生产装配契约', () => {
         cwd: root,
         session_dir: path.join(root, '.ello', 'sessions'),
         initial_mode: 'ask-before-changes',
+        ...modelConfig(),
         context: {
           memory: {
             enabled: true,
@@ -480,6 +482,7 @@ describe('Memory 生产装配契约', () => {
         cwd: path.dirname(repository.roots.team),
         session_dir: path.join(repository.roots.team, '..', 'sessions'),
         initial_mode: 'plan',
+        ...modelConfig(),
         context: {
           memory: {
             enabled: true,
@@ -568,6 +571,25 @@ const TOOL_CONTEXT: AgentToolContext = {
   metadata: {},
   signal: new AbortController().signal,
 };
+
+function modelConfig() {
+  return {
+    models: {
+      test: {
+        protocol: 'openai' as const,
+        endpoint: 'responses' as const,
+        api_model: 'test-model',
+        base_url: 'https://api.example.test/v1',
+        api_key_env: 'TEST_API_KEY',
+        context_window: 128_000,
+        max_output_tokens: 16_000,
+        reasoning_effort: 'medium' as const,
+      },
+    },
+    primary_model: 'test',
+    auxiliary_model: 'test',
+  };
+}
 
 function immediateTool(tools: ReadonlyArray<AnyAgentTool>, name: string) {
   const tool = tools.find((candidate) => candidate.name === name);

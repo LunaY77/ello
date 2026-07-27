@@ -7,6 +7,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { TRUNCATION_HEAD_RATIO, truncationMarker } from '../shared.js';
+
 export interface ToolOutputLimits {
   readonly maxBytes: number;
   readonly maxLines: number;
@@ -126,9 +128,24 @@ function shouldTruncate(value: string, limits: ToolOutputLimits): boolean {
   );
 }
 
+/**
+ * 生成头尾双端预览：头部占 {@link TRUNCATION_HEAD_RATIO}，其余额度留给尾部。
+ * 测试与构建工具的失败摘要位于输出末尾，只留头部会让调用方看不到结论。
+ */
 function previewOutput(value: string, previewLines: number): string {
   const lines = value.split(/\r?\n/u);
-  return `${lines.slice(0, previewLines).join('\n')}\n... truncated; full output written to artifact ...`;
+  if (lines.length <= previewLines) {
+    return value;
+  }
+  const headLines = Math.floor(previewLines * TRUNCATION_HEAD_RATIO);
+  const tailLines = previewLines - headLines;
+  const omitted = lines.slice(headLines, lines.length - tailLines);
+  const omittedBytes = Buffer.byteLength(omitted.join('\n'), 'utf8');
+  return [
+    ...lines.slice(0, headLines),
+    `${truncationMarker(omittedBytes)} full output written to artifact ...`,
+    ...lines.slice(lines.length - tailLines),
+  ].join('\n');
 }
 
 function safeFileName(value: string): string {

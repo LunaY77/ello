@@ -45,8 +45,6 @@ const EMPTY_USAGE: Usage = {
 function testInitialSettings(params: ParsedClientParams<'thread/start'>) {
   return Promise.resolve({
     mode: params.mode ?? 'ask-before-changes',
-    profile: params.profile ?? 'test',
-    model: params.model ?? 'test:model',
     agent: params.agent ?? 'build',
   } as const);
 }
@@ -56,8 +54,6 @@ function testSettingsUpdate(
 ): Promise<Partial<ThreadSnapshot['settings']>> {
   return Promise.resolve({
     ...(params.mode === undefined ? {} : { mode: params.mode }),
-    ...(params.profile === undefined ? {} : { profile: params.profile }),
-    ...(params.model === undefined ? {} : { model: params.model }),
     ...(params.agent === undefined ? {} : { agent: params.agent }),
   });
 }
@@ -98,8 +94,6 @@ describe('ThreadFeature', () => {
 
     expect(attachment.snapshot.settings).toEqual({
       mode: 'ask-before-changes',
-      profile: 'test',
-      model: 'test:model',
       agent: 'build',
     });
   });
@@ -426,8 +420,6 @@ describe('ThreadFeature', () => {
       name: 'recovery',
       settings: {
         mode: 'ask-before-changes',
-        profile: 'main',
-        model: 'test:model',
         agent: 'primary',
       },
       metadata: {},
@@ -717,7 +709,7 @@ describe('ThreadFeature', () => {
       parseThreadRecord(
         {
           kind: 'thread.created',
-          schema: 1,
+          schema: 2,
           seq: 1,
           threadId: 'thr_orphan',
           createdAt: new Date().toISOString(),
@@ -726,8 +718,6 @@ describe('ThreadFeature', () => {
           name: 'orphan',
           settings: {
             mode: 'ask-before-changes',
-            profile: 'main',
-            model: 'test:model',
             agent: 'primary',
           },
           metadata: {},
