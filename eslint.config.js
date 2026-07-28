@@ -55,7 +55,12 @@ export default tseslint.config(
    * 全局忽略配置
    */
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**'],
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/coverage/**',
+      'packages/ello-bench/raw/**',
+    ],
   },
 
   /**
