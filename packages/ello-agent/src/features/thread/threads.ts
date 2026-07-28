@@ -267,10 +267,11 @@ export function createThreads(options: CreateThreadsInput) {
     steerTurn(
       threadId: string,
       turnId: string,
+      steerId: string,
       input: ReadonlyArray<UserInput>,
     ): Promise<void> {
       return pool.withState(threadId, false, (state) =>
-        state.steerTurn(turnId, input),
+        state.steerTurn(turnId, steerId, input),
       );
     },
     interruptTurn(

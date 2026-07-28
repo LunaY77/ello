@@ -293,7 +293,7 @@ function ReadyThreadScreen({
         {...(state.interruptNotice === undefined
           ? {}
           : { interruptNotice: state.interruptNotice })}
-        pendingSteers={state.pendingSteers}
+        pendingSteers={state.pendingSteers.map((steer) => steer.text)}
         usage={state.usage}
         {...(state.goal === undefined ? {} : { goal: state.goal })}
         overlay={

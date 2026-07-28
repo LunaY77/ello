@@ -34,6 +34,7 @@ import { StdioTransport } from './server/transport/stdio.js';
 export async function runAppServer(
   argv = process.argv.slice(2),
 ): Promise<void> {
+  configureAiSdkWarningLogging();
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -96,6 +97,23 @@ export async function runAppServer(
     process.off('SIGTERM', onSigterm);
     process.off('SIGINT', onSigint);
   }
+}
+
+function configureAiSdkWarningLogging(): void {
+  globalThis.AI_SDK_LOG_WARNINGS = ({ warnings, provider, model }) => {
+    for (const warning of warnings) {
+      process.stderr.write(
+        `${JSON.stringify({
+          level: 'warn',
+          event: 'model.warning',
+          at: new Date().toISOString(),
+          ...(provider === undefined ? {} : { provider }),
+          ...(model === undefined ? {} : { model }),
+          warning,
+        })}\n`,
+      );
+    }
+  };
 }
 
 function createProductionAgentRuntime(): AgentRuntime {

@@ -97,6 +97,10 @@ class RunningAgent implements AgentRun {
   private readonly pendingCompactions: Array<
     Extract<EngineEvent, { type: 'context.compaction' }>
   > = [];
+  private readonly pendingSteers: Array<{
+    readonly steerId: string;
+    readonly text: string;
+  }> = [];
   private activeStream: AgentStream | undefined;
   private interruptReason: string | undefined;
 
@@ -109,7 +113,7 @@ class RunningAgent implements AgentRun {
     this.result = this.runAgent();
   }
 
-  steer(input: string): void {
+  steer(steerId: string, input: string): void {
     const stream = this.activeStream;
     if (stream === undefined) {
       throw new Error('Agent run is not accepting steering.');
@@ -118,6 +122,7 @@ class RunningAgent implements AgentRun {
       role: 'user',
       content: input,
     });
+    this.pendingSteers.push({ steerId, text: input });
   }
 
   interrupt(reason: string): void {
@@ -345,14 +350,20 @@ class RunningAgent implements AgentRun {
           occurredAt: event.occurredAt,
         });
         return;
+      case 'model.completed':
+        this.completeOpenMessages();
+        return;
+      case 'queue.drained':
+        if (event.queue === 'steering') {
+          this.publishConsumedSteers(event.count, event.occurredAt);
+        }
+        return;
       case 'run.completed':
       case 'run.started':
       case 'turn.started':
       case 'turn.completed':
-      case 'queue.drained':
       case 'model.started':
       case 'model.first_token':
-      case 'model.completed':
       case 'model.failed':
       case 'tool.approval_requested':
       case 'run.interrupted':
@@ -367,6 +378,39 @@ class RunningAgent implements AgentRun {
     for (const [messageId, text] of this.messageText) {
       this.queue.push({ type: 'messageCompleted', messageId, text });
       this.messageText.delete(messageId);
+    }
+  }
+
+  /**
+   * 把 engine 的 steering drain 事实关联回产品层 steer，并按 FIFO 发布消费事件。
+   *
+   * Args:
+   * - `count`: engine 本回合实际抽取的 steering 数量。
+   * - `occurredAt`: engine 发布 drain 事实的时间。
+   *
+   * Returns:
+   * - 所有对应事件完成入队后同步返回。
+   *
+   * Throws:
+   * - 当 engine 抽取数量超过产品层已登记 steer 时抛错，避免错误关联。
+   */
+  private publishConsumedSteers(count: number, occurredAt: string): void {
+    if (count > this.pendingSteers.length) {
+      throw new Error(
+        `Engine drained ${count} steering messages with only ${this.pendingSteers.length} pending.`,
+      );
+    }
+    for (let index = 0; index < count; index += 1) {
+      const steer = this.pendingSteers.shift();
+      if (steer === undefined) {
+        throw new Error('Pending steering correlation was unexpectedly empty.');
+      }
+      this.queue.push({
+        type: 'steeringConsumed',
+        steerId: steer.steerId,
+        text: steer.text,
+        occurredAt,
+      });
     }
   }
 

@@ -140,7 +140,7 @@ describe('ThreadFeature', () => {
     const attachment = await startThread(manager, 'connection-1');
     await attachment.runtime.startTurn([{ type: 'text', text: 'first' }]);
     await expect(
-      attachment.runtime.steerTurn('turn_stale', [
+      attachment.runtime.steerTurn('turn_stale', 'steer_stale', [
         { type: 'text', text: 'steer' },
       ]),
     ).rejects.toMatchObject({ type: 'turnMismatch' });
@@ -151,6 +151,41 @@ describe('ThreadFeature', () => {
       status: 'completed',
       usage: EMPTY_USAGE,
     });
+  });
+
+  it('Agent 消费 steer 后把它持久化为带关联 id 的用户消息', async () => {
+    const attachment = await startThread(manager, 'connection-1');
+    const turn = await attachment.runtime.startTurn([
+      { type: 'text', text: 'first' },
+    ]);
+    const run = agent.run(attachment.snapshot.thread.id);
+
+    await attachment.runtime.steerTurn(turn.id, 'steer_focus', [
+      { type: 'text', text: 'focus tests' },
+    ]);
+    expect(run.steers).toEqual([
+      { steerId: 'steer_focus', text: 'focus tests' },
+    ]);
+
+    run.emit({
+      type: 'steeringConsumed',
+      steerId: 'steer_focus',
+      text: 'focus tests',
+      occurredAt: '2026-07-28T00:00:00.000Z',
+    });
+
+    await vi.waitFor(async () => {
+      expect(
+        (await attachment.runtime.snapshot()).turns[0]?.items,
+      ).toContainEqual(
+        expect.objectContaining({
+          type: 'userMessage',
+          steerId: 'steer_focus',
+          text: 'focus tests',
+        }),
+      );
+    });
+    run.finish({ status: 'completed', usage: EMPTY_USAGE });
   });
 
   it('fork 生成新 thread、turn 和 item id，原 thread 不变', async () => {
@@ -953,6 +988,8 @@ class FakeAgent {
 
 class FakeAgentRun implements AgentRun {
   readonly resolutions: string[] = [];
+  readonly steers: Array<{ readonly steerId: string; readonly text: string }> =
+    [];
   readonly rejections: Array<
     Extract<Parameters<AgentRun['resume']>[0], { type: 'rejected' }>
   > = [];
@@ -1005,7 +1042,9 @@ class FakeAgentRun implements AgentRun {
     this.resolveResult(result);
   }
 
-  steer(_input: string): void {}
+  steer(steerId: string, input: string): void {
+    this.steers.push({ steerId, text: input });
+  }
 
   interrupt(reason: string): void {
     this.finish({ status: 'interrupted', usage: EMPTY_USAGE, reason });

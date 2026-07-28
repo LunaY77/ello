@@ -15,6 +15,7 @@ import type { z } from 'zod';
 
 import {
   AppServerClient,
+  type AppServerClientCloseEvent,
   type IncomingServerRequest,
 } from '../../src/api/client.js';
 import {
@@ -163,6 +164,23 @@ describe('AppServerClient', () => {
     const context = await initializedClient({ requestTimeoutMs: 25 });
     const request = context.client.request('server/read', {});
     await expect(request).rejects.toBeInstanceOf(RequestTimeoutError);
+    expect(context.client.state).toBe('closed');
+    await context.client.close();
+  });
+
+  it('底层 transport 异常结束时发布唯一连接关闭事件', async () => {
+    const context = await initializedClient();
+    const closed = deferred<AppServerClientCloseEvent>();
+    const listener = vi.fn(closed.resolve);
+    context.client.onClose(listener);
+
+    await context.server.close();
+
+    await expect(closed.promise).resolves.toMatchObject({
+      reason: 'App Server transport ended unexpectedly.',
+      error: { message: 'App Server transport ended unexpectedly.' },
+    });
+    expect(listener).toHaveBeenCalledOnce();
     expect(context.client.state).toBe('closed');
     await context.client.close();
   });

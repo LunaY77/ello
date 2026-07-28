@@ -62,6 +62,7 @@
     "turn/steer": {
       "threadId": "thr_fixture",
       "expectedTurnId": "turn_fixture",
+      "steerId": "steer_fixture",
       "input": [{ "type": "text", "text": "continue" }]
     },
     "turn/interrupt": {

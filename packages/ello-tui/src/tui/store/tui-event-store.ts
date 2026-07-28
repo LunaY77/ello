@@ -47,14 +47,22 @@ export interface TuiEventState {
   readonly activeTurnId?: string;
   readonly runStartedAt?: number;
   readonly interruptNotice?: string;
-  readonly pendingSteers: readonly string[];
+  readonly pendingSteers: ReadonlyArray<{
+    readonly steerId: string;
+    readonly text: string;
+  }>;
   readonly stale: boolean;
   readonly historyResetKey: number;
 }
 
 export type TuiEventInput =
   | ThreadClientEvent
-  | { readonly type: 'steer.queued'; readonly text: string }
+  | {
+      readonly type: 'steer.queued';
+      readonly steerId: string;
+      readonly text: string;
+    }
+  | { readonly type: 'steer.failed'; readonly steerId: string }
   | {
       readonly type: 'ui.message';
       readonly text: string;
@@ -128,8 +136,47 @@ export function reduceTuiEvent(
         id: `client-error-${state.history.length}`,
         text: event.error.message,
       });
+    case 'connectionClosed': {
+      const {
+        activeTurnId: _activeTurnId,
+        runStartedAt: _runStartedAt,
+        pendingRequest: _pendingRequest,
+        ...withoutRun
+      } = state;
+      return appendHistory(
+        {
+          ...withoutRun,
+          snapshot: {
+            ...state.snapshot,
+            thread: { ...state.snapshot.thread, status: 'failed' },
+          },
+          live: emptyLiveState(),
+          status: 'failed',
+          pendingSteers: [],
+          stale: true,
+        },
+        {
+          kind: 'diagnostic',
+          id: `connection-closed-${state.history.length}`,
+          text: `App Server connection closed: ${event.error.message}`,
+        },
+      );
+    }
     case 'steer.queued':
-      return { ...state, pendingSteers: [...state.pendingSteers, event.text] };
+      return {
+        ...state,
+        pendingSteers: [
+          ...state.pendingSteers,
+          { steerId: event.steerId, text: event.text },
+        ],
+      };
+    case 'steer.failed':
+      return {
+        ...state,
+        pendingSteers: state.pendingSteers.filter(
+          (steer) => steer.steerId !== event.steerId,
+        ),
+      };
     case 'ui.message':
       return appendHistory(state, {
         kind: event.level === 'error' ? 'diagnostic' : 'system',
@@ -361,7 +408,14 @@ function startLiveItem(state: TuiEventState, item: ThreadItem): TuiEventState {
 
 function completeItem(state: TuiEventState, item: ThreadItem): TuiEventState {
   let next = state;
-  if (item.type === 'agentMessage' || item.type === 'plan') {
+  if (item.type === 'userMessage' && item.steerId !== undefined) {
+    next = {
+      ...next,
+      pendingSteers: next.pendingSteers.filter(
+        (steer) => steer.steerId !== item.steerId,
+      ),
+    };
+  } else if (item.type === 'agentMessage' || item.type === 'plan') {
     next = { ...next, live: { ...next.live, assistantText: '' } };
   } else if (item.type === 'reasoning') {
     next = { ...next, live: { ...next.live, reasoningText: '' } };

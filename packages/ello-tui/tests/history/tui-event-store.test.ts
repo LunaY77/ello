@@ -324,9 +324,7 @@ describe('tui-event-store', () => {
   it('replaces automatic compaction progress with the complete checkpoint', () => {
     let state = createInitialTuiEventState(
       fixtureSnapshot({
-        turns: [
-          turnFixture({ id: 'turn-1', status: 'inProgress', items: [] }),
-        ],
+        turns: [turnFixture({ id: 'turn-1', status: 'inProgress', items: [] })],
       }),
     );
     state = reduceTuiEvent(state, {
@@ -417,6 +415,7 @@ describe('tui-event-store', () => {
     state = reduceTuiEvent(state, { type: 'ui.message', text: 'connected' });
     state = reduceTuiEvent(state, {
       type: 'steer.queued',
+      steerId: 'steer_focus',
       text: 'focus tests',
     });
     state = reduceTuiEvent(state, {
@@ -428,7 +427,9 @@ describe('tui-event-store', () => {
       kind: 'system',
       text: 'connected',
     });
-    expect(state.pendingSteers).toEqual(['focus tests']);
+    expect(state.pendingSteers).toEqual([
+      { steerId: 'steer_focus', text: 'focus tests' },
+    ]);
     expect(state.stale).toBe(true);
 
     const replacement = fixtureSnapshot({
@@ -439,6 +440,59 @@ describe('tui-event-store', () => {
     expect(state.snapshot.thread.name).toBe('replacement');
     expect(state.historyResetKey).toBe(1);
     expect(state.stale).toBe(false);
+  });
+
+  it('moves only the consumed duplicate steer from pending into history', () => {
+    const turn = turnFixture({ id: 'turn-1', status: 'inProgress', items: [] });
+    let state = createInitialTuiEventState(
+      fixtureSnapshot({ turns: [turn], seq: 1 }),
+    );
+    state = reduceTuiEvent(state, {
+      type: 'steer.queued',
+      steerId: 'steer_first',
+      text: 'focus tests',
+    });
+    state = reduceTuiEvent(state, {
+      type: 'steer.queued',
+      steerId: 'steer_second',
+      text: 'focus tests',
+    });
+    const item = {
+      ...userItem('user-steer-first', 'focus tests'),
+      steerId: 'steer_first',
+    };
+
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('item/started', 2, {
+        turnId: turn.id,
+        itemId: item.id,
+        item,
+      }),
+    });
+    expect(state.pendingSteers).toHaveLength(2);
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('item/completed', 3, {
+        turnId: turn.id,
+        itemId: item.id,
+        item,
+      }),
+    });
+
+    expect(state.pendingSteers).toEqual([
+      { steerId: 'steer_second', text: 'focus tests' },
+    ]);
+    expect(state.history.at(-1)).toMatchObject({
+      kind: 'user',
+      text: 'focus tests',
+    });
+
+    state = reduceTuiEvent(state, {
+      type: 'steer.failed',
+      steerId: 'steer_second',
+    });
+    expect(state.pendingSteers).toEqual([]);
   });
 
   it('replays structured file changes instead of raw event payloads', () => {

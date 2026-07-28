@@ -313,6 +313,7 @@ export function createThreadRoutes(
       await context.threads.steerTurn(
         params.threadId,
         params.expectedTurnId,
+        params.steerId,
         params.input,
       );
       return { ok: true };

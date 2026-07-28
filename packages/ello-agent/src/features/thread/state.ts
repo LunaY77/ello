@@ -164,12 +164,17 @@ export interface ThreadState {
    *
    * Args:
    * - `turnId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   * - `steerId`: 客户端生成的关联标识；消费后原样进入用户消息记录。
    * - `input`: `steerTurn` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
    *
    * Returns:
    * - Promise 在 Thread 状态 模块 的异步副作用完整提交后兑现，不返回业务值。
    */
-  steerTurn(turnId: string, input: ReadonlyArray<UserInput>): Promise<void>;
+  steerTurn(
+    turnId: string,
+    steerId: string,
+    input: ReadonlyArray<UserInput>,
+  ): Promise<void>;
   /**
    * 执行 Thread 状态 模块 定义的 `interruptTurn` 领域操作，输入和副作用均受该边界约束。
    *
@@ -442,7 +447,7 @@ export function createThreadState(
     hasPendingServerRequest: () =>
       projector.current().pendingServerRequests.length > 0,
     startTurn: (input, settings) => turns.start(input, settings),
-    steerTurn: (turnId, input) => turns.steer(turnId, input),
+    steerTurn: (turnId, steerId, input) => turns.steer(turnId, steerId, input),
     interruptTurn: (turnId, reason) =>
       turns.interrupt(turnId, reason ?? 'client request'),
     resolveServerRequest: (requestId, result) =>

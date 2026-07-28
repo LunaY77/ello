@@ -430,6 +430,75 @@ describe('App typed client behavior', () => {
     view.unmount();
   });
 
+  it('运行中连接断开后停止 working，Ctrl+C 直接退出', async () => {
+    const harness = createThreadHarness(runningSnapshot());
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    harness.disconnect(new Error('transport failed'));
+
+    await vi.waitFor(() => {
+      expect(view.lastFrame()).toContain(
+        'App Server connection closed: transport failed',
+      );
+      expect(view.lastFrame()).not.toContain('working');
+    });
+    view.stdin.write('\x03');
+
+    await vi.waitFor(() => expect(harness.close).toHaveBeenCalledOnce());
+    expect(harness.interrupt).not.toHaveBeenCalled();
+  });
+
+  it('运行中 steer 被消费后从 pending 移入正常用户历史', async () => {
+    const current = runningSnapshot();
+    const harness = createThreadHarness(current);
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, 'focus tests');
+    await vi.waitFor(() => expect(harness.steerInput).toHaveBeenCalledOnce());
+    const steerId = harness.steerInput.mock.calls[0]?.[1] as string;
+    expect(steerId).toMatch(/^steer_[a-f0-9]{32}$/u);
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain(
+        'Messages queued for the running turn',
+      ),
+    );
+
+    const item = {
+      id: 'item_consumed_steer',
+      turnId: 'turn_running',
+      type: 'userMessage' as const,
+      text: 'focus tests',
+      steerId,
+      createdAt,
+    };
+    harness.emit(
+      notification(
+        'item/started',
+        2,
+        { turnId: item.turnId, itemId: item.id, item },
+        current.thread.id,
+      ),
+    );
+    harness.emit(
+      notification(
+        'item/completed',
+        3,
+        { turnId: item.turnId, itemId: item.id, item },
+        current.thread.id,
+      ),
+    );
+
+    await vi.waitFor(() => {
+      expect(view.lastFrame()).not.toContain(
+        'Messages queued for the running turn',
+      );
+      expect(view.lastFrame()).toContain('focus tests');
+    });
+    view.unmount();
+  });
+
   it('/resume 隐藏空白 thread，空白 TUI 退出时删除当前 thread', async () => {
     const named = summary('thr_named', 'Named session', 'work');
     const blank = summary('thr_blank', '', '');
@@ -535,7 +604,9 @@ interface ThreadHarness {
   readonly interrupt: ReturnType<typeof vi.fn>;
   readonly setMode: ReturnType<typeof vi.fn>;
   readonly submitInput: ReturnType<typeof vi.fn>;
+  readonly steerInput: ReturnType<typeof vi.fn>;
   emit(notification: ServerNotification): void;
+  disconnect(error: Error): void;
 }
 
 function createThreadHarness(
@@ -671,6 +742,7 @@ function createThreadHarness(
   const interrupt = vi.fn(async () => undefined);
   const setMode = vi.fn(async () => undefined);
   const submitInput = vi.fn(options.submitInput ?? (async () => 'turn_new'));
+  const steerInput = vi.fn(async () => undefined);
   const listeners = new Set<(event: ThreadClientEvent) => void>();
   const thread = {
     threadId: initialSnapshot.thread.id,
@@ -687,6 +759,7 @@ function createThreadHarness(
     interrupt,
     setMode,
     submitInput,
+    steerInput,
   } as unknown as ThreadClient;
   return {
     thread,
@@ -696,11 +769,43 @@ function createThreadHarness(
     interrupt,
     setMode,
     submitInput,
+    steerInput,
     emit: (notification: ServerNotification) => {
       for (const listener of listeners) {
         listener({ type: 'notification', notification });
       }
     },
+    disconnect: (error: Error) => {
+      for (const listener of listeners) {
+        listener({ type: 'connectionClosed', error });
+      }
+    },
+  };
+}
+
+function runningSnapshot(): ThreadSnapshot {
+  const current = snapshot('thr_running');
+  return {
+    ...current,
+    thread: { ...current.thread, status: 'running' },
+    turns: [
+      {
+        id: 'turn_running',
+        threadId: current.thread.id,
+        status: 'inProgress',
+        items: [
+          {
+            id: 'item_reasoning',
+            turnId: 'turn_running',
+            type: 'reasoning',
+            summary: 'Inspecting the repository',
+            status: 'completed',
+            createdAt,
+          },
+        ],
+        startedAt: createdAt,
+      },
+    ],
   };
 }
 
@@ -809,9 +914,10 @@ function notification<M extends ServerNotification['method']>(
     Extract<ServerNotification, { method: M }>['params'],
     'threadId' | 'seq'
   >,
+  threadId = 'thr_1',
 ): Extract<ServerNotification, { method: M }> {
   return {
     method,
-    params: { threadId: 'thr_1', seq, ...params },
+    params: { threadId, seq, ...params },
   } as unknown as Extract<ServerNotification, { method: M }>;
 }

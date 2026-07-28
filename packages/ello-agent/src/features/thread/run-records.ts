@@ -406,6 +406,27 @@ async function recordAgentRunEvent(
       });
       return;
     }
+    case 'steeringConsumed': {
+      const item: ThreadItem = {
+        type: 'userMessage',
+        id: createEntityId('item'),
+        turnId: turn.id,
+        createdAt: event.occurredAt,
+        text: event.text,
+        steerId: event.steerId,
+      };
+      await options.append({
+        kind: 'item.started',
+        turnId: turn.id,
+        item,
+      });
+      await options.append({
+        kind: 'item.completed',
+        turnId: turn.id,
+        item,
+      });
+      return;
+    }
     case 'messagesAppended':
       for (const message of event.messages) {
         await options.append({

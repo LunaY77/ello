@@ -139,6 +139,12 @@ export type AgentRunEvent =
       readonly occurredAt: string;
     }
   | {
+      readonly type: 'steeringConsumed';
+      readonly steerId: string;
+      readonly text: string;
+      readonly occurredAt: string;
+    }
+  | {
       readonly type: 'messagesAppended';
       readonly messages: ReadonlyArray<AgentMessage>;
     };
@@ -187,12 +193,13 @@ export interface AgentRun {
    * 把运行中的用户引导加入当前 run，供下一个可执行 turn 消费。
    *
    * Args:
+   * - `steerId`: 客户端分配的稳定标识；消费事件原样返回以关联 UI pending 状态。
    * - `input`: 非空用户文本；调用方保留字符串所有权，run 按调用顺序排队。
    *
    * Returns:
    * - 输入完成入队后同步返回；run 已结束或正在关闭时直接抛错。
    */
-  steer(input: string): void;
+  steer(steerId: string, input: string): void;
   /**
    * 请求中断当前 run，并把原因写入最终 `interrupted` 结果。
    *

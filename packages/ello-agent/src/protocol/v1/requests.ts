@@ -96,6 +96,7 @@ export const TurnSteerParamsSchema = z
   .object({
     threadId: OpaqueIdSchema,
     expectedTurnId: OpaqueIdSchema,
+    steerId: OpaqueIdSchema,
     input: z.array(UserInputSchema).min(1).readonly(),
   })
   .strict();

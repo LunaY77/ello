@@ -61,6 +61,7 @@ export const UserMessageItemSchema = z
     ...ItemBaseShape,
     type: z.literal('userMessage'),
     text: z.string(),
+    steerId: OpaqueIdSchema.optional(),
   })
   .strict();
 

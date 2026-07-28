@@ -358,6 +358,7 @@ function managementClient(result: unknown, rejects = false) {
     close: vi.fn().mockResolvedValue(undefined),
     onNotification: vi.fn(() => () => undefined),
     onServerRequest: vi.fn(() => () => undefined),
+    onClose: vi.fn(() => () => undefined),
   };
 }
 
@@ -379,6 +380,7 @@ function runClient(terminalStatus: 'completed' | 'failed' | 'interrupted') {
     request,
     close: vi.fn().mockResolvedValue(undefined),
     onServerRequest: vi.fn(() => () => undefined),
+    onClose: vi.fn(() => () => undefined),
     onNotification: vi.fn(
       (listener: (notification: ServerNotification) => void) => {
         notificationListeners.add(listener);

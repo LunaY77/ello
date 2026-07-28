@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type {
   AppServerClient,
+  AppServerClientCloseEvent,
   IncomingServerRequest,
 } from '../../src/api/client.js';
 import type {
@@ -9,6 +10,7 @@ import type {
   ServerRequestMethod,
   ThreadSnapshot,
 } from '../../src/api/protocol-types.js';
+import type { ThreadClientEvent } from '../../src/client/client-events.js';
 import { ThreadClient } from '../../src/client/thread-client.js';
 
 const createdAt = '2026-07-18T00:00:00.000Z';
@@ -80,6 +82,46 @@ describe('ThreadClient recovery', () => {
 
     await client.close();
   });
+
+  it('连接异常关闭时清空交互并发布终端事件', async () => {
+    const recovery = deferred<ThreadSnapshot>();
+    const server = new TestServer(recovery.promise);
+    const client = new ThreadClient(
+      server as unknown as AppServerClient,
+      snapshot(1),
+    );
+    const events: ThreadClientEvent[] = [];
+    client.subscribe((event) => events.push(event));
+
+    const error = new Error('transport failed');
+    server.emitClose({ reason: error.message, error });
+
+    expect(client.stale).toBe(true);
+    expect(events).toContainEqual({ type: 'connectionClosed', error });
+    await client.close();
+  });
+
+  it('steer 请求携带稳定关联 id', async () => {
+    const recovery = deferred<ThreadSnapshot>();
+    const server = new TestServer(recovery.promise);
+    const client = new ThreadClient(
+      server as unknown as AppServerClient,
+      runningSnapshot(),
+    );
+
+    await client.steer('focus tests', 'steer_focus');
+
+    expect(server.requests).toContainEqual([
+      'turn/steer',
+      {
+        threadId: 'thr_fixture',
+        expectedTurnId: 'turn_fixture',
+        steerId: 'steer_focus',
+        input: [{ type: 'text', text: 'focus tests' }],
+      },
+    ]);
+    await client.close();
+  });
 });
 
 class TestServer {
@@ -91,6 +133,9 @@ class TestServer {
     (
       request: IncomingServerRequest<ServerRequestMethod>,
     ) => boolean | void | Promise<boolean | void>
+  >();
+  private readonly closeListeners = new Set<
+    (event: AppServerClientCloseEvent) => void
   >();
 
   constructor(private readonly recovery: Promise<ThreadSnapshot>) {}
@@ -111,9 +156,15 @@ class TestServer {
     return () => this.serverRequestListeners.delete(listener);
   }
 
+  onClose(listener: (event: AppServerClientCloseEvent) => void): () => void {
+    this.closeListeners.add(listener);
+    return () => this.closeListeners.delete(listener);
+  }
+
   request(method: string, params: unknown): Promise<unknown> {
     this.requests.push([method, params]);
     if (method === 'thread/resume') return this.recovery;
+    if (method === 'turn/steer') return Promise.resolve({ ok: true });
     if (method === 'thread/unsubscribe') return Promise.resolve({ ok: true });
     throw new Error(`Unexpected request ${method}.`);
   }
@@ -124,6 +175,10 @@ class TestServer {
 
   emitServerRequest(request: IncomingServerRequest<ServerRequestMethod>): void {
     for (const listener of this.serverRequestListeners) listener(request);
+  }
+
+  emitClose(event: AppServerClientCloseEvent): void {
+    for (const listener of this.closeListeners) listener(event);
   }
 }
 
@@ -157,6 +212,23 @@ function snapshot(seq: number): ThreadSnapshot {
       toolCalls: 0,
     },
     seq,
+  };
+}
+
+function runningSnapshot(): ThreadSnapshot {
+  const current = snapshot(1);
+  return {
+    ...current,
+    thread: { ...current.thread, status: 'running' },
+    turns: [
+      {
+        id: 'turn_fixture',
+        threadId: current.thread.id,
+        status: 'inProgress',
+        items: [],
+        startedAt: createdAt,
+      },
+    ],
   };
 }
 

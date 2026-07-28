@@ -96,6 +96,7 @@ function eventType(event: AgentRunEvent): AgentRunEvent['type'] {
     case 'contextCompactionStarted':
     case 'contextCompacted':
     case 'runFailed':
+    case 'steeringConsumed':
       return event.type;
     default:
       event satisfies never;
