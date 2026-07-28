@@ -7,11 +7,22 @@ import type { AgentRunContext } from './adapter.js';
 
 export const RUNTIME_BOUNDARY_VERSION = '1';
 
-export function createRuntimeBoundaryInstruction(options: {
-  readonly containerName: string;
-  readonly containerWorkspace: '/app';
-  readonly taskFiles: AgentRunContext['taskFiles'];
-}): string {
+export function createRuntimeBoundaryInstruction(
+  options: AgentRunContext,
+): string {
+  if (options.runtime === 'local') {
+    return [
+      `Benchmark runtime boundary version ${RUNTIME_BOUNDARY_VERSION}.`,
+      'Repository files are in the current workspace.',
+      'Do not inspect benchmark tests, verifier inputs, reference solutions, or task corpus source files.',
+      'Do not use web search, HTTP fetch, browser, MCP, or any network tool.',
+      'File tools may read and edit only paths inside the current workspace.',
+      'Run repository shell commands directly in the current workspace on the host.',
+      'Do not use Docker, containers, or a container command prefix.',
+      `The repository working directory is ${options.workspace}.`,
+      'Do not change the shell working directory outside the current workspace.',
+    ].join('\n');
+  }
   const commandPrefix = dockerCommandPrefix(options);
   return [
     `Benchmark runtime boundary version ${RUNTIME_BOUNDARY_VERSION}.`,

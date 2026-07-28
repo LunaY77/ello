@@ -59,8 +59,9 @@ export const HarnessReportSchema = z
     status: z.enum(['passed', 'failed']),
     reward: z.union([z.literal(0), z.literal(1)]),
     verifierProcess: ArtifactReferenceSchema,
-    verifierImage: z.string().min(1),
-    verifierImageId: z.string().min(1),
+    verifierRuntime: z.enum(['docker', 'local']).default('docker'),
+    verifierImage: z.string().min(1).optional(),
+    verifierImageId: z.string().min(1).optional(),
     modelPatchSha256: z.string().regex(/^[0-9a-f]{64}$/u),
     appliedPatchSha256: z.string().regex(/^[0-9a-f]{64}$/u),
     verifierCapturedPatchSha256: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -73,6 +74,17 @@ export const HarnessReportSchema = z
   })
   .strict()
   .superRefine((report, context) => {
+    if (
+      report.verifierRuntime === 'docker' &&
+      (report.verifierImage === undefined ||
+        report.verifierImageId === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['verifierImageId'],
+        message: 'Docker verifier requires image and image id.',
+      });
+    }
     const expectedStatus = report.reward === 1 ? 'passed' : 'failed';
     if (report.status !== expectedStatus) {
       context.addIssue({
@@ -115,6 +127,7 @@ export const InfrastructureFailureSchema = z
     kind: z.enum([
       'corpus',
       'container',
+      'workspace',
       'server',
       'config',
       'provider',
@@ -175,6 +188,7 @@ export const RunManifestSchema = z
     agentRuntime: AgentRuntimeProvenanceSchema.optional(),
     provenance: RunProvenanceSchema.optional(),
     task: ResolvedTaskSchema.optional(),
+    executionRuntime: z.enum(['docker', 'local']).default('docker'),
     imageId: z.string().min(1).optional(),
     containerName: z.string().min(1).optional(),
     baselineTree: z
@@ -254,8 +268,6 @@ function validateCompleted(
     ['task', manifest.task],
     ['agent', manifest.agent],
     ['provenance', manifest.provenance],
-    ['imageId', manifest.imageId],
-    ['containerName', manifest.containerName],
     ['baselineTree', manifest.baselineTree],
     ['client', manifest.client],
     ['agentProcess', manifest.agentProcess],
@@ -271,6 +283,20 @@ function validateCompleted(
         path: [field],
         message: `Completed run requires ${field}.`,
       });
+    }
+  }
+  if (manifest.executionRuntime === 'docker') {
+    for (const [field, value] of [
+      ['imageId', manifest.imageId],
+      ['containerName', manifest.containerName],
+    ] as const) {
+      if (value === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `Completed Docker run requires ${field}.`,
+        });
+      }
     }
   }
   // Normalized evidence exists unless this run recorded why it could not be

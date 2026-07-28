@@ -265,6 +265,7 @@ async function createFixture(
     agentConfigHash: sha256(stableJson(agent)),
     agentStateRoot,
     workspace,
+    runtime: 'docker',
     containerName: 'bench-container',
     containerWorkspace: '/app',
     rawAgentRoot,

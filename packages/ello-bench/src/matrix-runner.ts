@@ -144,6 +144,7 @@ export async function runBenchmarkMatrix(options: {
         agent,
         provenance,
         taskFiles: files,
+        runtime: options.config.execution.runtime,
       });
       attempts.push(result);
       if (result.status === 'completed') {

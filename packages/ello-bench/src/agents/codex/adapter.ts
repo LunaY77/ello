@@ -93,9 +93,16 @@ export function createCodexAdapter(agent: CodexAgentSpec): AgentAdapter {
             tools: normalized.tools,
             parserCoverage: normalized.evidence.parserCoverage,
             workspace: context.workspace,
-            containerName: context.containerName,
-            containerWorkspace: context.containerWorkspace,
-            shellMode: containerShellMode(context.taskFiles.task.benchmark),
+            ...(context.runtime === 'docker'
+              ? {
+                  runtime: context.runtime,
+                  containerName: context.containerName,
+                  containerWorkspace: context.containerWorkspace,
+                  shellMode: containerShellMode(
+                    context.taskFiles.task.benchmark,
+                  ),
+                }
+              : { runtime: context.runtime }),
           });
           const runtime = AgentRuntimeProvenanceSchema.parse({
             schema: 'ello.benchmark.agent-runtime.v1',

@@ -62,6 +62,7 @@ export type BenchmarkId = z.infer<typeof BenchmarkIdSchema>;
 
 export const BenchmarkExecutionConfigSchema = z
   .object({
+    runtime: z.enum(['docker', 'local']).default('docker'),
     replicates: z.number().int().positive(),
     concurrency: z.number().int().positive(),
     maxInfrastructureRetries: z.number().int().min(0).max(5),

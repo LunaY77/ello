@@ -19,17 +19,29 @@ export interface BenchmarkServerProcess {
   close(): Promise<void>;
 }
 
-export async function startBenchmarkServerProcess(options: {
+interface BenchmarkServerProcessOptionsBase {
   readonly workspace: string;
-  readonly containerName: string;
-  readonly containerWorkspace: string;
-  readonly shellMode: ContainerShellMode;
   readonly elloHome: string;
   readonly socketPath: string;
   readonly rawRoot: string;
   readonly stdoutPath: string;
   readonly stderrPath: string;
-}): Promise<BenchmarkServerProcess> {
+}
+
+export type BenchmarkServerProcessOptions = BenchmarkServerProcessOptionsBase &
+  (
+    | { readonly runtime: 'local' }
+    | {
+        readonly runtime: 'docker';
+        readonly containerName: string;
+        readonly containerWorkspace: string;
+        readonly shellMode: ContainerShellMode;
+      }
+  );
+
+export async function startBenchmarkServerProcess(
+  options: BenchmarkServerProcessOptions,
+): Promise<BenchmarkServerProcess> {
   const entry = path.join(packageRoot, 'dist', 'server-entry.js');
   await access(entry);
   await Promise.all([
@@ -46,12 +58,18 @@ export async function startBenchmarkServerProcess(options: {
       options.socketPath,
       '--workspace',
       options.workspace,
-      '--container',
-      options.containerName,
-      '--container-workspace',
-      options.containerWorkspace,
-      '--shell-mode',
-      options.shellMode,
+      '--runtime',
+      options.runtime,
+      ...(options.runtime === 'docker'
+        ? [
+            '--container',
+            options.containerName,
+            '--container-workspace',
+            options.containerWorkspace,
+            '--shell-mode',
+            options.shellMode,
+          ]
+        : []),
       '--raw-root',
       options.rawRoot,
     ],

@@ -1,6 +1,6 @@
 # @ello/bench
 
-`@ello/bench` 是可复现的编码 Agent 基准评测工具。它让 Ello、Claude Code 和 Codex 在相同任务、指令、Docker 镜像和 verifier 下运行，生成带完整证据溯源的 `task × agent × replicate` 评分矩阵。
+`@ello/bench` 是编码 Agent 基准评测工具。它让 Ello、Claude Code 和 Codex 在相同任务、指令、执行 runtime 和 verifier 下运行，生成带完整证据溯源的 `task × agent × replicate` 评分矩阵。
 
 ## 两种 Benchmark
 
@@ -12,7 +12,7 @@
 | **语料来源** | Suite 内置 | `scaleapi/SWE-bench_Pro-os`（外部仓库） |
 | **用途** | 日常迭代优化的稳定目标 | 与社区结果可比较 |
 | **语料获取** | 自动克隆，无需额外配置 | 需 `--corpus-root` 或从 GitHub 自动克隆 |
-| **Verifier** | 容器内测试 harness | 上游 `run_script.sh` + `parser.py` |
+| **Verifier** | `test.sh` harness | 上游 `run_script.sh` + `parser.py` |
 
 **DeepSWE** 是日常迭代的主 Suite——题目固定、语料内置、无外部依赖。
 
@@ -106,18 +106,18 @@ DeepSWE（无需额外配置）：
 pnpm bench:run \
   --task actionlint-action-pinning-lint \
   --all-agents \
-  --run-root packages/ello-bench/raw/pilot-001
+  --run-root raw/pilot-001
 ```
 
 SWE-bench Pro（需要语料库——见下文）：
 
 ```bash
 pnpm bench:run \
-  --config packages/ello-bench/config/benchmark.config.mjs \
-  --corpus-root ../SWE-bench_Pro-os \
+  --config config/benchmark.config.mjs \
+  --corpus-root ../../../SWE-bench_Pro-os \
   --task swepro-navidrome-29b7b740 \
   --agent ello \
-  --run-root packages/ello-bench/raw/swepro-pilot-001
+  --run-root raw/swepro-pilot-001
 ```
 
 运行完整 30 题矩阵：
@@ -126,14 +126,14 @@ pnpm bench:run \
 pnpm bench:run \
   --all \
   --all-agents \
-  --run-root packages/ello-bench/raw/publish-001
+  --run-root raw/publish-001
 ```
 
 ### 6. 生成报告
 
 ```bash
 pnpm bench:report \
-  --run-root packages/ello-bench/raw/pilot-001
+  --run-root raw/pilot-001
 ```
 
 在 `bench:run` 中加 `--report` 可以一步完成运行和报告：
@@ -198,6 +198,23 @@ ello-bench validate [--run-root PATH]        验证配置（无参数）或已�
 
 三者均为严格 schema 校验的 ESM 模块。未知字段、缺字段、重复 Agent、非法状态都会立即报错，不接受 JSON 配置。
 
+### Docker 或本地执行
+
+在 `benchmark.config.mjs` 中设置 `execution.runtime`：
+
+```js
+execution: {
+  runtime: 'local', // 也可以是 'docker'；省略时默认使用 Docker
+  replicates: 1,
+  concurrency: 2,
+  maxInfrastructureRetries: 1,
+}
+```
+
+`docker` 使用题目固定的镜像准备 Agent 工作区和 verifier。`local` 完全不调用 Docker：它从 `repositoryUrl` 克隆并 checkout 到 `baseCommitHash`，为 verifier 再创建一份独立 clone，所有 shell 命令都直接在宿主机运行。Ello、Claude Code 和 Codex 本身在两种模式下始终是宿主机进程。
+
+本地模式要求宿主机已经具备项目需要的语言 runtime、系统包和依赖。镜像提供的 CPU、内存、网络和依赖保证均不再成立，因此本地结果适合开发调试，但不能直接与公开的 Docker 测评结果比较。该模式下 `bench:doctor` 会跳过全部 Docker 检查，改为检查基础宿主机工具链。
+
 ### 可发布性门禁
 
 在 `report.config.mjs` 中：
@@ -226,7 +243,8 @@ export const report = {
     ├── task/
     │   ├── instruction.md
     │   └── resolved-task.json
-    ├── docker-preflight.json
+    ├── docker-preflight.json  # Docker 模式
+    ├── local-preflight.json   # local 模式（二者只存在一个）
     ├── agent/
     │   ├── identity.json       # Agent、模型、commit
     │   ├── invocation.json     # 精确的 CLI 参数与环境变量
@@ -270,6 +288,7 @@ Validation 从原始 Agent 输出重新解析并与标准化 evidence 比对—�
 | `ELLO_BENCH_API_KEY` | Ello Agent（或你配置的 `apiKeyEnv`） |
 | `ELLO_BENCH_CLAUDE_EXE` | Claude Code Agent（或你配置的 `pathEnv`） |
 | `ELLO_BENCH_CODEX_EXE` | Codex Agent（或你配置的 `pathEnv`） |
+| `PYTHON` | 本地 verifier 使用的可选 Python 可执行文件（默认 `python3`） |
 | `ANTHROPIC_BASE_URL` | 仅注入 Claude Code 子进程 |
 | `ANTHROPIC_AUTH_TOKEN` | 仅注入 Claude Code 子进程 |
 

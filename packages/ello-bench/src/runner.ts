@@ -32,6 +32,7 @@ export async function runBenchmarkJob(options: {
   readonly agent: AgentSpec;
   readonly provenance: RunProvenance;
   readonly taskFiles: ResolvedTaskFiles;
+  readonly runtime: 'docker' | 'local';
 }): Promise<RunManifest> {
   let manifest = options.manifest;
   let preparedAgent: PreparedAgent | undefined;
@@ -63,6 +64,7 @@ export async function runBenchmarkJob(options: {
         agent: options.agent,
         provenance: options.provenance,
         task: options.taskFiles.task,
+        executionRuntime: options.runtime,
         phaseTimingsPath: timings.path,
       });
     });
@@ -73,42 +75,66 @@ export async function runBenchmarkJob(options: {
         attemptId: manifest.attemptId,
         workspace: manifest.workspace,
         taskFiles: options.taskFiles,
+        runtime: options.runtime,
       });
     });
-    containerName = preparedWorkspace.containerName;
-    await writeJsonAtomic(path.join(rawRoot, 'docker-preflight.json'), {
-      schema: 'ello.benchmark.docker-preflight.v1',
-      containerName: preparedWorkspace.containerName,
-      image: options.taskFiles.task.environment.image,
-      imageId: preparedWorkspace.imageId,
-      baseCommitHash: options.taskFiles.task.baseCommitHash,
-      baselineTree: preparedWorkspace.baselineTree,
-      initialGitStatus: preparedWorkspace.initialGitStatus,
-      containerWorkspace: preparedWorkspace.containerWorkspace,
-      containerUser: preparedWorkspace.containerUser,
-      network: preparedWorkspace.network,
-      cpus: options.taskFiles.task.environment.cpus,
-      memoryMb: options.taskFiles.task.environment.memoryMb,
-      storageMb: options.taskFiles.task.environment.storageMb,
-    });
-
-    preparedAgent = await runPhase('prepare-agent', () =>
-      createAgentAdapter(options.agent).prepare({
-        attemptId: manifest.attemptId,
-        agent: options.agent,
-        agentConfigHash: manifest.job.agentConfigHash,
-        agentStateRoot: manifest.agentStateRoot,
-        workspace: manifest.workspace,
+    if (preparedWorkspace.runtime === 'docker') {
+      containerName = preparedWorkspace.containerName;
+      await writeJsonAtomic(path.join(rawRoot, 'docker-preflight.json'), {
+        schema: 'ello.benchmark.docker-preflight.v1',
         containerName: preparedWorkspace.containerName,
+        image: options.taskFiles.task.environment.image,
+        imageId: preparedWorkspace.imageId,
+        baseCommitHash: options.taskFiles.task.baseCommitHash,
+        baselineTree: preparedWorkspace.baselineTree,
+        initialGitStatus: preparedWorkspace.initialGitStatus,
         containerWorkspace: preparedWorkspace.containerWorkspace,
-        rawAgentRoot,
-        taskFiles: options.taskFiles,
-      }),
+        containerUser: preparedWorkspace.containerUser,
+        network: preparedWorkspace.network,
+        cpus: options.taskFiles.task.environment.cpus,
+        memoryMb: options.taskFiles.task.environment.memoryMb,
+        storageMb: options.taskFiles.task.environment.storageMb,
+      });
+    } else {
+      await writeJsonAtomic(path.join(rawRoot, 'local-preflight.json'), {
+        schema: 'ello.benchmark.local-preflight.v1',
+        repositoryUrl: options.taskFiles.task.repositoryUrl,
+        baseCommitHash: options.taskFiles.task.baseCommitHash,
+        baselineTree: preparedWorkspace.baselineTree,
+        initialGitStatus: preparedWorkspace.initialGitStatus,
+        workspace: preparedWorkspace.workspace,
+      });
+    }
+
+    const agentContextBase = {
+      attemptId: manifest.attemptId,
+      agent: options.agent,
+      agentConfigHash: manifest.job.agentConfigHash,
+      agentStateRoot: manifest.agentStateRoot,
+      workspace: manifest.workspace,
+      rawAgentRoot,
+      taskFiles: options.taskFiles,
+    } as const;
+    preparedAgent = await runPhase('prepare-agent', () =>
+      createAgentAdapter(options.agent).prepare(
+        preparedWorkspace.runtime === 'docker'
+          ? {
+              ...agentContextBase,
+              runtime: preparedWorkspace.runtime,
+              containerName: preparedWorkspace.containerName,
+              containerWorkspace: preparedWorkspace.containerWorkspace,
+            }
+          : { ...agentContextBase, runtime: preparedWorkspace.runtime },
+      ),
     );
     manifest = await transitionRun(manifest, 'running', {
       phase: 'agent-running',
-      imageId: preparedWorkspace.imageId,
-      containerName: preparedWorkspace.containerName,
+      ...(preparedWorkspace.runtime === 'docker'
+        ? {
+            imageId: preparedWorkspace.imageId,
+            containerName: preparedWorkspace.containerName,
+          }
+        : {}),
       baselineTree: preparedWorkspace.baselineTree,
     });
 
@@ -220,14 +246,17 @@ export async function runBenchmarkJob(options: {
         harnessRoot,
         taskFiles: options.taskFiles,
         patch,
+        runtime: options.runtime,
       }),
     );
     await writeJsonAtomic(harness.reportPath, harness);
 
-    await runPhase('cleanup-agent-container', async () => {
-      await removeContainer(preparedWorkspace.containerName);
-      containerName = undefined;
-    });
+    if (preparedWorkspace.runtime === 'docker') {
+      await runPhase('cleanup-agent-container', async () => {
+        await removeContainer(preparedWorkspace.containerName);
+        containerName = undefined;
+      });
+    }
     const outcome = classifyOutcome(execution.process, harness.reward);
     return await transitionRun(manifest, 'completed', {
       phase: 'completed',
@@ -314,9 +343,8 @@ function failureForError(phase: string, error: unknown): InfrastructureFailure {
 
 function classifyPhase(phase: string): InfrastructureFailure['kind'] {
   if (phase.includes('corpus')) return 'corpus';
-  if (phase.includes('workspace') || phase.includes('container')) {
-    return 'container';
-  }
+  if (phase.includes('container')) return 'container';
+  if (phase.includes('workspace')) return 'workspace';
   if (phase.includes('agent')) return 'agent_process';
   if (phase.includes('provider')) return 'provider';
   if (phase.includes('config')) return 'config';

@@ -309,6 +309,7 @@ export const ToolViolationSchema = z
     kind: z.enum([
       'parser_incomplete',
       'host_shell',
+      'docker_shell',
       'shell_workdir',
       'path_escape',
       'network_tool',

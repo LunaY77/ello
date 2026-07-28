@@ -20,6 +20,7 @@ export async function runVerifier(options: {
   readonly harnessRoot: string;
   readonly taskFiles: ResolvedTaskFiles;
   readonly patch: PatchArtifact;
+  readonly runtime: 'docker' | 'local';
 }): Promise<HarnessReport> {
   const task = options.taskFiles.task;
   const prepared = await prepareVerifierWorkspace(options);
@@ -30,6 +31,7 @@ export async function runVerifier(options: {
     tests: prepared.tests,
     logs: prepared.logs,
     task,
+    runtime: prepared.runtime,
   });
   try {
     const reward = await readReward(prepared.verifierOutput);
@@ -47,8 +49,13 @@ export async function runVerifier(options: {
       status: reward === 1 ? 'passed' : 'failed',
       reward,
       verifierProcess: process.reference,
-      verifierImage: task.environment.image,
-      verifierImageId: prepared.imageId,
+      verifierRuntime: prepared.runtime,
+      ...(prepared.runtime === 'docker'
+        ? {
+            verifierImage: task.environment.image,
+            verifierImageId: prepared.imageId,
+          }
+        : {}),
       modelPatchSha256: options.patch.sha256,
       appliedPatchSha256: prepared.appliedPatchSha256,
       verifierCapturedPatchSha256,

@@ -11,14 +11,21 @@ import {
   type ToolViolation,
 } from '../contracts.js';
 
-export function auditExternalTools(options: {
-  readonly tools: readonly NormalizedToolCall[];
-  readonly parserCoverage: 'complete' | 'incomplete';
-  readonly workspace: string;
-  readonly containerName: string;
-  readonly containerWorkspace: '/app';
-  readonly shellMode: ContainerShellMode;
-}): ToolAudit {
+export function auditExternalTools(
+  options: {
+    readonly tools: readonly NormalizedToolCall[];
+    readonly parserCoverage: 'complete' | 'incomplete';
+    readonly workspace: string;
+  } & (
+    | {
+        readonly runtime: 'docker';
+        readonly containerName: string;
+        readonly containerWorkspace: '/app';
+        readonly shellMode: ContainerShellMode;
+      }
+    | { readonly runtime: 'local' }
+  ),
+): ToolAudit {
   const violations: ToolViolation[] = [];
   let shellCalls = 0;
   let routedShellCalls = 0;
@@ -49,19 +56,25 @@ export function auditExternalTools(options: {
         });
         continue;
       }
-      const routing = inspectShellRouting(
-        command,
-        options.containerName,
-        options.containerWorkspace,
-        options.shellMode,
-      );
+      const routing =
+        options.runtime === 'docker'
+          ? inspectDockerShellRouting(
+              command,
+              options.containerName,
+              options.containerWorkspace,
+              options.shellMode,
+            )
+          : inspectLocalShellRouting(command);
       if (routing === 'passed') {
         routedShellCalls += 1;
       } else {
         violations.push({
           toolCallId: tool.id,
           kind: routing,
-          detail: `Shell command is outside the assigned task container: ${command}.`,
+          detail:
+            options.runtime === 'docker'
+              ? `Shell command is outside the assigned task container: ${command}.`
+              : `Docker is forbidden in local benchmark mode: ${command}.`,
         });
       }
     }
@@ -121,7 +134,7 @@ export function auditElloTools(
   });
 }
 
-function inspectShellRouting(
+function inspectDockerShellRouting(
   command: string,
   containerName: string,
   containerWorkspace: '/app',
@@ -131,6 +144,15 @@ function inspectShellRouting(
   if (!/^docker\s+exec(?:\s|$)/u.test(unwrapped)) return 'host_shell';
   const expected = `docker exec -w ${containerWorkspace} ${containerName} bash ${containerShellFlag(shellMode)} `;
   return unwrapped.startsWith(expected) ? 'passed' : 'shell_workdir';
+}
+
+function inspectLocalShellRouting(command: string): 'passed' | 'docker_shell' {
+  const unwrapped = unwrapShell(command.trim());
+  return /(?:^|[\s;&|])(?:[^\s;&|]*\/)?docker(?:-compose)?(?:\s|$)/u.test(
+    unwrapped,
+  )
+    ? 'docker_shell'
+    : 'passed';
 }
 
 function unwrapShell(command: string): string {

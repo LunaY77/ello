@@ -29,14 +29,30 @@ export async function runDoctor(
     detail: process.versions.node,
   });
   checks.push(await commandCheck('Git', 'git', ['--version']));
-  checks.push(await commandCheck('Docker CLI', 'docker', ['--version']));
-  checks.push(
-    await commandCheck('Docker daemon', 'docker', [
-      'info',
-      '--format',
-      '{{.ServerVersion}}',
-    ]),
-  );
+  if (config.execution.runtime === 'docker') {
+    checks.push(await commandCheck('Docker CLI', 'docker', ['--version']));
+    checks.push(
+      await commandCheck('Docker daemon', 'docker', [
+        'info',
+        '--format',
+        '{{.ServerVersion}}',
+      ]),
+    );
+  } else {
+    checks.push(await commandCheck('Bash', '/bin/bash', ['--version']));
+    checks.push(
+      await commandCheck('Python', process.env.PYTHON ?? 'python3', [
+        '--version',
+      ]),
+    );
+    if (config.tasks.some((task) => task.language === 'go')) {
+      checks.push(await commandCheck('Go toolchain', 'go', ['version']));
+    }
+    if (config.tasks.some((task) => task.language === 'rust')) {
+      checks.push(await commandCheck('Rust compiler', 'rustc', ['--version']));
+      checks.push(await commandCheck('Cargo', 'cargo', ['--version']));
+    }
+  }
   for (const agent of config.agents) {
     if (!selectedAgentIds.has(agent.id)) continue;
     if (agent.kind === 'ello') {

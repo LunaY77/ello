@@ -99,8 +99,13 @@ export async function createCodexInvocation(
     },
     mcpServers: {},
     webSearch: 'disabled',
-    containerName: context.containerName,
-    containerWorkspace: context.containerWorkspace,
+    executionRuntime: context.runtime,
+    ...(context.runtime === 'docker'
+      ? {
+          containerName: context.containerName,
+          containerWorkspace: context.containerWorkspace,
+        }
+      : {}),
     instructionSha256: context.taskFiles.task.instructionSha256,
     runtimeBoundary,
     runtimeBoundarySha256: boundarySha256,

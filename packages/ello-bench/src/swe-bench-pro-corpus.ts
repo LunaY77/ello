@@ -56,6 +56,7 @@ export interface LoadedSweBenchProTask {
   readonly runScriptPath: string;
   readonly parserPath: string;
   readonly workspaceSetupCommands: readonly (readonly string[])[];
+  readonly workspacePatch: string;
   readonly testSpec: SweBenchProTestSpec;
 }
 
@@ -175,7 +176,9 @@ export async function loadSweBenchProTask(
       storageMb: 30 * 1024,
     },
     instructionSha256: sha256(instruction),
-    workspaceSetupSha256: sha256(row.before_repo_set_cmd),
+    workspaceSetupSha256: sha256(
+      stableJson({ commands: row.before_repo_set_cmd, patch: row.test_patch }),
+    ),
     runScriptSha256: sha256(runScript),
     parserSha256: sha256(parser),
     testSpecSha256: sha256(stableJson(testSpec)),
@@ -189,6 +192,7 @@ export async function loadSweBenchProTask(
     runScriptPath,
     parserPath,
     workspaceSetupCommands,
+    workspacePatch: row.test_patch,
     testSpec,
   };
 }

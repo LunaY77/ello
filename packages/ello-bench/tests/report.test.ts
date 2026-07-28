@@ -4,7 +4,11 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { RunManifestSchema, SuiteManifestSchema } from '../src/contracts.js';
+import {
+  HarnessReportSchema,
+  RunManifestSchema,
+  SuiteManifestSchema,
+} from '../src/contracts.js';
 import { sha256, stableJson } from '../src/hash.js';
 import { writeJsonAtomic } from '../src/io.js';
 import { generateSuiteReport } from '../src/report.js';
@@ -418,6 +422,93 @@ describe('evidence degradation', () => {
         },
       }),
     ).toThrow('Invalid run cannot declare evidence degradation');
+  });
+});
+
+describe('execution runtime artifact compatibility', () => {
+  it('defaults legacy run and harness artifacts to Docker', () => {
+    const verifierProcess = {
+      path: '/tmp/x/verifier.json',
+      sha256: '2'.repeat(64),
+    };
+    const harness = HarnessReportSchema.parse(
+      harnessReport('/tmp/x', verifierProcess, 1),
+    );
+
+    expect(harness.verifierRuntime).toBe('docker');
+
+    const run = RunManifestSchema.parse({
+      ...baseRun(
+        '/tmp/x',
+        'aaaaaaaaaaaaaaaaaaaaaaaa',
+        '1111111111111111',
+        'task-a',
+        'ello',
+      ),
+      status: 'invalid_infrastructure',
+      phase: 'prepare-workspace',
+      completedAt: '2026-07-23T00:00:01.000Z',
+      failure: {
+        kind: 'container',
+        phase: 'prepare-workspace',
+        message: 'container unavailable',
+      },
+    });
+    expect(run.executionRuntime).toBe('docker');
+  });
+
+  it('accepts a completed local run without image or container ids', () => {
+    const verifierProcess = {
+      path: '/tmp/x/verifier.json',
+      sha256: '2'.repeat(64),
+    };
+    const legacyHarness = harnessReport('/tmp/x', verifierProcess, 1);
+    const {
+      verifierImage: _image,
+      verifierImageId: _imageId,
+      ...common
+    } = legacyHarness;
+    const harness = HarnessReportSchema.parse({
+      ...common,
+      verifierRuntime: 'local',
+    });
+    const run = RunManifestSchema.parse({
+      ...baseRun(
+        '/tmp/x',
+        'aaaaaaaaaaaaaaaaaaaaaaaa',
+        '1111111111111111',
+        'task-a',
+        'ello',
+      ),
+      executionRuntime: 'local',
+      status: 'completed',
+      phase: 'completed',
+      startedAt: '2026-07-23T00:00:00.000Z',
+      completedAt: '2026-07-23T00:00:02.000Z',
+      task: resolvedTask('task-a'),
+      baselineTree: 'b'.repeat(40),
+      client: processResult(2000),
+      agentProcess: { path: '/tmp/x/agent.json', sha256: '3'.repeat(64) },
+      patch: {
+        path: '/tmp/x/model.patch',
+        sha256: 'a'.repeat(64),
+        bytes: 0,
+        changedFiles: [],
+        baselineTree: 'b'.repeat(40),
+      },
+      verifierProcess,
+      phaseTimingsPath: '/tmp/x/timings.json',
+      harness,
+      outcome: 'passed',
+      evidenceDegradation: {
+        phase: 'normalize-agent-evidence',
+        message: 'evidence unavailable',
+      },
+    });
+
+    expect(run.executionRuntime).toBe('local');
+    expect(run.imageId).toBeUndefined();
+    expect(run.containerName).toBeUndefined();
   });
 });
 

@@ -5,6 +5,7 @@ export default {
   schema: 'ello.benchmark.config.v1',
   suite: 'swe-bench-pro-calibration',
   execution: {
+    runtime: 'docker',
     replicates: 1,
     concurrency: 2,
     maxInfrastructureRetries: 1,

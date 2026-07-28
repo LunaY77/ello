@@ -45,6 +45,7 @@ export interface SweBenchProResolvedTaskFiles {
   readonly runScriptPath: string;
   readonly parserPath: string;
   readonly workspaceSetupCommands: readonly (readonly string[])[];
+  readonly workspacePatch: string;
   readonly testSpec: SweBenchProTestSpec;
 }
 
@@ -75,6 +76,7 @@ export interface BenchmarkSuiteAdapter {
   prepareWorkspace(
     workspace: string,
     taskFiles: ResolvedTaskFiles,
+    source: 'image' | 'repository',
   ): Promise<void>;
   stageVerifier(
     taskFiles: ResolvedTaskFiles,
@@ -233,9 +235,25 @@ function sweBenchProSuite(options: {
         ),
       );
     },
-    async prepareWorkspace(workspace, taskFiles) {
-      for (const args of requireSweBenchProFiles(taskFiles)
-        .workspaceSetupCommands) {
+    async prepareWorkspace(workspace, taskFiles, source) {
+      const files = requireSweBenchProFiles(taskFiles);
+      if (source === 'repository') {
+        if (files.workspacePatch !== '') {
+          await runChecked(
+            'git',
+            ['-C', workspace, 'apply', '--whitespace=nowarn', '--recount', '-'],
+            {
+              cwd: workspace,
+              input: files.workspacePatch,
+              timeoutMs: 10 * 60_000,
+              killGraceMs: 5_000,
+              maxOutputBytes: 128 * 1024 * 1024,
+            },
+          );
+        }
+        return;
+      }
+      for (const args of files.workspaceSetupCommands) {
         await runChecked('git', ['-C', workspace, ...args], {
           cwd: workspace,
           timeoutMs: 10 * 60_000,
@@ -251,7 +269,10 @@ function sweBenchProSuite(options: {
           files.runScriptPath,
           path.join(testsDirectory, 'run_script.sh'),
         ),
-        copyNormalized(files.parserPath, path.join(testsDirectory, 'parser.py')),
+        copyNormalized(
+          files.parserPath,
+          path.join(testsDirectory, 'parser.py'),
+        ),
         writeFile(
           path.join(testsDirectory, 'verifier.py'),
           SWE_BENCH_PRO_VERIFIER,

@@ -66,26 +66,39 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
         primaryModel: agent.primaryModel,
         auxiliaryModel: agent.auxiliaryModel,
         workspace: context.workspace,
-        containerName: context.containerName,
-        containerWorkspace: context.containerWorkspace,
+        executionRuntime: context.runtime,
+        ...(context.runtime === 'docker'
+          ? {
+              containerName: context.containerName,
+              containerWorkspace: context.containerWorkspace,
+            }
+          : {}),
         instructionSha256: context.taskFiles.task.instructionSha256,
         configSnapshotPath,
       });
+      const serverBase = {
+        workspace: context.workspace,
+        elloHome: context.agentStateRoot,
+        socketPath: path.join(
+          process.env.TMPDIR ?? '/tmp',
+          `ello-bench-${context.attemptId}.sock`,
+        ),
+        rawRoot: path.join(context.rawAgentRoot, 'adapter'),
+        stdoutPath: path.join(context.rawAgentRoot, 'server.stdout.log'),
+        stderrPath: path.join(context.rawAgentRoot, 'server.stderr.log'),
+      } as const;
       let server: BenchmarkServerProcess | undefined =
-        await startBenchmarkServerProcess({
-          workspace: context.workspace,
-          containerName: context.containerName,
-          containerWorkspace: context.containerWorkspace,
-          shellMode: containerShellMode(context.taskFiles.task.benchmark),
-          elloHome: context.agentStateRoot,
-          socketPath: path.join(
-            process.env.TMPDIR ?? '/tmp',
-            `ello-bench-${context.attemptId}.sock`,
-          ),
-          rawRoot: path.join(context.rawAgentRoot, 'adapter'),
-          stdoutPath: path.join(context.rawAgentRoot, 'server.stdout.log'),
-          stderrPath: path.join(context.rawAgentRoot, 'server.stderr.log'),
-        });
+        await startBenchmarkServerProcess(
+          context.runtime === 'docker'
+            ? {
+                ...serverBase,
+                runtime: context.runtime,
+                containerName: context.containerName,
+                containerWorkspace: context.containerWorkspace,
+                shellMode: containerShellMode(context.taskFiles.task.benchmark),
+              }
+            : { ...serverBase, runtime: context.runtime },
+        );
       return {
         async run(): Promise<AgentProcessExecution> {
           if (server === undefined) {

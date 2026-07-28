@@ -3,6 +3,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
+import type { DockerShellEvent } from './docker-shell.js';
 import { createBenchmarkAgentRuntime } from './runtime.js';
 import { startBenchmarkServer } from './server.js';
 
@@ -12,6 +13,7 @@ const { values } = parseArgs({
     root: { type: 'string' },
     socket: { type: 'string' },
     workspace: { type: 'string' },
+    runtime: { type: 'string' },
     container: { type: 'string' },
     'container-workspace': { type: 'string' },
     'shell-mode': { type: 'string' },
@@ -24,31 +26,36 @@ const { values } = parseArgs({
 const root = required(values.root, '--root');
 const socketPath = required(values.socket, '--socket');
 const workspace = required(values.workspace, '--workspace');
-const containerName = required(values.container, '--container');
-const containerWorkspace = required(
-  values['container-workspace'],
-  '--container-workspace',
-);
-const shellMode = requiredShellMode(values['shell-mode']);
+const runtime = requiredRuntime(values.runtime);
 const rawRoot = required(values['raw-root'], '--raw-root');
 await mkdir(rawRoot, { recursive: true });
 const shellLogPath = path.join(rawRoot, 'shell-events.jsonl');
 let shellWrites = Promise.resolve();
+const runtimeOptions =
+  runtime === 'docker'
+    ? {
+        runtime,
+        containerName: required(values.container, '--container'),
+        containerWorkspace: required(
+          values['container-workspace'],
+          '--container-workspace',
+        ),
+        shellMode: requiredShellMode(values['shell-mode']),
+        recordShell: (event: DockerShellEvent) => {
+          shellWrites = shellWrites.then(() =>
+            appendFile(shellLogPath, `${JSON.stringify(event)}\n`, 'utf8'),
+          );
+          return shellWrites;
+        },
+      }
+    : { runtime };
 const server = await startBenchmarkServer({
   root,
   socketPath,
   runtime: createBenchmarkAgentRuntime({
     workspace,
-    containerName,
-    containerWorkspace,
-    shellMode,
     rawRoot,
-    recordShell: (event) => {
-      shellWrites = shellWrites.then(() =>
-        appendFile(shellLogPath, `${JSON.stringify(event)}\n`, 'utf8'),
-      );
-      return shellWrites;
-    },
+    ...runtimeOptions,
   }),
 });
 
@@ -90,6 +97,13 @@ function requiredShellMode(
 ): 'login' | 'preserve-environment' {
   if (value !== 'login' && value !== 'preserve-environment') {
     throw new Error('--shell-mode must be login or preserve-environment.');
+  }
+  return value;
+}
+
+function requiredRuntime(value: string | undefined): 'docker' | 'local' {
+  if (value !== 'docker' && value !== 'local') {
+    throw new Error('--runtime must be docker or local.');
   }
   return value;
 }

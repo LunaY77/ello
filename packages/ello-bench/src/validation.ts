@@ -213,7 +213,9 @@ async function validateAttempt(
   const task = required(run.task, 'task', run);
   const provenance = required(run.provenance, 'provenance', run);
   if (run.agent?.kind === 'ello' && provenance.scope !== 'ello') {
-    throw new Error(`Ello run requires Ello harness provenance: ${run.attemptId}`);
+    throw new Error(
+      `Ello run requires Ello harness provenance: ${run.attemptId}`,
+    );
   }
   if (task.taskId !== run.job.taskId) {
     throw new Error(`Resolved task mismatch: ${run.attemptId}`);
@@ -248,6 +250,9 @@ async function validateAttempt(
   const harness = required(run.harness, 'harness', run);
   if (harness.taskId !== run.job.taskId) {
     throw new Error(`Harness task mismatch: ${run.attemptId}`);
+  }
+  if (harness.verifierRuntime !== run.executionRuntime) {
+    throw new Error(`Verifier runtime mismatch: ${run.attemptId}`);
   }
   assertInside(run.attemptRoot, harness.reportPath);
   const report = await readJsonFile(harness.reportPath, HarnessReportSchema);
@@ -432,11 +437,16 @@ async function validateAgentArtifacts(
         tools: recomputed.tools,
         parserCoverage: recomputed.evidence.parserCoverage,
         workspace: run.workspace,
-        containerName: required(run.containerName, 'containerName', run),
-        containerWorkspace: '/app',
-        shellMode: containerShellMode(
-          required(run.task, 'task', run).benchmark,
-        ),
+        ...(run.executionRuntime === 'docker'
+          ? {
+              runtime: run.executionRuntime,
+              containerName: required(run.containerName, 'containerName', run),
+              containerWorkspace: '/app' as const,
+              shellMode: containerShellMode(
+                required(run.task, 'task', run).benchmark,
+              ),
+            }
+          : { runtime: run.executionRuntime }),
       });
       break;
     case 'codex':
@@ -450,11 +460,16 @@ async function validateAgentArtifacts(
         tools: recomputed.tools,
         parserCoverage: recomputed.evidence.parserCoverage,
         workspace: run.workspace,
-        containerName: required(run.containerName, 'containerName', run),
-        containerWorkspace: '/app',
-        shellMode: containerShellMode(
-          required(run.task, 'task', run).benchmark,
-        ),
+        ...(run.executionRuntime === 'docker'
+          ? {
+              runtime: run.executionRuntime,
+              containerName: required(run.containerName, 'containerName', run),
+              containerWorkspace: '/app' as const,
+              shellMode: containerShellMode(
+                required(run.task, 'task', run).benchmark,
+              ),
+            }
+          : { runtime: run.executionRuntime }),
       });
       break;
   }

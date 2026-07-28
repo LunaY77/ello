@@ -6,6 +6,7 @@ import { extractImageWorkspace } from './docker-image.js';
 import { ensureEmptyDirectory } from './filesystem.js';
 import { assertGitHead, captureBaselineTree } from './git-workspace.js';
 import { sha256 } from './hash.js';
+import { cloneLocalWorkspace } from './local-workspace.js';
 import { runChecked } from './process.js';
 import { getBenchmarkSuiteForTask } from './suite.js';
 import type { ResolvedTaskFiles } from './task-corpus.js';
@@ -16,24 +17,31 @@ const GIT_OPTIONS = {
   maxOutputBytes: 512 * 1024 * 1024,
 } as const;
 
-export interface PreparedVerifierWorkspace {
+interface PreparedVerifierWorkspaceBase {
+  readonly runtime: 'docker' | 'local';
   readonly harnessRoot: string;
   readonly workspace: string;
   readonly tests: string;
   readonly logs: string;
   readonly artifacts: string;
   readonly verifierOutput: string;
-  readonly imageId: string;
   readonly appliedPatchSha256: string;
   readonly hiddenPatchChangedFiles: readonly string[];
   readonly patchConflictFiles: readonly string[];
 }
+
+export type PreparedVerifierWorkspace = PreparedVerifierWorkspaceBase &
+  (
+    | { readonly runtime: 'local' }
+    | { readonly runtime: 'docker'; readonly imageId: string }
+  );
 
 export async function prepareVerifierWorkspace(options: {
   readonly attemptId: string;
   readonly harnessRoot: string;
   readonly taskFiles: ResolvedTaskFiles;
   readonly patch: PatchArtifact;
+  readonly runtime: 'docker' | 'local';
 }): Promise<PreparedVerifierWorkspace> {
   const task = options.taskFiles.task;
   const harnessRoot = path.resolve(options.harnessRoot);
@@ -52,14 +60,28 @@ export async function prepareVerifierWorkspace(options: {
   const suite = getBenchmarkSuiteForTask(task.benchmark);
   await suite.stageVerifier(options.taskFiles, tests);
 
-  const imageId = await extractImageWorkspace({
-    containerName: `ello-bench-${options.attemptId}-verify-seed`,
-    image: task.environment.image,
+  let imageId: string | undefined;
+  if (options.runtime === 'docker') {
+    imageId = await extractImageWorkspace({
+      containerName: `ello-bench-${options.attemptId}-verify-seed`,
+      image: task.environment.image,
+      workspace,
+      timeoutMs: task.environment.buildTimeoutMs,
+    });
+    await suite.prepareWorkspace(workspace, options.taskFiles, 'image');
+  } else {
+    await cloneLocalWorkspace({
+      repository: task.repositoryUrl,
+      revision: task.baseCommitHash,
+      workspace,
+    });
+    await suite.prepareWorkspace(workspace, options.taskFiles, 'repository');
+  }
+  await assertGitHead(
     workspace,
-    timeoutMs: task.environment.buildTimeoutMs,
-  });
-  await suite.prepareWorkspace(workspace, options.taskFiles);
-  await assertGitHead(workspace, task.baseCommitHash, 'Verifier image');
+    task.baseCommitHash,
+    options.runtime === 'docker' ? 'Verifier image' : 'Local verifier checkout',
+  );
   const baselineTree = await captureBaselineTree(workspace);
   if (baselineTree !== options.patch.baselineTree) {
     throw new Error(
@@ -103,16 +125,27 @@ export async function prepareVerifierWorkspace(options: {
     ...GIT_OPTIONS,
   });
 
-  return {
+  const prepared = {
     harnessRoot,
     workspace,
     tests,
     logs,
     artifacts,
     verifierOutput,
-    imageId,
     appliedPatchSha256,
     hiddenPatchChangedFiles,
     patchConflictFiles,
-  };
+  } as const;
+  return options.runtime === 'docker'
+    ? {
+        ...prepared,
+        runtime: options.runtime,
+        imageId: requiredImageId(imageId),
+      }
+    : { ...prepared, runtime: options.runtime };
+}
+
+function requiredImageId(imageId: string | undefined): string {
+  if (imageId === undefined) throw new Error('Verifier image id is missing.');
+  return imageId;
 }

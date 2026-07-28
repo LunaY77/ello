@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { loadBenchmarkConfig } from '../src/config.js';
+import { BenchmarkExecutionConfigSchema } from '../src/contracts.js';
 import { sha256, stableJson } from '../src/hash.js';
 import { createPlan, expandJobs, selectAll } from '../src/matrix.js';
 import {
@@ -20,10 +21,21 @@ import {
 } from './example-config.js';
 
 describe('benchmark matrix', () => {
+  it('keeps Docker as the default for legacy configs', () => {
+    expect(
+      BenchmarkExecutionConfigSchema.parse({
+        replicates: 1,
+        concurrency: 1,
+        maxInfrastructureRetries: 1,
+      }).runtime,
+    ).toBe('docker');
+  });
+
   it('uses the fixed twenty-task declaration in the example config', async () => {
     const config = await loadBenchmarkConfig(EXAMPLE_CONFIG_PATH);
 
     expect(config.suite.source.repository).toBe(DEEP_SWE_SOURCE_REPOSITORY);
+    expect(config.execution.runtime).toBe('docker');
     expect(config.tasks).toEqual(DEEP_SWE_TASKS);
     expect(config.agents).toContainEqual(
       expect.objectContaining({
@@ -79,8 +91,7 @@ describe('benchmark matrix', () => {
     ).toEqual({ python: 10, 'typescript/javascript': 10, go: 10 });
     expect(
       config.tasks.reduce<Record<string, number>>((counts, task) => {
-        counts[task.difficultyBand] =
-          (counts[task.difficultyBand] ?? 0) + 1;
+        counts[task.difficultyBand] = (counts[task.difficultyBand] ?? 0) + 1;
         return counts;
       }, {}),
     ).toEqual({ easy: 8, 'medium-easy': 7, 'medium-hard': 8, hard: 7 });

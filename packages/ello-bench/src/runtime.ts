@@ -1,5 +1,5 @@
 /**
- * benchmark 将 job 的 workspace、Docker shell 和 JSONL recorder 组合为 AgentRuntime。
+ * benchmark 将 job 的 workspace、执行 shell 和 JSONL recorder 组合为 AgentRuntime。
  *
  * 每个 runtime 仅服务一个 job，工作目录或 event capture 路径不匹配时直接失败。
  */
@@ -11,14 +11,22 @@ import type { ContainerShellMode } from './container-shell.js';
 import { createDockerShell, type DockerShellEvent } from './docker-shell.js';
 import { createEventCaptureRecorder } from './event-capture.js';
 
-export interface BenchmarkAgentRuntimeOptions {
+interface BenchmarkAgentRuntimeOptionsBase {
   readonly workspace: string;
-  readonly containerName: string;
-  readonly containerWorkspace: string;
   readonly rawRoot: string;
-  readonly shellMode: ContainerShellMode;
-  readonly recordShell?: (event: DockerShellEvent) => Promise<void>;
 }
+
+export type BenchmarkAgentRuntimeOptions = BenchmarkAgentRuntimeOptionsBase &
+  (
+    | { readonly runtime: 'local' }
+    | {
+        readonly runtime: 'docker';
+        readonly containerName: string;
+        readonly containerWorkspace: string;
+        readonly shellMode: ContainerShellMode;
+        readonly recordShell?: (event: DockerShellEvent) => Promise<void>;
+      }
+  );
 
 export function createBenchmarkAgentRuntime(
   options: BenchmarkAgentRuntimeOptions,
@@ -35,19 +43,23 @@ export function createBenchmarkAgentRuntime(
           `Agent cwd does not match benchmark workspace: ${config.cwd}`,
         );
       }
-      return createLocalEnvironment({
-        cwd: workspace,
-        allowedPaths: [workspace],
-        shell: createDockerShell({
-          containerName: options.containerName,
-          hostWorkspace: workspace,
-          containerWorkspace: options.containerWorkspace,
-          shellMode: options.shellMode,
-          ...(options.recordShell === undefined
-            ? {}
-            : { record: options.recordShell }),
-        }),
-      });
+      return createLocalEnvironment(
+        options.runtime === 'local'
+          ? { cwd: workspace, allowedPaths: [workspace] }
+          : {
+              cwd: workspace,
+              allowedPaths: [workspace],
+              shell: createDockerShell({
+                containerName: options.containerName,
+                hostWorkspace: workspace,
+                containerWorkspace: options.containerWorkspace,
+                shellMode: options.shellMode,
+                ...(options.recordShell === undefined
+                  ? {}
+                  : { record: options.recordShell }),
+              }),
+            },
+      );
     },
     createTracing: ({ threadId }) => {
       if (captures.has(threadId)) {

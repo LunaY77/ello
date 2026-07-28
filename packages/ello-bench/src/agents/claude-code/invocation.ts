@@ -101,8 +101,13 @@ export async function createClaudeCodeInvocation(
     model: agent.model,
     tools: tools.split(','),
     mcpConfig: JSON.parse(emptyMcpConfig) as unknown,
-    containerName: context.containerName,
-    containerWorkspace: context.containerWorkspace,
+    executionRuntime: context.runtime,
+    ...(context.runtime === 'docker'
+      ? {
+          containerName: context.containerName,
+          containerWorkspace: context.containerWorkspace,
+        }
+      : {}),
     instructionSha256: context.taskFiles.task.instructionSha256,
     runtimeBoundary,
     runtimeBoundarySha256: boundarySha256,

@@ -1,6 +1,6 @@
 # @ello/bench
 
-`@ello/bench` is a reproducible coding-agent benchmark harness. It compares Ello, Claude Code, and Codex by running each agent through the same tasks, instructions, Docker images, and verifier, producing a scored `task × agent × replicate` matrix with full evidence provenance.
+`@ello/bench` is a coding-agent benchmark harness. It compares Ello, Claude Code, and Codex by running each agent through the same tasks, instructions, execution runtime, and verifier, producing a scored `task × agent × replicate` matrix with full evidence provenance.
 
 ## The two benchmarks
 
@@ -12,7 +12,7 @@
 | **Source repo** | Bundled with the suite | `scaleapi/SWE-bench_Pro-os` (external) |
 | **Purpose** | Stable optimization target | Upstream comparability |
 | **Corpus** | Auto-cloned, no extra setup | Needs `--corpus-root` or auto-clone from GitHub |
-| **Verifier** | Container-based test harness | Upstream `run_script.sh` + `parser.py` |
+| **Verifier** | `test.sh` harness | Upstream `run_script.sh` + `parser.py` |
 
 **DeepSWE** is the primary suite for day-to-day iteration — the task set is fixed, the corpus ships with the suite, and there's no external dependency.
 
@@ -107,18 +107,18 @@ DeepSWE (no extra setup):
 pnpm bench:run \
   --task actionlint-action-pinning-lint \
   --all-agents \
-  --run-root packages/ello-bench/raw/pilot-001
+  --run-root raw/pilot-001
 ```
 
 SWE-bench Pro (needs the corpus — see below):
 
 ```bash
 pnpm bench:run \
-  --config packages/ello-bench/config/benchmark.config.mjs \
-  --corpus-root ../SWE-bench_Pro-os \
+  --config config/benchmark.config.mjs \
+  --corpus-root ../../../SWE-bench_Pro-os \
   --task swepro-navidrome-29b7b740 \
   --agent ello \
-  --run-root packages/ello-bench/raw/swepro-pilot-001
+  --run-root raw/swepro-pilot-001
 ```
 
 Run the complete 30-task matrix:
@@ -127,14 +127,14 @@ Run the complete 30-task matrix:
 pnpm bench:run \
   --all \
   --all-agents \
-  --run-root packages/ello-bench/raw/publish-001
+  --run-root raw/publish-001
 ```
 
 ### 6. Generate the report
 
 ```bash
 pnpm bench:report \
-  --run-root packages/ello-bench/raw/pilot-001
+  --run-root raw/pilot-001
 ```
 
 Add `--report` to `bench:run` to generate the report in a single command:
@@ -199,6 +199,23 @@ Three files, kept in `packages/ello-bench/config/`:
 
 All three are ESM modules with strict schema validation. Unknown fields, missing fields, duplicate agents, or illegal states fail immediately. JSON configuration is not accepted.
 
+### Docker or local execution
+
+Set `execution.runtime` in `benchmark.config.mjs`:
+
+```js
+execution: {
+  runtime: 'local', // or 'docker'; omitted values default to 'docker'
+  replicates: 1,
+  concurrency: 2,
+  maxInfrastructureRetries: 1,
+}
+```
+
+`docker` uses the pinned task image for the Agent workspace and verifier. `local` never invokes Docker: it clones `repositoryUrl` at `baseCommitHash` for the Agent, creates a second clone for verification, and runs all shell commands directly on the host. Ello, Claude Code, and Codex themselves remain host processes in both modes.
+
+Local mode requires the repository's language runtimes, system packages, and project dependencies to already be available on the host. The image CPU, memory, network, and dependency guarantees do not apply, so local results are convenient for development but are not directly comparable with published Docker runs. `bench:doctor` skips all Docker checks in this mode and checks the basic host toolchain instead.
+
 ### Publishability gates
 
 In `report.config.mjs`:
@@ -227,7 +244,8 @@ When `renderCharts` is `false`, the `report` command only produces JSON — no `
     ├── task/
     │   ├── instruction.md
     │   └── resolved-task.json
-    ├── docker-preflight.json
+    ├── docker-preflight.json  # Docker mode
+    ├── local-preflight.json   # local mode (one of these two is present)
     ├── agent/
     │   ├── identity.json       # Agent, model, commit
     │   ├── invocation.json     # Exact CLI args and env
@@ -271,6 +289,7 @@ Credentials stay in env vars, never in config files, CLI args, or run artifacts.
 | `ELLO_BENCH_API_KEY` | Ello agent (or whatever `apiKeyEnv` you configure) |
 | `ELLO_BENCH_CLAUDE_EXE` | Claude Code agent (or whatever `pathEnv` you configure) |
 | `ELLO_BENCH_CODEX_EXE` | Codex agent (or whatever `pathEnv` you configure) |
+| `PYTHON` | Optional Python executable used by the local verifier (defaults to `python3`) |
 | `ANTHROPIC_BASE_URL` | Injected into Claude Code subprocess only |
 | `ANTHROPIC_AUTH_TOKEN` | Injected into Claude Code subprocess only |
 

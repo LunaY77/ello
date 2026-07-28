@@ -26,7 +26,8 @@ describe('SWE-bench Pro corpus', () => {
       problem_statement:
         '"# Title\\nFix cache invalidation"\n\nRequirements:\n"Keep entries coherent."\n\nNew interfaces introduced:\n"None."',
       patch: 'diff --git a/cache.go b/cache.go\n',
-      test_patch: '',
+      test_patch:
+        'diff --git a/cache_test.go b/cache_test.go\nnew file mode 100644\nindex 0000000..df967b9\n--- /dev/null\n+++ b/cache_test.go\n@@ -0,0 +1 @@\n+package cache\n',
       repo: 'flipt-io/flipt',
       base_commit: baseCommit,
       base_dockerfile: 'FROM golang:1.24\n',
@@ -80,6 +81,7 @@ describe('SWE-bench Pro corpus', () => {
       ['checkout', baseCommit],
       ['checkout', testCommit, '--', 'internal/cache/cache_test.go'],
     ]);
+    expect(loaded.workspacePatch).toBe(row.test_patch);
     expect(loaded.testSpec).toEqual({
       selectedTests: ['TestCache'],
       failToPass: ['TestCache'],

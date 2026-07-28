@@ -5,6 +5,7 @@ import { CONTAINER_HOME, hostContainerUser } from './container-user.js';
 import type { ResolvedTask } from './contracts.js';
 import { extractImageWorkspace, removeContainer } from './docker-image.js';
 import { assertGitHead, captureBaselineTree } from './git-workspace.js';
+import { cloneLocalWorkspace } from './local-workspace.js';
 import { runChecked } from './process.js';
 import { getBenchmarkSuiteForTask } from './suite.js';
 import type { ResolvedTaskFiles } from './task-corpus.js';
@@ -15,28 +16,66 @@ const SHORT_PROCESS = {
   maxOutputBytes: 128 * 1024 * 1024,
 } as const;
 
-export interface PreparedWorkspace {
+interface PreparedWorkspaceBase {
+  readonly runtime: 'docker' | 'local';
   readonly workspace: string;
+  readonly baselineTree: string;
+  readonly initialGitStatus: string;
+}
+
+export interface PreparedDockerWorkspace extends PreparedWorkspaceBase {
+  readonly runtime: 'docker';
   readonly containerName: string;
   readonly containerWorkspace: '/app';
   readonly containerUser: string;
   readonly imageId: string;
-  readonly baselineTree: string;
-  readonly initialGitStatus: string;
   readonly network: 'none' | 'bridge';
 }
+
+export interface PreparedLocalWorkspace extends PreparedWorkspaceBase {
+  readonly runtime: 'local';
+}
+
+export type PreparedWorkspace =
+  | PreparedDockerWorkspace
+  | PreparedLocalWorkspace;
 
 export async function prepareTaskWorkspace(options: {
   readonly attemptId: string;
   readonly workspace: string;
   readonly taskFiles: ResolvedTaskFiles;
+  readonly runtime: 'docker' | 'local';
 }): Promise<PreparedWorkspace> {
   const task = options.taskFiles.task;
   const workspace = path.resolve(options.workspace);
-  if (workspace.includes(',')) {
+  if (options.runtime === 'docker' && workspace.includes(',')) {
     throw new Error(`Docker bind path cannot contain a comma: ${workspace}`);
   }
   await assertWorkspaceCapacity(workspace, task.environment.storageMb);
+  const suite = getBenchmarkSuiteForTask(task.benchmark);
+  if (options.runtime === 'local') {
+    await cloneLocalWorkspace({
+      repository: task.repositoryUrl,
+      revision: task.baseCommitHash,
+      workspace,
+    });
+    await suite.prepareWorkspace(workspace, options.taskFiles, 'repository');
+    await assertGitHead(workspace, task.baseCommitHash, 'Local task checkout');
+    const initialGitStatus = (
+      await runChecked('git', ['-C', workspace, 'status', '--short'], {
+        cwd: workspace,
+        ...SHORT_PROCESS,
+      })
+    ).stdout;
+    const baselineTree = await captureBaselineTree(workspace);
+    return {
+      runtime: 'local',
+      workspace,
+      baselineTree,
+      initialGitStatus,
+    };
+  }
+
   const seedContainer = containerName(options.attemptId, 'seed');
   const agentContainer = containerName(options.attemptId, 'agent');
   await removeContainer(agentContainer);
@@ -46,8 +85,7 @@ export async function prepareTaskWorkspace(options: {
     workspace,
     timeoutMs: task.environment.buildTimeoutMs,
   });
-  const suite = getBenchmarkSuiteForTask(task.benchmark);
-  await suite.prepareWorkspace(workspace, options.taskFiles);
+  await suite.prepareWorkspace(workspace, options.taskFiles, 'image');
   await assertGitHead(workspace, task.baseCommitHash, 'Task image');
   const initialGitStatus = (
     await runChecked('git', ['-C', workspace, 'status', '--short'], {
@@ -102,6 +140,7 @@ export async function prepareTaskWorkspace(options: {
     throw new Error(`Task container HOME mismatch: ${String(containerHome)}`);
   }
   return {
+    runtime: 'docker',
     workspace,
     containerName: agentContainer,
     containerWorkspace: '/app',

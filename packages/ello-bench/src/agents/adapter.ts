@@ -8,17 +8,27 @@ import type {
 } from '../contracts.js';
 import type { ResolvedTaskFiles } from '../task-corpus.js';
 
-export interface AgentRunContext {
+interface AgentRunContextBase {
   readonly attemptId: string;
   readonly agent: AgentSpec;
   readonly agentConfigHash: string;
   readonly agentStateRoot: string;
   readonly workspace: string;
-  readonly containerName: string;
-  readonly containerWorkspace: '/app';
   readonly rawAgentRoot: string;
   readonly taskFiles: ResolvedTaskFiles;
 }
+
+export interface DockerAgentRunContext extends AgentRunContextBase {
+  readonly runtime: 'docker';
+  readonly containerName: string;
+  readonly containerWorkspace: '/app';
+}
+
+export interface LocalAgentRunContext extends AgentRunContextBase {
+  readonly runtime: 'local';
+}
+
+export type AgentRunContext = DockerAgentRunContext | LocalAgentRunContext;
 
 export interface AgentProcessExecution {
   readonly process: ProcessResult;

@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { CONTAINER_HOME, hostContainerUser } from './container-user.js';
@@ -31,34 +32,54 @@ export async function executeVerifierProcess(options: {
   readonly tests: string;
   readonly logs: string;
   readonly task: ResolvedTask;
+  readonly runtime: 'docker' | 'local';
 }): Promise<{
   readonly reference: ArtifactReference;
   readonly baselineExitCode: number;
   readonly newTestsExitCode: number;
 }> {
   const verifierName = `ello-bench-${options.attemptId}-verify`;
-  await removeContainer(verifierName);
+  if (options.runtime === 'docker') await removeContainer(verifierName);
   const stdoutPath = path.join(options.harnessRoot, 'stdout.log');
   const stderrPath = path.join(options.harnessRoot, 'stderr.log');
   const startedAt = new Date().toISOString();
   let execution: Awaited<ReturnType<typeof runProcess>> | undefined;
   let cleanupError: unknown;
+  let compatibilityRoot: string | undefined;
   try {
-    execution = await runProcess(
-      'docker',
-      verifierDockerArgs(options, verifierName, hostContainerUser()),
-      {
-        cwd: options.harnessRoot,
+    if (options.runtime === 'docker') {
+      execution = await runProcess(
+        'docker',
+        verifierDockerArgs(options, verifierName, hostContainerUser()),
+        {
+          cwd: options.harnessRoot,
+          timeoutMs: options.task.verifierTimeoutMs,
+          killGraceMs: 10_000,
+          capture: false,
+          stdoutPath,
+          stderrPath,
+        },
+      );
+    } else {
+      compatibilityRoot = await prepareLocalCompatibilityRoot(options);
+      const local = localVerifierCommand(options, compatibilityRoot);
+      execution = await runProcess(local.command, local.args, {
+        cwd: path.join(compatibilityRoot, 'app'),
+        env: process.env,
         timeoutMs: options.task.verifierTimeoutMs,
         killGraceMs: 10_000,
         capture: false,
         stdoutPath,
         stderrPath,
-      },
-    );
+      });
+    }
   } finally {
     try {
-      await removeContainer(verifierName);
+      if (options.runtime === 'docker') {
+        await removeContainer(verifierName);
+      } else if (compatibilityRoot !== undefined) {
+        await rm(compatibilityRoot, { recursive: true, force: true });
+      }
     } catch (error) {
       cleanupError = error;
     }
@@ -76,7 +97,7 @@ export async function executeVerifierProcess(options: {
   });
   if (cleanupError !== undefined) {
     throw new VerifierExecutionError(
-      `Verifier container cleanup failed: ${errorMessage(cleanupError)}`,
+      `Verifier runtime cleanup failed: ${errorMessage(cleanupError)}`,
       evidence.reference,
     );
   }
@@ -97,6 +118,90 @@ export async function executeVerifierProcess(options: {
     );
   }
   return { reference: evidence.reference, baselineExitCode, newTestsExitCode };
+}
+
+async function prepareLocalCompatibilityRoot(options: {
+  readonly workspace: string;
+  readonly tests: string;
+  readonly logs: string;
+  readonly task: ResolvedTask;
+}): Promise<string> {
+  const root = await mkdtemp(path.join(tmpdir(), 'ello-bench-verifier-'));
+  try {
+    await Promise.all([
+      symlink(options.workspace, path.join(root, 'app'), 'dir'),
+      symlink(options.tests, path.join(root, 'tests'), 'dir'),
+      symlink(options.logs, path.join(root, 'logs'), 'dir'),
+    ]);
+    const scripts =
+      options.task.benchmark === 'deep-swe'
+        ? [path.join(options.tests, 'test.sh')]
+        : [
+            path.join(options.tests, 'verifier.py'),
+            path.join(options.tests, 'run_script.sh'),
+          ];
+    await Promise.all(
+      scripts.map(async (script) => {
+        const source = await readFile(script, 'utf8');
+        await writeFile(
+          script,
+          rewriteContainerRoot(
+            rewriteContainerRoot(
+              rewriteContainerRoot(
+                source,
+                '/tests',
+                path.join(root, 'tests'),
+              ),
+              '/logs',
+              path.join(root, 'logs'),
+            ),
+            '/app',
+            path.join(root, 'app'),
+          ),
+          'utf8',
+        );
+      }),
+    );
+    return root;
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function rewriteContainerRoot(
+  source: string,
+  containerRoot: '/app' | '/tests' | '/logs',
+  localRoot: string,
+): string {
+  const escaped = containerRoot.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const pattern = new RegExp(
+    `(^|[^A-Za-z0-9_.-])${escaped}(?=/|[^A-Za-z0-9_.-]|$)`,
+    'gmu',
+  );
+  return source.replace(
+    pattern,
+    (_match, prefix: string) => `${prefix}${localRoot}`,
+  );
+}
+
+export function localVerifierCommand(
+  options: {
+    readonly tests: string;
+    readonly task: ResolvedTask;
+  },
+  compatibilityRoot: string,
+): { readonly command: string; readonly args: readonly string[] } {
+  if (options.task.benchmark === 'deep-swe') {
+    return {
+      command: '/bin/bash',
+      args: [path.join(compatibilityRoot, 'tests', 'test.sh')],
+    };
+  }
+  return {
+    command: process.env.PYTHON ?? 'python3',
+    args: [path.join(compatibilityRoot, 'tests', 'verifier.py')],
+  };
 }
 
 export function verifierDockerArgs(
