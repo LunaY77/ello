@@ -202,6 +202,7 @@ export const CLIENT_REQUEST_SCHEMAS = {
     })
     .strict(),
   'thread/compact/start': ThreadIdParamsSchema,
+  'thread/compact/interrupt': ThreadIdParamsSchema,
   'thread/shellCommand': z
     .object({
       threadId: OpaqueIdSchema,
@@ -217,9 +218,7 @@ export const CLIENT_REQUEST_SCHEMAS = {
     })
     .strict()
     .refine(
-      (value) =>
-        value.mode !== undefined ||
-        value.agent !== undefined,
+      (value) => value.mode !== undefined || value.agent !== undefined,
       'At least one setting is required.',
     ),
   'turn/start': TurnStartParamsSchema,
@@ -247,6 +246,13 @@ export const CLIENT_REQUEST_SCHEMAS = {
     .strict(),
   'config/sources': CwdParamsSchema,
   'model/list': CwdParamsSchema,
+  'agent/effort/update': z
+    .object({
+      cwd: z.string().min(1),
+      agent: z.string().min(1),
+      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']),
+    })
+    .strict(),
   'agent/list': OptionalThreadParamsSchema,
   'tool/list': OptionalThreadParamsSchema,
   'skills/list': OptionalThreadParamsSchema.extend({

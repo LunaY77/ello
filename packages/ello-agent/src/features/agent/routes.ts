@@ -9,7 +9,7 @@ import {
   type FeatureHandlerMap,
 } from '../../server/rpc/route.js';
 import type { RpcRouteFragment } from '../../server/rpc/route.js';
-import { loadCodingAgentConfig } from '../config/index.js';
+import { loadCodingAgentConfig, writeConfigPath } from '../config/index.js';
 
 import { createAgentRegistry } from './subagents/registry.js';
 
@@ -42,7 +42,20 @@ const agentHandlers = {
       }),
     };
   },
-} satisfies FeatureHandlerMap<void, 'agent/list'>;
+  'agent/effort/update': async (_context, params) => {
+    const config = await loadCodingAgentConfig({ cwd: params.cwd });
+    const definition = (await createAgentRegistry(config)).get(params.agent);
+    const selector = definition.model;
+    const model = config[selector];
+    await writeConfigPath(
+      params.cwd,
+      'global',
+      ['models', model, 'reasoning_effort'],
+      { type: 'set', value: params.effort },
+    );
+    return { agent: definition.name, selector, model, effort: params.effort };
+  },
+} satisfies FeatureHandlerMap<void, 'agent/list' | 'agent/effort/update'>;
 
 /**
  * 构造 产品 Agent route 适配 模块 中的 `createAgentRoutes` 结果，并在返回前建立所需的不变量。
@@ -56,12 +69,19 @@ const agentHandlers = {
  * Throws:
  * - 当 产品 Agent route 适配 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
-export function createAgentRoutes(): RpcRouteFragment<'agent/list'> {
+export function createAgentRoutes(): RpcRouteFragment<
+  'agent/list' | 'agent/effort/update'
+> {
   return {
     'agent/list': bindFeatureRoute(
       agentHandlers,
       () => undefined,
       'agent/list',
+    ),
+    'agent/effort/update': bindFeatureRoute(
+      agentHandlers,
+      () => undefined,
+      'agent/effort/update',
     ),
   };
 }

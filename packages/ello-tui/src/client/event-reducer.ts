@@ -109,6 +109,7 @@ export function applyNotification(
         false,
       );
     case 'item/agentMessage/delta':
+    case 'item/reasoning/delta':
     case 'item/plan/delta':
     case 'item/commandExecution/outputDelta':
     case 'thread/started':

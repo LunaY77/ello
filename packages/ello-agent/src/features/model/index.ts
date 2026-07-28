@@ -30,6 +30,7 @@ export {
   createModelRegistry,
   modelInputBudgetFromRuntimeModel,
   modelSettingsFromRuntimeModel,
+  providerOptionsFromRuntimeModel,
   prepareModelInputForRuntimeModel,
   type ModelRegistry,
   type RuntimeModel,

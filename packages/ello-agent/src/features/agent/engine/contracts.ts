@@ -9,6 +9,7 @@ import type {
   AgentObserver,
   EngineEvent,
   MessageCompactor,
+  ModelCompactor,
 } from './events.js';
 import type {
   AgentMessage,
@@ -427,6 +428,31 @@ export interface Agent {
    */
   resume(input: AgentResumeInput, options?: AgentRunOptions): AgentStream;
   /**
+   * 使用当前主 Agent 的完整模型配置执行上下文压缩。
+   *
+   * Args:
+   * - `input`: 用于恢复稳定模型前缀的完整历史、待压缩历史、compact 提示词和取消信号。
+   *
+   * Returns:
+   * - 返回主模型生成的 compact 文本与该次调用的 usage。
+   */
+  compact(input: {
+    readonly contextMessages: ReadonlyArray<AgentMessage>;
+    readonly messages: ReadonlyArray<AgentMessage>;
+    readonly prompt: string;
+    readonly signal: AbortSignal;
+  }): ReturnType<ModelCompactor['compact']>;
+  /**
+   * 读取该 Agent 最近一次主模型请求派生的压缩能力。
+   *
+   * Args:
+   * - 无：读取 Agent 内部保留的主模型请求状态。
+   *
+   * Returns:
+   * - 已形成主模型上下文时返回压缩器，否则返回 `undefined`。
+   */
+  modelCompactor(): ModelCompactor | undefined;
+  /**
    * 关闭 Agent 稳定配置与仍由门面持有的共享资源。
    *
    * Args:
@@ -474,6 +500,8 @@ export interface AgentStream extends AsyncIterable<EngineEvent> {
 export interface AgentUsage {
   readonly requests: number;
   readonly inputTokens: number;
+  /** 最近一次模型请求实际占用的输入 token；不参与累计计费。 */
+  readonly lastInputTokens?: number | undefined;
   readonly outputTokens: number;
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
@@ -614,6 +642,7 @@ export interface CreateAgentOptions<TContext = unknown> {
   readonly eventRecorder?: AgentEventRecorder<TContext>;
   readonly stream?: { readonly maxBufferedEvents: number };
   readonly compactor?: MessageCompactor;
+  readonly modelCompactor?: ModelCompactor;
   readonly metadata?: Record<string, unknown>;
   readonly modelInputBudget?: {
     readonly maxInputTokens: number;

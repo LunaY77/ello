@@ -13,6 +13,8 @@ const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
 export const LiveViewport = memo(function LiveViewport({
   cwd,
   assistantText,
+  reasoningText,
+  compactionText,
   runningTools,
   runningSubagents,
   running,
@@ -22,6 +24,8 @@ export const LiveViewport = memo(function LiveViewport({
 }: {
   readonly cwd: string;
   readonly assistantText: string;
+  readonly reasoningText: string;
+  readonly compactionText: string;
   readonly runningTools: readonly ToolCallView[];
   readonly runningSubagents: readonly SubagentRunView[];
   readonly running: boolean;
@@ -30,8 +34,16 @@ export const LiveViewport = memo(function LiveViewport({
   readonly pendingSteers?: readonly string[];
 }) {
   const visibleAssistantText = assistantText.trim();
+  const visibleReasoningText = reasoningText.trim();
+  const visibleCompactionText = compactionText.trim();
   return (
     <Box flexDirection="column" flexGrow={1} minHeight={1}>
+      {visibleCompactionText !== '' ? (
+        <LiveCompactionText text={visibleCompactionText} />
+      ) : null}
+      {visibleReasoningText !== '' ? (
+        <LiveReasoningText text={visibleReasoningText} />
+      ) : null}
       {visibleAssistantText !== '' ? (
         <LiveAssistantText text={visibleAssistantText} />
       ) : null}
@@ -50,6 +62,27 @@ export const LiveViewport = memo(function LiveViewport({
     </Box>
   );
 });
+
+function LiveCompactionText({ text }: { readonly text: string }) {
+  const theme = useTheme();
+  return <Text color={theme.accent}>{`- ${text}`}</Text>;
+}
+
+function LiveReasoningText({ text }: { readonly text: string }) {
+  const theme = useTheme();
+  return (
+    <Box>
+      <Text color={theme.textMuted}>Thinking: </Text>
+      <Box flexDirection="column" flexShrink={1}>
+        {text.split('\n').map((line, index) => (
+          <Text key={`${index}:${line}`} color={theme.textMuted} wrap="wrap">
+            {line}
+          </Text>
+        ))}
+      </Box>
+    </Box>
+  );
+}
 
 function LiveAssistantText({ text }: { readonly text: string }) {
   const theme = useTheme();

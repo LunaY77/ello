@@ -104,7 +104,7 @@ export const workspaces = sqliteTable(
   ],
 );
 
-/** workspace 与 repo 的 worktree 关系；不把 usage/tasks/checkpoint 挂到这里。 */
+/** workspace 与 repo 的 worktree 关系；不把 usage/tasks 挂到这里。 */
 export const workspaceRepositories = sqliteTable(
   'workspace_repositories',
   {
@@ -266,50 +266,6 @@ export const memoryJobs = sqliteTable(
     ),
   ],
 );
-
-/** checkpoint 元数据；不挂 session/workspace 外键，runId 只是弱关联字符串。 */
-export const checkpoints = sqliteTable('checkpoints', {
-  id: text('id').primaryKey(),
-  runId: text('run_id'),
-  label: text('label'),
-  status: text('status').notNull(),
-  createdAt: text('created_at').notNull(),
-  rolledBackAt: text('rolled_back_at'),
-});
-
-/** checkpoint 文件变化；文件内容通过 artifact 关联，不直接塞进 DB。 */
-export const checkpointFileChanges = sqliteTable(
-  'checkpoint_file_changes',
-  {
-    id: text('id').primaryKey(),
-    checkpointId: text('checkpoint_id')
-      .notNull()
-      .references(() => checkpoints.id, { onDelete: 'cascade' }),
-    path: text('path').notNull(),
-    pathHash: text('path_hash').notNull(),
-    changeType: text('change_type').notNull(),
-    beforeArtifactId: text('before_artifact_id').references(() => artifacts.id),
-    afterArtifactId: text('after_artifact_id').references(() => artifacts.id),
-    beforeSha256: text('before_sha256'),
-    afterSha256: text('after_sha256'),
-    diff: text('diff'),
-    toolCallId: text('tool_call_id'),
-    createdAt: text('created_at').notNull(),
-  },
-  (table) => [index('checkpoint_file_changes_path_idx').on(table.pathHash)],
-);
-
-/** 回滚记录；回滚仍由调用方按权限策略放行，本表只负责审计结果。 */
-export const checkpointRollbacks = sqliteTable('checkpoint_rollbacks', {
-  id: text('id').primaryKey(),
-  checkpointId: text('checkpoint_id')
-    .notNull()
-    .references(() => checkpoints.id),
-  runId: text('run_id'),
-  status: text('status').notNull(),
-  errorMessage: text('error_message'),
-  createdAt: text('created_at').notNull(),
-});
 
 /** 显式 task board；scope 决定任务属于 session 或命名 global board。 */
 export const taskBoards = sqliteTable(
@@ -517,9 +473,6 @@ export const codingStorageSchema = {
   usagePriceSnapshots,
   usageReportCache,
   memoryJobs,
-  checkpoints,
-  checkpointFileChanges,
-  checkpointRollbacks,
   taskBoards,
   tasks,
   taskDependencies,

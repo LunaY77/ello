@@ -8,6 +8,7 @@ import type { CodingAgentConfig } from '../../config/index.js';
 import {
   modelInputBudgetFromRuntimeModel,
   modelSettingsFromRuntimeModel,
+  providerOptionsFromRuntimeModel,
   prepareModelInputForRuntimeModel,
   type ModelRegistry,
 } from '../../model/index.js';
@@ -75,6 +76,7 @@ export async function runInternalAgent(input: {
       ? {}
       : { instructions: input.definition.prompt }),
     modelInput: {
+      providerOptions: () => providerOptionsFromRuntimeModel(model),
       prepare: (modelInput: ModelInput) =>
         prepareModelInputForRuntimeModel(model, modelInput, {
           promptProfile: `internal:${input.definition.name}`,

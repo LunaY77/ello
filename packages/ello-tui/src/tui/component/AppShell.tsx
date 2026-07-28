@@ -14,6 +14,8 @@ export interface AppShellProps {
   readonly mode: TuiModeState;
   readonly pendingPlanApproval?: boolean;
   readonly liveAssistantText: string;
+  readonly liveReasoningText?: string;
+  readonly liveCompactionText?: string;
   readonly runningTools: readonly ToolCallView[];
   readonly runningSubagents: readonly SubagentRunView[];
   readonly running: boolean;
@@ -23,6 +25,7 @@ export interface AppShellProps {
   readonly usage?: Usage;
   readonly goal?: Goal;
   readonly contextPercent?: number;
+  readonly contextWindow?: number;
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
 }
@@ -37,6 +40,8 @@ export function AppShell(props: AppShellProps) {
         <LiveViewport
           cwd={props.cwd}
           assistantText={props.liveAssistantText}
+          reasoningText={props.liveReasoningText ?? ''}
+          compactionText={props.liveCompactionText ?? ''}
           runningTools={props.runningTools}
           runningSubagents={props.runningSubagents}
           running={props.running}
@@ -59,6 +64,9 @@ export function AppShell(props: AppShellProps) {
         {...(props.goal !== undefined ? { goal: props.goal } : {})}
         {...(props.contextPercent !== undefined
           ? { contextPercent: props.contextPercent }
+          : {})}
+        {...(props.contextWindow !== undefined
+          ? { contextWindow: props.contextWindow }
           : {})}
         overlay={props.overlay}
         composer={props.composer}

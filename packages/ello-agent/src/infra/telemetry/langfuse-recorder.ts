@@ -145,6 +145,8 @@ class LangfuseEventRecorder {
       case 'run.failed':
         this.endRun(event);
         return;
+      case 'context.compaction.started':
+        return;
       case 'context.compaction':
         this.recordCompaction(event);
         return;

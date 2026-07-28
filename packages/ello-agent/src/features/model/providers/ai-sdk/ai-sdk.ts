@@ -169,6 +169,8 @@ async function* streamWithAiSdk(
       } else {
         yield { type: 'text-delta', text: part.text };
       }
+    } else if (part.type === 'reasoning-delta') {
+      yield { type: 'reasoning-delta', text: part.text };
     } else if (part.type === 'tool-call') {
       toolCalls.push(readToolCall(part));
     } else if (part.type === 'finish') {

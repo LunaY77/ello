@@ -16,15 +16,13 @@ import type {
   CreateAgentOptions,
 } from './contracts.js';
 import { closeAgentResources } from './events.js';
-import {
-  availableModelInputTokens,
-  buildModelInput,
-  estimateMessagesTokens,
-} from './model-input.js';
+import { buildModelInput } from './model-input.js';
 import { callModel, type ModelAdapter } from './model.js';
+import { createModelCompactor } from './model.js';
 import {
   beginRunTurn,
   canBeginRunTurn,
+  compactRunMessages,
   completeRunState,
   completeRunTurn,
   createRunState,
@@ -74,6 +72,7 @@ class ElloAgent implements Agent {
   private readonly environment: AgentEnvironment;
   /** 模型适配器由创建者显式注入，所有 run 共享同一无会话状态边界。 */
   private readonly modelAdapter: ModelAdapter;
+  private readonly compactorState;
 
   /**
    * 创建 `ElloAgent` 并保存跨 run 共享的稳定配置。
@@ -84,6 +83,7 @@ class ElloAgent implements Agent {
   constructor(private readonly config: CreateAgentOptions) {
     this.environment = config.environment;
     this.modelAdapter = config.modelAdapter;
+    this.compactorState = { current: config.modelCompactor };
   }
 
   /**
@@ -134,6 +134,7 @@ class ElloAgent implements Agent {
       runOptions: options,
       environment: this.environment,
       modelAdapter: this.modelAdapter,
+      compactorState: this.compactorState,
     });
     void runAgentLoop(run);
     return run.stream;
@@ -157,6 +158,45 @@ class ElloAgent implements Agent {
       { messages: [...input.messages] },
       { ...options, resume: input.deferred },
     );
+  }
+
+  /**
+   * 使用当前主 Agent 配置恢复模型输入并执行上下文压缩。
+   *
+   * Args:
+   * - `input`: 完整上下文、待压缩消息、compact 提示词和取消信号。
+   *
+   * Returns:
+   * - 返回主模型生成的 compact 文本与 usage。
+   */
+  async compact(input: {
+    readonly contextMessages: ReadonlyArray<import('./model.js').AgentMessage>;
+    readonly messages: ReadonlyArray<import('./model.js').AgentMessage>;
+    readonly prompt: string;
+    readonly signal: AbortSignal;
+  }) {
+    const run = createRunState({
+      config: this.config,
+      input: { messages: [...input.contextMessages] },
+      runOptions: { signal: input.signal },
+      environment: this.environment,
+      modelAdapter: this.modelAdapter,
+      compactorState: this.compactorState,
+    });
+    await run.environment.setup?.(run.ctx);
+    run.state.messages.push(...input.contextMessages);
+    const modelInput = await buildModelInput(run);
+    const compactor = createModelCompactor(run, modelInput);
+    this.compactorState.current = compactor;
+    return compactor.compact({
+      messages: input.messages,
+      prompt: input.prompt,
+      signal: input.signal,
+    });
+  }
+
+  modelCompactor() {
+    return this.compactorState.current;
   }
 
   /**
@@ -203,7 +243,12 @@ async function runAgentLoop(run: RunState): Promise<void> {
         break;
       }
 
-      const input = await buildModelInput(run);
+      let input = await buildModelInput(run);
+      run.compactorState.current = createModelCompactor(run, input);
+      if (await compactRunMessages(run)) {
+        input = await buildModelInput(run);
+        run.compactorState.current = createModelCompactor(run, input);
+      }
       const assistant = await callModel(run, input);
       const toolResults = await executeToolCalls(run, assistant);
 
@@ -219,8 +264,6 @@ async function runAgentLoop(run: RunState): Promise<void> {
       if (shouldStopRun(run)) {
         break;
       }
-
-      await compactMidLoop(run);
     }
 
     await completeRunState(run);
@@ -319,39 +362,4 @@ function uniqueNames(
     names.add(tool.name);
   }
   return names;
-}
-
-const MID_LOOP_COMPACTION_THRESHOLD = 0.75;
-
-async function compactMidLoop(run: RunState): Promise<void> {
-  const compactor = run.config.compactor;
-  if (compactor === undefined) return;
-  const modelInputBudget = run.config.modelInputBudget;
-  if (modelInputBudget === undefined) return;
-  const contextWindow = availableModelInputTokens(modelInputBudget);
-
-  const currentTokens = estimateMessagesTokens(run.state.messages);
-  if (currentTokens <= contextWindow * MID_LOOP_COMPACTION_THRESHOLD) return;
-
-  const compacted = await compactor.compact({
-    messages: [...run.state.messages],
-    contextWindow,
-    signal: run.signal,
-  });
-  if (compacted === null) return;
-
-  run.state.messages.splice(
-    0,
-    run.state.messages.length,
-    ...compacted.messages,
-  );
-  await run.events.emit({
-    type: 'context.compaction',
-    beforeMessageCount: compacted.report.beforeMessageCount,
-    afterMessageCount: compacted.report.afterMessageCount,
-    compactor: compacted.report.compactor,
-    ...(compacted.report.metadata === undefined
-      ? {}
-      : { metadata: compacted.report.metadata }),
-  });
 }

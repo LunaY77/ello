@@ -249,6 +249,7 @@ describe('ThreadFeature', () => {
     expect(snapshot.usage).toEqual({
       requests: 5,
       inputTokens: 50,
+      lastInputTokens: 30,
       outputTokens: 12,
       cacheReadTokens: 10,
       cacheWriteTokens: 3,

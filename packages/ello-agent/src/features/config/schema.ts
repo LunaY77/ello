@@ -73,14 +73,9 @@ const CommonModelFields = {
   http_headers: HttpHeadersSchema.optional(),
   context_window: z.number().int().positive(),
   max_output_tokens: z.number().int().positive(),
-  reasoning_effort: z.enum([
-    'none',
-    'minimal',
-    'low',
-    'medium',
-    'high',
-    'xhigh',
-  ]),
+  reasoning_effort: z
+    .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+    .default('medium'),
 };
 
 export const AnthropicAuthSchemeSchema = z.enum(['api-key', 'bearer']);

@@ -92,10 +92,6 @@ describe('buildAgent model input budget', () => {
       provider: {},
     });
     const dependencies: CreateAgentFeatureInput = {
-      createCheckpoints: () => ({
-        record: async () => undefined,
-        seal: async () => undefined,
-      }),
       resolveDefinition: async () => ({
         config,
         definition,
@@ -139,6 +135,7 @@ describe('buildAgent model input budget', () => {
         executionTools: [tool],
         modelTools: [tool],
         goalSystemSection: () => null,
+        mode: () => 'ask-before-changes',
         setMode: () => undefined,
       }),
       createCompactor: (input) => {

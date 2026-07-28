@@ -143,6 +143,13 @@ export function notificationsFor(
               params: { ...base, delta: record.delta.text },
             },
           ];
+        case 'reasoning':
+          return [
+            {
+              method: 'item/reasoning/delta',
+              params: { ...base, delta: record.delta.text },
+            },
+          ];
         case 'plan':
           return [
             {

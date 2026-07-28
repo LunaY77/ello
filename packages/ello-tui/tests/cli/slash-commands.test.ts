@@ -50,6 +50,21 @@ describe('斜杠命令派发', () => {
     });
   });
 
+  it('校验并派发 thinking effort', () => {
+    for (const effort of ['low', 'medium', 'high', 'xhigh', 'max'] as const) {
+      expect(handleSlashCommand(`/effort ${effort}`).command).toEqual({
+        type: 'set-effort',
+        effort,
+      });
+    }
+    for (const input of ['/effort', '/effort minimal', '/effort high extra']) {
+      expect(handleSlashCommand(input).command).toEqual({
+        type: 'message',
+        message: 'Usage: /effort <low|medium|high|xhigh|max>',
+      });
+    }
+  });
+
   it('按空白拆分运行时动作参数', () => {
     expect(
       handleSlashCommand('/goal finish implementation --tokens 12000').command,

@@ -9,23 +9,19 @@ import type { ThreadRecord } from '../../storage/threads/thread-record.js';
 import {
   createAgentMessage,
   type AgentMessage,
+  type AgentUsage,
   type MessageCompactionReport,
   type MessageCompactor,
+  type ModelCompactor,
 } from '../agent/engine/index.js';
-import {
-  createAgentRegistry,
-  runInternalAgent,
-  type AgentRegistry,
-} from '../agent/subagents/index.js';
+import { renderPromptTemplate } from '../agent/index.js';
+import { createAgentRegistry } from '../agent/subagents/index.js';
 import {
   loadCodingAgentConfig,
   type CodingAgentConfig,
   type ContextCompactionConfig,
 } from '../config/index.js';
-import {
-  createAiSdkModelAdapter,
-  createModelRegistry,
-} from '../model/index.js';
+import { createModelRegistry } from '../model/index.js';
 
 import type { ThreadStore } from './store.js';
 
@@ -35,7 +31,6 @@ const CHECKPOINT_SUFFIX = '\n</compact-checkpoint>';
 
 export interface ThreadCompactorOptions {
   readonly config: CodingAgentConfig;
-  readonly agentRegistry?: AgentRegistry;
   /** 产品装配阶段解析出的有效窗口；用于防止调用方传入更大的运行时窗口。 */
   readonly contextWindow?: number;
   readonly force?: boolean;
@@ -60,6 +55,7 @@ export interface ThreadCompactorOptions {
 export interface ManualCompactionOptions {
   readonly force?: boolean;
   readonly turnId?: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface ThreadCompactionService {
@@ -76,14 +72,21 @@ export interface ThreadCompactionService {
   compactNow(
     threadId: string,
     options?: ManualCompactionOptions,
-  ): Promise<MessageCompactionReport | null>;
+  ): Promise<PersistedThreadCompactionReport | null>;
+}
+
+export interface PersistedThreadCompactionReport extends MessageCompactionReport {
+  readonly id: string;
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly createdAt: string;
 }
 
 /**
  * 创建不接触 Thread 持久化的消息压缩器。
  *
  * Args:
- * - `options`: 已验证配置、可选 agent registry 和 checkpoint 生成函数。
+ * - `options`: 已验证配置、窗口限制和可选 checkpoint 测试替身。
  *
  * Returns:
  * - 返回只依赖消息快照、上下文窗口和中断信号的压缩器。
@@ -91,42 +94,33 @@ export interface ThreadCompactionService {
 export function createThreadCompactor(
   options: ThreadCompactorOptions,
 ): MessageCompactor {
-  let registryTask: Promise<AgentRegistry> | undefined;
-
-  const getRegistry = async (): Promise<AgentRegistry> => {
-    if (options.agentRegistry !== undefined) return options.agentRegistry;
-    if (registryTask === undefined) {
-      registryTask = createAgentRegistry(options.config);
-    }
-    return registryTask;
-  };
-
   const generateCheckpoint = async (
-    messages: ReadonlyArray<AgentMessage>,
+    messagesToCompact: ReadonlyArray<AgentMessage>,
     previousCheckpoint: string | undefined,
     signal: AbortSignal,
-  ): Promise<string> => {
+    compact: ModelCompactor['compact'],
+  ): Promise<{
+    readonly summary: string;
+    readonly usage?: AgentUsage;
+  }> => {
     if (options.generateCheckpoint !== undefined) {
-      return options.generateCheckpoint(messages, previousCheckpoint, signal);
+      return {
+        summary: await options.generateCheckpoint(
+          messagesToCompact,
+          previousCheckpoint,
+          signal,
+        ),
+      };
     }
-    const registry = await getRegistry();
-    const modelRegistry = createModelRegistry(options.config);
-    const conversation = messages
-      .map((message) => `### ${message.role}\n${messageText(message)}`)
-      .join('\n\n');
-    const prompt = `${
-      previousCheckpoint === undefined
-        ? ''
-        : `<previous-compact>\n${previousCheckpoint}\n</previous-compact>\n`
-    }<conversation>\n${conversation}\n</conversation>`;
-    return runInternalAgent({
-      definition: registry.get('compact'),
-      prompt,
-      config: options.config,
-      modelRegistry,
-      modelAdapter: createAiSdkModelAdapter(),
+    const result = await compact({
+      messages:
+        previousCheckpoint === undefined
+          ? messagesToCompact
+          : [summaryMessage(previousCheckpoint), ...messagesToCompact],
+      prompt: renderPromptTemplate('compact'),
       signal,
     });
+    return { summary: result.text, usage: result.usage };
   };
 
   return {
@@ -160,17 +154,23 @@ export function createThreadCompactor(
       const toSummarize = checkpoint.messages.slice(0, cut);
       const kept = checkpoint.messages.slice(cut);
       if (toSummarize.length === 0 || kept.length === 0) return null;
-      const summary = await generateCheckpoint(
-        serializeForCompact(toSummarize, options.config.context.compaction),
+      await input.onStart?.({
+        beforeMessageCount: input.messages.length,
+        tokensBefore,
+      });
+      const generated = await generateCheckpoint(
+        toSummarize,
         checkpoint.previous,
         input.signal,
+        input.compact,
       );
-      const normalizedSummary = summary.trim();
+      const normalizedSummary = generated.summary.trim();
       if (normalizedSummary === '') {
         throw new Error('Compaction model returned an empty checkpoint.');
       }
       return {
         messages: [summaryMessage(normalizedSummary), ...kept],
+        ...(generated.usage === undefined ? {} : { usage: generated.usage }),
         report: {
           compactor: COMPACTION_NAME,
           beforeMessageCount: input.messages.length,
@@ -201,12 +201,19 @@ export function createThreadCompactor(
 export async function createProductionThreadCompactor(options: {
   readonly store: ThreadStore;
   readonly snapshot: ThreadSnapshot;
+  readonly compact: ModelCompactor['compact'];
 }): Promise<ThreadCompactionService> {
   const config = await loadCodingAgentConfig({
     cwd: options.snapshot.thread.cwd,
     initial_mode: options.snapshot.settings.mode,
   });
-  const model = createModelRegistry(config).resolveSelector('auxiliary_model');
+  const agents = await createAgentRegistry(config);
+  const agentName =
+    options.snapshot.settings.agent === 'primary'
+      ? config.default_agent
+      : options.snapshot.settings.agent;
+  const definition = agents.get(agentName);
+  const model = createModelRegistry(config).resolveSelector(definition.model);
 
   return {
     async compactNow(threadId, manual = {}) {
@@ -219,7 +226,8 @@ export async function createProductionThreadCompactor(options: {
       const compacted = await compactor.compact({
         messages: view.projectedMessages,
         contextWindow: model.contextWindow,
-        signal: new AbortController().signal,
+        signal: manual.signal ?? new AbortController().signal,
+        compact: options.compact,
       });
       if (compacted === null) return null;
       const turnId = manual.turnId ?? view.entries.at(-1)?.turnId;
@@ -228,14 +236,20 @@ export async function createProductionThreadCompactor(options: {
           'Compaction requires a transcript entry with a turn id.',
         );
       }
-      await appendThreadCompaction({
+      const record = await appendThreadCompaction({
         store: options.store,
         threadId,
         turnId,
         view,
         report: compacted.report,
       });
-      return compacted.report;
+      return {
+        ...compacted.report,
+        id: `compaction-${record.seq}`,
+        threadId,
+        turnId,
+        createdAt: record.createdAt,
+      };
     },
   };
 }
@@ -320,20 +334,27 @@ export async function appendThreadCompaction(input: {
   readonly turnId: string;
   readonly view: ReturnType<typeof compactionView>;
   readonly report: MessageCompactionReport;
-}): Promise<void> {
+}): Promise<Extract<ThreadRecord, { kind: 'compaction' }>> {
   const firstKept = input.view.entries.at(-input.report.keptMessageCount);
   if (firstKept === undefined) {
     throw new Error(
       `Compaction kept ${input.report.keptMessageCount} messages outside the current Thread history.`,
     );
   }
-  await input.store.append(input.threadId, {
+  const record = await input.store.append(input.threadId, {
     kind: 'compaction',
     turnId: input.turnId,
     summary: input.report.summary,
     firstKeptSeq: firstKept.seq,
     tokensBefore: input.report.tokensBefore,
+    beforeMessageCount: input.report.beforeMessageCount,
+    afterMessageCount: input.report.afterMessageCount,
+    keptMessageCount: input.report.keptMessageCount,
   });
+  if (record.kind !== 'compaction') {
+    throw new Error(`Expected compaction record, received ${record.kind}.`);
+  }
+  return record;
 }
 
 function shouldCompact(
@@ -395,20 +416,6 @@ function findCutIndex(
     if (message.role !== 'tool') return index;
   }
   return null;
-}
-
-function serializeForCompact(
-  messages: ReadonlyArray<AgentMessage>,
-  settings: ContextCompactionConfig,
-): ReadonlyArray<AgentMessage> {
-  if (!settings.prune_tool_output) return messages;
-  return messages.map((message) => {
-    if (message.role !== 'tool') return message;
-    return createAgentMessage({
-      ...message,
-      content: messageText(message).slice(0, settings.tool_output_max_chars),
-    });
-  });
 }
 
 function splitCheckpoint(messages: ReadonlyArray<AgentMessage>): {

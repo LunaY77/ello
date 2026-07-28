@@ -95,10 +95,19 @@ function summarize(
   }
   if (typeof input === 'object' && input !== null) {
     const record = input as Record<string, unknown>;
-    for (const key of ['path', 'command', 'pattern', 'url', 'query']) {
+    for (const key of [
+      'filePath',
+      'path',
+      'command',
+      'pattern',
+      'url',
+      'query',
+    ]) {
       const value = record[key];
       if (typeof value === 'string' && value !== '') {
-        return key === 'path' ? formatToolPath(value, options) : value;
+        return key === 'filePath' || key === 'path'
+          ? formatToolPath(value, options)
+          : value;
       }
     }
   }
@@ -248,7 +257,11 @@ function searchTarget(
   options: ToolCardDisplayOptions,
 ): string {
   const pattern = text(metadata?.pattern) || inputString(input, 'pattern');
-  const targetPath = text(metadata?.path) || inputString(input, 'path');
+  const targetPath =
+    text(metadata?.filePath) ||
+    text(metadata?.path) ||
+    inputString(input, 'filePath') ||
+    inputString(input, 'path');
   const displayPath = formatToolPath(targetPath, options);
   if (pattern === '') {
     return displayPath !== '' ? ` in ${displayPath}` : '';
@@ -360,9 +373,11 @@ export function buildToolCardModel(
     metrics: metricList(metadata),
     details: detailList(metadata, diff),
     outputPreview:
-      metadata?.kind === 'shell' || call.name === 'bash'
-        ? outputPreview(call.output)
-        : [],
+      call.status === 'fail' && call.error?.message !== undefined
+        ? outputPreview(call.error.message)
+        : metadata?.kind === 'shell' || call.name === 'bash'
+          ? outputPreview(call.output)
+          : [],
     ...(outputPath !== ''
       ? {
           artifact: {
@@ -418,7 +433,7 @@ function displayMetadataPath(
   metadata: ToolMetadata | undefined,
   options: ToolCardDisplayOptions,
 ): string {
-  const metadataPath = text(metadata?.path);
+  const metadataPath = text(metadata?.filePath) || text(metadata?.path);
   const metadataPaths = Array.isArray(metadata?.paths)
     ? metadata.paths.filter(
         (value): value is string => typeof value === 'string',

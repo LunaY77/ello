@@ -164,6 +164,58 @@ describe('tui-event-store', () => {
     expect(state.history.at(-1)).toMatchObject({ kind: 'tool', id: item.id });
   });
 
+  it('projects reasoning deltas into live state and committed history', () => {
+    const turn = turnFixture({ id: 'turn-1', status: 'inProgress', items: [] });
+    const item: Extract<ThreadItem, { type: 'reasoning' }> = {
+      id: 'reasoning-1',
+      turnId: turn.id,
+      type: 'reasoning',
+      summary: '',
+      status: 'inProgress',
+      createdAt: fixtureTimestamp,
+    };
+    let state = createInitialTuiEventState(fixtureSnapshot());
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('turn/started', 1, { turnId: turn.id, turn }),
+    });
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('item/started', 2, {
+        turnId: turn.id,
+        itemId: item.id,
+        item,
+      }),
+    });
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('item/reasoning/delta', 3, {
+        turnId: turn.id,
+        itemId: item.id,
+        delta: 'checking context',
+      }),
+    });
+    expect(state.live.reasoningText).toBe('checking context');
+
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('item/completed', 4, {
+        turnId: turn.id,
+        itemId: item.id,
+        item: {
+          ...item,
+          summary: 'checking context',
+          status: 'completed',
+        },
+      }),
+    });
+    expect(state.live.reasoningText).toBe('');
+    expect(state.history.at(-1)).toMatchObject({
+      kind: 'reasoning',
+      text: 'checking context',
+    });
+  });
+
   it('keeps server requests pending until an explicit resolution', () => {
     const request = {
       id: 'request-1',
@@ -204,7 +256,7 @@ describe('tui-event-store', () => {
     });
   });
 
-  it('updates settings, goal, plan, usage, and compaction notices', () => {
+  it('updates settings, goal, plan, usage, and compaction state', () => {
     const goal = {
       id: 'goal-1',
       objective: 'ship refactor',
@@ -264,9 +316,99 @@ describe('tui-event-store', () => {
     expect(state.goal).toEqual(goal);
     expect(state.snapshot.plan).toEqual(plan);
     expect(state.usage.outputTokens).toBe(3);
-    expect(state.history.at(-1)).toMatchObject({
-      kind: 'system',
-      text: 'context compacted: kept recent context',
+    expect(state.history.some((entry) => entry.id === 'compaction-5')).toBe(
+      false,
+    );
+  });
+
+  it('replaces automatic compaction progress with the complete checkpoint', () => {
+    let state = createInitialTuiEventState(
+      fixtureSnapshot({
+        turns: [
+          turnFixture({ id: 'turn-1', status: 'inProgress', items: [] }),
+        ],
+      }),
+    );
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('item/started', 1, {
+        turnId: 'turn-1',
+        itemId: 'compact-1',
+        item: {
+          type: 'contextCompaction',
+          id: 'compact-1',
+          turnId: 'turn-1',
+          createdAt: fixtureTimestamp,
+          summary: 'Compacting 42 messages…',
+          tokensBefore: 120_000,
+          status: 'inProgress',
+        },
+      }),
+    });
+
+    expect(state.live.compactionText).toBe('Compacting 42 messages…');
+    expect(state.history).toHaveLength(1);
+
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('item/completed', 2, {
+        turnId: 'turn-1',
+        itemId: 'compact-1',
+        item: {
+          type: 'contextCompaction',
+          id: 'compact-1',
+          turnId: 'turn-1',
+          createdAt: fixtureTimestamp,
+          summary: '## Goal\nKeep the automatic checkpoint.',
+          tokensBefore: 120_000,
+          beforeMessageCount: 42,
+          afterMessageCount: 8,
+          keptMessageCount: 7,
+          status: 'completed',
+        },
+      }),
+    });
+
+    expect(state.live.compactionText).toBe('');
+    expect(state.history.at(-1)).toEqual({
+      kind: 'compaction',
+      id: 'compact-1',
+      summary: '## Goal\nKeep the automatic checkpoint.',
+      tokensBefore: 120_000,
+      beforeMessageCount: 42,
+      afterMessageCount: 8,
+      keptMessageCount: 7,
+    });
+  });
+
+  it('replaces manual compaction progress with the complete checkpoint', () => {
+    let state = createInitialTuiEventState(fixtureSnapshot());
+    state = reduceTuiEvent(state, { type: 'ui.compaction.started' });
+
+    expect(state.live.compactionText).toBe('Compacting context…');
+    expect(state.history).toHaveLength(1);
+
+    state = reduceTuiEvent(state, {
+      type: 'ui.compaction.completed',
+      report: {
+        id: 'compaction-7',
+        summary: '## Goal\nKeep the compact checkpoint.',
+        tokensBefore: 4_096,
+        beforeMessageCount: 12,
+        afterMessageCount: 3,
+        keptMessageCount: 2,
+      },
+    });
+
+    expect(state.live.compactionText).toBe('');
+    expect(state.history.at(-1)).toEqual({
+      kind: 'compaction',
+      id: 'compaction-7',
+      summary: '## Goal\nKeep the compact checkpoint.',
+      tokensBefore: 4_096,
+      beforeMessageCount: 12,
+      afterMessageCount: 3,
+      keptMessageCount: 2,
     });
   });
 
@@ -327,6 +469,82 @@ describe('tui-event-store', () => {
         (entry) => entry.kind === 'diagnostic' && entry.text.includes('raw'),
       ),
     ).toBe(false);
+  });
+
+  it('replays a manual compact checkpoint after its completed turn separator', () => {
+    const state = createInitialTuiEventState(
+      fixtureSnapshot({
+        turns: [
+          turnFixture({
+            id: 'turn-1',
+            status: 'completed',
+            items: [
+              userItem('user-1', 'finish the task'),
+              {
+                id: 'compaction-7',
+                turnId: 'turn-1',
+                type: 'contextCompaction',
+                summary: '## Goal\nPreserve the checkpoint.',
+                tokensBefore: 4_096,
+                beforeMessageCount: 12,
+                afterMessageCount: 3,
+                keptMessageCount: 2,
+                status: 'completed',
+                createdAt: '2026-07-18T00:00:06.000Z',
+              },
+            ],
+            completedAt: '2026-07-18T00:00:05.000Z',
+          }),
+        ],
+      }),
+    );
+
+    expect(state.history.map((entry) => entry.kind)).toEqual([
+      'session_header',
+      'user',
+      'separator',
+      'compaction',
+    ]);
+    expect(state.history.at(-1)).toMatchObject({
+      kind: 'compaction',
+      summary: '## Goal\nPreserve the checkpoint.',
+    });
+  });
+
+  it('replays the persisted error from a failed tool call', () => {
+    const item: Extract<ThreadItem, { type: 'toolCall' }> = {
+      id: 'glob-1',
+      turnId: 'turn-1',
+      type: 'toolCall',
+      toolName: 'glob',
+      headline: 'Glob packages',
+      status: 'failed',
+      error: 'Path not allowed: /outside/packages',
+      metadata: {
+        input: { filePath: '/outside/packages', pattern: '**/*context*' },
+      },
+      createdAt: fixtureTimestamp,
+    };
+    const state = createInitialTuiEventState(
+      fixtureSnapshot({
+        turns: [
+          turnFixture({
+            id: 'turn-1',
+            status: 'failed',
+            items: [item],
+            completedAt: fixtureTimestamp,
+          }),
+        ],
+      }),
+    );
+
+    expect(state.history.at(-2)).toMatchObject({
+      kind: 'tool',
+      tool: {
+        status: 'fail',
+        error: { message: 'Path not allowed: /outside/packages' },
+      },
+    });
   });
 });
 

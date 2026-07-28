@@ -171,6 +171,83 @@ describe('App typed client behavior', () => {
     view.unmount();
   });
 
+  it('/effort 通过 agent 写入当前模型的全局配置', async () => {
+    const harness = createThreadHarness(snapshot());
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, '/effort max');
+
+    await vi.waitFor(() =>
+      expect(harness.request).toHaveBeenCalledWith('agent/effort/update', {
+        cwd: '/workspace',
+        agent: 'build',
+        effort: 'max',
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('Thinking effort set to max'),
+    );
+    view.unmount();
+  });
+
+  it('/compact 用完整 checkpoint 替换进行中提示', async () => {
+    const harness = createThreadHarness(snapshot());
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, '/compact');
+
+    await vi.waitFor(() =>
+      expect(harness.request).toHaveBeenCalledWith('thread/compact/start', {
+        threadId: 'thr_1',
+      }),
+    );
+    await vi.waitFor(() => {
+      const frame = view.lastFrame();
+      expect(frame).toContain(
+        'Context compacted · 12 -> 3 messages · 4.1k tokens before',
+      );
+      expect(frame).toContain('## Goal');
+      expect(frame).toContain('Preserve the active compact checkpoint.');
+      expect(frame).not.toContain('jobId');
+      expect(frame).not.toContain('Compacting context…');
+    });
+    view.unmount();
+  });
+
+  it('/compact 进行中可用 Ctrl+C 中断', async () => {
+    let rejectCompact!: (error: Error) => void;
+    const compact = new Promise<never>((_resolve, reject) => {
+      rejectCompact = reject;
+    });
+    const harness = createThreadHarness(snapshot(), {
+      compact: () => compact,
+    });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, '/compact');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('Compacting context…'),
+    );
+
+    view.stdin.write('\x03');
+
+    await vi.waitFor(() =>
+      expect(harness.request).toHaveBeenCalledWith('thread/compact/interrupt', {
+        threadId: 'thr_1',
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).not.toContain('Compacting context…'),
+    );
+    rejectCompact(new Error('context compaction aborted'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(view.lastFrame()).not.toContain('context compaction aborted');
+    view.unmount();
+  });
+
   it('Hero 只显示一次 Server 返回的具体 settings', async () => {
     const harness = createThreadHarness(snapshot());
     const view = render(<App thread={harness.thread} />);
@@ -464,6 +541,7 @@ interface ThreadHarness {
 function createThreadHarness(
   initialSnapshot: ThreadSnapshot,
   options: {
+    readonly compact?: () => Promise<unknown>;
     readonly fileSearchError?: Error;
     readonly submitInput?: () => Promise<string>;
     readonly sessions?: readonly ThreadSummary[];
@@ -505,6 +583,30 @@ function createThreadHarness(
             },
           ],
         };
+      case 'agent/effort/update':
+        return {
+          agent: 'build',
+          selector: 'primary_model',
+          model: 'mock/new',
+          effort: 'max',
+        };
+      case 'thread/compact/start':
+        if (options.compact !== undefined) return options.compact();
+        return {
+          id: 'compaction-7',
+          threadId: initialSnapshot.thread.id,
+          turnId: 'turn_1',
+          createdAt,
+          compactor: 'ello-thread-compactor',
+          beforeMessageCount: 12,
+          afterMessageCount: 3,
+          keptMessageCount: 2,
+          tokensBefore: 4_096,
+          summary: '## Goal\nPreserve the active compact checkpoint.',
+          metadata: { summarizedMessageCount: 10 },
+        };
+      case 'thread/compact/interrupt':
+        return { ok: true };
       case 'config/read':
       case 'config/write':
         return { config };

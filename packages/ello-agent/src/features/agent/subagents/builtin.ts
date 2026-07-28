@@ -12,7 +12,7 @@ import type { CodingAgentDefinition } from './schema.js';
  * 内置 agent 定义。
  *
  * - build 是 primary。
- * - title/compact/summary/memory-extractor/dream 是 internal：系统专用。
+ * - title/summary/memory-extractor/dream 是 internal：系统专用。
  *
  * Args:
  * - 无：操作使用实例或闭包已经持有的稳定状态。
@@ -38,17 +38,6 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
       tools: [],
       description: 'Internal session title generator.',
       prompt: renderPromptTemplate('title'),
-      maxTurns: 4,
-    },
-    {
-      name: 'compact',
-      mode: 'internal',
-      model: 'auxiliary_model',
-      source: 'builtin',
-      hidden: true,
-      tools: [],
-      description: 'Internal compact checkpoint generator.',
-      prompt: renderPromptTemplate('compact'),
       maxTurns: 4,
     },
     {

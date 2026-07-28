@@ -188,8 +188,8 @@ export function availableModelInputTokens(
 /** 锚点前移的目标水位：砍到预算的这个比例，留出余量供后续回合追加。 */
 const BUDGET_ADVANCE_RATIO = 0.6;
 
-/** 前缀指纹取样的消息条数，用于观测锚点是否漂移。 */
-const PREFIX_FINGERPRINT_SAMPLE = 4;
+/** 前缀指纹覆盖的消息条数，用于观测锚点是否漂移。 */
+const PREFIX_FINGERPRINT_MESSAGE_COUNT = 4;
 
 /**
  * 跨回合共享的前缀锚点。
@@ -392,7 +392,7 @@ export function fingerprintToolset(tools: AgentToolSet): string {
 /**
  * 对保留窗口的头部消息取指纹，用于观测前缀锚点是否漂移。
  *
- * 只取前 {@link PREFIX_FINGERPRINT_SAMPLE} 条：provider 缓存断点按下标放置，
+ * 只覆盖前 {@link PREFIX_FINGERPRINT_MESSAGE_COUNT} 条：provider 缓存断点按下标放置，
  * 头部一动则所有断点指向不同消息、缓存整体失效。指纹覆盖全部历史时每轮
  * 必变（历史逐轮追加），无法区分"正常增长"与"前缀漂移"，也就无法告警。
  *
@@ -400,12 +400,14 @@ export function fingerprintToolset(tools: AgentToolSet): string {
  * - `messages`: 当轮最终发给模型的消息序列。
  *
  * Returns:
- * - 返回头部样本的 sha256；同一锚点区间内逐字节稳定。
+ * - 返回头部消息的 sha256；同一锚点区间内逐字节稳定。
  */
 export function fingerprintMessagePrefix(
   messages: ReadonlyArray<AgentMessage>,
 ): string {
-  return sha256(stableJson(messages.slice(0, PREFIX_FINGERPRINT_SAMPLE)));
+  return sha256(
+    stableJson(messages.slice(0, PREFIX_FINGERPRINT_MESSAGE_COUNT)),
+  );
 }
 
 /**

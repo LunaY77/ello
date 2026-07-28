@@ -102,6 +102,20 @@ describe('loadCodingAgentConfig', () => {
     });
   });
 
+  it('enables reasoning at medium effort when a model omits the setting', async () => {
+    const withoutReasoning = model('anthropic', 'reasoning-default');
+    const { reasoning_effort: _removed, ...modelConfig } = withoutReasoning;
+    await writeGlobalConfig({
+      models: { defaulted: modelConfig },
+      primary_model: 'defaulted',
+      auxiliary_model: 'defaulted',
+    });
+
+    await expect(loadCodingAgentConfig({ cwd })).resolves.toMatchObject({
+      models: { defaulted: { reasoning_effort: 'medium' } },
+    });
+  });
+
   it('rejects context reservations that exceed a selected model window', async () => {
     await writeGlobalConfig({
       models: {

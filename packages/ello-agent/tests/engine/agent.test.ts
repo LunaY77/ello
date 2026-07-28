@@ -145,6 +145,41 @@ describe('createAgent', () => {
     await agent.close();
   });
 
+  it('publishes reasoning as an independent lifecycle', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        generate: (request) => new EchoAdapter().generate(request),
+        async *stream(request) {
+          yield { type: 'reasoning-delta', text: 'inspect ' };
+          yield { type: 'reasoning-delta', text: 'state' };
+          yield {
+            type: 'final',
+            response: await new EchoAdapter().generate(request),
+          };
+        },
+      },
+    });
+    const stream = agent.stream('hi');
+    const events: EngineEvent[] = [];
+    for await (const event of stream) events.push(event);
+    await stream.final;
+
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        'reasoning.started',
+        'reasoning.delta',
+        'reasoning.completed',
+      ]),
+    );
+    expect(
+      events.find((event) => event.type === 'reasoning.completed'),
+    ).toMatchObject({
+      text: 'inspect state',
+    });
+    await agent.close();
+  });
+
   it('adds ephemeral run instructions to system without persisting them', async () => {
     let request: AgentModelRequest | undefined;
     const agent = createAgent({
@@ -434,7 +469,7 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('passes the complete current messages to the pure compactor', async () => {
+  it('compacts the current input before the model call', async () => {
     let messagesSeenByCompactor: AgentMessage[] = [];
     const agent = createAgent({
       model: 'test:model',
@@ -459,9 +494,16 @@ describe('createAgent', () => {
       },
     });
 
-    const result = await agent.run('current input');
+    const result = await agent.run({
+      messages: [{ role: 'user', content: 'history' }],
+      prompt: 'current input',
+    });
 
     expect(messagesSeenByCompactor.map((message) => message.role)).toEqual([
+      'user',
+      'user',
+    ]);
+    expect(result.newMessages.map((message) => message.role)).toEqual([
       'user',
       'assistant',
     ]);

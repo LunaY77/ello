@@ -25,16 +25,21 @@ export OPENAI_API_KEY="..."
 ello
 ```
 
-TUI 提供两个相关入口：
+TUI 提供三个相关入口：
 
-| 命令        | 用途                                    |
-| ----------- | --------------------------------------- |
-| `/models`   | 查看模型目录，并修改两个全局 model 引用 |
-| `/settings` | 查看普通运行设置的来源和生效时机        |
+| 命令              | 用途                                         |
+| ----------------- | -------------------------------------------- |
+| `/models`         | 查看模型目录，并修改两个全局 model 引用      |
+| `/effort <level>` | 修改当前 Agent 所用 model 的 thinking effort |
+| `/settings`       | 查看普通运行设置的来源和生效时机             |
 
 模型目录不通过 `/settings` 编辑。`/models` 会先选择 `primary_model` 或
 `auxiliary_model`，再把选中的 model 名写入全局配置。新增 model 或修改其连接字段时，
 直接编辑全局 `~/.ello/config.yaml`，或通过 Config RPC 写入全局配置。
+
+`/effort` 支持 `low`、`medium`、`high`、`xhigh`、`max`。Agent Server 根据当前
+Thread 的 agent 定义解析实际 model，并把结果写入全局 `config.yaml`；从下一个 Turn
+开始生效。
 
 ## 完整模型配置
 
@@ -92,16 +97,17 @@ agent:
 | `http_headers`      | 可选的额外 HTTP headers                      |
 | `context_window`    | 模型总上下文窗口                             |
 | `max_output_tokens` | 单次调用允许的最大输出                       |
-| `reasoning_effort`  | reasoning 档位                               |
+| `reasoning_effort`  | thinking/reasoning 档位，默认 `medium`       |
 
 `reasoning_effort` 可选值为：
 
 ```text
-none | minimal | low | medium | high | xhigh
+none | minimal | low | medium | high | xhigh | max
 ```
 
-目前它只转换为 OpenAI 协议的 reasoning 设置；Anthropic 和 OpenAI-compatible model
-仍要求声明该字段，但不会自动映射为厂商专属 thinking 参数。
+该字段统一传给 AI SDK 的 reasoning 设置。OpenAI、Anthropic 和 OpenAI-compatible
+协议会由各自 provider 转换为对应的 thinking/reasoning 参数；设为 `none` 可显式关闭。
+`max` 表示当前 SDK 可表达的最高档位；运行时会映射为 provider 的最高 reasoning 设置。
 
 协议专属字段：
 

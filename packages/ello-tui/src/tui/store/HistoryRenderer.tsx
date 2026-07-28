@@ -58,6 +58,10 @@ function renderHistoryEntryContent(
           ))}
         </Box>
       );
+    case 'reasoning':
+      return <ReasoningText text={entry.text} />;
+    case 'compaction':
+      return <HistoryCompaction entry={entry} />;
     case 'skill':
       return <Text color={theme.accent}>{`loaded [${entry.name}]`}</Text>;
     case 'tool':
@@ -92,6 +96,53 @@ function renderHistoryEntryContent(
     case 'diagnostic':
       return <Text color={theme.error}>{`x ${entry.text}`}</Text>;
   }
+}
+
+function HistoryCompaction({
+  entry,
+}: {
+  readonly entry: Extract<HistoryEntry, { kind: 'compaction' }>;
+}) {
+  const theme = useTheme();
+  const messageCounts =
+    entry.beforeMessageCount === undefined ||
+    entry.afterMessageCount === undefined
+      ? ''
+      : ` · ${entry.beforeMessageCount} -> ${entry.afterMessageCount} messages`;
+  return (
+    <Box flexDirection="column">
+      <Text color={theme.accent}>
+        {`- Context compacted${messageCounts} · ${formatHistoryTokens(entry.tokensBefore)} tokens before`}
+      </Text>
+      {entry.summary.split('\n').map((line, index) => (
+        <Text key={`${entry.id}:summary:${index}`} color={theme.textMuted}>
+          {`  ${line}`}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+function ReasoningText({ text }: { readonly text: string }) {
+  const theme = useTheme();
+  return (
+    <Box>
+      <Text color={theme.textMuted}>Thinking: </Text>
+      <Box flexDirection="column" flexShrink={1}>
+        {text.split('\n').map((line, index) => (
+          <Text key={`${index}:${line}`} color={theme.textMuted} wrap="wrap">
+            {line}
+          </Text>
+        ))}
+      </Box>
+    </Box>
+  );
+}
+
+function formatHistoryTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return String(tokens);
 }
 
 function summarizeUserInputResolution(resolution: UserInputResolution): string {

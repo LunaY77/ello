@@ -25,6 +25,7 @@ import {
   type AgentEventInput,
   type AgentEventMetadata,
   type EngineEvent,
+  type ModelCompactor,
 } from './events.js';
 import { normalizeInput } from './messages.js';
 import {
@@ -199,9 +200,10 @@ export interface RunState {
   readonly toolScheduler: ToolScheduler;
   readonly events: AgentEventDispatcher;
   readonly maxTurns: number | undefined;
-  initialHistoryLength: number;
+  readonly newMessages: AgentMessage[];
   resumeForFirstTurn: DeferredRunResults | undefined;
   turns: import('./contracts.js').AgentTurnDiagnostics[];
+  compactions: MessageCompactionReport[];
   toolCalls: AgentToolCall[];
   usage: AgentUsage;
   finalResponse: AgentModelResponse | undefined;
@@ -210,6 +212,9 @@ export interface RunState {
   lastTurnResponse: AgentModelResponse | undefined;
   /** 跨回合共享的前缀锚点，保证 provider 缓存断点下标稳定。 */
   readonly messageBudgetAnchor: MessageBudgetAnchor;
+  readonly compactorState: {
+    current: ModelCompactor | undefined;
+  };
 }
 
 /**
@@ -231,6 +236,7 @@ export function createRunState(options: {
   readonly runOptions: AgentRunOptions;
   readonly environment: AgentEnvironment;
   readonly modelAdapter: ModelAdapter;
+  readonly compactorState: RunState['compactorState'];
 }): RunState {
   const maxTurns = options.runOptions.maxTurns;
   if (
@@ -313,9 +319,10 @@ export function createRunState(options: {
     toolScheduler,
     events,
     maxTurns,
-    initialHistoryLength: 0,
+    newMessages: [],
     resumeForFirstTurn: undefined,
     turns: [],
+    compactions: [],
     toolCalls: [],
     usage: createEmptyUsage(),
     finalResponse: undefined,
@@ -323,6 +330,7 @@ export function createRunState(options: {
     lastTurnNewMessages: [],
     lastTurnResponse: undefined,
     messageBudgetAnchor: { index: 0 },
+    compactorState: options.compactorState,
   };
 }
 
@@ -341,7 +349,6 @@ export function createRunState(options: {
 export async function initializeRunState(run: RunState): Promise<void> {
   await run.environment.setup?.(run.ctx);
   const normalized = normalizeInput(run.input);
-  run.initialHistoryLength = normalized.historyLength;
   for (const message of normalized.messages.slice(
     0,
     normalized.historyLength,
@@ -399,6 +406,10 @@ export async function beginRunTurn(run: RunState): Promise<RunTurn> {
   }
   const resume = turnIndex === 0 ? run.resumeForFirstTurn : undefined;
   const drained = run.runControl.drainNextTurn(resume);
+  const sessionCount =
+    drained.diagnostics.find((diagnostic) => diagnostic.queue === 'session')
+      ?.count ?? 0;
+  run.newMessages.push(...drained.messages.slice(sessionCount));
   run.state.queueDiagnostics.push(...drained.diagnostics);
   run.state.messages.push(...drained.messages);
   for (const diagnostic of drained.diagnostics) {
@@ -445,6 +456,7 @@ export async function completeRunTurn(
 ): Promise<void> {
   const newMessages = response === undefined ? [] : response.newMessages;
   const allNewMessages = [...newMessages, ...toolResults.messages];
+  run.newMessages.push(...allNewMessages);
   run.state.messages.push(...allNewMessages);
   run.lastTurnNewMessages = allNewMessages;
   run.lastTurnResponse = response;
@@ -531,25 +543,16 @@ export function shouldStopRun(run: RunState): boolean {
  * - Promise 在 产品 Agent Agent engine 运行状态 模块 的异步读取或状态变更完成后兑现为声明结果。
  */
 export async function completeRunState(run: RunState): Promise<AgentRunResult> {
-  const newMessages = run.state.messages.slice(run.initialHistoryLength);
-  const compactions = await compactRunMessages(run);
-  for (const compaction of compactions) {
-    await run.events.emit({
-      type: 'context.compaction',
-      beforeMessageCount: compaction.beforeMessageCount,
-      afterMessageCount: compaction.afterMessageCount,
-      compactor: compaction.compactor,
-      ...(compaction.metadata === undefined
-        ? {}
-        : { metadata: compaction.metadata }),
-    });
-  }
   const diagnostics = createRunDiagnostics({
     run,
     turns: run.turns,
-    compactions,
+    compactions: run.compactions,
   });
-  const result = createRunResult({ run, diagnostics, newMessages });
+  const result = createRunResult({
+    run,
+    diagnostics,
+    newMessages: run.newMessages,
+  });
   if (run.stopReason === 'interrupted') {
     await run.events.emit({
       type: 'run.interrupted',
@@ -629,11 +632,21 @@ function bridgeAbortSignal(
   });
 }
 
-async function compactRunMessages(
-  run: RunState,
-): Promise<ReadonlyArray<MessageCompactionReport>> {
+/**
+ * 在下一次模型调用前按当前完整消息快照执行上下文压缩，并发布开始与完成事件。
+ *
+ * Args:
+ * - `run`: 当前 run 的可变状态；压缩成功后会原位替换模型消息并累计压缩报告。
+ *
+ * Returns:
+ * - 压缩并替换消息时返回 `true`；无需压缩时返回 `false`。
+ *
+ * Throws:
+ * - 压缩预算缺失、报告归属错误或压缩器执行失败时直接抛错。
+ */
+export async function compactRunMessages(run: RunState): Promise<boolean> {
   const compactor = run.config.compactor;
-  if (compactor === undefined) return [];
+  if (compactor === undefined) return false;
   const modelInputBudget = run.config.modelInputBudget;
   if (modelInputBudget === undefined) {
     throw new Error(
@@ -641,12 +654,32 @@ async function compactRunMessages(
     );
   }
   const contextWindow = availableModelInputTokens(modelInputBudget);
+  const modelCompactor = run.compactorState.current;
+  const compactionId = randomUUID();
+  let started = false;
   const compacted = await compactor.compact({
     messages: [...run.state.messages],
     contextWindow,
     signal: run.signal,
+    compact: (input) => {
+      if (modelCompactor === undefined) {
+        throw new Error(
+          'Context compaction requires an existing primary-agent model context.',
+        );
+      }
+      return modelCompactor.compact(input);
+    },
+    onStart: async (input) => {
+      started = true;
+      await run.events.emit({
+        type: 'context.compaction.started',
+        compactionId,
+        beforeMessageCount: input.beforeMessageCount,
+        tokensBefore: input.tokensBefore,
+      });
+    },
   });
-  if (compacted === null) return [];
+  if (compacted === null) return false;
   if (compacted.report.compactor !== compactor.name) {
     throw new Error(
       `Message compactor '${compactor.name}' returned report for '${compacted.report.compactor}'.`,
@@ -657,7 +690,32 @@ async function compactRunMessages(
     run.state.messages.length,
     ...compacted.messages,
   );
-  return [compacted.report];
+  if (!started) {
+    await run.events.emit({
+      type: 'context.compaction.started',
+      compactionId,
+      beforeMessageCount: compacted.report.beforeMessageCount,
+      tokensBefore: compacted.report.tokensBefore,
+    });
+  }
+  run.compactions.push(compacted.report);
+  if (compacted.usage !== undefined) {
+    run.usage = addUsage(run.usage, compacted.usage);
+  }
+  await run.events.emit({
+    type: 'context.compaction',
+    compactionId,
+    beforeMessageCount: compacted.report.beforeMessageCount,
+    afterMessageCount: compacted.report.afterMessageCount,
+    compactor: compacted.report.compactor,
+    summary: compacted.report.summary,
+    keptMessageCount: compacted.report.keptMessageCount,
+    tokensBefore: compacted.report.tokensBefore,
+    ...(compacted.report.metadata === undefined
+      ? {}
+      : { metadata: compacted.report.metadata }),
+  });
+  return true;
 }
 
 function validateToolCollections(

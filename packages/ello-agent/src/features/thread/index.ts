@@ -21,7 +21,9 @@ export function createThreadFeature(input: CreateThreadsInput): ThreadFeature {
 
 export { createThreadStore } from './store.js';
 export type { ThreadStore } from './store.js';
+export type { PersistedThreadCompactionReport } from './compact.js';
 export {
+  compactionView,
   createProductionThreadCompactor,
   createThreadCompactor,
 } from './compact.js';

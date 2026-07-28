@@ -130,7 +130,9 @@ function ReadyThreadScreen({
   const { themeName, themeEpoch, setThemeName, setThemeEpoch } =
     useThemeState(onError);
   const bypassEnabled = bypassEnabledFromConfig(catalogs.config);
-  const globalModelSelections = globalModelSelectionsFromConfig(catalogs.config);
+  const globalModelSelections = globalModelSelectionsFromConfig(
+    catalogs.config,
+  );
   const modelOptions = useMemo(
     () => buildModelCatalogOptions(catalogs.models, globalModelSelections),
     [catalogs.models, globalModelSelections],
@@ -187,6 +189,7 @@ function ReadyThreadScreen({
     switchThread,
     closeCurrentThread,
     exit,
+    onError,
   });
 
   const { submitPrompt } = createThreadCommandRunner({
@@ -214,6 +217,7 @@ function ReadyThreadScreen({
   });
 
   const handleCancel = (): void => {
+    if (runtime.cancelCompaction()) return;
     if (submission.cancel()) return;
     void closeCurrentThread().then(exit).catch(onError);
   };
@@ -252,16 +256,18 @@ function ReadyThreadScreen({
     { isActive: true },
   );
 
-  const contextPercent = contextRemainingPercent(
-    catalogs.models,
-    selectedModelForAgent(
-      catalogs.agents,
-      state.settings.agent,
-      globalModelSelections,
-    ),
-    state.usage.inputTokens + state.usage.outputTokens,
+  const selectedModel = selectedModelForAgent(
+    catalogs.agents,
+    state.settings.agent,
+    globalModelSelections,
   );
-  const ctrlCInterrupts = running || submission.submissionPending;
+  const contextWindow = modelContextWindow(catalogs.models, selectedModel);
+  const contextPercent = contextRemainingPercent(
+    contextWindow,
+    state.usage.lastInputTokens,
+  );
+  const ctrlCInterrupts =
+    running || submission.submissionPending || runtime.compactionRunning;
   return (
     <ThemeProvider theme={resolveTheme(themeName)}>
       <TerminalHistoryOutput
@@ -275,8 +281,11 @@ function ReadyThreadScreen({
         model={`primary: ${globalModelSelections.primaryModel} · auxiliary: ${globalModelSelections.auxiliaryModel}`}
         mode={{ mode: state.settings.mode }}
         {...(contextPercent === undefined ? {} : { contextPercent })}
+        {...(contextWindow === undefined ? {} : { contextWindow })}
         pendingPlanApproval={effectiveOverlay.type === 'plan-approval'}
         liveAssistantText={state.live.assistantText}
+        liveReasoningText={state.live.reasoningText}
+        liveCompactionText={state.live.compactionText}
         runningTools={[...state.live.runningTools.values()]}
         runningSubagents={[...state.live.runningSubagents.values()]}
         running={running}
@@ -373,27 +382,37 @@ function ReadyThreadScreen({
 }
 
 function contextRemainingPercent(
-  models: readonly {
-    readonly id: string;
-    readonly metadata: Record<string, unknown>;
-  }[],
-  model: string,
-  used: number,
+  contextWindow: number | undefined,
+  used: number | undefined,
 ): number | undefined {
-  const selected = models.find((entry) => entry.id === model);
-  if (selected === undefined) return undefined;
-  const contextWindow = selected.metadata.contextWindow;
-  if (typeof contextWindow !== 'number' || contextWindow <= 0) return undefined;
+  if (used === undefined || contextWindow === undefined) return undefined;
   return Math.max(
     0,
     Math.round(((contextWindow - used) / contextWindow) * 100),
   );
 }
 
+function modelContextWindow(
+  models: readonly {
+    readonly id: string;
+    readonly metadata: Record<string, unknown>;
+  }[],
+  model: string,
+): number | undefined {
+  const selected = models.find((entry) => entry.id === model);
+  const contextWindow = selected?.metadata.contextWindow;
+  return typeof contextWindow === 'number' && contextWindow > 0
+    ? contextWindow
+    : undefined;
+}
+
 function selectedModelForAgent(
   agents: ReadyCatalogs['agents'],
   agentName: string,
-  references: { readonly primaryModel: string; readonly auxiliaryModel: string },
+  references: {
+    readonly primaryModel: string;
+    readonly auxiliaryModel: string;
+  },
 ): string {
   const agent = agents.find((entry) => entry.id === agentName);
   if (agent === undefined) {

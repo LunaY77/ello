@@ -100,11 +100,12 @@ export async function runAppServer(
 
 function createProductionAgentRuntime(): AgentRuntime {
   return {
-    createEnvironment: ({ config, permission, skillReadRoots }) =>
+    createEnvironment: ({ config, permission, mode, skillReadRoots }) =>
       createRuntimeEnvironment(
         config,
         () => permission.rules(),
         () => permission.externalPaths(),
+        mode,
         skillReadRoots,
       ),
     createTracing: ({ config, threadId }) =>

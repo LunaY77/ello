@@ -23,6 +23,7 @@ describe('AI SDK usage mapping', () => {
     ).toEqual({
       requests: 1,
       inputTokens: 100,
+      lastInputTokens: 100,
       outputTokens: 25,
       cacheReadTokens: 70,
       cacheWriteTokens: 10,

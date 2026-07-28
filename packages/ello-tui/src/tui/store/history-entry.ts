@@ -58,6 +58,20 @@ export type HistoryEntry =
       readonly entryId?: string;
       readonly text: string;
     }
+  | {
+      readonly kind: 'reasoning';
+      readonly id: string;
+      readonly text: string;
+    }
+  | {
+      readonly kind: 'compaction';
+      readonly id: string;
+      readonly summary: string;
+      readonly tokensBefore: number;
+      readonly beforeMessageCount?: number;
+      readonly afterMessageCount?: number;
+      readonly keptMessageCount?: number;
+    }
   | { readonly kind: 'skill'; readonly id: string; readonly name: string }
   | { readonly kind: 'tool'; readonly id: string; readonly tool: ToolCallView }
   | {

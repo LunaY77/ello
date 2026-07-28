@@ -116,6 +116,25 @@ describe('buildToolCardModel', () => {
     expect(model.headline).toBe('Activate Skill workspace');
   });
 
+  it('shows filePath for read and search tools', () => {
+    const read = buildToolCardModel(
+      call({
+        name: 'read',
+        input: { filePath: '/workspace/src/index.ts' },
+      }),
+    );
+    expect(read.headline).toBe('Read src/index.ts');
+    expect(read.summary).toBe('src/index.ts');
+
+    const search = buildToolCardModel(
+      call({
+        name: 'grep',
+        input: { pattern: 'createAgent', filePath: '/workspace/src' },
+      }),
+    );
+    expect(search.headline).toBe('Search createAgent in src');
+  });
+
   it('prioritizes denied/failed over exit code and duration', () => {
     const denied = buildToolCardModel(
       call({
@@ -255,5 +274,20 @@ describe('buildToolCardModel', () => {
       call({ status: 'fail', error: { name: 'E', message: 'x' } as never }),
     );
     expect(failed.defaultCollapsed).toBe(false);
+  });
+
+  it('shows the real tool error in a failed card', () => {
+    const failed = buildToolCardModel(
+      call({
+        name: 'glob',
+        input: { filePath: '/workspace/packages' },
+        status: 'fail',
+        error: { message: 'Path not allowed: /workspace/packages' },
+      }),
+    );
+
+    expect(failed.outputPreview).toEqual([
+      'Path not allowed: /workspace/packages',
+    ]);
   });
 });

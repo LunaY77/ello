@@ -45,6 +45,7 @@
       "maxBytes": 1024
     },
     "thread/compact/start": { "threadId": "thr_fixture" },
+    "thread/compact/interrupt": { "threadId": "thr_fixture" },
     "thread/shellCommand": {
       "threadId": "thr_fixture",
       "command": "pwd",
@@ -92,6 +93,11 @@
     "config/init": { "cwd": "/workspace", "force": false },
     "config/sources": { "cwd": "/workspace" },
     "model/list": { "cwd": "/workspace" },
+    "agent/effort/update": {
+      "cwd": "/workspace",
+      "agent": "build",
+      "effort": "high"
+    },
     "agent/list": { "cwd": "/workspace" },
     "tool/list": { "cwd": "/workspace" },
     "skills/list": { "cwd": "/workspace", "query": "fixture" },
@@ -202,6 +208,7 @@
     "item/started",
     "item/completed",
     "item/agentMessage/delta",
+    "item/reasoning/delta",
     "item/plan/delta",
     "item/commandExecution/outputDelta",
     "serverRequest/resolved",

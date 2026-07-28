@@ -10,6 +10,7 @@ import type {
   CreateAgentFeatureInput,
 } from './contracts.js';
 import { createAgent, type Agent } from './engine/index.js';
+import type { ModelCompactor } from './engine/index.js';
 
 /**
  * 为一次 Thread turn 装配产品 Agent。
@@ -27,6 +28,7 @@ import { createAgent, type Agent } from './engine/index.js';
 export async function buildAgent(
   request: AgentRunRequest,
   dependencies: CreateAgentFeatureInput,
+  modelCompactor?: ModelCompactor,
 ): Promise<BuiltAgent> {
   const definition = await dependencies.resolveDefinition(request);
   const model = await dependencies.resolveModel({ request, definition });
@@ -49,7 +51,6 @@ export async function buildAgent(
     const compactor = dependencies.createCompactor({
       config: definition.config,
       contextWindow: model.contextWindow,
-      agentRegistry: definition.agentRegistry,
     });
     engine = createAgent({
       name: `ello-${definition.definition.name}`,
@@ -63,11 +64,13 @@ export async function buildAgent(
       environment: dependencies.runtime.createEnvironment({
         config: definition.config,
         permission: request.permission,
+        mode: tools.mode,
         skillReadRoots: context.readRoots,
       }),
       executionTools: tools.executionTools,
       modelTools: tools.modelTools,
       compactor,
+      ...(modelCompactor === undefined ? {} : { modelCompactor }),
       ...(tracing.eventRecorder === undefined
         ? {}
         : { eventRecorder: tracing.eventRecorder }),
@@ -102,6 +105,7 @@ export async function buildAgent(
   return {
     engine,
     maxTurns: definition.definition.maxTurns,
+    modelCompactor: () => engine.modelCompactor(),
     setMode: tools.setMode,
     close: () => closeBuiltAgent(engine, tracing.close),
   };

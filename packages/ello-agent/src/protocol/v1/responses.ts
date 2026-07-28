@@ -209,7 +209,22 @@ export const CLIENT_RESPONSE_SCHEMAS = {
       eof: z.boolean(),
     })
     .strict(),
-  'thread/compact/start': z.object({ jobId: OpaqueIdSchema }).strict(),
+  'thread/compact/start': z
+    .object({
+      id: OpaqueIdSchema,
+      threadId: OpaqueIdSchema,
+      turnId: OpaqueIdSchema,
+      createdAt: IsoDateTimeSchema,
+      compactor: z.string().min(1),
+      beforeMessageCount: NonNegativeIntegerSchema,
+      afterMessageCount: NonNegativeIntegerSchema,
+      keptMessageCount: NonNegativeIntegerSchema,
+      tokensBefore: NonNegativeIntegerSchema,
+      summary: z.string().min(1),
+      metadata: z.record(z.string(), JsonValueSchema).optional(),
+    })
+    .strict(),
+  'thread/compact/interrupt': AckSchema,
   'thread/shellCommand': z
     .object({
       exitCode: z.number().int(),
@@ -302,6 +317,14 @@ export const CLIENT_RESPONSE_SCHEMAS = {
     })
     .strict(),
   'model/list': CatalogResultSchema,
+  'agent/effort/update': z
+    .object({
+      agent: z.string().min(1),
+      selector: z.enum(['primary_model', 'auxiliary_model']),
+      model: z.string().min(1),
+      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']),
+    })
+    .strict(),
   'agent/list': CatalogResultSchema,
   'tool/list': CatalogResultSchema,
   'skills/list': CatalogResultSchema,

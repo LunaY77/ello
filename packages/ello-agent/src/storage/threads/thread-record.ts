@@ -112,6 +112,7 @@ export const ItemDeltaRecordSchema = z
     itemId: OpaqueIdSchema,
     delta: z.discriminatedUnion('type', [
       z.object({ type: z.literal('agentMessage'), text: z.string() }).strict(),
+      z.object({ type: z.literal('reasoning'), text: z.string() }).strict(),
       z.object({ type: z.literal('plan'), text: z.string() }).strict(),
       z
         .object({
@@ -151,6 +152,9 @@ export const CompactionRecordSchema = z
     summary: z.string(),
     firstKeptSeq: z.number().int().positive(),
     tokensBefore: NonNegativeIntegerSchema,
+    beforeMessageCount: NonNegativeIntegerSchema.optional(),
+    afterMessageCount: NonNegativeIntegerSchema.optional(),
+    keptMessageCount: NonNegativeIntegerSchema.optional(),
   })
   .strict();
 

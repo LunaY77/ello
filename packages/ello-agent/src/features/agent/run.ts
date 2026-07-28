@@ -9,7 +9,6 @@ import { projectToolEvent } from '../tool/index.js';
 
 import type {
   AgentResumeResult,
-  AgentCheckpoints,
   AgentRun,
   AgentRunEvent,
   AgentRunRequest,
@@ -28,7 +27,6 @@ import type {
 
 interface RunningAgentOptions {
   readonly agent: BuiltAgent['engine'];
-  readonly checkpoints: AgentCheckpoints;
   /**
    * 按 产品 Agent 运行 模块 的一致性约束执行 `setMode` 状态变更。
    *
@@ -54,7 +52,6 @@ interface RunningAgentOptions {
   closeAgent(): Promise<void>;
   readonly threadId: string;
   readonly turnId: string;
-  readonly cwd: string;
   readonly history: ReadonlyArray<AgentMessage>;
   readonly input: string;
   readonly maxTurns: number | undefined;
@@ -66,7 +63,6 @@ interface RunningAgentOptions {
  * Args:
  * - `built`: `startAgentRun` 所需的业务值；函数按声明读取，不补造缺失内容。
  * - `request`: 进入 产品 Agent 运行 模块 的稳定请求；校验后只读传递，不由函数修改。
- * - `checkpoints`: `startAgentRun` 所需的业务值；函数按声明读取，不补造缺失内容。
  *
  * Returns:
  * - 返回 `startAgentRun` 计算出的声明结果；返回值不包含未声明的兜底状态。
@@ -77,16 +73,13 @@ interface RunningAgentOptions {
 export function startAgentRun(
   built: BuiltAgent,
   request: AgentRunRequest,
-  checkpoints: AgentCheckpoints,
 ): AgentRun {
   return new RunningAgent({
     agent: built.engine,
-    checkpoints,
     setMode: built.setMode,
     closeAgent: built.close,
     threadId: request.threadId,
     turnId: request.turnId,
-    cwd: request.cwd,
     history: request.history,
     input: request.input,
     maxTurns: built.maxTurns,
@@ -100,6 +93,10 @@ class RunningAgent implements AgentRun {
   private readonly queue = new AsyncQueue<AgentRunEvent>();
   private readonly interactions;
   private readonly messageText = new Map<string, string>();
+  private readonly reasoningText = new Map<string, string>();
+  private readonly pendingCompactions: Array<
+    Extract<EngineEvent, { type: 'context.compaction' }>
+  > = [];
   private activeStream: AgentStream | undefined;
   private interruptReason: string | undefined;
 
@@ -146,7 +143,6 @@ class RunningAgent implements AgentRun {
         for await (const event of stream) await this.publish(event);
         const result = await stream.final;
         usage = addUsage(usage, result.usage);
-        await this.options.checkpoints.seal(result.id);
         this.completeOpenMessages();
         if (result.newMessages.length > 0) {
           this.queue.push({
@@ -154,16 +150,16 @@ class RunningAgent implements AgentRun {
             messages: result.newMessages,
           });
         }
-        const compactedAt = new Date().toISOString();
-        for (const compaction of result.compactions) {
+        for (const compaction of this.pendingCompactions.splice(0)) {
           this.queue.push({
             type: 'contextCompacted',
+            compactionId: compaction.compactionId,
             beforeMessageCount: compaction.beforeMessageCount,
             afterMessageCount: compaction.afterMessageCount,
             summary: compaction.summary,
             keptMessageCount: compaction.keptMessageCount,
             tokensBefore: compaction.tokensBefore,
-            occurredAt: compactedAt,
+            occurredAt: compaction.occurredAt,
           });
         }
         messages = [...result.messages];
@@ -244,6 +240,39 @@ class RunningAgent implements AgentRun {
   private async publish(rawEvent: EngineEvent): Promise<void> {
     const event = projectToolEvent(rawEvent);
     switch (event.type) {
+      case 'reasoning.started':
+        if (this.reasoningText.has(event.reasoningId)) {
+          throw new Error(
+            `Reasoning ${event.reasoningId} started more than once.`,
+          );
+        }
+        this.reasoningText.set(event.reasoningId, '');
+        this.queue.push({
+          type: 'reasoningStarted',
+          reasoningId: event.reasoningId,
+          occurredAt: event.occurredAt,
+        });
+        return;
+      case 'reasoning.delta':
+        this.reasoningText.set(
+          event.reasoningId,
+          `${this.requireReasoningText(event.reasoningId)}${event.text}`,
+        );
+        this.queue.push({
+          type: 'reasoningDelta',
+          reasoningId: event.reasoningId,
+          text: event.text,
+        });
+        return;
+      case 'reasoning.completed':
+        this.requireReasoningText(event.reasoningId);
+        this.reasoningText.delete(event.reasoningId);
+        this.queue.push({
+          type: 'reasoningCompleted',
+          reasoningId: event.reasoningId,
+          text: event.text,
+        });
+        return;
       case 'message.started':
         if (this.messageText.has(event.messageId)) {
           throw new Error(`Message ${event.messageId} started more than once.`);
@@ -276,11 +305,6 @@ class RunningAgent implements AgentRun {
         });
         return;
       case 'tool.completed':
-        this.options.checkpoints.record({
-          cwd: this.options.cwd,
-          toolCallId: event.toolCallId,
-          output: event.output,
-        });
         this.queue.push({
           type: 'toolCompleted',
           toolCallId: event.toolCallId,
@@ -301,7 +325,17 @@ class RunningAgent implements AgentRun {
       case 'tool.deferred':
         this.interactions.register(event.item, event.occurredAt);
         return;
+      case 'context.compaction.started':
+        this.queue.push({
+          type: 'contextCompactionStarted',
+          compactionId: event.compactionId,
+          beforeMessageCount: event.beforeMessageCount,
+          tokensBefore: event.tokensBefore,
+          occurredAt: event.occurredAt,
+        });
+        return;
       case 'context.compaction':
+        this.pendingCompactions.push(event);
         return;
       case 'run.failed':
         this.queue.push({
@@ -341,6 +375,16 @@ class RunningAgent implements AgentRun {
     if (text === undefined) {
       throw new Error(
         `Message ${messageId} emitted a delta before it started.`,
+      );
+    }
+    return text;
+  }
+
+  private requireReasoningText(reasoningId: string): string {
+    const text = this.reasoningText.get(reasoningId);
+    if (text === undefined) {
+      throw new Error(
+        `Reasoning ${reasoningId} emitted an event before it started.`,
       );
     }
     return text;
@@ -578,7 +622,7 @@ function isFailure(result: EngineRunResult): boolean {
   }
 }
 
-function emptyUsage() {
+function emptyUsage(): EngineRunResult['usage'] {
   return {
     requests: 0,
     inputTokens: 0,
@@ -590,12 +634,13 @@ function emptyUsage() {
 }
 
 function addUsage(
-  left: ReturnType<typeof emptyUsage>,
-  right: ReturnType<typeof emptyUsage>,
-): ReturnType<typeof emptyUsage> {
+  left: EngineRunResult['usage'],
+  right: EngineRunResult['usage'],
+): EngineRunResult['usage'] {
   return {
     requests: left.requests + right.requests,
     inputTokens: left.inputTokens + right.inputTokens,
+    lastInputTokens: right.lastInputTokens ?? right.inputTokens,
     outputTokens: left.outputTokens + right.outputTokens,
     cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
     cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,

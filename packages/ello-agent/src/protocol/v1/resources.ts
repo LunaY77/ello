@@ -124,6 +124,7 @@ export const ToolCallItemSchema = z
     toolName: z.string().min(1),
     headline: z.string(),
     status: ItemStatusSchema,
+    error: z.string().min(1).optional(),
     outputPreview: z.string().optional(),
     artifactId: OpaqueIdSchema.optional(),
     metadata: z.record(z.string(), JsonValueSchema).optional(),
@@ -148,6 +149,9 @@ export const ContextCompactionItemSchema = z
     type: z.literal('contextCompaction'),
     summary: z.string(),
     tokensBefore: NonNegativeIntegerSchema,
+    beforeMessageCount: NonNegativeIntegerSchema.optional(),
+    afterMessageCount: NonNegativeIntegerSchema.optional(),
+    keptMessageCount: NonNegativeIntegerSchema.optional(),
     status: ItemStatusSchema,
   })
   .strict();

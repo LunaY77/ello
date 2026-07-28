@@ -67,10 +67,38 @@ export function modelSettingsFromRuntimeModel(
 ): AgentModelSettings {
   return {
     maxOutputTokens: model.maxOutputTokens,
-    ...(model.protocol === 'openai'
-      ? { reasoning: model.reasoningEffort }
-      : {}),
+    reasoning:
+      model.reasoningEffort === 'max' ? 'xhigh' : model.reasoningEffort,
   };
+}
+
+/**
+ * 把 runtime model 的协议专用思考强度转换为 provider options。
+ *
+ * Args:
+ * - `model`: 已解析并固定协议的 runtime model。
+ *
+ * Returns:
+ * - DeepSeek Anthropic 兼容模型返回原生 thinking 与 effort；其他模型返回 `undefined`。
+ */
+export function providerOptionsFromRuntimeModel(
+  model: RuntimeModel,
+): AgentProviderOptions | undefined {
+  if (model.protocol !== 'anthropic' || !isDeepSeekModel(model)) {
+    return undefined;
+  }
+  return {
+    anthropic: {
+      thinking: { type: 'enabled', budgetTokens: 1_024 },
+      effort: model.reasoningEffort,
+    },
+  };
+}
+
+function isDeepSeekModel(model: RuntimeModel): boolean {
+  return [model.name, model.apiModel, model.baseUrl].some((value) =>
+    value.toLowerCase().includes('deepseek'),
+  );
 }
 
 /**

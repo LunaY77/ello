@@ -71,6 +71,79 @@ describe('TerminalHistoryOutput', () => {
     expect(output).toContain('mode: ask-before-changes');
   });
 
+  it('keeps committed reasoning muted and above the assistant output', () => {
+    const output = renderToString(
+      <TerminalHistoryOutput
+        cwd="/workspace"
+        resetKey={0}
+        settings={DISPLAY_SETTINGS}
+        entries={[
+          {
+            kind: 'reasoning',
+            id: 'reasoning-1',
+            text: 'checking the context',
+          },
+          { kind: 'assistant', id: 'assistant-1', text: 'final output' },
+        ]}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).not.toContain('reasoning:');
+    expect(output.indexOf('Thinking: checking the context')).toBeLessThan(
+      output.indexOf('* final output'),
+    );
+  });
+
+  it('indents every committed reasoning line after the Thinking label', () => {
+    const output = renderToString(
+      <TerminalHistoryOutput
+        cwd="/workspace"
+        resetKey={0}
+        settings={DISPLAY_SETTINGS}
+        entries={[
+          {
+            kind: 'reasoning',
+            id: 'reasoning-multiline',
+            text: 'first line\nsecond line',
+          },
+        ]}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('Thinking: first line\n          second line');
+  });
+
+  it('renders the complete compact checkpoint as muted history', () => {
+    const output = renderToString(
+      <TerminalHistoryOutput
+        cwd="/workspace"
+        resetKey={0}
+        settings={DISPLAY_SETTINGS}
+        entries={[
+          {
+            kind: 'compaction',
+            id: 'compaction-7',
+            summary: '## Goal\nPreserve the current implementation state.',
+            tokensBefore: 4_096,
+            beforeMessageCount: 12,
+            afterMessageCount: 3,
+            keptMessageCount: 2,
+          },
+        ]}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain(
+      'Context compacted · 12 -> 3 messages · 4.1k tokens before',
+    );
+    expect(output).toContain('## Goal');
+    expect(output).toContain('Preserve the current implementation state.');
+    expect(output).not.toContain('jobId');
+  });
+
   it('renders user, assistant and tool history outside AppShell', () => {
     const output = renderToString(
       <TerminalHistoryOutput
@@ -220,11 +293,13 @@ describe('AppShell', () => {
         model="primary: deepseek-v4-pro · auxiliary: deepseek-v4-flash"
         mode={{ mode: 'bypass' }}
         contextPercent={100}
+        contextWindow={1_000_000}
         usage={{
           requests: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
+          inputTokens: 4_600_000,
+          lastInputTokens: 100_000,
+          outputTokens: 4_800,
+          cacheReadTokens: 4_500_000,
           cacheWriteTokens: 0,
           toolCalls: 0,
         }}
@@ -240,9 +315,14 @@ describe('AppShell', () => {
 
     expect(output).toContain('primary: deepseek-v4-pro');
     expect(output).toContain('auxiliary: deepseek-v4-flash');
-    expect(output.split('\n').some((line) =>
-      line.includes('auxiliary:') && line.includes('bypass'),
-    )).toBe(false);
+    expect(output).toContain('context 100.0k / 1.0m');
+    expect(output).not.toContain('session 4.6m tokens');
+    expect(output).toContain('98% cached');
+    expect(
+      output
+        .split('\n')
+        .some((line) => line.includes('auxiliary:') && line.includes('bypass')),
+    ).toBe(false);
   });
 
   it('shows running status in the live viewport', () => {
@@ -266,6 +346,49 @@ describe('AppShell', () => {
 
     expect(output).toContain('* I am checking the parser');
     expect(output).toContain('working 12s');
+  });
+
+  it('shows live reasoning separately from assistant output', () => {
+    const output = renderToString(
+      <AppShell
+        cwd="/workspace"
+        model="main"
+        mode={{ mode: 'ask-before-changes' }}
+        liveAssistantText="final output"
+        liveReasoningText="checking the context"
+        runningTools={[]}
+        runningSubagents={[]}
+        running
+        overlay={null}
+        composer={null}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('Thinking: checking the context');
+    expect(output.indexOf('Thinking: checking the context')).toBeLessThan(
+      output.indexOf('* final output'),
+    );
+  });
+
+  it('indents every live reasoning line after the Thinking label', () => {
+    const output = renderToString(
+      <AppShell
+        cwd="/workspace"
+        model="main"
+        mode={{ mode: 'ask-before-changes' }}
+        liveAssistantText=""
+        liveReasoningText={'first line\nsecond line'}
+        runningTools={[]}
+        runningSubagents={[]}
+        running
+        overlay={null}
+        composer={null}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain(' Thinking: first line\n           second line');
   });
 
   it('does not render blank assistant stream chunks as empty message lines', () => {

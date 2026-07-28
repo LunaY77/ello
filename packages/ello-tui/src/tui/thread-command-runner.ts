@@ -112,6 +112,18 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
       case 'set-mode':
         await input.thread.setMode(command.mode);
         return;
+      case 'set-effort': {
+        const result = await input.thread.request('agent/effort/update', {
+          cwd: input.thread.cwd,
+          agent: input.state.settings.agent,
+          effort: command.effort,
+        });
+        input.dispatch({
+          type: 'ui.message',
+          text: `Thinking effort set to ${result.effort} for ${result.model}; applies next turn.`,
+        });
+        return;
+      }
       case 'open-overlay':
         await openOverlay(command.overlay);
         return;

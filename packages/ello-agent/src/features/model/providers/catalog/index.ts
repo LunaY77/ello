@@ -8,6 +8,7 @@ export { createModelRegistry } from './registry.js';
 export {
   modelInputBudgetFromRuntimeModel,
   modelSettingsFromRuntimeModel,
+  providerOptionsFromRuntimeModel,
   prepareModelInputForRuntimeModel,
 } from './transforms.js';
 export type { ModelProtocol, ModelRegistry, RuntimeModel } from './types.js';

@@ -144,7 +144,10 @@ export function failItem(item: ThreadItem, message: string): ThreadItem {
   if (item.type === 'commandExecution') {
     return { ...item, status: 'failed', outputPreview: message };
   }
-  if (item.type === 'fileChange' || item.type === 'toolCall') {
+  if (item.type === 'toolCall') {
+    return { ...item, status: 'failed', error: message };
+  }
+  if (item.type === 'fileChange') {
     return { ...item, status: 'failed' };
   }
   return item;

@@ -82,6 +82,9 @@ snapshot satisfies AgentRunRequest;
  */
 function eventType(event: AgentRunEvent): AgentRunEvent['type'] {
   switch (event.type) {
+    case 'reasoningStarted':
+    case 'reasoningDelta':
+    case 'reasoningCompleted':
     case 'messageStarted':
     case 'messageDelta':
     case 'messageCompleted':
@@ -90,6 +93,7 @@ function eventType(event: AgentRunEvent): AgentRunEvent['type'] {
     case 'toolFailed':
     case 'interactionRequired':
     case 'messagesAppended':
+    case 'contextCompactionStarted':
     case 'contextCompacted':
     case 'runFailed':
       return event.type;

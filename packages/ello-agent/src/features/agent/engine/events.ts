@@ -79,6 +79,23 @@ export type EngineEvent =
       readonly text: string;
     })
   | (AgentEventMetadata & {
+      readonly type: 'reasoning.started';
+      readonly turnIndex: number;
+      readonly reasoningId: string;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'reasoning.delta';
+      readonly turnIndex: number;
+      readonly reasoningId: string;
+      readonly text: string;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'reasoning.completed';
+      readonly turnIndex: number;
+      readonly reasoningId: string;
+      readonly text: string;
+    })
+  | (AgentEventMetadata & {
       readonly type: 'model.started';
       readonly identity: ModelCallIdentity;
       readonly request: AgentModelRequest;
@@ -136,10 +153,20 @@ export type EngineEvent =
       readonly error: AgentError;
     })
   | (AgentEventMetadata & {
+      readonly type: 'context.compaction.started';
+      readonly compactionId: string;
+      readonly beforeMessageCount: number;
+      readonly tokensBefore: number;
+    })
+  | (AgentEventMetadata & {
       readonly type: 'context.compaction';
+      readonly compactionId: string;
       readonly beforeMessageCount: number;
       readonly afterMessageCount: number;
       readonly compactor: string;
+      readonly summary: string;
+      readonly keptMessageCount: number;
+      readonly tokensBefore: number;
       readonly metadata?: Record<string, unknown>;
     })
   | (AgentEventMetadata & {
@@ -264,6 +291,30 @@ export interface AgentObserver<TContext = unknown> {
 export interface MessageCompactionResult {
   readonly messages: ReadonlyArray<AgentMessage>;
   readonly report: import('./contracts.js').MessageCompactionReport;
+  readonly usage?: AgentUsage;
+}
+
+export interface ModelCompactionResult {
+  readonly text: string;
+  readonly usage: AgentUsage;
+}
+
+export interface ModelCompactor {
+  readonly modelCall: ModelCallConfiguration;
+  /**
+   * 使用主模型请求的稳定配置和缓存前缀压缩结构化消息。
+   *
+   * Args:
+   * - `input`: 待压缩消息、context compact 提示词和取消信号。
+   *
+   * Returns:
+   * - 返回 checkpoint 文本及独立模型调用的 usage。
+   */
+  compact(input: {
+    readonly messages: ReadonlyArray<AgentMessage>;
+    readonly prompt: string;
+    readonly signal: AbortSignal;
+  }): MaybePromise<ModelCompactionResult>;
 }
 
 export interface MessageCompactor {
@@ -281,6 +332,11 @@ export interface MessageCompactor {
     readonly messages: ReadonlyArray<AgentMessage>;
     readonly contextWindow: number;
     readonly signal: AbortSignal;
+    readonly compact: ModelCompactor['compact'];
+    readonly onStart?: (input: {
+      readonly beforeMessageCount: number;
+      readonly tokensBefore: number;
+    }) => MaybePromise<void>;
   }): MaybePromise<MessageCompactionResult | null>;
 }
 
@@ -531,6 +587,7 @@ function toTraceEvent(
         errorName: event.error.name,
         errorMessage: event.error.message,
       };
+    case 'context.compaction.started':
     case 'context.compaction':
     case 'model.started':
     case 'model.first_token':
@@ -539,6 +596,9 @@ function toTraceEvent(
     case 'queue.drained':
     case 'message.started':
     case 'message.delta':
+    case 'reasoning.started':
+    case 'reasoning.delta':
+    case 'reasoning.completed':
       return null;
     default:
       event satisfies never;
@@ -592,6 +652,9 @@ async function emitSingleObserverEvent(
     case 'queue.drained':
     case 'message.started':
     case 'message.delta':
+    case 'reasoning.started':
+    case 'reasoning.delta':
+    case 'reasoning.completed':
     case 'model.started':
     case 'model.first_token':
     case 'model.completed':
@@ -599,6 +662,7 @@ async function emitSingleObserverEvent(
     case 'tool.approval_requested':
     case 'tool.deferred':
     case 'tool.failed':
+    case 'context.compaction.started':
     case 'context.compaction':
     case 'run.interrupted':
     case 'run.completed':

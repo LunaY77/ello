@@ -16,17 +16,15 @@ import {
   type AnyAgentTool,
 } from './features/agent/engine/index.js';
 import {
-  CheckpointStore,
   createAgentRegistry,
   createAgentRoutes,
   createAgentFeature,
-  createCheckpointRecordStore,
   createCodingSystemPromptSection,
   createRequestUserInputTool,
   PLAN_EXIT_TOOL_NAME,
-  recordCheckpointChanges,
   type CreateAgentTools,
   type AgentRuntime,
+  type AgentRunRequest,
   type LoadAgentContext,
   type ResolveAgentDefinition,
   type ResolveAgentModel,
@@ -46,6 +44,7 @@ import {
   createModelRegistry,
   modelInputBudgetFromRuntimeModel,
   modelSettingsFromRuntimeModel,
+  providerOptionsFromRuntimeModel,
   prepareModelInputForRuntimeModel,
 } from './features/model/index.js';
 import { createModelFeature } from './features/model/index.js';
@@ -62,6 +61,7 @@ import {
 } from './features/task/index.js';
 import {
   createExportRoutes,
+  compactionView,
   createProductionThreadCompactor,
   createThreadFeature,
   createThreadCompactor,
@@ -121,7 +121,6 @@ export async function createApp(
   const artifactStore = new ArtifactStore(database.db, artifactsDir(root));
   const taskBoards = createTaskBoardStore(database.db);
   const threadStore = createThreadStore({ root, database: database.db });
-  const checkpoints = createCheckpointRecordStore(database.db, artifactStore);
   const repositories = createRepositoryStore(database.db);
   const workspaceStore = createWorkspaceRecordStore(database.db);
   const artifacts = createArtifactFeature(artifactStore);
@@ -137,16 +136,6 @@ export async function createApp(
     workspaces: workspaceStore,
   });
   const agent = createAgentFeature({
-    createCheckpoints: () => {
-      const store = new CheckpointStore(checkpoints);
-      return {
-        record: (recordInput) =>
-          recordCheckpointChanges({ checkpoints: store, ...recordInput }),
-        async seal(runId) {
-          await store.seal(runId);
-        },
-      };
-    },
     resolveDefinition: resolveAgentDefinition,
     resolveModel: resolveAgentModel,
     loadContext: loadAgentContext,
@@ -165,27 +154,73 @@ export async function createApp(
     resolveInitialSettings,
     resolveSettingsUpdate,
   });
+  const compactionControllers = new Map<string, AbortController>();
   const compact = async (threadId: string) => {
-    const snapshot = await threads.read({
-      threadId,
-      includeTurns: true,
-      includeItems: true,
-    });
-    if (snapshot.thread.status === 'running') {
+    if (compactionControllers.has(threadId)) {
       throw new AppServerError({
         type: 'threadBusy',
-        message: `Thread ${threadId} is running; interrupt it before compacting.`,
+        message: `Thread ${threadId} is already compacting.`,
       });
     }
-    const compactor = await createProductionThreadCompactor({
-      store: threadStore,
-      snapshot,
-    });
-    const lastTurnId = snapshot.turns.at(-1)?.id;
-    return compactor.compactNow(threadId, {
-      force: true,
-      ...(lastTurnId === undefined ? {} : { turnId: lastTurnId }),
-    });
+    const controller = new AbortController();
+    compactionControllers.set(threadId, controller);
+    try {
+      const snapshot = await threads.read({
+        threadId,
+        includeTurns: true,
+        includeItems: true,
+      });
+      if (snapshot.thread.status === 'running') {
+        throw new AppServerError({
+          type: 'threadBusy',
+          message: `Thread ${threadId} is running; interrupt it before compacting.`,
+        });
+      }
+      const history = compactionView(
+        await threadStore.read(threadId),
+      ).projectedMessages;
+      const lastTurnId = snapshot.turns.at(-1)?.id;
+      const request = {
+        threadId,
+        turnId: lastTurnId ?? threadId,
+        cwd: snapshot.thread.cwd,
+        selection: snapshot.settings,
+        history,
+        input: '',
+        goal:
+          snapshot.goal === null
+            ? null
+            : {
+                id: snapshot.goal.id,
+                objective: snapshot.goal.objective,
+                status: snapshot.goal.status,
+                tokensUsed: snapshot.goal.tokensUsed,
+                createdAt: snapshot.goal.createdAt,
+                updatedAt: snapshot.goal.updatedAt,
+                ...(snapshot.goal.tokenBudget === undefined
+                  ? {}
+                  : { tokenBudget: snapshot.goal.tokenBudget }),
+              },
+        permission: {
+          rules: () => [],
+          externalPaths: () => [],
+        },
+      } satisfies AgentRunRequest;
+      const compactor = await createProductionThreadCompactor({
+        store: threadStore,
+        snapshot,
+        compact: (input) => agent.compact({ request, ...input }),
+      });
+      return await compactor.compactNow(threadId, {
+        force: true,
+        signal: controller.signal,
+        ...(lastTurnId === undefined ? {} : { turnId: lastTurnId }),
+      });
+    } finally {
+      if (compactionControllers.get(threadId) === controller) {
+        compactionControllers.delete(threadId);
+      }
+    }
   };
   const routes = {
     ...config.routes,
@@ -201,6 +236,11 @@ export async function createApp(
     ...createThreadRoutes({
       artifacts: artifactStore,
       compact,
+      interruptCompact: (threadId) => {
+        compactionControllers
+          .get(threadId)
+          ?.abort('user interrupted context compaction');
+      },
       threads,
     }),
     ...createExportRoutes({
@@ -279,7 +319,7 @@ const resolveAgentModel: ResolveAgentModel = async ({ definition }) => {
     contextWindow:
       modelInputBudget.maxInputTokens -
       (modelInputBudget.reservedOutputTokens ?? 0),
-    providerOptions: () => undefined,
+    providerOptions: () => providerOptionsFromRuntimeModel(model),
     prepareModelInput: (modelInput) =>
       Promise.resolve(
         prepareModelInputForRuntimeModel(model, modelInput, {
@@ -379,6 +419,7 @@ function createAgentTools(taskBoards: TaskBoardStore): CreateAgentTools {
       ...(runtime.usesToolRouting
         ? { routingInstructions: TOOL_ROUTING_INSTRUCTIONS }
         : {}),
+      mode: () => modeState.mode,
       setMode(mode) {
         modeState = {
           mode,

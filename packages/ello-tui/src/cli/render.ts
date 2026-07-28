@@ -32,7 +32,7 @@ export function renderItem(item: ThreadItem): string {
     case 'fileChange':
       return `file changes: ${item.changes.map((change) => `${change.kind} ${change.path}`).join(', ')}`;
     case 'toolCall':
-      return `tool: ${item.toolName} ${item.headline}`;
+      return `tool: ${item.toolName} ${item.headline}${item.error === undefined ? '' : `\n${item.error}`}`;
     case 'subagent':
       return `subagent: ${item.agentName} ${item.description}`;
     case 'contextCompaction':

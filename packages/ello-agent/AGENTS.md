@@ -10,7 +10,7 @@ src/
 ├── app.ts                   # Composition root — creates features, wires routes, manages lifecycle
 ├── index.ts                 # Public export: createApp, AgentServer
 ├── features/                # 11 feature modules
-│   ├── agent/               # Agent lifecycle, engine, system prompts, subagents, checkpoints, user-input
+│   ├── agent/               # Agent lifecycle, engine, system prompts, subagents, user-input
 │   ├── thread/              # Thread/Turn/Item CRUD, compaction, goals, title generation, export
 │   ├── tool/                # Tool registry, permissions engine, tool runtime (shell, fs, patch, search)
 │   ├── workspace/           # Repository management, workspace CRUD, tmux integration
@@ -78,7 +78,6 @@ src/
 - **Atomic build**: `scripts/build.mjs` compiles to PID-temp dir, runs `verify-dist.mjs`, then atomically swaps `dist`
 - **Dist verification**: `verify-dist.mjs` rejects builds containing React/Ink (server contamination)
 - **Comment verification**: `scripts/verify-source-comments.mjs` validates Chinese documentation via AST
-- **Change tracking**: Agent runs produce checkpoints (`features/agent/change/`) for plan-mode workflows
 - **Goals subsystem**: `features/thread/goals/` manages persistent goals with tool integration
 
 ## COMMANDS

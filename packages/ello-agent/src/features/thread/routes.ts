@@ -27,6 +27,7 @@ import {
 } from '../../server/rpc/route.js';
 import type { ArtifactStore } from '../artifact/index.js';
 
+import type { PersistedThreadCompactionReport } from './compact.js';
 import { readPlanArtifact } from './plan.js';
 import { ServerRequestControllerUnavailableError } from './state.js';
 
@@ -56,6 +57,7 @@ type CoreThreadMethod =
 
 type ThreadOperationMethod =
   | 'thread/compact/start'
+  | 'thread/compact/interrupt'
   | 'thread/shellCommand'
   | 'thread/goal/get'
   | 'thread/goal/set'
@@ -76,7 +78,11 @@ export interface ThreadRouteContext {
    * Returns:
    * - Promise 在 Thread route 适配 模块 的异步读取或状态变更完成后兑现为声明结果。
    */
-  readonly compact: (threadId: string) => Promise<unknown | null>;
+  readonly compact: (
+    threadId: string,
+  ) => Promise<PersistedThreadCompactionReport | null>;
+  /** 中断指定 Thread 当前正在进行的手动压缩；没有活动压缩时保持幂等。 */
+  readonly interruptCompact: (threadId: string) => void;
   readonly threads: ThreadFeature;
 }
 
@@ -86,7 +92,11 @@ const operationHandlers = {
     if (report === null) {
       throw invalidParams('Thread has no compactable history.');
     }
-    return { jobId: createEntityId('job') };
+    return report;
+  },
+  'thread/compact/interrupt': (context, params) => {
+    context.interruptCompact(params.threadId);
+    return { ok: true as const };
   },
   'thread/shellCommand': async (context, params) => {
     const snapshot = await context.threads.read({
@@ -315,6 +325,7 @@ export function createThreadRoutes(
       ),
     })),
     'thread/compact/start': bind('thread/compact/start'),
+    'thread/compact/interrupt': bind('thread/compact/interrupt'),
     'thread/shellCommand': bind('thread/shellCommand'),
     'thread/goal/get': bind('thread/goal/get'),
     'thread/goal/set': bind('thread/goal/set'),

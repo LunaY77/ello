@@ -1,7 +1,7 @@
 /**
  * 产品 Agent feature 只拥有运行构建、活动运行生命周期和进程关闭顺序。
  *
- * Thread 通过 `AgentFeature.startRun()` 启动一次独立运行；engine、checkpoint 和装配资源都在
+ * Thread 通过 `AgentFeature.startRun()` 启动一次独立运行；engine 和装配资源都在
  * 运行完成前由本 feature 持有，关闭时先等待构建任务，再中断活动运行。
  */
 import { buildAgent } from './build.js';
@@ -11,6 +11,7 @@ import type {
   AgentRunRequest,
   CreateAgentFeatureInput,
 } from './contracts.js';
+import type { ModelCompactor } from './engine/index.js';
 import { startAgentRun } from './run.js';
 
 /**
@@ -30,18 +31,29 @@ export function createAgentFeature(
 ): AgentFeature {
   const activeRuns = new Set<AgentRun>();
   const startingRuns = new Set<Promise<AgentRun>>();
+  const modelCompactors = new Map<string, ModelCompactor>();
   let closing = false;
 
   const start = async (runInput: AgentRunRequest): Promise<AgentRun> => {
     if (closing) throw new Error('Agent is closing.');
-    const built = await buildAgent(runInput, input);
+    const built = await buildAgent(
+      runInput,
+      input,
+      modelCompactors.get(runInput.threadId),
+    );
     if (closing) {
       await built.close();
       throw new Error('Agent closed while a run was being built.');
     }
-    const run = startAgentRun(built, runInput, input.createCheckpoints());
+    const run = startAgentRun(built, runInput);
     activeRuns.add(run);
-    const clear = () => activeRuns.delete(run);
+    const clear = () => {
+      activeRuns.delete(run);
+      const compactor = built.modelCompactor();
+      if (compactor !== undefined) {
+        modelCompactors.set(runInput.threadId, compactor);
+      }
+    };
     void run.result.then(clear, clear);
     return run;
   };
@@ -66,6 +78,28 @@ export function createAgentFeature(
       void task.then(clear, clear);
       return task;
     },
+    async compact(compactInput) {
+      const threadId = compactInput.request.threadId;
+      const compactor = modelCompactors.get(threadId);
+      if (compactor !== undefined) {
+        return compactor.compact(compactInput);
+      }
+      if (closing) throw new Error('Agent is closing.');
+      const built = await buildAgent(compactInput.request, input);
+      try {
+        const result = await built.engine.compact({
+          contextMessages: compactInput.request.history,
+          messages: compactInput.messages,
+          prompt: compactInput.prompt,
+          signal: compactInput.signal,
+        });
+        const restored = built.modelCompactor();
+        if (restored !== undefined) modelCompactors.set(threadId, restored);
+        return result;
+      } finally {
+        await built.close();
+      }
+    },
     /**
      * 停止 产品 Agent 公开入口 模块 的异步工作并释放其拥有的资源；关闭完成后不再接受新操作。
      *
@@ -85,6 +119,7 @@ export function createAgentFeature(
       const runs = [...activeRuns];
       for (const run of runs) run.interrupt('agent closing');
       await Promise.all(runs.map((run) => run.result));
+      modelCompactors.clear();
     },
   };
 }
@@ -115,12 +150,6 @@ export type {
 } from './contracts.js';
 export { PLAN_EXIT_TOOL_NAME } from './contracts.js';
 export { createAgentRoutes } from './routes.js';
-export { CheckpointStore } from './change/checkpoint.js';
-export {
-  createCheckpointRecordStore,
-  type CheckpointRecordStore,
-} from './change/store.js';
-export { recordCheckpointChanges } from './change/recording.js';
 export { createCodingSystemPromptSection } from './context/prompts.js';
 export { createAgentRegistry } from './subagents/registry.js';
 export {

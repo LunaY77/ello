@@ -98,6 +98,41 @@ describe('AI SDK model adapter', () => {
     ]);
   });
 
+  it('forwards provider reasoning deltas', async () => {
+    const adapter = createAiSdkModelAdapter();
+    const events = await collectEvents(
+      adapter.stream(
+        createRequest([
+          { type: 'reasoning-start', id: 'reasoning_1' },
+          {
+            type: 'reasoning-delta',
+            id: 'reasoning_1',
+            delta: 'checking context',
+          },
+          { type: 'reasoning-end', id: 'reasoning_1' },
+          {
+            type: 'text-start',
+            id: 'text_1',
+          },
+          { type: 'text-delta', id: 'text_1', delta: 'done' },
+          { type: 'text-end', id: 'text_1' },
+          {
+            type: 'finish',
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: emptyUsage(),
+          },
+        ]),
+      ),
+    );
+
+    expect(events).toMatchObject([
+      { type: 'stream-start' },
+      { type: 'reasoning-delta', text: 'checking context' },
+      { type: 'text-delta', text: 'done' },
+      { type: 'final' },
+    ]);
+  });
+
   it('maps AI SDK cache token details into AgentUsage', async () => {
     const adapter = createAiSdkModelAdapter();
     const events = await collectEvents(
@@ -129,6 +164,7 @@ describe('AI SDK model adapter', () => {
     expect(final.response.usage).toEqual({
       requests: 1,
       inputTokens: 100,
+      lastInputTokens: 100,
       outputTokens: 25,
       cacheReadTokens: 70,
       cacheWriteTokens: 10,

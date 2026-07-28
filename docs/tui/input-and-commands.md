@@ -84,30 +84,31 @@ Skill 目录和覆盖规则见 [Skills 技能目录](../skills/README.md)。
 行首输入 `/` 会显示命令候选。输入部分名称后使用方向键选择，按 `Tab` 补全，按 `Enter`
 执行。`/help` 在 TUI 内显示常用命令。
 
-| 命令                              | 用途                                       |
-| --------------------------------- | ------------------------------------------ |
-| `/help` 或 `/?`                   | 显示帮助                                   |
-| `/mode <mode>`                    | 设置当前会话模式                           |
-| `/plan`                           | 进入 Plan 模式                             |
-| `/models`                         | 浏览并切换 Model                           |
-| `/profiles [name]`                | 浏览 Profile，或切换到指定 Profile         |
-| `/settings`                       | 搜索和修改全局、项目及 TUI 设置            |
-| `/resume`                         | 打开当前工作目录的会话列表                 |
-| `/clear`                          | 创建空白 Thread 并切换过去                 |
-| `/fork [turnId]`                  | 从当前 Thread 创建分支                     |
-| `/rewind [entryId]`               | 选择旧输入，在对应位置创建分支并回填输入框 |
-| `/compact`                        | 压缩当前 Thread 的模型上下文               |
-| `/export [markdown\|html\|jsonl]` | 导出当前 Thread，默认使用 Markdown         |
-| `/goal get`                       | 查看当前 Goal                              |
-| `/goal set <objective>`           | 设置当前 Thread 的 Goal                    |
-| `/goal clear`                     | 清除当前 Goal                              |
-| `/agents`                         | 查看可委派的 Subagent                      |
-| `/skills`                         | 查看可用 Skill                             |
-| `/tasks`                          | 查看任务列表                               |
-| `/workspace`                      | 查看 Workspace                             |
-| `/memory [reload]`                | 查看 Memory 状态，可在查看前重新加载       |
-| `/dream`                          | 启动 Memory consolidation job              |
-| `/quit` 或 `/exit`                | 关闭当前会话连接并退出 TUI                 |
+| 命令                                      | 用途                                       |
+| ----------------------------------------- | ------------------------------------------ |
+| `/help` 或 `/?`                           | 显示帮助                                   |
+| `/mode <mode>`                            | 设置当前会话模式                           |
+| `/plan`                                   | 进入 Plan 模式                             |
+| `/models`                                 | 浏览并切换 Model                           |
+| `/effort <low\|medium\|high\|xhigh\|max>` | 设置当前 Agent 模型的 thinking 强度        |
+| `/profiles [name]`                        | 浏览 Profile，或切换到指定 Profile         |
+| `/settings`                               | 搜索和修改全局、项目及 TUI 设置            |
+| `/resume`                                 | 打开当前工作目录的会话列表                 |
+| `/clear`                                  | 创建空白 Thread 并切换过去                 |
+| `/fork [turnId]`                          | 从当前 Thread 创建分支                     |
+| `/rewind [entryId]`                       | 选择旧输入，在对应位置创建分支并回填输入框 |
+| `/compact`                                | 压缩当前 Thread 的模型上下文               |
+| `/export [markdown\|html\|jsonl]`         | 导出当前 Thread，默认使用 Markdown         |
+| `/goal get`                               | 查看当前 Goal                              |
+| `/goal set <objective>`                   | 设置当前 Thread 的 Goal                    |
+| `/goal clear`                             | 清除当前 Goal                              |
+| `/agents`                                 | 查看可委派的 Subagent                      |
+| `/skills`                                 | 查看可用 Skill                             |
+| `/tasks`                                  | 查看任务列表                               |
+| `/workspace`                              | 查看 Workspace                             |
+| `/memory [reload]`                        | 查看 Memory 状态，可在查看前重新加载       |
+| `/dream`                                  | 启动 Memory consolidation job              |
+| `/quit` 或 `/exit`                        | 关闭当前会话连接并退出 TUI                 |
 
 会话分支、回退和上下文压缩的适用范围见
 [会话、模式与上下文](sessions-modes-and-context.md)。Goal 的多轮用法见

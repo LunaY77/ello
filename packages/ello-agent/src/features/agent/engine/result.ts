@@ -240,6 +240,7 @@ export function addUsage(left: AgentUsage, right: AgentUsage): AgentUsage {
   return {
     requests: left.requests + right.requests,
     inputTokens: left.inputTokens + right.inputTokens,
+    lastInputTokens: right.lastInputTokens ?? right.inputTokens,
     outputTokens: left.outputTokens + right.outputTokens,
     cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
     cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,
@@ -272,6 +273,7 @@ export function mapAiSdkUsage(usage: unknown): AgentUsage {
   return {
     requests: 1,
     inputTokens: optionalTokenCount(inputTokens, 'inputTokens'),
+    lastInputTokens: optionalTokenCount(inputTokens, 'inputTokens'),
     outputTokens: optionalTokenCount(outputTokens, 'outputTokens'),
     cacheReadTokens: optionalTokenCount(
       Reflect.get(details, 'cacheReadTokens'),

@@ -22,6 +22,7 @@ import type {
   DeferredApprovalItem,
   DeferredToolCallItem,
   MessageCompactor,
+  ModelCompactor,
   ModelAdapter,
   ModelCallConfiguration,
   ModelInput,
@@ -63,6 +64,21 @@ export type AgentInteraction =
 
 export type AgentRunEvent =
   | {
+      readonly type: 'reasoningStarted';
+      readonly reasoningId: string;
+      readonly occurredAt: string;
+    }
+  | {
+      readonly type: 'reasoningDelta';
+      readonly reasoningId: string;
+      readonly text: string;
+    }
+  | {
+      readonly type: 'reasoningCompleted';
+      readonly reasoningId: string;
+      readonly text: string;
+    }
+  | {
       readonly type: 'messageStarted';
       readonly messageId: string;
       readonly occurredAt: string;
@@ -100,7 +116,15 @@ export type AgentRunEvent =
       readonly interaction: AgentInteraction;
     }
   | {
+      readonly type: 'contextCompactionStarted';
+      readonly compactionId: string;
+      readonly beforeMessageCount: number;
+      readonly tokensBefore: number;
+      readonly occurredAt: string;
+    }
+  | {
       readonly type: 'contextCompacted';
+      readonly compactionId: string;
       readonly beforeMessageCount: number;
       readonly afterMessageCount: number;
       readonly summary: string;
@@ -230,6 +254,16 @@ export interface BuiltAgent {
   readonly engine: EngineAgent;
   readonly maxTurns: number | undefined;
   /**
+   * 读取当前主 Agent 最近一次完整模型请求派生的压缩能力。
+   *
+   * Args:
+   * - 无：该能力由当前 `BuiltAgent` 内部持有。
+   *
+   * Returns:
+   * - 已形成主模型上下文时返回压缩器，否则返回 `undefined`。
+   */
+  modelCompactor(): ModelCompactor | undefined;
+  /**
    * 更新工具执行读取的 session mode。
    *
    * Args:
@@ -269,6 +303,21 @@ export interface AgentFeature {
    */
   startRun(input: AgentRunRequest): Promise<AgentRun>;
   /**
+   * 使用指定 Thread 已保留的主 Agent 模型上下文执行压缩。
+   *
+   * Args:
+   * - `input`: Thread 标识、结构化历史、compact 提示词和取消信号。
+   *
+   * Returns:
+   * - 返回主模型生成的 checkpoint 文本和该模型调用的 usage。
+   */
+  compact(input: {
+    readonly request: AgentRunRequest;
+    readonly messages: ReadonlyArray<AgentMessage>;
+    readonly prompt: string;
+    readonly signal: AbortSignal;
+  }): ReturnType<ModelCompactor['compact']>;
+  /**
    * 关闭 feature 创建但尚未释放的全部 run 资源。
    *
    * Args:
@@ -282,44 +331,6 @@ export interface AgentFeature {
    */
   close(): Promise<void>;
 }
-
-export interface AgentCheckpoints {
-  /**
-   * 从一次成功工具调用中提取并暂存文件改动。
-   *
-   * Args:
-   * - `input`: 工具运行目录、调用 ID 与结构化输出；仅包含有效 `fileChanges` 时才产生暂存状态。
-   *
-   * Returns:
-   * - 所有有效改动按工具调用顺序写入当前 open checkpoint 后返回。
-   */
-  record(input: {
-    readonly cwd: string;
-    readonly toolCallId: string;
-    readonly output: unknown;
-  }): void;
-  /**
-   * 把当前 run 累积的文件改动封存为 durable checkpoint。
-   *
-   * Args:
-   * - `runId`: 归属本批改动的稳定 run ID；用于建立 checkpoint owner 关系。
-   *
-   * Returns:
-   * - Promise 在 checkpoint 元数据和 artifact owner 关系提交后兑现；没有改动时不创建空记录。
-   */
-  seal(runId: string): Promise<void>;
-}
-
-/**
- * 为一个 Agent run 创建独立的 checkpoint 累积器。
- *
- * Args:
- * - 无：持久化依赖由 factory 闭包显式捕获。
- *
- * Returns:
- * - 返回仅归当前 run 使用的 `AgentCheckpoints`，其 pending changes 不与其他 run 共享。
- */
-export type CreateAgentCheckpoints = () => AgentCheckpoints;
 
 export interface AgentTracing {
   readonly eventRecorder?: AgentEventRecorder;
@@ -356,6 +367,16 @@ export interface AgentEnvironmentInput {
   readonly config: CodingAgentConfig;
   readonly permission: PermissionSessionView;
   /**
+   * 每次 I/O 前读取当前 session mode。
+   *
+   * Args:
+   * - 无：mode 由当前 run 的工具运行时持有。
+   *
+   * Returns:
+   * - 返回与工具审批策略相同的当前 mode。
+   */
+  readonly mode: () => SessionMode;
+  /**
    * 读取当前 run 已加载 Skill 的只读根目录。
    *
    * Args:
@@ -388,7 +409,6 @@ export interface AgentRuntime {
 export interface AgentCompactorInput {
   readonly config: CodingAgentConfig;
   readonly contextWindow: number;
-  readonly agentRegistry: AgentRegistry;
 }
 
 /**
@@ -500,6 +520,16 @@ export interface AgentRunTools {
   readonly goalSystemSection: SystemSection;
   readonly routingInstructions?: string;
   /**
+   * 读取 execution tools 当前使用的 session mode。
+   *
+   * Args:
+   * - 无：mode state 由当前工具运行时持有。
+   *
+   * Returns:
+   * - 返回下一次审批和环境路径判断使用的 mode。
+   */
+  mode(): SessionMode;
+  /**
    * 更新 execution tools 动态读取的 session mode。
    *
    * Args:
@@ -569,7 +599,6 @@ export type CreateAgentTools = (input: {
 }) => Promise<AgentRunTools>;
 
 export interface CreateAgentFeatureInput {
-  readonly createCheckpoints: CreateAgentCheckpoints;
   readonly resolveDefinition: ResolveAgentDefinition;
   readonly resolveModel: ResolveAgentModel;
   readonly loadContext: LoadAgentContext;

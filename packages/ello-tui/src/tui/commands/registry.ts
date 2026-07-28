@@ -43,6 +43,12 @@ const META: Record<string, CommandMeta> = {
     keywords: ['plan', 'permissions'],
     shortcut: 'shift+tab',
   },
+  effort: {
+    id: 'model.effort',
+    group: 'Model',
+    title: 'Set thinking effort',
+    keywords: ['reasoning', 'thinking'],
+  },
   plan: {
     id: 'session.plan',
     group: 'Session',

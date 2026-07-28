@@ -28,6 +28,8 @@ import {
 
 export interface LiveRunState {
   readonly assistantText: string;
+  readonly reasoningText: string;
+  readonly compactionText: string;
   readonly runningTools: ReadonlyMap<string, ToolCallView>;
   readonly runningSubagents: ReadonlyMap<string, SubagentRunView>;
 }
@@ -58,6 +60,19 @@ export type TuiEventInput =
       readonly text: string;
       readonly level?: 'info' | 'error';
     }
+  | { readonly type: 'ui.compaction.started' }
+  | {
+      readonly type: 'ui.compaction.completed';
+      readonly report: {
+        readonly id: string;
+        readonly summary: string;
+        readonly tokensBefore: number;
+        readonly beforeMessageCount: number;
+        readonly afterMessageCount: number;
+        readonly keptMessageCount: number;
+      };
+    }
+  | { readonly type: 'ui.compaction.cleared' }
   | {
       readonly type: 'interaction.resolved';
       readonly requestId: string;
@@ -121,6 +136,32 @@ export function reduceTuiEvent(
         id: `ui-message-${state.history.length}`,
         text: event.text,
       });
+    case 'ui.compaction.started':
+      return {
+        ...state,
+        live: { ...state.live, compactionText: 'Compacting context…' },
+      };
+    case 'ui.compaction.completed':
+      return appendHistory(
+        {
+          ...state,
+          live: { ...state.live, compactionText: '' },
+        },
+        {
+          kind: 'compaction',
+          id: event.report.id,
+          summary: event.report.summary,
+          tokensBefore: event.report.tokensBefore,
+          beforeMessageCount: event.report.beforeMessageCount,
+          afterMessageCount: event.report.afterMessageCount,
+          keptMessageCount: event.report.keptMessageCount,
+        },
+      );
+    case 'ui.compaction.cleared':
+      return {
+        ...state,
+        live: { ...state.live, compactionText: '' },
+      };
     case 'interaction.resolved': {
       const request = state.pendingRequest;
       const next =
@@ -223,6 +264,14 @@ function reduceServerNotification(
           assistantText: next.live.assistantText + notification.params.delta,
         },
       };
+    case 'item/reasoning/delta':
+      return {
+        ...next,
+        live: {
+          ...next.live,
+          reasoningText: next.live.reasoningText + notification.params.delta,
+        },
+      };
     case 'item/commandExecution/outputDelta': {
       const tool = next.live.runningTools.get(notification.params.itemId);
       if (tool === undefined)
@@ -268,11 +317,7 @@ function reduceServerNotification(
     case 'turn/diff/updated':
       return next;
     case 'thread/compaction/updated':
-      return appendHistory(next, {
-        kind: 'system',
-        id: `compaction-${notification.params.seq}`,
-        text: `context compacted: ${notification.params.summary}`,
-      });
+      return next;
     case 'skills/changed':
     case 'fs/changed':
     case 'memory/job/updated':
@@ -289,6 +334,12 @@ function startLiveItem(state: TuiEventState, item: ThreadItem): TuiEventState {
   if (item.type === 'agentMessage' || item.type === 'plan') {
     return { ...state, live: { ...state.live, assistantText: item.text } };
   }
+  if (item.type === 'reasoning') {
+    return {
+      ...state,
+      live: { ...state.live, reasoningText: item.summary },
+    };
+  }
   if (isToolItem(item)) {
     const runningTools = new Map(state.live.runningTools);
     runningTools.set(item.id, itemToToolView(item));
@@ -299,6 +350,12 @@ function startLiveItem(state: TuiEventState, item: ThreadItem): TuiEventState {
     runningSubagents.set(item.id, itemToSubagentView(item));
     return { ...state, live: { ...state.live, runningSubagents } };
   }
+  if (item.type === 'contextCompaction') {
+    return {
+      ...state,
+      live: { ...state.live, compactionText: item.summary },
+    };
+  }
   return state;
 }
 
@@ -306,6 +363,10 @@ function completeItem(state: TuiEventState, item: ThreadItem): TuiEventState {
   let next = state;
   if (item.type === 'agentMessage' || item.type === 'plan') {
     next = { ...next, live: { ...next.live, assistantText: '' } };
+  } else if (item.type === 'reasoning') {
+    next = { ...next, live: { ...next.live, reasoningText: '' } };
+  } else if (item.type === 'contextCompaction') {
+    next = { ...next, live: { ...next.live, compactionText: '' } };
   } else if (isToolItem(item)) {
     const runningTools = new Map(next.live.runningTools);
     runningTools.delete(item.id);
@@ -322,6 +383,8 @@ function completeItem(state: TuiEventState, item: ThreadItem): TuiEventState {
 function liveStateFromSnapshot(snapshot: ThreadSnapshot): LiveRunState {
   const live = emptyLiveState();
   let assistantText = '';
+  let reasoningText = '';
+  let compactionText = '';
   const runningTools = new Map<string, ToolCallView>();
   const runningSubagents = new Map<string, SubagentRunView>();
   for (const turn of snapshot.turns) {
@@ -330,18 +393,29 @@ function liveStateFromSnapshot(snapshot: ThreadSnapshot): LiveRunState {
       if (!('status' in item) || item.status !== 'inProgress') continue;
       if (item.type === 'agentMessage' || item.type === 'plan')
         assistantText = item.text;
+      else if (item.type === 'reasoning') reasoningText = item.summary;
+      else if (item.type === 'contextCompaction') compactionText = item.summary;
       else if (isToolItem(item))
         runningTools.set(item.id, itemToToolView(item));
       else if (item.type === 'subagent')
         runningSubagents.set(item.id, itemToSubagentView(item));
     }
   }
-  return { ...live, assistantText, runningTools, runningSubagents };
+  return {
+    ...live,
+    assistantText,
+    reasoningText,
+    compactionText,
+    runningTools,
+    runningSubagents,
+  };
 }
 
 function emptyLiveState(): LiveRunState {
   return {
     assistantText: '',
+    reasoningText: '',
+    compactionText: '',
     runningTools: new Map(),
     runningSubagents: new Map(),
   };
@@ -381,6 +455,7 @@ function omitGoal(state: TuiEventState): Omit<TuiEventState, 'goal'> {
 function isLiveDelta(notification: ServerNotification): boolean {
   return (
     notification.method === 'item/agentMessage/delta' ||
+    notification.method === 'item/reasoning/delta' ||
     notification.method === 'item/plan/delta' ||
     notification.method === 'item/commandExecution/outputDelta'
   );

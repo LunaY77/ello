@@ -14,6 +14,7 @@ import { createSkillFeature } from '../../src/features/skill/index.js';
 import { createTaskFeature } from '../../src/features/task/index.js';
 import { createExportRoutes } from '../../src/features/thread/export.js';
 import type {
+  PersistedThreadCompactionReport,
   ThreadFeature,
   ThreadStore,
 } from '../../src/features/thread/index.js';
@@ -38,7 +39,9 @@ export function createTestFeatures(input: {
   readonly storage: TestStores;
   readonly threads: ThreadFeature;
   readonly store: ThreadStore;
-  readonly compact: (threadId: string) => Promise<unknown | null>;
+  readonly compact: (
+    threadId: string,
+  ) => Promise<PersistedThreadCompactionReport | null>;
 }) {
   const artifacts = createArtifactFeature(input.storage.artifacts);
   const fs = createFsFeature(input.storage.artifacts);
@@ -59,6 +62,7 @@ export function createTestFeatures(input: {
     ...createThreadRoutes({
       artifacts: input.storage.artifacts,
       compact: input.compact,
+      interruptCompact: () => undefined,
       threads: input.threads,
     }),
     ...createExportRoutes({

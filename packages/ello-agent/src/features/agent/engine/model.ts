@@ -5,6 +5,7 @@
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
 import { randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 
 import type {
   JSONValue,
@@ -22,6 +23,7 @@ import type {
   AgentUsage,
 } from './contracts.js';
 import { ModelAdapterProtocolError, normalizeAgentError } from './errors.js';
+import type { ModelCompactor } from './events.js';
 import { interruptRunState, type RunState } from './run-state.js';
 import type { AgentToolCall } from './tools.js';
 
@@ -162,6 +164,7 @@ export type AgentModelEvent =
    * 延迟。适配器必须在首个承载模型内容的增量上恰好发出一次本事件。
    */
   | { type: 'stream-start' }
+  | { type: 'reasoning-delta'; text: string }
   | { type: 'text-delta'; text: string }
   | { type: 'final'; response: AgentModelResponse };
 
@@ -244,6 +247,19 @@ export async function callModel(
   let firstTokenAt: string | undefined;
   let finalResponse: AgentModelResponse | null = null;
   let emittedTextDelta = false;
+  let reasoningId: string | undefined;
+  let reasoningText = '';
+  let reasoningCompleted = false;
+  const completeReasoning = async (): Promise<void> => {
+    if (reasoningId === undefined || reasoningCompleted) return;
+    reasoningCompleted = true;
+    await run.events.emit({
+      type: 'reasoning.completed',
+      turnIndex: run.state.turn,
+      reasoningId,
+      text: reasoningText,
+    });
+  };
   try {
     for await (const event of run.modelAdapter.stream(request)) {
       if (finalResponse !== null) {
@@ -275,6 +291,27 @@ export async function callModel(
           });
           emittedTextDelta = true;
           break;
+        case 'reasoning-delta':
+          if (firstTokenAt === undefined) {
+            firstTokenAt = new Date().toISOString();
+            await run.events.emit({ type: 'model.first_token', identity });
+          }
+          if (reasoningId === undefined) {
+            reasoningId = randomUUID();
+            await run.events.emit({
+              type: 'reasoning.started',
+              turnIndex: run.state.turn,
+              reasoningId,
+            });
+          }
+          reasoningText += event.text;
+          await run.events.emit({
+            type: 'reasoning.delta',
+            turnIndex: run.state.turn,
+            reasoningId,
+            text: event.text,
+          });
+          break;
         case 'final':
           finalResponse = event.response;
           break;
@@ -288,6 +325,7 @@ export async function callModel(
         'Model adapter stream ended without a final event.',
       );
     }
+    await completeReasoning();
     if (!emittedTextDelta && finalResponse.text !== '') {
       await run.events.emit({
         type: 'message.delta',
@@ -306,6 +344,7 @@ export async function callModel(
     });
     return { response: finalResponse };
   } catch (error) {
+    await completeReasoning();
     if (run.signal.aborted || isAbortError(error)) {
       interruptRunState(run);
       return { stopReason: 'interrupted' };
@@ -363,6 +402,87 @@ function createModelRequest(
     },
     signal: run.signal,
   };
+}
+
+/**
+ * 从主 Agent 已成型的模型请求创建同模型、同 system、同 tools 和同缓存前缀的模型压缩器。
+ *
+ * Args:
+ * - `run`: 当前主 Agent run，提供模型、adapter 和稳定调用设置。
+ * - `input`: 当前主模型调用已经成型的最终输入，包含 provider cache 标记。
+ *
+ * Returns:
+ * - 返回可在主 run 之外执行、但复用同一模型前缀的压缩器。
+ */
+export function createModelCompactor(
+  run: RunState,
+  input: ModelInput,
+): ModelCompactor {
+  const baseRequest = createModelRequest(run, input);
+  return {
+    modelCall: run.config.modelCall,
+    async compact(compactInput) {
+      const response = await run.modelAdapter.generate({
+        ...baseRequest,
+        runId: randomUUID(),
+        messages: [
+          ...reuseCachedMessagePrefix(
+            compactInput.messages,
+            baseRequest.messages,
+          ),
+          { role: 'user', content: compactInput.prompt },
+        ],
+        toolChoice: 'none',
+        signal: compactInput.signal,
+      });
+      return { text: response.text, usage: response.usage };
+    },
+  };
+}
+
+function reuseCachedMessagePrefix(
+  messages: ReadonlyArray<AgentMessage>,
+  cached: ReadonlyArray<ConversationMessage>,
+): ConversationMessage[] {
+  const source = messages.filter(
+    (message): message is ConversationMessage => message.role !== 'system',
+  );
+  const prefixLength = commonMessagePrefixLength(source, cached);
+  return source.map((message, index) => {
+    if (index >= prefixLength) return message;
+    const cachedMessage = cached[index];
+    if (cachedMessage === undefined) return message;
+    return cachedMessage;
+  });
+}
+
+function commonMessagePrefixLength(
+  messages: ReadonlyArray<ConversationMessage>,
+  cached: ReadonlyArray<ConversationMessage>,
+): number {
+  const length = Math.min(messages.length, cached.length);
+  for (let index = 0; index < length; index += 1) {
+    const message = messages[index];
+    const cachedMessage = cached[index];
+    if (
+      message === undefined ||
+      cachedMessage === undefined ||
+      !isDeepStrictEqual(
+        messageWithoutProviderOptions(message),
+        messageWithoutProviderOptions(cachedMessage),
+      )
+    ) {
+      return index;
+    }
+  }
+  return length;
+}
+
+function messageWithoutProviderOptions(
+  message: ConversationMessage,
+): Omit<ConversationMessage, 'providerOptions'> {
+  const { providerOptions: _providerOptions, ...content } = message;
+  return content;
 }
 
 function isAbortError(error: unknown): boolean {

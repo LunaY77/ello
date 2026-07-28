@@ -12,6 +12,7 @@ import type { ContextConfig } from '../../src/features/config/index.js';
 import {
   modelInputBudgetFromRuntimeModel,
   modelSettingsFromRuntimeModel,
+  providerOptionsFromRuntimeModel,
   prepareModelInputForRuntimeModel,
 } from '../../src/features/model/providers/catalog/transforms.js';
 import type { RuntimeModel } from '../../src/features/model/providers/catalog/types.js';
@@ -111,14 +112,47 @@ describe('provider cache transforms', () => {
     expect(transformed.providerOptions).toBeUndefined();
   });
 
-  it('does not turn generic reasoning effort into Anthropic extended thinking', () => {
-    expect(modelSettingsFromRuntimeModel(runtimeModel('anthropic'))).toEqual({
-      maxOutputTokens: 10_000,
+  it('passes reasoning effort to every supported provider protocol', () => {
+    for (const protocol of [
+      'anthropic',
+      'openai',
+      'openai-compatible',
+    ] as const) {
+      expect(modelSettingsFromRuntimeModel(runtimeModel(protocol))).toEqual({
+        maxOutputTokens: 10_000,
+        reasoning: 'medium',
+      });
+    }
+
+    expect(
+      modelSettingsFromRuntimeModel({
+        ...runtimeModel('anthropic'),
+        reasoningEffort: 'max',
+      }),
+    ).toEqual({ maxOutputTokens: 10_000, reasoning: 'xhigh' });
+  });
+
+  it('passes DeepSeek thinking and effort as Anthropic provider input', () => {
+    expect(
+      providerOptionsFromRuntimeModel({
+        ...runtimeModel('anthropic'),
+        name: 'deepseek-v4-pro',
+        apiModel: 'deepseek-v4-pro',
+        baseUrl: 'https://api.deepseek.com/anthropic',
+        reasoningEffort: 'high',
+      }),
+    ).toEqual({
+      anthropic: {
+        thinking: { type: 'enabled', budgetTokens: 1_024 },
+        effort: 'high',
+      },
     });
-    expect(modelSettingsFromRuntimeModel(runtimeModel('openai'))).toEqual({
-      maxOutputTokens: 10_000,
-      reasoning: 'medium',
-    });
+    expect(
+      providerOptionsFromRuntimeModel(runtimeModel('anthropic')),
+    ).toBeUndefined();
+    expect(
+      providerOptionsFromRuntimeModel(runtimeModel('openai-compatible')),
+    ).toBeUndefined();
   });
 
   it('puts Anthropic cache breakpoints in instructions, never conversation messages', () => {

@@ -162,14 +162,24 @@ describe('context source contract', () => {
     ).rejects.toThrow('HTTP 503');
   });
 
-  it('手动压缩调用生产 runner 并返回真实 job id', async () => {
+  it('手动压缩返回完整持久化报告', async () => {
     const compactThread = vi.fn(async () => ({
+      id: 'compaction-12',
+      threadId: 'thr_context_contract',
+      turnId: 'turn_context_contract',
+      createdAt: '2026-07-28T00:00:00.000Z',
       compactor: 'ello-thread-compactor',
+      beforeMessageCount: 12,
+      afterMessageCount: 3,
+      keptMessageCount: 2,
+      tokensBefore: 4_000,
+      summary: 'compact checkpoint',
     }));
     const services = {
       routes: createThreadRoutes({
         artifacts: {} as never,
         compact: compactThread,
+        interruptCompact: () => undefined,
         threads: {} as never,
       }),
     };
@@ -178,8 +188,35 @@ describe('context source contract', () => {
       invokeServiceRoute(services, createTestPeer(), 'thread/compact/start', {
         threadId: 'thr_context_contract',
       }),
-    ).resolves.toMatchObject({ jobId: expect.stringMatching(/^job_/u) });
+    ).resolves.toMatchObject({
+      id: 'compaction-12',
+      summary: 'compact checkpoint',
+      beforeMessageCount: 12,
+      afterMessageCount: 3,
+    });
     expect(compactThread).toHaveBeenCalledWith('thr_context_contract');
+  });
+
+  it('手动压缩中断路由转发目标 Thread', async () => {
+    const interruptCompact = vi.fn();
+    const services = {
+      routes: createThreadRoutes({
+        artifacts: {} as never,
+        compact: vi.fn(async () => null),
+        interruptCompact,
+        threads: {} as never,
+      }),
+    };
+
+    await expect(
+      invokeServiceRoute(
+        services,
+        createTestPeer(),
+        'thread/compact/interrupt',
+        { threadId: 'thr_context_contract' },
+      ),
+    ).resolves.toEqual({ ok: true });
+    expect(interruptCompact).toHaveBeenCalledWith('thr_context_contract');
   });
 
   it('按输入预算保留最新消息，并拒绝无可用输入空间的参数', async () => {

@@ -116,6 +116,13 @@ export const SERVER_NOTIFICATION_SCHEMAS = {
       delta: z.string(),
     })
     .strict(),
+  'item/reasoning/delta': z
+    .object({
+      ...TurnSequenceShape,
+      itemId: OpaqueIdSchema,
+      delta: z.string(),
+    })
+    .strict(),
   'item/plan/delta': z
     .object({
       ...TurnSequenceShape,

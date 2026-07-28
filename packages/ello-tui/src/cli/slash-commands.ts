@@ -25,6 +25,10 @@ export type CommandResult =
       readonly args: readonly string[];
     }
   | { readonly type: 'set-mode'; readonly mode: SessionMode }
+  | {
+      readonly type: 'set-effort';
+      readonly effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+    }
   | { readonly type: 'submit'; readonly prompt: string };
 
 export interface SlashCommand {
@@ -54,6 +58,19 @@ export const slashCommands: readonly SlashCommand[] = [
     rawArgs === ''
       ? { type: 'set-mode', mode: 'plan' }
       : { type: 'submit', prompt: rawArgs },
+  ),
+  command(
+    'effort',
+    'Set thinking effort for the current agent model',
+    (args) => {
+      const effort = parseEffort(args);
+      return effort === undefined
+        ? {
+            type: 'message',
+            message: 'Usage: /effort <low|medium|high|xhigh|max>',
+          }
+        : { type: 'set-effort', effort };
+    },
   ),
   command(
     'help',
@@ -177,11 +194,26 @@ function parseSessionMode(value: string | undefined): SessionMode | undefined {
     : undefined;
 }
 
+function parseEffort(
+  args: readonly string[],
+): Extract<CommandResult, { type: 'set-effort' }>['effort'] | undefined {
+  if (args.length !== 1) return undefined;
+  const value = args[0];
+  return value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh' ||
+    value === 'max'
+    ? value
+    : undefined;
+}
+
 function renderCommandResult(result: CommandResult): string {
   if (result.type === 'message') return result.message;
   if (result.type === 'open-overlay') return `Open overlay: ${result.overlay}`;
   if (result.type === 'runtime-action')
     return `Runtime action: ${result.action}`;
   if (result.type === 'set-mode') return `Set mode: ${result.mode}`;
+  if (result.type === 'set-effort') return `Set effort: ${result.effort}`;
   return result.prompt;
 }
