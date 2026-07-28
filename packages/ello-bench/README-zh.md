@@ -1,6 +1,6 @@
 # @ello/bench
 
-`@ello/bench` 是可复现的编码 Agent 基准评测工具。它在相同任务、相同指令、相同 Docker 镜像和相同 verifier 下对比 Ello 与 Claude Code，生成带完整证据溯源的 `task × agent × replicate` 评分矩阵。
+`@ello/bench` 是可复现的编码 Agent 基准评测工具。它让 Ello、Claude Code 和 Codex 在相同任务、指令、Docker 镜像和 verifier 下运行，生成带完整证据溯源的 `task × agent × replicate` 评分矩阵。
 
 ## 两种 Benchmark
 
@@ -58,9 +58,11 @@ cp packages/ello-bench/config/examples/swe-bench-pro.config.mjs \
 | `models.<name>.apiModel` | Provider 的模型 ID |
 | `models.<name>.baseUrl` | Provider 的 base URL |
 | `models.<name>.apiKeyEnv` | 存放 API key 的环境变量**名** |
-| `binary.pathEnv`（Claude Code） | 存放 CLI 绝对路径的环境变量名 |
-| `binary.expectedVersion` | `--version` 的精确输出 |
+| `binary.pathEnv`（Claude Code/Codex） | 存放 CLI 绝对路径的环境变量名 |
+| `binary.expectedVersion` | 固定的 CLI 版本号；适配器会按标准 `--version` 输出校验 |
 | `binary.sha256` | CLI 可执行文件的 SHA-256 |
+| `connection.baseUrl`（Codex） | OpenAI Responses 兼容 API 根地址，包含 `/v1` |
+| `reasoningEffort`（Codex） | 固定的 Codex 推理档位 |
 
 获取 Claude Code 校验和：
 
@@ -68,11 +70,21 @@ cp packages/ello-bench/config/examples/swe-bench-pro.config.mjs \
 sha256sum "$ELLO_BENCH_CLAUDE_EXE" | cut -d' ' -f1
 ```
 
+获取 Codex 校验和：
+
+```bash
+sha256sum "$ELLO_BENCH_CODEX_EXE" | cut -d' ' -f1
+```
+
+Codex 使用隔离的 `CODEX_HOME` 并忽略用户配置。适配器根据
+`connection` 配置 Responses 兼容 provider，不复用交互式 Codex 登录。
+
 ### 3. 设置环境变量
 
 ```bash
 export ELLO_BENCH_API_KEY=<your-api-token>
 export ELLO_BENCH_CLAUDE_EXE=/absolute/path/to/claude
+export ELLO_BENCH_CODEX_EXE=/absolute/path/to/codex
 ```
 
 ### 4. 构建与验证
@@ -257,6 +269,7 @@ Validation 从原始 Agent 输出重新解析并与标准化 evidence 比对—�
 |---|---|
 | `ELLO_BENCH_API_KEY` | Ello Agent（或你配置的 `apiKeyEnv`） |
 | `ELLO_BENCH_CLAUDE_EXE` | Claude Code Agent（或你配置的 `pathEnv`） |
+| `ELLO_BENCH_CODEX_EXE` | Codex Agent（或你配置的 `pathEnv`） |
 | `ANTHROPIC_BASE_URL` | 仅注入 Claude Code 子进程 |
 | `ANTHROPIC_AUTH_TOKEN` | 仅注入 Claude Code 子进程 |
 

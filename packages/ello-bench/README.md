@@ -1,6 +1,6 @@
 # @ello/bench
 
-`@ello/bench` is a reproducible coding-agent benchmark harness. It compares Ello against Claude Code by running both agents through the same tasks, same instructions, same Docker images, and the same verifier — producing a scored `task × agent × replicate` matrix with full evidence provenance.
+`@ello/bench` is a reproducible coding-agent benchmark harness. It compares Ello, Claude Code, and Codex by running each agent through the same tasks, instructions, Docker images, and verifier, producing a scored `task × agent × replicate` matrix with full evidence provenance.
 
 ## The two benchmarks
 
@@ -58,9 +58,11 @@ Edit `config/agents.config.mjs`. The template is valid syntax but contains place
 | `models.<name>.apiModel` | Your provider's model ID |
 | `models.<name>.baseUrl` | Provider base URL |
 | `models.<name>.apiKeyEnv` | Name of the env var holding your API key |
-| `binary.pathEnv` (Claude Code) | Name of the env var holding the CLI's absolute path |
-| `binary.expectedVersion` | Exact `--version` output of the pinned CLI |
+| `binary.pathEnv` (Claude Code/Codex) | Name of the env var holding the CLI's absolute path |
+| `binary.expectedVersion` | Pinned CLI version validated against canonical `--version` output |
 | `binary.sha256` | SHA-256 of the CLI executable |
+| `connection.baseUrl` (Codex) | OpenAI Responses-compatible API root, including `/v1` |
+| `reasoningEffort` (Codex) | Pinned Codex reasoning effort |
 
 Get the Claude Code checksum:
 
@@ -68,11 +70,22 @@ Get the Claude Code checksum:
 sha256sum "$ELLO_BENCH_CLAUDE_EXE" | cut -d' ' -f1
 ```
 
+Get the Codex checksum:
+
+```bash
+sha256sum "$ELLO_BENCH_CODEX_EXE" | cut -d' ' -f1
+```
+
+Codex runs with an isolated `CODEX_HOME` and ignores user config. The adapter
+configures a Responses-compatible provider from `connection`, so it does not
+reuse an interactive Codex login.
+
 ### 3. Set environment variables
 
 ```bash
 export ELLO_BENCH_API_KEY=<your-api-token>
 export ELLO_BENCH_CLAUDE_EXE=/absolute/path/to/claude
+export ELLO_BENCH_CODEX_EXE=/absolute/path/to/codex
 ```
 
 ### 4. Build and verify
@@ -257,6 +270,7 @@ Credentials stay in env vars, never in config files, CLI args, or run artifacts.
 |---|---|
 | `ELLO_BENCH_API_KEY` | Ello agent (or whatever `apiKeyEnv` you configure) |
 | `ELLO_BENCH_CLAUDE_EXE` | Claude Code agent (or whatever `pathEnv` you configure) |
+| `ELLO_BENCH_CODEX_EXE` | Codex agent (or whatever `pathEnv` you configure) |
 | `ANTHROPIC_BASE_URL` | Injected into Claude Code subprocess only |
 | `ANTHROPIC_AUTH_TOKEN` | Injected into Claude Code subprocess only |
 

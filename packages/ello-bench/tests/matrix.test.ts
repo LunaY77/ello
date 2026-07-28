@@ -33,6 +33,15 @@ describe('benchmark matrix', () => {
         }),
       }),
     );
+    expect(config.agents).toContainEqual(
+      expect.objectContaining({
+        id: 'codex',
+        reasoningEffort: 'high',
+        connection: expect.objectContaining({
+          apiKeyEnv: 'ELLO_BENCH_API_KEY',
+        }),
+      }),
+    );
     expect(config.suite.taskSetHash).toBe(DEEP_SWE_TASK_SET_HASH);
     expect(DEEP_SWE_TASK_SET_HASH).toBe(sha256(stableJson(DEEP_SWE_TASKS)));
     expect(config.tasks).toHaveLength(20);
@@ -84,9 +93,9 @@ describe('benchmark matrix', () => {
     const second = createPlan(config, selection);
 
     expect(first).toEqual(second);
-    expect(first.jobs).toHaveLength(40);
-    expect(new Set(first.jobs.map((job) => job.jobId))).toHaveLength(40);
-    expect(expandJobs(config, selection)).toHaveLength(40);
+    expect(first.jobs).toHaveLength(60);
+    expect(new Set(first.jobs.map((job) => job.jobId))).toHaveLength(60);
+    expect(expandJobs(config, selection)).toHaveLength(60);
     expect(new Set(first.jobs.map((job) => job.agentId))).toEqual(
       new Set(config.agents.map((agent) => agent.id)),
     );

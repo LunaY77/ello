@@ -1,13 +1,13 @@
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { ClaudeCodeAgentSpec } from '../contracts.js';
+import type { AgentSpec } from '../contracts.js';
 import { sha256 } from '../hash.js';
 import { runProcess } from '../process.js';
 
 import { AgentAdapterError } from './adapter.js';
 
-export type ExternalAgentSpec = ClaudeCodeAgentSpec;
+export type ExternalAgentSpec = Exclude<AgentSpec, { readonly kind: 'ello' }>;
 
 export interface ExternalRuntimeInspection {
   readonly executablePath: string;
@@ -83,6 +83,18 @@ export async function prepareClaudeHome(options: {
   return { home, configDirectory };
 }
 
+export async function prepareCodexHome(options: {
+  readonly agentStateRoot: string;
+}): Promise<{ readonly home: string; readonly codexHome: string }> {
+  const home = path.join(options.agentStateRoot, 'home');
+  const codexHome = path.join(options.agentStateRoot, 'codex-home');
+  await Promise.all([
+    mkdir(home, { recursive: true, mode: 0o700 }),
+    mkdir(codexHome, { recursive: true, mode: 0o700 }),
+  ]);
+  return { home, codexHome };
+}
+
 export function externalProcessEnvironment(
   overrides: Readonly<Record<string, string>>,
 ): NodeJS.ProcessEnv {
@@ -124,7 +136,12 @@ export function requiredEnvironment(name: string): string {
 }
 
 function expectedVersionOutput(agent: ExternalAgentSpec): string {
-  return `${agent.binary.expectedVersion} (Claude Code)`;
+  switch (agent.kind) {
+    case 'claude-code':
+      return `${agent.binary.expectedVersion} (Claude Code)`;
+    case 'codex':
+      return `codex-cli ${agent.binary.expectedVersion}`;
+  }
 }
 
 function requiredCaptured(

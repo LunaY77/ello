@@ -2,6 +2,7 @@ import type { AgentSpec } from '../contracts.js';
 
 import type { AgentAdapter } from './adapter.js';
 import { createClaudeCodeAdapter } from './claude-code/adapter.js';
+import { createCodexAdapter } from './codex/adapter.js';
 import { createElloAdapter } from './ello/adapter.js';
 
 export function createAgentAdapter(agent: AgentSpec): AgentAdapter {
@@ -10,5 +11,7 @@ export function createAgentAdapter(agent: AgentSpec): AgentAdapter {
       return createElloAdapter(agent);
     case 'claude-code':
       return createClaudeCodeAdapter(agent);
+    case 'codex':
+      return createCodexAdapter(agent);
   }
 }

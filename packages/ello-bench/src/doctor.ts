@@ -118,6 +118,15 @@ async function externalAgentChecks(
       });
       break;
     }
+    case 'codex': {
+      const apiKey = process.env[agent.connection.apiKeyEnv];
+      checks.push({
+        label: `Credential ${agent.id}`,
+        ok: apiKey !== undefined && apiKey !== '',
+        detail: agent.connection.apiKeyEnv,
+      });
+      break;
+    }
   }
   return checks;
 }
@@ -166,27 +175,44 @@ async function externalCapabilityCheck(
 }
 
 function requiredHelpArgs(
-  _agent: Exclude<AgentSpec, { readonly kind: 'ello' }>,
+  agent: Exclude<AgentSpec, { readonly kind: 'ello' }>,
 ): readonly string[] {
-  return ['--help'];
+  return agent.kind === 'codex' ? ['exec', '--help'] : ['--help'];
 }
 
 function requiredHelpFlags(
-  _agent: Exclude<AgentSpec, { readonly kind: 'ello' }>,
+  agent: Exclude<AgentSpec, { readonly kind: 'ello' }>,
 ): readonly string[] {
-  return [
-    '--output-format',
-    '--safe-mode',
-    '--setting-sources',
-    '--strict-mcp-config',
-    '--dangerously-skip-permissions',
-  ];
+  switch (agent.kind) {
+    case 'claude-code':
+      return [
+        '--output-format',
+        '--safe-mode',
+        '--setting-sources',
+        '--strict-mcp-config',
+        '--dangerously-skip-permissions',
+      ];
+    case 'codex':
+      return [
+        '--json',
+        '--strict-config',
+        '--skip-git-repo-check',
+        '--ignore-user-config',
+        '--ignore-rules',
+        '--dangerously-bypass-approvals-and-sandbox',
+      ];
+  }
 }
 
 function expectedVersionOutput(
   agent: Exclude<AgentSpec, { readonly kind: 'ello' }>,
 ): string {
-  return `${agent.binary.expectedVersion} (Claude Code)`;
+  switch (agent.kind) {
+    case 'claude-code':
+      return `${agent.binary.expectedVersion} (Claude Code)`;
+    case 'codex':
+      return `codex-cli ${agent.binary.expectedVersion}`;
+  }
 }
 
 async function commandCheck(

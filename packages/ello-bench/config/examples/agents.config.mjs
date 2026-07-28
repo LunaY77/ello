@@ -48,4 +48,21 @@ export const agents = [
       CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: 'true',
     },
   },
+  {
+    id: 'codex',
+    displayName: 'Codex',
+    kind: 'codex',
+    model: '<your-codex-model-id>',
+    reasoningEffort: 'high',
+    binary: {
+      pathEnv: 'ELLO_BENCH_CODEX_EXE',
+      expectedVersion: '0.145.0',
+      sha256:
+        '0000000000000000000000000000000000000000000000000000000000000000',
+    },
+    connection: {
+      baseUrl: 'https://api.example.com/openai/v1',
+      apiKeyEnv: 'ELLO_BENCH_API_KEY',
+    },
+  },
 ];

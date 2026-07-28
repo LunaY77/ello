@@ -282,7 +282,7 @@ export const NormalizedAgentEvidenceSchema = z
   .object({
     schema: z.literal('ello.benchmark.agent-evidence.v1'),
     agentId: z.string().min(1),
-    kind: z.enum(['ello', 'claude-code']),
+    kind: z.enum(['ello', 'claude-code', 'codex']),
     observedModel: z.string().min(1),
     terminalStatus: z.enum(['completed', 'failed', 'timed_out']),
     providerFailure: z.boolean(),

@@ -139,9 +139,28 @@ export const ClaudeCodeAgentSpecSchema = z
   })
   .strict();
 
+export const CodexAgentSpecSchema = z
+  .object({
+    ...AgentSpecBase,
+    kind: z.literal('codex'),
+    model: z.string().min(1),
+    reasoningEffort: ReasoningEffortSchema,
+    binary: AgentBinarySchema,
+    connection: z
+      .object({
+        baseUrl: z.string().url(),
+        apiKeyEnv: z.string().regex(/^[A-Z][A-Z0-9_]*$/u),
+        httpHeaders: z.record(z.string(), z.string()).optional(),
+      })
+      .strict(),
+    environment: z.record(z.string(), z.string()).optional(),
+  })
+  .strict();
+
 export const AgentSpecSchema = z.discriminatedUnion('kind', [
   ElloAgentSpecSchema,
   ClaudeCodeAgentSpecSchema,
+  CodexAgentSpecSchema,
 ]);
 
 const AgentRuntimeBase = {
@@ -182,15 +201,27 @@ export const ClaudeCodeAgentRuntimeSchema = z
   })
   .strict();
 
+export const CodexAgentRuntimeSchema = z
+  .object({
+    ...ExternalAgentRuntimeBase,
+    kind: z.literal('codex'),
+    reasoningEffort: ReasoningEffortSchema,
+    baseUrl: z.string().url(),
+    apiKeyEnv: z.string().regex(/^[A-Z][A-Z0-9_]*$/u),
+  })
+  .strict();
+
 export const AgentRuntimeProvenanceSchema = z.discriminatedUnion('kind', [
   ElloAgentRuntimeSchema,
   ClaudeCodeAgentRuntimeSchema,
+  CodexAgentRuntimeSchema,
 ]);
 
 export type AgentSpec = z.infer<typeof AgentSpecSchema>;
 export type ElloAgentSpec = z.infer<typeof ElloAgentSpecSchema>;
 export type BenchmarkModel = z.infer<typeof BenchmarkModelSchema>;
 export type ClaudeCodeAgentSpec = z.infer<typeof ClaudeCodeAgentSpecSchema>;
+export type CodexAgentSpec = z.infer<typeof CodexAgentSpecSchema>;
 export type AgentRuntimeProvenance = z.infer<
   typeof AgentRuntimeProvenanceSchema
 >;

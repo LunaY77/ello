@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import type { AgentProcessExecution } from './agents/adapter.js';
 import { parseClaudeCodeEvidence } from './agents/claude-code/parser.js';
+import { parseCodexEvidence } from './agents/codex/parser.js';
 import {
   aggregateUsage,
   summarizeTools,
@@ -438,6 +439,24 @@ async function validateAgentArtifacts(
         ),
       });
       break;
+    case 'codex':
+      recomputed = await parseCodexEvidence({
+        agent,
+        execution,
+        roundsPath: evidence.rounds.path,
+        persistRounds: false,
+      });
+      expectedAudit = auditExternalTools({
+        tools: recomputed.tools,
+        parserCoverage: recomputed.evidence.parserCoverage,
+        workspace: run.workspace,
+        containerName: required(run.containerName, 'containerName', run),
+        containerWorkspace: '/app',
+        shellMode: containerShellMode(
+          required(run.task, 'task', run).benchmark,
+        ),
+      });
+      break;
   }
   if (stableJson(recomputed.rounds) !== stableJson(rounds)) {
     throw new Error(`Normalized Agent rounds mismatch: ${run.attemptId}`);
@@ -490,6 +509,19 @@ function validateAgentRuntime(
         runtime.apiKeyEnv !== agent.connection.apiKeyEnv
       ) {
         throw new Error(`Claude runtime provenance mismatch: ${run.attemptId}`);
+      }
+      break;
+    case 'codex':
+      if (
+        runtime.kind !== 'codex' ||
+        runtime.expectedModel !== agent.model ||
+        runtime.expectedVersion !== agent.binary.expectedVersion ||
+        runtime.executableSha256 !== agent.binary.sha256 ||
+        runtime.reasoningEffort !== agent.reasoningEffort ||
+        runtime.baseUrl !== agent.connection.baseUrl ||
+        runtime.apiKeyEnv !== agent.connection.apiKeyEnv
+      ) {
+        throw new Error(`Codex runtime provenance mismatch: ${run.attemptId}`);
       }
       break;
   }
