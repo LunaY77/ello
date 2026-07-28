@@ -53,6 +53,12 @@ export function createThreadGoalRuntime(
         description:
           'Get the current thread goal and its persisted token usage. Fails when this thread has no goal.',
         discovery: { aliases: ['goal status'], risk: 'readonly' },
+        capabilities: () => ({
+          concurrencySafe: true,
+          readOnly: true,
+          destructive: false,
+          telemetryTag: 'goal.get',
+        }),
         input: z.object({}).strict(),
         execute: () => {
           if (currentGoal === null) {

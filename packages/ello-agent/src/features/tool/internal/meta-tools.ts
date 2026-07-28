@@ -11,6 +11,8 @@ import {
   createAgentMessage,
   defineTool,
   parseToolInput,
+  resolveToolCapabilities,
+  validateToolInput,
   type AgentApprovalDecision,
   type AgentMessage,
   type AgentTool,
@@ -131,6 +133,12 @@ export function createToolSearchTool(options: {
     description:
       'Search target tools by capability, or omit query to page through lightweight summaries of tools available in the current mode. Returned names are not directly callable; execute targets only through call_tool.',
     discovery: { aliases: ['find tool'], risk: 'readonly', core: true },
+    capabilities: () => ({
+      concurrencySafe: true,
+      readOnly: true,
+      destructive: false,
+      telemetryTag: 'tool.search',
+    }),
     input: z
       .object({
         query: z
@@ -257,6 +265,22 @@ export function createCallTool(
       'Call one available tool by its exact name using arguments that match the schema returned by tool_search.',
     discovery: { aliases: ['invoke tool'], risk: 'external', core: true },
     input: inputSchema,
+    capabilities: async (input, context) => {
+      const resolved = resolveTargetCall(input);
+      const capabilities = await resolveToolCapabilities(
+        resolved.target,
+        resolved.input,
+        context,
+      );
+      return {
+        ...capabilities,
+        logicalName: input.name,
+      };
+    },
+    validateInput: async (input, context) => {
+      const resolved = resolveTargetCall(input);
+      await validateToolInput(resolved.target, resolved.input, context);
+    },
     approval: async (input, context) => {
       const resolved = resolveTargetCall(input);
       const decision = await resolved.target.approval?.(

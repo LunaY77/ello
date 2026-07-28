@@ -24,7 +24,11 @@ import type {
 } from './model.js';
 import type { AgentTraceEvent, InternalAgentRunContext } from './run-state.js';
 import type { AgentEventStream } from './stream.js';
-import type { AgentApprovalRequest, AgentToolCall } from './tools.js';
+import type {
+  AgentApprovalRequest,
+  AgentToolCall,
+  AgentToolCapabilities,
+} from './tools.js';
 
 export interface AgentEventMetadata {
   readonly runId: string;
@@ -126,6 +130,9 @@ export type EngineEvent =
       readonly toolCallId: string;
       readonly name: string;
       readonly input: unknown;
+      readonly invocation?: AgentToolCapabilities & {
+        readonly physicalName: string;
+      };
     })
   | (AgentEventMetadata & {
       readonly type: 'tool.approval_requested';
@@ -532,7 +539,10 @@ function toTraceEvent(
         sequence: event.sequence,
         occurredAt: event.occurredAt,
         toolCallId: event.toolCallId,
-        name: event.name,
+        name: event.invocation?.logicalName ?? event.name,
+        ...(event.invocation === undefined
+          ? {}
+          : { telemetryTag: event.invocation.telemetryTag }),
       };
     case 'tool.approval_requested':
       return {

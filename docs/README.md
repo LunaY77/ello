@@ -20,5 +20,6 @@
 | Storage    | [storage/README.md](storage/README.md)             | JSONL 事实源、SQLite 投影、artifact 与 usage               |
 | Config     | [config/README.md](config/README.md)               | 首次配置、作用域、模型服务与常见排错                       |
 | Tools      | [tools/tool-scheduler.md](tools/tool-scheduler.md) | 工具调度边界、审批与恢复，以及单个编码工具的执行语义       |
+| MCP        | [tools/mcp.md](tools/mcp.md)                       | 外部工具、资源、权限、并发与连接生命周期                   |
 
 建议先读 [Agent 与回合循环](agent/agent-loop.md) 和 [Agent C/S 架构](agent/client-server-architecture.md)。这两篇覆盖核心抽象、进程边界和消息驱动方式。

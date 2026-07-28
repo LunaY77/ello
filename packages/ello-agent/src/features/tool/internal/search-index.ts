@@ -4,7 +4,7 @@
  * 文本归一化、BM25、前缀/模糊匹配和稳定排序全部由通用索引实现，避免与 Skill
  * 搜索维护两套逐渐漂移的算法。
  */
-import { core, z } from 'zod';
+import { z } from 'zod';
 
 import {
   WeightedSearchIndex,
@@ -13,7 +13,7 @@ import {
 import { isRecord } from '../../../protocol/json-value.js';
 import type { AnyAgentTool, ToolRisk } from '../../agent/engine/index.js';
 
-export type JsonSchema = core.JSONSchema.BaseSchema;
+export type JsonSchema = Record<string, unknown>;
 
 export interface ToolIndexDocument {
   readonly name: string;
@@ -236,9 +236,13 @@ function buildDocuments(tools: readonly AnyAgentTool[]): ToolSearchSource[] {
 
 function schemaFor(tool: AnyAgentTool): JsonSchema {
   try {
-    const schema = z.toJSONSchema(tool.input);
-    JSON.stringify(schema);
-    return schema;
+    const schema = tool.inputJsonSchema ?? z.toJSONSchema(tool.input);
+    const serialized = JSON.stringify(schema);
+    const parsed: unknown = JSON.parse(serialized);
+    if (!isRecord(parsed)) {
+      throw new Error('input schema must be a JSON object');
+    }
+    return parsed;
   } catch (error) {
     throw new Error(
       `Cannot serialize input schema for tool '${tool.name}': ${error instanceof Error ? error.message : String(error)}`,

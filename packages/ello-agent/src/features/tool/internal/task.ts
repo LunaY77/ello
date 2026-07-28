@@ -68,6 +68,7 @@ export function createTaskTools(
       name: 'task_list',
       description: 'List persisted coding-agent tasks.',
       discovery: { aliases: ['tasks'], risk: 'readonly' },
+      capabilities: () => readonlyTaskCapabilities('task.list'),
       input: z.object({}).strict(),
       approval: approval('task_list'),
       execute: () => service.list(),
@@ -76,6 +77,7 @@ export function createTaskTools(
       name: 'task_get',
       description: 'Get one persisted coding-agent task.',
       discovery: { aliases: ['task details'], risk: 'readonly' },
+      capabilities: () => readonlyTaskCapabilities('task.get'),
       input: z.object({ id: z.string().describe('Task identifier') }).strict(),
       approval: approval('task_get'),
       execute: async ({ id }) => {
@@ -156,4 +158,13 @@ export function createTaskTools(
       },
     }),
   ];
+}
+
+function readonlyTaskCapabilities(telemetryTag: string) {
+  return {
+    concurrencySafe: true,
+    readOnly: true,
+    destructive: false,
+    telemetryTag,
+  } as const;
 }

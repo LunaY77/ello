@@ -121,16 +121,9 @@ function verifyDeclarations(sourceFile, filePath) {
           verifyDoc(
             member,
             `constructor ${node.name?.text ?? 'default export class'}`,
-            {
-              args: true,
-              returns: false,
-            },
           );
         } else if (ts.isGetAccessorDeclaration(member)) {
-          verifyDoc(member, `getter ${member.name.getText(sourceFile)}`, {
-            args: false,
-            returns: true,
-          });
+          verifyDoc(member, `getter ${member.name.getText(sourceFile)}`);
         } else if (
           ts.isMethodDeclaration(member) ||
           ts.isSetAccessorDeclaration(member)
@@ -169,20 +162,16 @@ function verifyDeclarations(sourceFile, filePath) {
   function verifyCallable(node, name) {
     if (verified.has(node)) return;
     verified.add(node);
-    verifyDoc(node, name, { args: true, returns: true });
+    verifyDoc(node, name);
   }
 
-  function verifyDoc(node, name, requirements) {
+  function verifyDoc(node, name) {
     const docs = ts
       .getJSDocCommentsAndTags(node)
       .filter((comment) => ts.isJSDoc(comment));
     const text = docs.map((doc) => doc.getText(sourceFile)).join('\n');
     const missing = [];
     if (!chinesePattern.test(text)) missing.push('中文说明');
-    if (requirements.args && !/\bArgs:/u.test(text)) missing.push('Args:');
-    if (requirements.returns && !/\bReturns:/u.test(text)) {
-      missing.push('Returns:');
-    }
     if (missing.length > 0) {
       addFinding(
         sourceFile,

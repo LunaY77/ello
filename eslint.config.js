@@ -12,6 +12,7 @@ const agentFeatureNames = [
   'config',
   'fs',
   'memory',
+  'mcp',
   'model',
   'repo',
   'skill',

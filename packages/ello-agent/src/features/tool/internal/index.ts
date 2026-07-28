@@ -19,7 +19,9 @@ import type { PermissionRule } from '../permissions/types.js';
 
 import { createFsTools } from './fs.js';
 import { adaptCodingTools } from './runtime/adapter.js';
+import type { AnyCodingTool } from './runtime/coding-tool.js';
 import { ShellCommandHistory } from './runtime/command-history.js';
+import { SessionFileState } from './runtime/file-state.js';
 import { SessionToolOutputStore } from './runtime/output-store.js';
 import { createSearchTools } from './search.js';
 import { createShellTools } from './shell.js';
@@ -70,6 +72,8 @@ export interface CreateCodingToolsOptions {
    * - 当 工具 公开入口 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
    */
   readonly readRoots?: () => readonly string[];
+  readonly fileState?: SessionFileState;
+  readonly additionalTools?: readonly AnyCodingTool[];
 }
 
 /**
@@ -104,15 +108,22 @@ export function createCodingTools(
   const tasks = createTaskService(options.taskBoards, options.taskBoardScope);
   // 全部 coding 工具共用一份轮次记录，重复命令判定才能看到期间的文件变更。
   const commandHistory = new ShellCommandHistory();
+  const fileState = options.fileState ?? new SessionFileState();
 
   const codingTools = [
-    ...createFsTools(config, decide),
+    ...createFsTools(config, decide, fileState),
     ...createSearchTools(config, decide),
     ...createShellTools(config, decide),
+    ...(options.additionalTools ?? []),
   ];
 
   return [
-    ...adaptCodingTools(codingTools, { config, outputStore, commandHistory }),
+    ...adaptCodingTools(codingTools, {
+      config,
+      outputStore,
+      commandHistory,
+      fileState,
+    }),
     ...createTaskTools(approval, tasks),
   ].filter((tool) => !disabled.has(tool.name));
 }

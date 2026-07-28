@@ -47,6 +47,16 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
         aliases: ['shell', 'terminal', 'command'],
         risk: 'external',
       },
+      capabilities: ({ command }) => {
+        const readOnly = isClearlyReadOnlyCommand(command);
+        return {
+          concurrencySafe: readOnly,
+          readOnly,
+          destructive: !readOnly,
+          interruptible: true,
+          telemetryTag: readOnly ? 'shell.read' : 'shell.command',
+        };
+      },
       input: z
         .object({
           command: z.string().min(1).describe('Shell command to execute'),
@@ -165,4 +175,31 @@ function analyzeCommandRisk(command: string): 'normal' | 'dangerous' {
   return /\b(rm\s+-rf|sudo|chmod\s+-R|chown\s+-R|mkfs|dd\s+if=)/u.test(command)
     ? 'dangerous'
     : 'normal';
+}
+
+/**
+ * 判断一条命令是否可以确定为只读操作。
+ *
+ * 只有不包含控制运算符和命令替换、且命令本身在只读白名单中的简单调用才会通过。
+ * 其他命令一律按可能修改数据处理，并使用独占锁执行。
+ */
+function isClearlyReadOnlyCommand(command: string): boolean {
+  const normalized = command.trim();
+  if (
+    normalized === '' ||
+    /[;&|<>`\n\r]|\$\(/u.test(normalized) ||
+    /(?:^|\s)(?:--output|-o|--pre|--exec|-exec|--write|-w)(?:=|\s|$)/u.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+  if (normalized === 'pwd') return true;
+  if (/^(?:ls|rg|grep|cat|head|tail|wc|stat|file)(?:\s|$)/u.test(normalized)) {
+    return true;
+  }
+  if (/^sed\s+-n(?:\s|$)/u.test(normalized)) return true;
+  return /^git\s+(?:status|diff|show|log|rev-parse|ls-files|grep)(?:\s|$)/u.test(
+    normalized,
+  );
 }

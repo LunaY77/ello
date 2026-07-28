@@ -269,6 +269,7 @@ function derivePermission(toolName: string): string {
     return 'edit';
   if (toolName === 'bash') return 'bash';
   if (toolName === 'web_fetch') return 'web_fetch';
+  if (toolName.startsWith('mcp__')) return 'mcp';
   if (toolName.startsWith('task_')) return 'task';
   return toolName;
 }

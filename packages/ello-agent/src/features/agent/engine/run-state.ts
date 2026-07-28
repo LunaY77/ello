@@ -71,6 +71,7 @@ export type AgentTraceEvent =
       readonly type: 'tool.started';
       readonly toolCallId: string;
       readonly name: string;
+      readonly telemetryTag?: string;
     })
   | (AgentEventMetadata & {
       readonly type: 'tool.approval_requested';

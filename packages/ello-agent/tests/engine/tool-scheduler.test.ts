@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest';
 import {
   defineDeferredTool,
   defineTool,
+  type AgentEnvironment,
+  type AnyAgentTool,
   z,
 } from '../../src/features/agent/engine/index.js';
 import { ToolScheduler } from '../../src/features/agent/engine/tool-scheduler.js';
@@ -234,7 +236,11 @@ describe('ToolScheduler', () => {
         description: 'Read',
         discovery: { aliases: [], risk: 'readonly' },
         input: z.object({}).strict(),
-        concurrency: 'parallel',
+        capabilities: () => ({
+          concurrencySafe: true,
+          readOnly: true,
+          destructive: false,
+        }),
         execute: async () => {
           active.push(1);
           peak = Math.max(peak, active.length);
@@ -271,11 +277,7 @@ describe('ToolScheduler', () => {
     );
 
     expect(peak).toBe(2);
-    expect(result.toolCalls.map((call) => call.id)).toEqual([
-      'c1',
-      'c2',
-      'c3',
-    ]);
+    expect(result.toolCalls.map((call) => call.id)).toEqual(['c1', 'c2', 'c3']);
   });
 
   it('写工具切断并发段，其前后的只读工具不与它同时执行', async () => {
@@ -286,7 +288,11 @@ describe('ToolScheduler', () => {
         description: 'Read',
         discovery: { aliases: [], risk: 'readonly' },
         input: z.object({}).strict(),
-        concurrency: 'parallel',
+        capabilities: () => ({
+          concurrencySafe: true,
+          readOnly: true,
+          destructive: false,
+        }),
         execute: async () => {
           order.push(`${name}:start`);
           await new Promise((resolve) => setTimeout(resolve, 5));
@@ -333,7 +339,112 @@ describe('ToolScheduler', () => {
       'grep:end',
     ]);
   });
+
+  it('同一 environment 的不同 scheduler 共享读写执行门', async () => {
+    const environment: AgentEnvironment = {};
+    const order: string[] = [];
+    let releaseRead: (() => void) | undefined;
+    const readFinished = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const read = defineTool({
+      name: 'read',
+      description: 'Read',
+      discovery: { aliases: [], risk: 'readonly' },
+      input: z.object({}).strict(),
+      capabilities: () => ({
+        concurrencySafe: true,
+        readOnly: true,
+        destructive: false,
+      }),
+      execute: async () => {
+        order.push('read:start');
+        await readFinished;
+        order.push('read:end');
+      },
+    });
+    const write = defineTool({
+      name: 'write',
+      description: 'Write',
+      discovery: { aliases: [], risk: 'workspace-write' },
+      input: z.object({}).strict(),
+      execute: () => {
+        order.push('write');
+      },
+    });
+    const reader = schedulerFor('reader', [read], environment);
+    const writer = schedulerFor('writer', [write], environment);
+
+    const reading = reader.schedule(
+      [{ id: 'read-call', name: 'read', input: {} }],
+      sink([]),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const writing = writer.schedule(
+      [{ id: 'write-call', name: 'write', input: {} }],
+      sink([]),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(order).toEqual(['read:start']);
+    releaseRead?.();
+    await Promise.all([reading, writing]);
+    expect(order).toEqual(['read:start', 'read:end', 'write']);
+  });
+
+  it('按解析后的 input 动态判定并发并对不完整声明 fail closed', async () => {
+    let active = 0;
+    let peak = 0;
+    const inspect = defineTool({
+      name: 'inspect',
+      description: 'Inspect or mutate',
+      discovery: { aliases: [], risk: 'external' },
+      input: z.object({ mode: z.enum(['read', 'write']) }).strict(),
+      capabilities: ({ mode }) =>
+        mode === 'read'
+          ? {
+              concurrencySafe: true,
+              readOnly: true,
+              destructive: false,
+            }
+          : { destructive: true },
+      execute: async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+      },
+    });
+    const scheduler = schedulerFor('dynamic', [inspect], {});
+
+    await scheduler.schedule(
+      [
+        { id: 'c1', name: 'inspect', input: { mode: 'read' } },
+        { id: 'c2', name: 'inspect', input: { mode: 'read' } },
+        { id: 'c3', name: 'inspect', input: { mode: 'write' } },
+      ],
+      sink([]),
+    );
+
+    expect(peak).toBe(2);
+  });
 });
+
+function schedulerFor(
+  runId: string,
+  tools: readonly AnyAgentTool[],
+  environment: AgentEnvironment,
+): ToolScheduler {
+  return new ToolScheduler({
+    runId,
+    turnIndex: () => 0,
+    tools,
+    callableToolNames: new Set(tools.map((tool) => tool.name)),
+    environment,
+    metadata: {},
+    signal: new AbortController().signal,
+  });
+}
 
 function sink(events: string[]) {
   return {

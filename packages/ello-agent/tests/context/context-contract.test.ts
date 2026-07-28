@@ -12,10 +12,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ContextSnapshot } from '../../src/features/agent/context/context-snapshot.js';
 import { loadInstructionSources } from '../../src/features/agent/context/instructions.js';
+import { createCodingSystemPromptSection } from '../../src/features/agent/context/prompts.js';
 import {
   loadContextBundle,
   type ContextEvent,
 } from '../../src/features/agent/context/source-registry.js';
+import type { AgentRunContext } from '../../src/features/agent/engine/contracts.js';
 import { compactMessages } from '../../src/features/agent/engine/model-input.js';
 import {
   CodingAgentConfigSchema,
@@ -100,6 +102,25 @@ describe('context source contract', () => {
     expect(sameRun.system).toContain('first contract');
     expect(nextRun.system).toContain('second contract');
     expect(nextRun.fingerprint).not.toBe(beforeChange.fingerprint);
+  });
+
+  it('并发说明只允许直接调用现有工具，不声明额外包装工具', async () => {
+    const root = await temporaryRoot();
+    const section = createCodingSystemPromptSection(configFor(root, []), {
+      model: 'test-model',
+    });
+    const prompt = await section(promptRunContext());
+
+    expect(prompt).toContain(
+      'there is no separate batching or parallel-execution tool',
+    );
+    expect(prompt).toContain(
+      'name only those definitions and do not infer extra orchestration tools',
+    );
+    expect(prompt).toContain(
+      'Never borrow tool names, capabilities, or tool-use conventions',
+    );
+    expect(prompt).not.toContain('multi_tool_use.parallel');
   });
 
   it('glob 结果稳定排序，并按真实文件来源去重', async () => {
@@ -348,6 +369,18 @@ function modelConfig() {
     },
     primary_model: 'test',
     auxiliary_model: 'test',
+  };
+}
+
+function promptRunContext(): AgentRunContext {
+  return {
+    runId: 'run-tool-list-contract',
+    agentName: 'build',
+    input: '你有哪些工具？',
+    context: undefined,
+    options: {},
+    environment: {},
+    metadata: {},
   };
 }
 

@@ -11,6 +11,7 @@ import {
   readdir,
   rm,
   stat,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -37,8 +38,10 @@ import {
   createToolSearchTool,
 } from '../../src/features/tool/internal/meta-tools.js';
 import type { CodingToolContext } from '../../src/features/tool/internal/runtime/coding-tool.js';
+import { SessionFileState } from '../../src/features/tool/internal/runtime/file-state.js';
 import { createToolSearchIndex } from '../../src/features/tool/internal/search-index.js';
 import { createSearchTools } from '../../src/features/tool/internal/search.js';
+import type { SearchProvider } from '../../src/features/tool/internal/search-provider.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -283,16 +286,66 @@ describe('搜索工具契约', () => {
     expect(next.output).toBe('src/z.ts');
     expect(next.metadata.truncated).toBe(false);
   });
+
+  it('原生 provider 安全处理空格和 shell 元字符，且可回退 JS 遍历', async () => {
+    const root = await temporaryDirectory('ello-native-search-');
+    await writeFile(
+      path.join(root, 'a b.txt'),
+      'needle;touch injected\n',
+      'utf8',
+    );
+    const native = searchTool('grep');
+
+    const nativeResult = await native.execute(
+      { pattern: 'needle;touch injected', filePath: '.', limit: 10 },
+      searchContext(root),
+    );
+    expect(nativeResult.output).toBe('a b.txt:1:needle;touch injected');
+    await expect(stat(path.join(root, 'injected'))).rejects.toThrow();
+
+    const fallback: SearchProvider = {
+      grep: vi.fn(async () => null),
+      listFiles: vi.fn(async () => null),
+    };
+    const fallbackGrep = searchTool('grep', fallback);
+    const fallbackGlob = searchTool('glob', fallback);
+    await expect(
+      fallbackGrep.execute(
+        { pattern: 'needle', filePath: '.', limit: 10 },
+        searchContext(root),
+      ),
+    ).resolves.toMatchObject({ metadata: { matchCount: 1 } });
+    await expect(
+      fallbackGlob.execute(
+        { pattern: '**/*.txt', filePath: '.', limit: 10 },
+        searchContext(root),
+      ),
+    ).resolves.toMatchObject({ metadata: { matchCount: 1 } });
+    expect(fallback.grep).toHaveBeenCalledOnce();
+    expect(fallback.listFiles).toHaveBeenCalledOnce();
+  });
 });
 
 describe('读取工具契约', () => {
   it('相同未变更区间只返回短标记，文件变化后重新返回内容', async () => {
     const root = await temporaryDirectory('ello-read-cache-');
-    await writeFile(path.join(root, 'a.txt'), 'first\nsecond\n', 'utf8');
-    const read = createFsTools({} as CodingAgentConfig, () => 'auto').find(
-      (candidate) => candidate.name === 'read',
-    );
+    const targetPath = path.join(root, 'a.txt');
+    await writeFile(targetPath, 'first\nsecond\n', 'utf8');
+    const initialVersion = await stat(targetPath);
+    const fileState = new SessionFileState();
+    const read = createFsTools(
+      {} as CodingAgentConfig,
+      () => 'auto',
+      fileState,
+    ).find((candidate) => candidate.name === 'read');
     if (read === undefined) throw new Error('read tool missing');
+    const nextRunRead = createFsTools(
+      {} as CodingAgentConfig,
+      () => 'auto',
+      fileState,
+    ).find((candidate) => candidate.name === 'read');
+    if (nextRunRead === undefined)
+      throw new Error('next run read tool missing');
     const context = searchContext(root);
     const input = { filePath: 'a.txt', offset: 1, limit: 10 };
 
@@ -301,13 +354,16 @@ describe('读取工具契约', () => {
     expect(first.output).toContain('[Read lines 1-3 of 3.]');
     expect(first.metadata.unchanged).toBeUndefined();
 
-    const duplicate = await read.execute(input, context);
+    const duplicate = await nextRunRead.execute(input, context);
     expect(duplicate.output).toContain('File unchanged');
     expect(duplicate.metadata.unchanged).toBe(true);
 
-    await writeFile(path.join(root, 'a.txt'), 'updated\ncontent\nlonger\n');
-    const changed = await read.execute(input, context);
-    expect(changed.output).toContain('updated');
+    // 即使文件大小和修改时间没有变化，主动清除缓存后也必须读到最新内容。
+    await writeFile(targetPath, 'third\nfourth\n', 'utf8');
+    await utimes(targetPath, initialVersion.atime, initialVersion.mtime);
+    fileState.invalidate([targetPath]);
+    const changed = await nextRunRead.execute(input, context);
+    expect(changed.output).toContain('third');
     expect(changed.metadata.unchanged).toBeUndefined();
   });
 
@@ -551,6 +607,52 @@ describe('Meta Tool 路由契约', () => {
     );
   });
 
+  it('call_tool 代理目标的动态能力、启用状态和领域校验', async () => {
+    const validateInput = vi.fn((input: { readonly path: string }) => {
+      if (input.path.endsWith('.secret')) {
+        throw new Error('Secret files are disabled.');
+      }
+    });
+    const read = defineTool({
+      name: 'read_extra',
+      description: 'Read an extra file.',
+      discovery: { aliases: ['extra file'], risk: 'readonly' },
+      input: z.object({ path: z.string() }).strict(),
+      capabilities: ({ path }) => ({
+        concurrencySafe: true,
+        readOnly: true,
+        destructive: false,
+        enabled: path !== 'disabled.txt',
+        telemetryTag: 'extension.read',
+      }),
+      validateInput,
+      execute: ({ path }) => path,
+    });
+    const proxy = createCallTool([read]);
+    const input = { name: 'read_extra', arguments: { path: 'a.txt' } };
+
+    await expect(
+      proxy.capabilities?.(input, agentToolContext),
+    ).resolves.toMatchObject({
+      logicalName: 'read_extra',
+      concurrencySafe: true,
+      readOnly: true,
+      destructive: false,
+      enabled: true,
+      telemetryTag: 'extension.read',
+    });
+    await expect(
+      proxy.validateInput?.(input, agentToolContext),
+    ).resolves.toBeUndefined();
+    await expect(
+      proxy.validateInput?.(
+        { name: 'read_extra', arguments: { path: 'token.secret' } },
+        agentToolContext,
+      ),
+    ).rejects.toThrow('Secret files are disabled.');
+    expect(validateInput).toHaveBeenCalledTimes(2);
+  });
+
   it('事件投影向观察者呈现真实目标而非 wrapper', () => {
     expect(
       projectToolEvent({
@@ -588,10 +690,12 @@ function targetTool(name: string, description: string, alias: string) {
   });
 }
 
-function searchTool(name: 'grep' | 'glob') {
-  const tool = createSearchTools({} as CodingAgentConfig, () => 'auto').find(
-    (candidate) => candidate.name === name,
-  );
+function searchTool(name: 'grep' | 'glob', provider?: SearchProvider) {
+  const tool = createSearchTools(
+    {} as CodingAgentConfig,
+    () => 'auto',
+    provider,
+  ).find((candidate) => candidate.name === name);
   if (tool === undefined) {
     throw new Error(`${name} tool missing`);
   }

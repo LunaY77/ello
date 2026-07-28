@@ -42,6 +42,12 @@ export function createGoalTools(service: GoalService): AnyAgentTool[] {
       description:
         'Get the current session goal, including status, usage, blocker audit, and remaining host limits.',
       discovery: { aliases: ['goal status'], risk: 'readonly' },
+      capabilities: () => ({
+        concurrencySafe: true,
+        readOnly: true,
+        destructive: false,
+        telemetryTag: 'goal.get',
+      }),
       input: z.object({}).strict(),
       execute: () => {
         const status = service.status();

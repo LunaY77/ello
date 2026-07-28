@@ -17,6 +17,11 @@ import {
   createCodingToolResult,
   defineCodingTool,
 } from './runtime/coding-tool.js';
+import {
+  createSearchProvider,
+  type SearchProvider,
+  type SearchProviderMatch,
+} from './search-provider.js';
 import { requireFs, resolveRuntimePath, statRuntimePath } from './shared.js';
 
 const MAX_SEARCH_FILES = 100_000;
@@ -40,16 +45,22 @@ const MAX_SEARCH_FILES = 100_000;
 export function createSearchTools(
   _config: CodingAgentConfig,
   decide: DecideApproval,
+  provider: SearchProvider = createSearchProvider(),
 ) {
   return [
     defineCodingTool({
       name: 'grep',
-      // 无副作用只读工具：允许与同批其他只读调用并发执行。
-      concurrency: 'parallel',
+      capabilities: () => ({
+        concurrencySafe: true,
+        readOnly: true,
+        destructive: false,
+        interruptible: true,
+        telemetryTag: 'search.grep',
+      }),
       description: `Search UTF-8 file contents with a Unicode regular expression and return 'path:line:text' for matches; context lines use 'path-line-text'.
 'filePath' accepts either a directory or a single file: a directory is walked recursively, a file is searched on its own so you can scan one known file without inventing a glob. 'glob' filters candidate paths relative to the search root. 'context' includes lines before and after each match. 'limit' caps match lines, not context lines; when more matches exist the result reports the next 'offset' so you can page without repeating earlier output.
 The pattern is a JavaScript RegExp with the 'u' flag, matched per line, case sensitive; an invalid pattern fails the call instead of returning nothing. Binary files, files above 2 MiB, symlinked directories, and .git/node_modules/dist/build/coverage are skipped, so a file inside them is only searched when named directly. Traversals above 100000 files fail explicitly instead of returning incomplete results. No match is a success with empty output, not an error.
-Use grep to find where text occurs; use glob to find paths by name without reading contents; use read once you know the file and need a larger exact range. Independent read, grep, and glob calls can be issued together in one model response and will run concurrently.`,
+Use grep to find where text occurs; use glob to find paths by name without reading contents; use read once you know the file and need a larger exact range. Put independent read, grep, and glob calls directly in the same model response; the runtime schedules safe calls concurrently without a wrapper tool.`,
       discovery: {
         aliases: ['search text', 'find content', 'regex'],
         risk: 'readonly',
@@ -119,6 +130,7 @@ Use grep to find where text occurs; use glob to find paths by name without readi
         const root = info.isDirectory() ? resolved : path.dirname(resolved);
         const result = await searchFiles({
           fs,
+          provider,
           root,
           pattern,
           ...(info.isDirectory() ? {} : { file: resolved }),
@@ -150,12 +162,17 @@ Use grep to find where text occurs; use glob to find paths by name without readi
     }),
     defineCodingTool({
       name: 'glob',
-      // 无副作用只读工具：允许与同批其他只读调用并发执行。
-      concurrency: 'parallel',
+      capabilities: () => ({
+        concurrencySafe: true,
+        readOnly: true,
+        destructive: false,
+        interruptible: true,
+        telemetryTag: 'search.glob',
+      }),
       description: `Find files by path shape and return paths relative to 'filePath', sorted lexicographically.
 'pattern' must match the whole relative path: '*' matches within one segment, '**/' matches any number of leading directories, so use '**/*.ts' rather than '*.ts' to reach nested files. Only files are returned, never directories. 'filePath' must be a directory; pass a file path to read or grep instead. 'limit' caps returned paths after sorting, so the result stays the lexicographic prefix of all matches.
 Symlinked directories are not traversed and .git, node_modules, dist, build, and coverage are ignored, so build artifacts and dependencies never appear. Traversals above 100000 files fail explicitly instead of returning an incomplete prefix. No match is a success with empty output.
-When more paths exist the result reports the next 'offset' so you can page without repeating earlier paths. Use glob when you know part of a name or extension; use grep when you know text inside the file; use read on a directory path for a single non-recursive listing with sizes. Independent read, grep, and glob calls can be issued together in one model response and will run concurrently.`,
+When more paths exist the result reports the next 'offset' so you can page without repeating earlier paths. Use glob when you know part of a name or extension; use grep when you know text inside the file; use read on a directory path for a single non-recursive listing with sizes. Put independent read, grep, and glob calls directly in the same model response; the runtime schedules safe calls concurrently without a wrapper tool.`,
       discovery: {
         aliases: ['find files', 'match paths', 'files'],
         risk: 'readonly',
@@ -205,7 +222,13 @@ When more paths exist the result reports the next 'offset' so you can page witho
       ) => {
         const fs = requireFs(ctx.agent);
         const root = resolveRuntimePath(fs, targetPath);
-        const files = await walkAllSearchFiles(fs, root, ctx.abortSignal);
+        const files =
+          (await provider.listFiles({
+            root,
+            ...(ctx.abortSignal === undefined
+              ? {}
+              : { signal: ctx.abortSignal }),
+          })) ?? (await walkAllSearchFiles(fs, root, ctx.abortSignal));
         const matcher = globToRegExp(pattern);
         const allMatches = files
           .filter((file) => matcher.test(path.relative(root, file)))
@@ -240,6 +263,7 @@ When more paths exist the result reports the next 'offset' so you can page witho
 
 async function searchFiles(input: {
   readonly fs: AgentFileSystem;
+  readonly provider: SearchProvider;
   readonly root: string;
   readonly pattern: string;
   /** 显式单文件目标；给出时跳过目录遍历，只搜索该文件。 */
@@ -250,6 +274,24 @@ async function searchFiles(input: {
   readonly context: number;
   readonly signal?: AbortSignal;
 }): Promise<SearchFilesResult> {
+  const native = await input.provider.grep({
+    root: input.root,
+    ...(input.file === undefined ? {} : { file: input.file }),
+    pattern: input.pattern,
+    ...(input.glob === undefined ? {} : { glob: input.glob }),
+    limit: input.limit,
+    offset: input.offset,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (native !== null) {
+    const matches = await hydrateProviderMatches(input.fs, native.matches);
+    return renderSelectedSearchMatches(
+      matches,
+      input.context,
+      native.truncated,
+      native.nextOffset,
+    );
+  }
   const files =
     input.file === undefined
       ? await walkAllSearchFiles(input.fs, input.root, input.signal)
@@ -313,6 +355,20 @@ function renderSearchMatches(
   const selected = matches.slice(input.offset, input.offset + input.limit);
   const truncated = input.offset + selected.length < matches.length;
   const nextOffset = truncated ? input.offset + selected.length : undefined;
+  return renderSelectedSearchMatches(
+    selected,
+    input.context,
+    truncated,
+    nextOffset,
+  );
+}
+
+function renderSelectedSearchMatches(
+  selected: readonly SearchMatch[],
+  context: number,
+  truncated: boolean,
+  nextOffset: number | undefined,
+): SearchFilesResult {
   const output: string[] = [];
   for (const [relativePath, fileMatches] of groupMatchesByFile(selected)) {
     const lines = fileMatches[0]?.lines;
@@ -320,8 +376,8 @@ function renderSearchMatches(
     const matchingLines = new Set(fileMatches.map((match) => match.lineIndex));
     const ranges = mergeLineRanges(
       fileMatches.map((match) => ({
-        start: Math.max(0, match.lineIndex - input.context),
-        end: Math.min(lines.length - 1, match.lineIndex + input.context),
+        start: Math.max(0, match.lineIndex - context),
+        end: Math.min(lines.length - 1, match.lineIndex + context),
       })),
     );
     for (const [rangeIndex, range] of ranges.entries()) {
@@ -349,6 +405,31 @@ function renderSearchMatches(
     truncated,
     ...(nextOffset === undefined ? {} : { nextOffset }),
   };
+}
+
+async function hydrateProviderMatches(
+  fs: AgentFileSystem,
+  matches: readonly SearchProviderMatch[],
+): Promise<SearchMatch[]> {
+  const contents = new Map<string, readonly string[]>();
+  const hydrated: SearchMatch[] = [];
+  for (const match of matches) {
+    let lines = contents.get(match.absolutePath);
+    if (lines === undefined) {
+      const content = await readSearchableFile(fs, match.absolutePath);
+      if (content === undefined) continue;
+      lines = content.split(/\r?\n/u);
+      contents.set(match.absolutePath, lines);
+    }
+    const lineIndex = match.lineNumber - 1;
+    if (lineIndex < 0 || lineIndex >= lines.length) {
+      throw new Error(
+        `ripgrep returned out-of-range line ${match.lineNumber} for ${match.relativePath}.`,
+      );
+    }
+    hydrated.push({ relativePath: match.relativePath, lineIndex, lines });
+  }
+  return hydrated;
 }
 
 function groupMatchesByFile(

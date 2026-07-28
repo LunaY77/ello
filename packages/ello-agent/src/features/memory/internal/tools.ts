@@ -57,6 +57,7 @@ export function createMemoryTools(options: {
       description:
         'List memory topics in one scope with metadata and current revisions.',
       discovery: { aliases: ['memories'], risk: 'readonly' },
+      capabilities: () => readonlyMemoryCapabilities('memory.list'),
       input: z
         .object({ scope: ScopeSchema.describe('Memory scope to list') })
         .strict(),
@@ -73,6 +74,7 @@ export function createMemoryTools(options: {
       description:
         'Read MEMORY.md or one top-level topic file and return its revision.',
       discovery: { aliases: ['recall memory'], risk: 'readonly' },
+      capabilities: () => readonlyMemoryCapabilities('memory.read'),
       input: z
         .object({
           scope: ScopeSchema.describe('Memory scope'),
@@ -134,6 +136,7 @@ export function createMemoryTools(options: {
       description:
         'Search topic names, descriptions, and bodies. Use this before creating a topic to avoid duplicates.',
       discovery: { aliases: ['find memory'], risk: 'readonly' },
+      capabilities: () => readonlyMemoryCapabilities('memory.search'),
       input: z
         .object({
           query: z
@@ -148,4 +151,14 @@ export function createMemoryTools(options: {
         options.port.repository.search(query, scope),
     }),
   ];
+}
+
+function readonlyMemoryCapabilities(telemetryTag: string) {
+  return {
+    concurrencySafe: true,
+    readOnly: true,
+    destructive: false,
+    interruptible: true,
+    telemetryTag,
+  } as const;
 }

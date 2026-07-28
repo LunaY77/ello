@@ -34,6 +34,7 @@ import { ArtifactStore } from './features/artifact/index.js';
 import { loadCodingAgentConfig } from './features/config/index.js';
 import { createConfigFeature } from './features/config/index.js';
 import { createFsFeature } from './features/fs/index.js';
+import { McpManager } from './features/mcp/index.js';
 import {
   createMemoryFeature,
   createMemoryRunRuntime,
@@ -76,6 +77,7 @@ import {
   createProductionToolRuntime,
   createToolFeature,
   markCoreTool,
+  SessionFileStateRegistry,
   TOOL_ROUTING_INSTRUCTIONS,
   type SessionModeState,
 } from './features/tool/index.js';
@@ -120,6 +122,7 @@ export async function createApp(
   const database = openDatabase({ databasePath: stateDatabasePath(root) });
   const artifactStore = new ArtifactStore(database.db, artifactsDir(root));
   const taskBoards = createTaskBoardStore(database.db);
+  const mcp = new McpManager();
   const threadStore = createThreadStore({ root, database: database.db });
   const repositories = createRepositoryStore(database.db);
   const workspaceStore = createWorkspaceRecordStore(database.db);
@@ -129,7 +132,9 @@ export async function createApp(
   const tasks = createTaskFeature(taskBoards);
   const skills = createSkillFeature();
   const memory = createMemoryFeature();
-  const tools = createToolFeature(taskBoards);
+  const tools = createToolFeature(taskBoards, {
+    loadAdditionalTools: (toolConfig) => mcp.toolsForConfig(toolConfig),
+  });
   const fs = createFsFeature(artifactStore);
   const workspaces = createWorkspaceFeature({
     repositories,
@@ -139,7 +144,7 @@ export async function createApp(
     resolveDefinition: resolveAgentDefinition,
     resolveModel: resolveAgentModel,
     loadContext: loadAgentContext,
-    createTools: createAgentTools(taskBoards),
+    createTools: createAgentTools(taskBoards, mcp),
     createCompactor: (compactorOptions) =>
       createThreadCompactor(compactorOptions),
     runtime: options.agentRuntime,
@@ -266,6 +271,7 @@ export async function createApp(
       closeAppResources([
         () => threads.close(),
         () => agent.close(),
+        () => mcp.close(),
         () => fs.close(),
         () => artifacts.close(),
         () => {
@@ -364,7 +370,11 @@ const loadAgentContext: LoadAgentContext = async ({ definition, model }) => {
   };
 };
 
-function createAgentTools(taskBoards: TaskBoardStore): CreateAgentTools {
+function createAgentTools(
+  taskBoards: TaskBoardStore,
+  mcp: McpManager,
+): CreateAgentTools {
+  const fileStates = new SessionFileStateRegistry();
   return async ({ request, definition, context }) => {
     let modeState: SessionModeState = {
       mode: request.selection.mode,
@@ -372,6 +382,7 @@ function createAgentTools(taskBoards: TaskBoardStore): CreateAgentTools {
       source: 'resume',
       changedAt: new Date().toISOString(),
     };
+    const mcpTools = await mcp.toolsForConfig(definition.config);
     const productionTools = createProductionToolRuntime({
       config: definition.config,
       taskBoards,
@@ -382,6 +393,8 @@ function createAgentTools(taskBoards: TaskBoardStore): CreateAgentTools {
       rules: () => request.permission.rules(),
       mode: () => modeState,
       readRoots: context.readRoots,
+      fileState: fileStates.forSession(request.threadId),
+      ...(mcpTools.length === 0 ? {} : { additionalTools: mcpTools }),
     });
     const memory = createMemoryRunRuntime(
       definition.config,

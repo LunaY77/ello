@@ -324,5 +324,5 @@ Config RPC 会先构造候选配置并完成校验，再通过同目录临时文
 | compaction `reserved_tokens` 校验失败           | 该值必须小于选中 model 的有效输入容量                   |
 | `bypass_enabled must be true`                   | 开启安全闸门，或改用其他 `initial_mode`                 |
 
-`~/.ello/mcp.json` 单独保存 MCP Server 配置。Agent 定义格式和加载顺序见
-[Subagents](../subagents/README.md)，权限规则见[Permission](../permission/README.md)。
+`~/.ello/mcp.json` 单独保存 MCP Server 配置。配置格式、工具命名、资源读取和连接生命周期见
+[MCP 工具接入](../tools/mcp.md)；权限规则见[Permission](../permission/README.md)。

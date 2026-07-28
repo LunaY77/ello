@@ -4,6 +4,8 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
+import path from 'node:path';
+
 import {
   defineTool,
   type AnyAgentTool,
@@ -20,6 +22,7 @@ import {
   duplicateCommandNotice,
   ShellCommandHistory,
 } from './command-history.js';
+import type { SessionFileState } from './file-state.js';
 import {
   persistLargeOutput,
   type ToolOutputLimits,
@@ -31,6 +34,7 @@ export interface CodingToolAdapterOptions {
   readonly outputStore: ToolOutputStore;
   /** 跨工具共享的命令轮次记录；同一批工具必须共用同一实例才能识别重复。 */
   readonly commandHistory: ShellCommandHistory;
+  readonly fileState: SessionFileState;
 }
 
 /**
@@ -48,14 +52,28 @@ export function adaptCodingTool(
   options: CodingToolAdapterOptions,
 ): AnyAgentTool {
   const approval = tool.approval;
+  const capabilities = tool.capabilities;
+  const validateInput = tool.validateInput;
   return defineTool({
     name: tool.name,
     description: tool.description,
     discovery: tool.discovery,
     input: tool.input,
-    ...(tool.concurrency === undefined
+    ...(tool.inputJsonSchema === undefined
       ? {}
-      : { concurrency: tool.concurrency }),
+      : { inputJsonSchema: tool.inputJsonSchema }),
+    ...(capabilities === undefined
+      ? {}
+      : {
+          capabilities: (input, ctx) =>
+            capabilities(input, createContext(ctx, options.config)),
+        }),
+    ...(validateInput === undefined
+      ? {}
+      : {
+          validateInput: (input, ctx) =>
+            validateInput(input, createContext(ctx, options.config)),
+        }),
     approval:
       approval === undefined
         ? undefined
@@ -63,6 +81,11 @@ export function adaptCodingTool(
     execute: async (input, ctx) => {
       const codingContext = createContext(ctx, options.config);
       const result = await tool.execute(input, codingContext);
+      invalidateChangedFiles(
+        options.fileState,
+        options.config.cwd,
+        result.metadata.fileChanges,
+      );
       const notice = recordRound(options.commandHistory, result.metadata);
       const output =
         notice === undefined ? result.output : `${notice}\n${result.output}`;
@@ -89,6 +112,22 @@ export function adaptCodingTool(
       };
     },
   });
+}
+
+function invalidateChangedFiles(
+  fileState: SessionFileState,
+  cwd: string,
+  changes: CodingToolResult['metadata']['fileChanges'],
+): void {
+  if (changes === undefined || changes.length === 0) return;
+  fileState.invalidate(
+    changes.flatMap((change) => [
+      path.resolve(cwd, change.path),
+      ...(change.kind === 'modified' && change.movePath !== undefined
+        ? [path.resolve(cwd, change.movePath)]
+        : []),
+    ]),
+  );
 }
 
 /**

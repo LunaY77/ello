@@ -301,7 +301,7 @@ class LangfuseEventRecorder {
     );
     const span = startChildSpan(
       this.runtime.tracer,
-      `tool.${event.name}`,
+      `tool.${event.invocation?.logicalName ?? event.name}`,
       turn,
       event.occurredAt,
     );
@@ -309,6 +309,12 @@ class LangfuseEventRecorder {
       [LANGFUSE_ATTRIBUTES.observationType]: 'tool',
       'ello.tool.call.id': event.toolCallId,
       'ello.tool.name': event.name,
+      'ello.tool.logical_name': event.invocation?.logicalName ?? event.name,
+      'ello.tool.telemetry_tag': event.invocation?.telemetryTag ?? event.name,
+      'ello.tool.read_only': event.invocation?.readOnly ?? false,
+      'ello.tool.destructive': event.invocation?.destructive ?? true,
+      'ello.tool.concurrency_safe': event.invocation?.concurrencySafe ?? false,
+      'ello.tool.interruptible': event.invocation?.interruptible ?? false,
       'ello.tool.turn.index': event.turnIndex,
       ...contentAttributes(this.runtime.config.content, 'input', event.input),
     });

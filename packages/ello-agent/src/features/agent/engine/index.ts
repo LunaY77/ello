@@ -16,7 +16,13 @@ export {
   defineTool,
   describeZodIssues,
   parseToolInput,
+  resolveToolCapabilities,
+  validateToolInput,
 } from './tools.js';
+export {
+  ToolExecutionGate,
+  toolExecutionGateFor,
+} from './tool-execution-gate.js';
 export {
   compactMessages,
   dynamicSystemSection,

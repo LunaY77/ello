@@ -143,8 +143,9 @@ flowchart TD
   Scan -->|Single deferred call| ValidateDeferred[Validate input]
   ValidateDeferred -->|Valid| QueueDeferred[Queue deferred item]
   ValidateDeferred -->|Invalid| FailedResult[Create error result]
-  Scan -->|Immediate calls only| Sequential[Process in response order]
-  Sequential --> Immediate[Immediate call pipeline]
+  Scan -->|Immediate calls only| Prepare[Prepare each call]
+  Prepare --> Lock[Read/write lock]
+  Lock --> Immediate[Immediate call pipeline]
 ```
 
 ## `schedule()` 的执行流程
@@ -155,9 +156,18 @@ flowchart TD
 
 - 混合批次：所有调用依次发出 `started`、`failed` 回调，整批不执行；
 - 单个延迟调用：校验输入，成功后进入 `pending` 并发出 `onToolDeferred`；
-- 仅含立即调用：按照模型响应中的顺序逐个调度。
+- 仅含立即调用：先解析全部参数和调用能力，再在并发上限内调度。
 
-顺序执行让文件修改、Shell 命令等副作用保持模型给出的先后关系，事件顺序也与调用顺序一致。某个立即工具失败后，后续调用仍会继续处理。混合延迟批次是批次级失败，不进入逐调用执行阶段。
+调度器按模型调用顺序返回结果。确认安全的只读调用可以并发执行；写入、未知调用或能力声明不完整的调用使用独占锁，因此不会与任何其他工具交错。某个立即工具失败后，后续调用仍会继续处理。混合延迟批次是批次级失败，不进入逐调用执行阶段。
+
+### 并发与读写锁
+
+参数结构校验和能力判断在真正执行前完成。只有工具明确声明为可并发、只读且不会修改数据时，
+调度器才为它取得共享锁；其余调用一律取得独占锁。锁按 `AgentEnvironment` 共享，因此即使
+不同 Agent 运行同时使用同一环境，写操作也不会越过正在执行或已经排队的读取操作。
+
+模型不需要调用批处理或并行包装工具。只要将相互独立的原生工具调用放在同一条模型响应中，
+调度器会根据以上规则安排执行。
 
 ### 立即工具路径
 
@@ -283,7 +293,7 @@ sequenceDiagram
 2. 输入先于审批和执行完成校验，批准后执行时再次校验。
 3. `required` 和 `deferred` 分支在当前 run 中不产生工具副作用。
 4. 已结束的调用产生 `tool-result`；挂起调用在恢复时补结果。
-5. 立即调用按模型响应顺序执行，单个调用失败不会停止后续调用。
+5. 工具结果按模型响应顺序返回；安全只读调用可以并发，其他调用与全部工具互斥。
 6. 混合延迟批次在副作用发生前整批失败。
 7. 所有工具执行都取得 `runId`、回合、环境、metadata 和取消信号。
 
@@ -291,12 +301,11 @@ sequenceDiagram
 
 | 文件                                                                                      | 内容                                       |
 | ----------------------------------------------------------------------------------------- | ------------------------------------------ |
-| [`tool-scheduler.ts`](../../packages/ello-agent/src/agent/engine/core/tool-scheduler.ts)  | 调度主流程、审批分支、立即执行与批次预检   |
-| [`tool-execution.ts`](../../packages/ello-agent/src/agent/engine/core/tool-execution.ts)  | 事件回调适配与 deferred queue 入队         |
-| [`run-session.ts`](../../packages/ello-agent/src/agent/engine/core/run-session.ts)        | 调度器装配、回合结算与停止条件             |
-| [`resume.ts`](../../packages/ello-agent/src/agent/engine/core/resume.ts)                  | 批准后的工具执行与结果回填                 |
-| [`run-control.ts`](../../packages/ello-agent/src/agent/engine/core/run-control.ts)        | 挂起状态和恢复消息配对                     |
-| [`tool-messages.ts`](../../packages/ello-agent/src/agent/engine/core/tool-messages.ts)    | tool-call/tool-result 消息编码             |
+| [`tool-scheduler.ts`](../../packages/ello-agent/src/features/agent/engine/tool-scheduler.ts) | 调度主流程、审批分支、立即执行与批次预检 |
+| [`tool-execution-gate.ts`](../../packages/ello-agent/src/features/agent/engine/tool-execution-gate.ts) | 环境级读写锁与取消处理 |
+| [`run-state.ts`](../../packages/ello-agent/src/features/agent/engine/run-state.ts) | 调度器装配、回合结算与停止条件 |
+| [`run-control.ts`](../../packages/ello-agent/src/features/agent/engine/run-control.ts) | 挂起状态和恢复消息配对 |
+| [`tools.ts`](../../packages/ello-agent/src/features/agent/engine/tools.ts) | 工具调用与结果消息编码 |
 | [`tool-scheduler.test.ts`](../../packages/ello-agent/tests/engine/tool-scheduler.test.ts) | 输入复验、审批异常、延迟工具和混合批次测试 |
 
 相关架构说明：

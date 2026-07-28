@@ -20,6 +20,7 @@ import {
   createCodingToolResult,
   defineCodingTool,
 } from './runtime/coding-tool.js';
+import { SessionFileState } from './runtime/file-state.js';
 import {
   findNearestLine,
   requireFs,
@@ -46,17 +47,22 @@ import {
 export function createFsTools(
   config: CodingAgentConfig,
   decide: DecideApproval,
+  fileState: SessionFileState = new SessionFileState(),
 ) {
-  const readCache = new Map<string, CachedRead>();
   return [
     defineCodingTool({
       name: 'read',
-      // 无副作用只读工具：允许与同批其他只读调用并发执行。
-      concurrency: 'parallel',
+      capabilities: () => ({
+        concurrencySafe: true,
+        readOnly: true,
+        destructive: false,
+        interruptible: true,
+        telemetryTag: 'filesystem.read',
+      }),
       description: `Read a UTF-8 text file, or list one directory, at 'filePath'.
 File output is line-numbered in a right-aligned gutter followed by two spaces; the gutter is display only, so never copy it into edit or apply_patch. 'offset' is the 1-based first line or directory entry and 'limit' the maximum number of lines or entries, default 400 and at most 2000; the result reports the returned range and total count so you can page with successive offsets. Re-reading the same unchanged file range returns a short unchanged marker instead of duplicating content already present in the thread. A directory path returns a sorted, non-recursive listing of 'name<TAB>kind<TAB>size'. A binary file returns a byte count and is attached as an artifact rather than inlined.
 A missing path, an unreadable path, or a path outside the allowed roots fails the call. Very long output is centrally reduced to a bounded head/tail preview while the complete result is retained as an artifact.
-Read a file before editing it: edit and apply_patch match text literally, so they need the exact current content. Use grep to find which file contains some text, and glob to find files by name. Independent read, grep, and glob calls can be issued together in one model response and will run concurrently.`,
+Read a file before editing it: edit and apply_patch match text literally, so they need the exact current content. Use grep to find which file contains some text, and glob to find files by name. Put independent read, grep, and glob calls directly in the same model response; the runtime schedules safe calls concurrently without a wrapper tool.`,
       discovery: { aliases: ['file', 'directory', 'cat'], risk: 'readonly' },
       input: z
         .object({
@@ -133,13 +139,11 @@ Read a file before editing it: edit and apply_patch match text literally, so the
           });
         }
         const sourceStat = await stat(absolutePath);
-        const cacheKey = readCacheKey(absolutePath, offset, limit);
-        const cached = readCache.get(cacheKey);
-        if (
-          cached !== undefined &&
-          cached.mtimeMs === sourceStat.mtimeMs &&
-          cached.size === sourceStat.size
-        ) {
+        const cached = fileState.unchanged(absolutePath, sourceStat, {
+          offset,
+          limit,
+        });
+        if (cached !== undefined) {
           return createCodingToolResult({
             title: `Unchanged ${targetPath}`,
             output: `File unchanged since the previous read of ${targetPath} lines ${cached.lineStart}-${cached.lineEnd}. Reuse the earlier content already present in this thread.`,
@@ -196,13 +200,17 @@ Read a file before editing it: edit and apply_patch match text literally, so the
         ]
           .filter((part) => part !== '')
           .join('\n');
-        readCache.set(cacheKey, {
-          mtimeMs: stableRead.version.mtimeMs,
-          size: stableRead.version.size,
-          lineStart: offset,
-          lineEnd,
-          totalLines: lines.length,
-        });
+        fileState.record(
+          absolutePath,
+          stableRead.version,
+          { offset, limit },
+          {
+            size: stableRead.version.size,
+            lineStart: offset,
+            lineEnd,
+            totalLines: lines.length,
+          },
+        );
         return createCodingToolResult({
           title: `Read ${targetPath}`,
           output: modelOutput,
@@ -416,14 +424,6 @@ Boundaries: use write to create a single new file, edit for one fragment in one 
   ];
 }
 
-interface CachedRead {
-  readonly mtimeMs: number;
-  readonly size: number;
-  readonly lineStart: number;
-  readonly lineEnd: number;
-  readonly totalLines: number;
-}
-
 interface FileVersion {
   readonly mtimeMs: number;
   readonly size: number;
@@ -447,14 +447,6 @@ async function readStableFile(
     before = after;
   }
   throw new Error(`File changed while it was being read: ${absolutePath}`);
-}
-
-function readCacheKey(
-  absolutePath: string,
-  offset: number,
-  limit: number,
-): string {
-  return `${absolutePath}\u0000${offset}\u0000${limit}`;
 }
 
 /**
