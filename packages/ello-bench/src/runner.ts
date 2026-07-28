@@ -39,6 +39,7 @@ export async function runBenchmarkJob(options: {
   let containerName: string | undefined;
   let phase = 'prepare-attempt';
   let pendingFailure: InfrastructureFailure | undefined;
+  let closeFailure: InfrastructureFailure | undefined;
   const rawRoot = path.join(manifest.attemptRoot, 'raw');
   const rawAgentRoot = path.join(rawRoot, 'agent');
   const taskEvidenceRoot = path.join(rawRoot, 'task');
@@ -151,7 +152,7 @@ export async function runBenchmarkJob(options: {
         requiredPreparedAgent(preparedAgent).close(),
       );
     } catch (error) {
-      pendingFailure ??= failureForError(phase, error);
+      closeFailure = failureForError(phase, error);
     }
     manifest = await transitionRun(manifest, 'capturing', {
       phase: 'capture-evidence',
@@ -170,11 +171,12 @@ export async function runBenchmarkJob(options: {
     if (pendingFailure !== undefined || execution === undefined) {
       return await invalidateRun(
         await updateRun(manifest, { patch, phase }),
-        pendingFailure ?? {
-          kind: 'agent_process',
-          phase,
-          message: 'Agent process result is missing.',
-        },
+        pendingFailure ??
+          closeFailure ?? {
+            kind: 'agent_process',
+            phase,
+            message: 'Agent process result is missing.',
+          },
       );
     }
 
@@ -225,6 +227,23 @@ export async function runBenchmarkJob(options: {
           phase: 'agent-model-call',
           message: requiredProviderFailureMessage(normalized),
         },
+      );
+    }
+    if (closeFailure !== undefined) {
+      return await invalidateRun(
+        await updateRun(manifest, {
+          phase,
+          ...(normalized === undefined
+            ? {}
+            : {
+                agentRuntime: normalized.runtime,
+                agentEvidence: normalized.evidenceArtifact,
+                toolAudit: normalized.toolAuditArtifact,
+              }),
+          ...(evidenceDegradation === undefined ? {} : { evidenceDegradation }),
+          patch,
+        }),
+        closeFailure,
       );
     }
 

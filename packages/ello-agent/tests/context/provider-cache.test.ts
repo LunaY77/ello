@@ -155,6 +155,18 @@ describe('provider cache transforms', () => {
     ).toBeUndefined();
   });
 
+  it('keeps official OpenAI Responses requests stateless', () => {
+    expect(providerOptionsFromRuntimeModel(runtimeModel('openai'))).toEqual({
+      openai: { store: false },
+    });
+    expect(
+      providerOptionsFromRuntimeModel({
+        ...runtimeModel('openai'),
+        endpoint: 'chat',
+      }),
+    ).toBeUndefined();
+  });
+
   it('puts Anthropic cache breakpoints in instructions, never conversation messages', () => {
     const transformed = prepareModelInputForRuntimeModel(
       runtimeModel('anthropic'),

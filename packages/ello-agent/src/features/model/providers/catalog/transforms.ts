@@ -73,26 +73,30 @@ export function modelSettingsFromRuntimeModel(
 }
 
 /**
- * 把 runtime model 的协议专用思考强度转换为 provider options。
+ * 把 runtime model 的协议专用状态与思考强度转换为 provider options。
  *
  * Args:
  * - `model`: 已解析并固定协议的 runtime model。
  *
  * Returns:
+ * - OpenAI Responses 模型关闭服务端状态，避免兼容代理跨请求引用失效的 item ID。
  * - DeepSeek Anthropic 兼容模型返回原生 thinking 与 effort；其他模型返回 `undefined`。
  */
 export function providerOptionsFromRuntimeModel(
   model: RuntimeModel,
 ): AgentProviderOptions | undefined {
-  if (model.protocol !== 'anthropic' || !isDeepSeekModel(model)) {
-    return undefined;
+  if (model.protocol === 'openai' && model.endpoint === 'responses') {
+    return { openai: { store: false } };
   }
-  return {
-    anthropic: {
-      thinking: { type: 'enabled', budgetTokens: 1_024 },
-      effort: model.reasoningEffort,
-    },
-  };
+  if (model.protocol === 'anthropic' && isDeepSeekModel(model)) {
+    return {
+      anthropic: {
+        thinking: { type: 'enabled', budgetTokens: 1_024 },
+        effort: model.reasoningEffort,
+      },
+    };
+  }
+  return undefined;
 }
 
 function isDeepSeekModel(model: RuntimeModel): boolean {
