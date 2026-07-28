@@ -28,6 +28,7 @@ const socketPath = required(values.socket, '--socket');
 const workspace = required(values.workspace, '--workspace');
 const runtime = requiredRuntime(values.runtime);
 const rawRoot = required(values['raw-root'], '--raw-root');
+const hasParentChannel = typeof process.send === 'function';
 await mkdir(rawRoot, { recursive: true });
 const shellLogPath = path.join(rawRoot, 'shell-events.jsonl');
 let shellWrites = Promise.resolve();
@@ -79,11 +80,19 @@ await new Promise<void>((resolve) => {
       );
       process.exitCode = 1;
     } finally {
+      if (process.connected) process.disconnect();
       resolve();
     }
   };
   process.once('SIGTERM', () => void close('SIGTERM'));
   process.once('SIGINT', () => void close('SIGINT'));
+  if (hasParentChannel) {
+    if (process.connected) {
+      process.once('disconnect', () => void close('parent-disconnect'));
+    } else {
+      void close('parent-disconnect');
+    }
+  }
 });
 
 function required(value: string | undefined, option: string): string {

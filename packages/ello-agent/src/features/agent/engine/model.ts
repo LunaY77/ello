@@ -215,6 +215,25 @@ export async function callModel(
   run: RunState,
   input: ModelInput,
 ): Promise<ModelCallResult> {
+  return callModelAttempt(run, input, 0);
+}
+
+/**
+ * 执行单次可观察模型尝试，并对瞬时传输错误进行有界恢复。
+ *
+ * Args:
+ * - `run`: 当前 run 状态、事件发布器和模型 adapter。
+ * - `input`: 已完成 system、message、tool 与 provider option 装配的模型输入。
+ * - `retryAttempt`: 已经执行的恢复次数，用于选择固定退避并限制总尝试数。
+ *
+ * Returns:
+ * - 返回最终模型响应；中断时只返回 `stopReason`。
+ */
+async function callModelAttempt(
+  run: RunState,
+  input: ModelInput,
+  retryAttempt: number,
+): Promise<ModelCallResult> {
   if (run.signal.aborted) {
     interruptRunState(run);
     return { stopReason: 'interrupted' };
@@ -356,6 +375,14 @@ export async function callModel(
       diagnostics: modelCallDiagnostics(diagnostics),
       startedAt,
     });
+    const retryDelay = MODEL_STREAM_RETRY_DELAYS_MS[retryAttempt];
+    if (retryDelay !== undefined && isTransientModelError(error)) {
+      if (!(await waitForModelRetry(retryDelay, run.signal))) {
+        interruptRunState(run);
+        return { stopReason: 'interrupted' };
+      }
+      return callModelAttempt(run, input, retryAttempt + 1);
+    }
     throw error;
   }
 }
@@ -490,4 +517,90 @@ function isAbortError(error: unknown): boolean {
     error instanceof Error &&
     (error.name === 'AbortError' || error.name === 'TimeoutError')
   );
+}
+
+const MODEL_STREAM_RETRY_DELAYS_MS = [250, 1_000] as const;
+const TRANSIENT_MODEL_ERROR_CODES: ReadonlySet<string> = new Set([
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ENETDOWN',
+  'ENETUNREACH',
+  'EPIPE',
+  'ETIMEDOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_RES_CONTENT_LENGTH_MISMATCH',
+  'UND_ERR_SOCKET',
+]);
+
+/**
+ * 沿 Error cause 链识别允许重放当前无工具副作用模型请求的瞬时故障。
+ *
+ * Args:
+ * - `error`: provider 或 HTTP runtime 抛出的原始异常。
+ *
+ * Returns:
+ * - 明确标记 retryable、常见瞬时状态码或传输错误码时返回 `true`。
+ */
+function isTransientModelError(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (
+    typeof current === 'object' &&
+    current !== null &&
+    !seen.has(current)
+  ) {
+    seen.add(current);
+    if (Reflect.get(current, 'isRetryable') === true) return true;
+    const code = Reflect.get(current, 'code');
+    if (typeof code === 'string' && TRANSIENT_MODEL_ERROR_CODES.has(code)) {
+      return true;
+    }
+    const status =
+      Reflect.get(current, 'statusCode') ?? Reflect.get(current, 'status');
+    if (
+      typeof status === 'number' &&
+      (status === 408 ||
+        status === 409 ||
+        status === 425 ||
+        status === 429 ||
+        status >= 500)
+    ) {
+      return true;
+    }
+    current = Reflect.get(current, 'cause');
+  }
+  return false;
+}
+
+/**
+ * 等待模型重试退避，并让用户中断立即抢占等待。
+ *
+ * Args:
+ * - `delayMs`: 本次恢复前的等待毫秒数。
+ * - `signal`: 当前 run 的取消信号。
+ *
+ * Returns:
+ * - 等待完成返回 `true`；期间收到取消返回 `false`。
+ */
+function waitForModelRetry(
+  delayMs: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+    const complete = (result: boolean): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      resolve(result);
+    };
+    const onAbort = (): void => complete(false);
+    const timer = setTimeout(() => complete(true), delayMs);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }

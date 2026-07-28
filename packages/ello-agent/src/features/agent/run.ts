@@ -353,6 +353,11 @@ class RunningAgent implements AgentRun {
       case 'model.completed':
         this.completeOpenMessages();
         return;
+      case 'model.failed':
+        // 重试会启动新的 assistant message；先关闭当前部分消息，避免客户端
+        // 永久保留 in-progress item。
+        this.completeOpenMessages();
+        return;
       case 'queue.drained':
         if (event.queue === 'steering') {
           this.publishConsumedSteers(event.count, event.occurredAt);
@@ -364,7 +369,6 @@ class RunningAgent implements AgentRun {
       case 'turn.completed':
       case 'model.started':
       case 'model.first_token':
-      case 'model.failed':
       case 'tool.approval_requested':
       case 'run.interrupted':
         return;

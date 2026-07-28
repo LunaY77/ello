@@ -62,6 +62,13 @@ export function normalizeEventCaptureSource(
   }
   if (order.length === 0) throw new Error('Event capture contains no model call.');
   const toolGroups = normalizeElloTools(captures, allowIncomplete);
+  const toolOwnerByTurn = new Map<number, string>();
+  for (const id of order) {
+    if (!completed.has(id)) continue;
+    const start = starts.get(id);
+    if (start === undefined) throw new Error(`Missing model start: ${id}`);
+    toolOwnerByTurn.set(modelTurnIndex(start), id);
+  }
   const rounds = order.map((id, index) => {
     const start = starts.get(id);
     if (start === undefined) throw new Error(`Missing model start: ${id}`);
@@ -74,16 +81,27 @@ export function normalizeEventCaptureSource(
       index + 1,
       start,
       terminal,
-      toolGroups.byTurn.get(turnIndex) ?? [],
+      toolOwnerByTurn.get(turnIndex) === id
+        ? (toolGroups.byTurn.get(turnIndex) ?? [])
+        : [],
     );
   });
   for (const id of [...completed.keys(), ...failed.keys()]) {
     if (!starts.has(id)) throw new Error(`Model terminal event has no start: ${id}`);
   }
+  const terminalRun = captures.findLast(
+    (capture) =>
+      capture.event === 'run.completed' ||
+      capture.event === 'run.failed' ||
+      capture.event === 'run.interrupted',
+  );
   return {
     rounds,
     usage: aggregateUsage(rounds),
-    providerFailure: failed.size > 0,
+    providerFailure:
+      terminalRun === undefined
+        ? failed.size > 0
+        : terminalRun.event === 'run.failed',
     tools: toolGroups.tools,
   };
 }
@@ -133,7 +151,7 @@ function createRound(
       ...base,
       completedAt,
       status: 'failed',
-      error: `${requiredString(error.name, 'error name')}: ${requiredString(error.message, 'error message')}`,
+      error: modelFailureMessage(error),
       usage: {
         status: 'unavailable',
         reason: 'Ello provider failure did not return complete usage evidence.',
@@ -175,6 +193,16 @@ function createRound(
         ? null
         : elapsedMilliseconds(startedAt, firstTokenAt),
   });
+}
+
+function modelFailureMessage(error: Record<string, unknown>): string {
+  const message = `${requiredString(error.name, 'error name')}: ${requiredString(error.message, 'error message')}`;
+  const cause = error.cause;
+  if (typeof cause !== 'object' || cause === null) return message;
+  const code = Reflect.get(cause, 'code');
+  return typeof code === 'string' && code !== ''
+    ? `${message} [${code}]`
+    : message;
 }
 
 function normalizeElloTools(

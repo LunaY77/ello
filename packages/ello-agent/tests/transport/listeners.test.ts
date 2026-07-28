@@ -4,6 +4,8 @@
  * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
  * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
  */
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { request as httpRequest, type RequestOptions } from 'node:http';
 import { createConnection, createServer as createNetServer } from 'node:net';
@@ -163,6 +165,52 @@ describe('App Server network listeners', () => {
     await listener.close();
     listener = undefined;
     await expect(waitForClose(client)).resolves.toBeUndefined();
+  });
+
+  it('Unix listener 回收崩溃进程留下的陈旧 socket', async () => {
+    const socketPath = join(root, 'stale.sock');
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        `require('node:net').createServer().listen(${JSON.stringify(socketPath)}, () => process.stdout.write('ready\\n'))`,
+      ],
+      { stdio: ['ignore', 'pipe', 'inherit'] },
+    );
+    await once(child.stdout, 'data');
+    child.kill('SIGKILL');
+    await once(child, 'exit');
+    expect((await stat(socketPath)).isSocket()).toBe(true);
+
+    listener = await listenEndpoint({
+      endpoint: `unix://${socketPath}`,
+      capabilities: ['read'],
+      server,
+    });
+
+    await expect(readHealth({ socketPath, path: '/healthz' })).resolves.toEqual(
+      { statusCode: 200, body: { status: 'ready' } },
+    );
+  });
+
+  it('Unix listener 不会删除仍有活动进程监听的 socket', async () => {
+    const socketPath = join(root, 'active.sock');
+    listener = await listenEndpoint({
+      endpoint: `unix://${socketPath}`,
+      capabilities: ['read'],
+      server,
+    });
+
+    await expect(
+      listenEndpoint({
+        endpoint: `unix://${socketPath}`,
+        capabilities: ['read'],
+        server,
+      }),
+    ).rejects.toThrow('already has an active listener');
+    await expect(readHealth({ socketPath, path: '/healthz' })).resolves.toEqual(
+      { statusCode: 200, body: { status: 'ready' } },
+    );
   });
 });
 

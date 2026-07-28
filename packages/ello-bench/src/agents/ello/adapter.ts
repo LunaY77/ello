@@ -218,7 +218,9 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
             toolAudit: audit,
             toolAuditArtifact: artifacts.toolAuditArtifact,
             providerFailure: normalized.providerFailure,
-            providerFailureMessage: providerFailureMessage(normalized.rounds),
+            providerFailureMessage: normalized.providerFailure
+              ? providerFailureMessage(normalized.rounds)
+              : null,
           };
         },
       };

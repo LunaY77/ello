@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,7 +11,10 @@ const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
 );
-type ServerChild = ChildProcessByStdio<null, Readable, Readable>;
+type ServerChild = ChildProcess & {
+  readonly stdout: Readable;
+  readonly stderr: Readable;
+};
 
 export interface BenchmarkServerProcess {
   readonly endpoint: string;
@@ -48,7 +51,7 @@ export async function startBenchmarkServerProcess(
     mkdir(path.dirname(options.stdoutPath), { recursive: true }),
     mkdir(path.dirname(options.stderrPath), { recursive: true }),
   ]);
-  const child = spawn(
+  const spawned = spawn(
     process.execPath,
     [
       entry,
@@ -77,10 +80,16 @@ export async function startBenchmarkServerProcess(
       cwd: options.workspace,
       env: { ...process.env, ELLO_HOME: options.elloHome },
       detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // IPC channel closes with the benchmark parent, allowing server-entry to
+      // release its listener even when the parent is interrupted or killed.
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'] as const,
       windowsHide: true,
     },
   );
+  if (spawned.stdout === null || spawned.stderr === null) {
+    throw new Error('Benchmark server did not create output pipes.');
+  }
+  const child = spawned as ServerChild;
   if (child.pid === undefined)
     throw new Error('Benchmark server has no process id.');
   const stdout = createWriteStream(options.stdoutPath, { flags: 'w' });
