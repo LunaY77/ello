@@ -38,6 +38,12 @@ export interface ThreadGoalRuntime {
 export function createThreadGoalRuntime(
   initialGoal: Goal | null,
 ): ThreadGoalRuntime {
+  if (initialGoal === null || initialGoal.status !== 'active') {
+    return {
+      tools: [],
+      systemSection: () => null,
+    };
+  }
   let currentGoal = initialGoal;
   return {
     systemSection: () => renderGoalSection(currentGoal),

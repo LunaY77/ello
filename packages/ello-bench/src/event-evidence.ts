@@ -56,7 +56,7 @@ export async function validateEventEvidence(
     throw new Error(`Event capture lifecycle count mismatch: ${eventLogPath}`);
   }
   if (
-    actualCounts.runCount !== 1 ||
+    actualCounts.runCount < 1 ||
     actualCounts.turnCount < 1 ||
     actualCounts.modelCallCount < 1
   ) {
@@ -66,7 +66,9 @@ export async function validateEventEvidence(
   }
   // 校验序号集合本身完整（无重复、无缺口），而不是文件物理行序。行序由异步
   // 落盘决定，把它当作序号顺序的代理会把可恢复的写入乱序判成证据损坏。
-  const sequences = captures.map((capture) => capture.sequence).sort((a, b) => a - b);
+  const sequences = captures
+    .map((capture) => capture.sequence)
+    .sort((a, b) => a - b);
   for (const [index, sequence] of sequences.entries()) {
     if (sequence === index + 1) continue;
     const previous = sequences[index - 1];

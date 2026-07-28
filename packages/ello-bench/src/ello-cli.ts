@@ -17,6 +17,7 @@ export async function runElloCli(options: {
   readonly workspace: string;
   readonly elloHome: string;
   readonly instruction: string;
+  readonly threadId?: string;
   readonly timeoutMs: number;
   readonly stdoutPath: string;
   readonly stderrPath: string;
@@ -41,6 +42,7 @@ export async function runElloCli(options: {
       'run',
       '--mode',
       'bypass',
+      ...(options.threadId === undefined ? [] : ['--thread', options.threadId]),
       options.instruction,
     ],
     {

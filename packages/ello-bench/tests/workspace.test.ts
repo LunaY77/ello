@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import type { ResolvedTask } from '../src/contracts.js';
+import { cloneLocalWorkspace } from '../src/local-workspace.js';
 import { runChecked } from '../src/process.js';
 import type { ResolvedTaskFiles } from '../src/suite.js';
 import {
@@ -69,10 +70,71 @@ describe('task container Docker arguments', () => {
 });
 
 describe('local task workspace', () => {
+  it('serializes mirror updates while validating each requested revision', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-git-mirror-race-'));
+    const repository = path.join(root, 'repository');
+    const cacheRoot = path.join(root, 'git-cache');
+    try {
+      await git(['init', repository], root);
+      await git(['-C', repository, 'config', 'user.name', 'Benchmark'], root);
+      await git(
+        ['-C', repository, 'config', 'user.email', 'benchmark@example.test'],
+        root,
+      );
+      await writeFile(path.join(repository, 'README.md'), 'base\n', 'utf8');
+      await git(['-C', repository, 'add', 'README.md'], root);
+      await git(['-C', repository, 'commit', '-m', 'base'], root);
+      const baseRevision = (
+        await git(['-C', repository, 'rev-parse', 'HEAD'], root)
+      ).trim();
+      await cloneLocalWorkspace({
+        repository,
+        revision: baseRevision,
+        workspace: path.join(root, 'seed-workspace'),
+        cacheRoot,
+      });
+
+      await writeFile(path.join(repository, 'SECOND.md'), 'second\n', 'utf8');
+      await git(['-C', repository, 'add', 'SECOND.md'], root);
+      await git(['-C', repository, 'commit', '-m', 'second'], root);
+      const secondRevision = (
+        await git(['-C', repository, 'rev-parse', 'HEAD'], root)
+      ).trim();
+
+      const baseWorkspace = path.join(root, 'base-workspace');
+      const secondWorkspace = path.join(root, 'second-workspace');
+      await Promise.all([
+        cloneLocalWorkspace({
+          repository,
+          revision: baseRevision,
+          workspace: baseWorkspace,
+          cacheRoot,
+        }),
+        cloneLocalWorkspace({
+          repository,
+          revision: secondRevision,
+          workspace: secondWorkspace,
+          cacheRoot,
+        }),
+      ]);
+
+      expect(
+        await readFile(path.join(baseWorkspace, 'README.md'), 'utf8'),
+      ).toBe('base\n');
+      expect(
+        await readFile(path.join(secondWorkspace, 'SECOND.md'), 'utf8'),
+      ).toBe('second\n');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('clones the pinned repository and applies the public test patch', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ello-local-workspace-'));
     const repository = path.join(root, 'repository');
     const workspace = path.join(root, 'workspace');
+    const secondWorkspace = path.join(root, 'workspace-from-cache');
+    const gitCacheRoot = path.join(root, 'git-cache');
     await git(['init', repository], root);
     await git(['-C', repository, 'config', 'user.name', 'Benchmark'], root);
     await git(
@@ -105,6 +167,7 @@ describe('local task workspace', () => {
     const prepared = await prepareTaskWorkspace({
       attemptId: 'a'.repeat(24),
       workspace,
+      gitCacheRoot,
       taskFiles,
       runtime: 'local',
     });
@@ -115,6 +178,19 @@ describe('local task workspace', () => {
     );
     expect(prepared.initialGitStatus).toBe(' M README.md\n');
     expect(prepared.baselineTree).toMatch(/^[0-9a-f]{40,64}$/u);
+
+    await rm(repository, { recursive: true, force: true });
+    const cached = await prepareTaskWorkspace({
+      attemptId: 'b'.repeat(24),
+      workspace: secondWorkspace,
+      gitCacheRoot,
+      taskFiles,
+      runtime: 'local',
+    });
+    expect(cached.runtime).toBe('local');
+    expect(
+      await readFile(path.join(secondWorkspace, 'README.md'), 'utf8'),
+    ).toBe('public test patch\n');
   });
 });
 

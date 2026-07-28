@@ -39,6 +39,7 @@ export type PreparedVerifierWorkspace = PreparedVerifierWorkspaceBase &
 export async function prepareVerifierWorkspace(options: {
   readonly attemptId: string;
   readonly harnessRoot: string;
+  readonly gitCacheRoot: string;
   readonly taskFiles: ResolvedTaskFiles;
   readonly patch: PatchArtifact;
   readonly runtime: 'docker' | 'local';
@@ -74,6 +75,7 @@ export async function prepareVerifierWorkspace(options: {
       repository: task.repositoryUrl,
       revision: task.baseCommitHash,
       workspace,
+      cacheRoot: options.gitCacheRoot,
     });
     await suite.prepareWorkspace(workspace, options.taskFiles, 'repository');
   }

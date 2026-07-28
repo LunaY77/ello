@@ -18,6 +18,7 @@ import { prepareVerifierWorkspace } from './verifier-workspace.js';
 export async function runVerifier(options: {
   readonly attemptId: string;
   readonly harnessRoot: string;
+  readonly gitCacheRoot: string;
   readonly taskFiles: ResolvedTaskFiles;
   readonly patch: PatchArtifact;
   readonly runtime: 'docker' | 'local';

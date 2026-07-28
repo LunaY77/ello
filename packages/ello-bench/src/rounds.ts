@@ -43,7 +43,8 @@ export function normalizeEventCaptureSource(
   for (const capture of captures) {
     if (capture.event === 'model.started') {
       const id = modelCallId(capture);
-      if (starts.has(id)) throw new Error(`Duplicate model.started event: ${id}`);
+      if (starts.has(id))
+        throw new Error(`Duplicate model.started event: ${id}`);
       starts.set(id, capture);
       order.push(id);
     } else if (capture.event === 'model.completed') {
@@ -60,14 +61,15 @@ export function normalizeEventCaptureSource(
       failed.set(id, capture);
     }
   }
-  if (order.length === 0) throw new Error('Event capture contains no model call.');
+  if (order.length === 0)
+    throw new Error('Event capture contains no model call.');
   const toolGroups = normalizeElloTools(captures, allowIncomplete);
-  const toolOwnerByTurn = new Map<number, string>();
+  const toolOwnerByTurn = new Map<string, string>();
   for (const id of order) {
     if (!completed.has(id)) continue;
     const start = starts.get(id);
     if (start === undefined) throw new Error(`Missing model start: ${id}`);
-    toolOwnerByTurn.set(modelTurnIndex(start), id);
+    toolOwnerByTurn.set(modelTurnKey(start), id);
   }
   const rounds = order.map((id, index) => {
     const start = starts.get(id);
@@ -76,18 +78,19 @@ export function normalizeEventCaptureSource(
     if (terminal === undefined && !allowIncomplete) {
       throw new Error(`Incomplete model call without client timeout: ${id}`);
     }
-    const turnIndex = modelTurnIndex(start);
+    const turnKey = modelTurnKey(start);
     return createRound(
       index + 1,
       start,
       terminal,
-      toolOwnerByTurn.get(turnIndex) === id
-        ? (toolGroups.byTurn.get(turnIndex) ?? [])
+      toolOwnerByTurn.get(turnKey) === id
+        ? (toolGroups.byTurn.get(turnKey) ?? [])
         : [],
     );
   });
   for (const id of [...completed.keys(), ...failed.keys()]) {
-    if (!starts.has(id)) throw new Error(`Model terminal event has no start: ${id}`);
+    if (!starts.has(id))
+      throw new Error(`Model terminal event has no start: ${id}`);
   }
   const terminalRun = captures.findLast(
     (capture) =>
@@ -120,7 +123,10 @@ function createRound(
     requestId: requiredString(identity.modelCallId, 'model call id'),
     agentName: requiredString(identity.agentName, 'agent name'),
     modelSelector: requiredModelSelector(identity.modelSelector),
-    configuredModel: requiredString(identity.configuredModel, 'configured model'),
+    configuredModel: requiredString(
+      identity.configuredModel,
+      'configured model',
+    ),
     protocol: requiredModelProtocol(identity.protocol),
     apiModel: requiredString(identity.apiModel, 'api model'),
     startedAt,
@@ -174,8 +180,14 @@ function createRound(
     usage: {
       status: 'complete',
       requests: 1,
-      inputTokens: requiredNonnegativeInteger(usage.inputTokens, 'input tokens'),
-      outputTokens: requiredNonnegativeInteger(usage.outputTokens, 'output tokens'),
+      inputTokens: requiredNonnegativeInteger(
+        usage.inputTokens,
+        'input tokens',
+      ),
+      outputTokens: requiredNonnegativeInteger(
+        usage.outputTokens,
+        'output tokens',
+      ),
       cacheReadTokens: requiredNonnegativeInteger(
         usage.cacheReadTokens,
         'cache read tokens',
@@ -210,24 +222,26 @@ function normalizeElloTools(
   allowIncomplete: boolean,
 ): {
   readonly tools: readonly NormalizedToolCall[];
-  readonly byTurn: ReadonlyMap<number, readonly NormalizedToolCall[]>;
+  readonly byTurn: ReadonlyMap<string, readonly NormalizedToolCall[]>;
 } {
   const starts = new Map<string, EventCapture>();
   const terminals = new Map<string, EventCapture>();
   for (const capture of captures) {
     if (capture.event === 'tool.started') {
       const id = requiredString(capture.payload.toolCallId, 'tool call id');
-      if (starts.has(id)) throw new Error(`Duplicate tool.started event: ${id}`);
+      if (starts.has(id))
+        throw new Error(`Duplicate tool.started event: ${id}`);
       starts.set(id, capture);
     }
     if (capture.event === 'tool.completed' || capture.event === 'tool.failed') {
       const id = requiredString(capture.payload.toolCallId, 'tool call id');
-      if (terminals.has(id)) throw new Error(`Duplicate tool terminal event: ${id}`);
+      if (terminals.has(id))
+        throw new Error(`Duplicate tool terminal event: ${id}`);
       terminals.set(id, capture);
     }
   }
   const tools: NormalizedToolCall[] = [];
-  const byTurn = new Map<number, NormalizedToolCall[]>();
+  const byTurn = new Map<string, NormalizedToolCall[]>();
   for (const [id, start] of starts) {
     const terminal = terminals.get(id);
     if (terminal === undefined && !allowIncomplete) {
@@ -235,7 +249,10 @@ function normalizeElloTools(
     }
     const name = requiredString(start.payload.name, 'tool name');
     const input = requiredRecord(start.payload.input, 'tool input');
-    const startedAt = requiredString(start.payload.occurredAt, 'tool startedAt');
+    const startedAt = requiredString(
+      start.payload.occurredAt,
+      'tool startedAt',
+    );
     const completedAt =
       terminal === undefined
         ? null
@@ -249,13 +266,14 @@ function normalizeElloTools(
       completedAt,
     });
     tools.push(tool);
-    const turnIndex = requiredInteger(start.payload.turnIndex, 'tool turn index');
-    const current = byTurn.get(turnIndex) ?? [];
+    const turnKey = eventTurnKey(start, 'tool');
+    const current = byTurn.get(turnKey) ?? [];
     current.push(tool);
-    byTurn.set(turnIndex, current);
+    byTurn.set(turnKey, current);
   }
   for (const id of terminals.keys()) {
-    if (!starts.has(id)) throw new Error(`Tool terminal event has no start: ${id}`);
+    if (!starts.has(id))
+      throw new Error(`Tool terminal event has no start: ${id}`);
   }
   return { tools, byTurn };
 }
@@ -320,7 +338,9 @@ function normalizeElloTool(options: {
       ...common,
       category: 'edit',
       command: null,
-      paths: patchPaths(requiredString(options.input.patch, 'apply_patch input')),
+      paths: patchPaths(
+        requiredString(options.input.patch, 'apply_patch input'),
+      ),
       mutating: true,
     };
   }
@@ -334,9 +354,9 @@ function normalizeElloTool(options: {
 }
 
 function patchPaths(source: string): string[] {
-  const paths = [...source.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gmu)].map(
-    (match) => requiredString(match[1], 'apply_patch file path'),
-  );
+  const paths = [
+    ...source.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gmu),
+  ].map((match) => requiredString(match[1], 'apply_patch file path'));
   if (paths.length === 0) throw new Error('apply_patch contains no file path.');
   return paths;
 }
@@ -359,14 +379,29 @@ function modelCallId(capture: EventCapture): string {
   return requiredString(identity.modelCallId, 'model call id');
 }
 
-function modelTurnIndex(capture: EventCapture): number {
+function modelTurnKey(capture: EventCapture): string {
   const identity = requiredRecord(capture.payload.identity, 'model identity');
-  return requiredInteger(identity.turnIndex, 'model turn index');
+  return turnKey(
+    requiredString(identity.runId, 'model run id'),
+    requiredInteger(identity.turnIndex, 'model turn index'),
+  );
+}
+
+function eventTurnKey(capture: EventCapture, label: string): string {
+  return turnKey(
+    requiredString(capture.payload.runId, `${label} run id`),
+    requiredInteger(capture.payload.turnIndex, `${label} turn index`),
+  );
+}
+
+function turnKey(runId: string, turnIndex: number): string {
+  return `${runId}\u0000${turnIndex}`;
 }
 
 function elapsedMilliseconds(start: string, end: string): number {
   const elapsed = Date.parse(end) - Date.parse(start);
-  if (elapsed < 0) throw new Error(`Negative event duration: ${start} to ${end}.`);
+  if (elapsed < 0)
+    throw new Error(`Negative event duration: ${start} to ${end}.`);
   return elapsed;
 }
 
@@ -381,7 +416,8 @@ function requiredRecord(
 }
 
 function requiredString(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value === '') throw new Error(`Missing ${label}.`);
+  if (typeof value !== 'string' || value === '')
+    throw new Error(`Missing ${label}.`);
   return value;
 }
 

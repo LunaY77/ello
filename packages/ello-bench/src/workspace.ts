@@ -43,6 +43,7 @@ export type PreparedWorkspace =
 export async function prepareTaskWorkspace(options: {
   readonly attemptId: string;
   readonly workspace: string;
+  readonly gitCacheRoot: string;
   readonly taskFiles: ResolvedTaskFiles;
   readonly runtime: 'docker' | 'local';
 }): Promise<PreparedWorkspace> {
@@ -58,6 +59,7 @@ export async function prepareTaskWorkspace(options: {
       repository: task.repositoryUrl,
       revision: task.baseCommitHash,
       workspace,
+      cacheRoot: options.gitCacheRoot,
     });
     await suite.prepareWorkspace(workspace, options.taskFiles, 'repository');
     await assertGitHead(workspace, task.baseCommitHash, 'Local task checkout');

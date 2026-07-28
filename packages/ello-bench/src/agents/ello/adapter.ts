@@ -1,3 +1,4 @@
+import { copyFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import { writeBenchmarkAgentConfig } from '../../config-writer.js';
@@ -31,6 +32,10 @@ import {
   writeNormalizedEvidence,
 } from '../evidence.js';
 import { auditElloTools } from '../routing-audit.js';
+
+import { findElloProviderRecoveryTarget } from './provider-recovery.js';
+
+const PROVIDER_RECOVERY_PROMPT = `The previous turn ended because the model provider connection failed after bounded retries. Continue the original task from the current thread and workspace. Inspect the existing progress, finish the implementation, run the relevant tests, and report the result. Do not restart from scratch.`;
 
 export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
   return {
@@ -110,7 +115,7 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
           const stdoutPath = path.join(context.rawAgentRoot, 'stdout.jsonl');
           const stderrPath = path.join(context.rawAgentRoot, 'stderr.log');
           const startedAt = new Date().toISOString();
-          const process = await runElloCli({
+          const initialProcess = await runElloCli({
             endpoint: server.endpoint,
             workspace: context.workspace,
             elloHome: context.agentStateRoot,
@@ -119,8 +124,21 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
             stdoutPath,
             stderrPath,
           });
-          const completedAt = new Date().toISOString();
           await validateJsonLines(stdoutPath);
+          const recovery = await recoverProviderFailure({
+            endpoint: server.endpoint,
+            workspace: context.workspace,
+            elloHome: context.agentStateRoot,
+            timeoutMs: context.taskFiles.task.agentTimeoutMs,
+            rawAgentRoot: context.rawAgentRoot,
+            eventRoot: path.join(context.rawAgentRoot, 'adapter'),
+            stdoutPath,
+            stderrPath,
+            initialProcess,
+          });
+          const process = recovery?.process ?? initialProcess;
+          const completedAt = new Date().toISOString();
+          if (recovery !== null) await validateJsonLines(stdoutPath);
           const processArtifact = await writeAgentProcessArtifact({
             rawAgentRoot: context.rawAgentRoot,
             execution: {
@@ -226,6 +244,83 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
       };
     },
   };
+}
+
+async function recoverProviderFailure(options: {
+  readonly endpoint: string;
+  readonly workspace: string;
+  readonly elloHome: string;
+  readonly timeoutMs: number;
+  readonly rawAgentRoot: string;
+  readonly eventRoot: string;
+  readonly stdoutPath: string;
+  readonly stderrPath: string;
+  readonly initialProcess: import('../../contracts.js').ProcessResult;
+}): Promise<{
+  readonly process: import('../../contracts.js').ProcessResult;
+} | null> {
+  if (
+    options.initialProcess.timedOut ||
+    options.initialProcess.exitCode === 0
+  ) {
+    return null;
+  }
+  const remainingTimeoutMs = Math.floor(
+    options.timeoutMs - options.initialProcess.durationMs,
+  );
+  if (remainingTimeoutMs <= 0) return null;
+  const target = await findElloProviderRecoveryTarget({
+    stdoutPath: options.stdoutPath,
+    eventRoot: options.eventRoot,
+  });
+  if (target === null) return null;
+
+  const recoveryRoot = path.join(options.rawAgentRoot, 'provider-recovery');
+  const initialStdoutPath = path.join(recoveryRoot, 'initial.stdout.jsonl');
+  const initialStderrPath = path.join(recoveryRoot, 'initial.stderr.log');
+  await mkdir(recoveryRoot, { recursive: true });
+  await Promise.all([
+    copyFile(options.stdoutPath, initialStdoutPath),
+    copyFile(options.stderrPath, initialStderrPath),
+  ]);
+  const recoveryStartedAt = new Date().toISOString();
+  const recoveredProcess = await runElloCli({
+    endpoint: options.endpoint,
+    workspace: options.workspace,
+    elloHome: options.elloHome,
+    instruction: PROVIDER_RECOVERY_PROMPT,
+    threadId: target.threadId,
+    timeoutMs: remainingTimeoutMs,
+    stdoutPath: options.stdoutPath,
+    stderrPath: options.stderrPath,
+  });
+  const recoveryCompletedAt = new Date().toISOString();
+  const process = {
+    ...recoveredProcess,
+    durationMs: options.initialProcess.durationMs + recoveredProcess.durationMs,
+  };
+  await writeJsonAtomic(
+    path.join(options.rawAgentRoot, 'provider-recovery.json'),
+    {
+      schema: 'ello.benchmark.provider-recovery.v1',
+      threadId: target.threadId,
+      eventLogPath: target.eventLogPath,
+      remainingTimeoutMs,
+      initial: {
+        process: options.initialProcess,
+        stdoutPath: initialStdoutPath,
+        stderrPath: initialStderrPath,
+      },
+      recovery: {
+        startedAt: recoveryStartedAt,
+        completedAt: recoveryCompletedAt,
+        process: recoveredProcess,
+        stdoutPath: options.stdoutPath,
+        stderrPath: options.stderrPath,
+      },
+    },
+  );
+  return { process };
 }
 
 function providerFailureMessage(

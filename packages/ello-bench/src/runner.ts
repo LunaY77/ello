@@ -29,6 +29,7 @@ type RunOutcome = NonNullable<RunManifest['outcome']>;
 
 export async function runBenchmarkJob(options: {
   readonly manifest: RunManifest;
+  readonly runRoot: string;
   readonly agent: AgentSpec;
   readonly provenance: RunProvenance;
   readonly taskFiles: ResolvedTaskFiles;
@@ -75,6 +76,7 @@ export async function runBenchmarkJob(options: {
       return prepareTaskWorkspace({
         attemptId: manifest.attemptId,
         workspace: manifest.workspace,
+        gitCacheRoot: path.join(options.runRoot, 'cache', 'git-mirrors'),
         taskFiles: options.taskFiles,
         runtime: options.runtime,
       });
@@ -263,6 +265,7 @@ export async function runBenchmarkJob(options: {
       runVerifier({
         attemptId: manifest.attemptId,
         harnessRoot,
+        gitCacheRoot: path.join(options.runRoot, 'cache', 'git-mirrors'),
         taskFiles: options.taskFiles,
         patch,
         runtime: options.runtime,

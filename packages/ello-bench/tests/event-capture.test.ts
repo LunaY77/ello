@@ -55,6 +55,15 @@ describe('event capture', () => {
       {},
     );
     await capture.recorder.flush?.({});
+    await capture.recorder.record(
+      {
+        type: 'run.started',
+        runId: 'run_2',
+        sequence: 1,
+        occurredAt: '2026-07-23T00:00:02.000Z',
+      },
+      {},
+    );
     await capture.close();
 
     const lines = (await readFile(capture.eventLogPath, 'utf8'))
@@ -75,7 +84,8 @@ describe('event capture', () => {
     expect(second.input).not.toHaveProperty('authorization');
     expect(second.input.nested).not.toHaveProperty('apiKey');
     expect(second.input.nested.retained).toBe('value');
-    expect(marker).toMatchObject({ eventCount: 2, runCount: 1 });
+    expect(lines.map((line) => line.payload.sequence)).toEqual([1, 2, 1]);
+    expect(marker).toMatchObject({ eventCount: 3, runCount: 2 });
     await expect(capture.close()).rejects.toThrow('already closed');
   });
 
@@ -117,6 +127,7 @@ describe('event capture', () => {
       event(1, 'run.started'),
       event(2, 'turn.started'),
       event(3, 'model.started'),
+      event(4, 'run.started'),
     ]
       .map(JSON.stringify)
       .join('\n')}\n`;
@@ -125,8 +136,8 @@ describe('event capture', () => {
     const marker = {
       schema: 'ello.benchmark.event-capture.complete.v1',
       eventLogPath,
-      eventCount: 3,
-      runCount: 1,
+      eventCount: 4,
+      runCount: 2,
       turnCount: 1,
       modelCallCount: 1,
       sha256: sha256(content),

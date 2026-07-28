@@ -14,7 +14,7 @@ import {
   createCodingToolResult,
   defineCodingTool,
 } from './runtime/coding-tool.js';
-import { requireShell, truncate } from './shared.js';
+import { requireShell } from './shared.js';
 
 /**
  * Shell 工具：bash。
@@ -41,7 +41,7 @@ export function createShellTools(
       name: 'bash',
       description: `Run one shell command in the workspace and return its stdout followed by its stderr under a 'stderr:' heading.
 'timeoutMs' defaults to 30000 and cannot exceed 120000; on timeout the process is killed and whatever it had already written is still returned, so a killed test run is reported as a timeout rather than as a failure. A nonzero exit is a normal result, not a tool error: read the output to decide what to do.
-Long output is truncated in the middle, keeping the head and the tail, because test runners print their failure summary last. When output is truncated, narrow the command instead of rerunning it unchanged: name a single test file, choose a terser reporter, or pipe through 'tail'.
+Long output is centrally reduced to a bounded head/tail preview while the complete result is retained as an artifact, because test runners print their failure summary last. When output is reduced, narrow the command instead of rerunning it unchanged: name a single test file, choose a terser reporter, or pipe through 'tail'.
 Use bash for builds, tests, lint, typecheck, code generation, and git inspection. Prefer read, grep, and glob over 'cat', 'grep', and 'find' so results come back structured, and prefer edit or apply_patch over 'sed -i' and shell redirection so file changes are reported.`,
       discovery: {
         aliases: ['shell', 'terminal', 'command'],
@@ -98,10 +98,10 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
           ? `${timeoutNotice(timeoutMs)}\n${output}`
           : output;
         // 退出码必须进入模型可见文本：metadata 只流向 UI，模型看不到。
-        // 截断只作用于命令输出，退出码行始终完整保留在首行。
+        // 长输出由统一 adapter 处理；退出码行始终保留在模型可见首行。
         return createCodingToolResult({
           title: `bash ${command}`,
-          output: `${exitCodeLine(result.exitCode)}\n${truncate(body)}`,
+          output: `${exitCodeLine(result.exitCode)}\n${body}`,
           metadata: {
             kind: 'shell',
             command,

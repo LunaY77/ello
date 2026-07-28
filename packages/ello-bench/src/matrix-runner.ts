@@ -141,6 +141,7 @@ export async function runBenchmarkMatrix(options: {
         throw new Error(`Missing task files ${job.taskId}.`);
       const result = await runBenchmarkJob({
         manifest: selection.run,
+        runRoot: opened.manifest.runRoot,
         agent,
         provenance,
         taskFiles: files,

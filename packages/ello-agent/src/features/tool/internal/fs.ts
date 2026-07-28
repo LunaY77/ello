@@ -25,7 +25,6 @@ import {
   requireFs,
   resolveRuntimePath,
   statRuntimePath,
-  truncate,
 } from './shared.js';
 
 /**
@@ -48,15 +47,16 @@ export function createFsTools(
   config: CodingAgentConfig,
   decide: DecideApproval,
 ) {
+  const readCache = new Map<string, CachedRead>();
   return [
     defineCodingTool({
       name: 'read',
       // 无副作用只读工具：允许与同批其他只读调用并发执行。
       concurrency: 'parallel',
       description: `Read a UTF-8 text file, or list one directory, at 'filePath'.
-File output is line-numbered in a right-aligned gutter followed by two spaces; the gutter is display only, so never copy it into edit or apply_patch. 'offset' is the 1-based first line and 'limit' the maximum number of lines, default 400 and at most 2000; the result reports the line range and total line count so you can page through a long file with successive offsets. A directory path returns one non-recursive listing of 'name<TAB>kind<TAB>size'. A binary file returns a byte count and is attached as an artifact rather than inlined.
-A missing path, an unreadable path, or a path outside the allowed roots fails the call. Very long output is truncated in the middle, keeping the head and the tail.
-Read a file before editing it: edit and apply_patch match text literally, so they need the exact current content. Use grep to find which file contains some text, and glob to find files by name.`,
+File output is line-numbered in a right-aligned gutter followed by two spaces; the gutter is display only, so never copy it into edit or apply_patch. 'offset' is the 1-based first line or directory entry and 'limit' the maximum number of lines or entries, default 400 and at most 2000; the result reports the returned range and total count so you can page with successive offsets. Re-reading the same unchanged file range returns a short unchanged marker instead of duplicating content already present in the thread. A directory path returns a sorted, non-recursive listing of 'name<TAB>kind<TAB>size'. A binary file returns a byte count and is attached as an artifact rather than inlined.
+A missing path, an unreadable path, or a path outside the allowed roots fails the call. Very long output is centrally reduced to a bounded head/tail preview while the complete result is retained as an artifact.
+Read a file before editing it: edit and apply_patch match text literally, so they need the exact current content. Use grep to find which file contains some text, and glob to find files by name. Independent read, grep, and glob calls can be issued together in one model response and will run concurrently.`,
       discovery: { aliases: ['file', 'directory', 'cat'], risk: 'readonly' },
       input: z
         .object({
@@ -97,8 +97,9 @@ Read a file before editing it: edit and apply_patch match text literally, so the
         if (info.isDirectory()) {
           const entries = await fs.listDir(targetPath);
           entries.sort((left, right) => left.localeCompare(right));
+          const selectedEntries = entries.slice(offset - 1, offset - 1 + limit);
           const renderedEntries = await Promise.all(
-            entries.map(async (entry) => {
+            selectedEntries.map(async (entry) => {
               const entryInfo = await statRuntimePath(
                 fs,
                 path.join(targetPath, entry),
@@ -109,6 +110,13 @@ Read a file before editing it: edit and apply_patch match text literally, so the
               return `${entry}\t${entryInfo.isDirectory() ? 'directory' : 'file'}\t${entryStat.size}`;
             }),
           );
+          const nextOffset =
+            offset - 1 + selectedEntries.length < entries.length
+              ? offset + selectedEntries.length
+              : undefined;
+          renderedEntries.push(
+            `[Listed ${selectedEntries.length} of ${entries.length} entries.${nextOffset === undefined ? '' : ` Continue with offset ${nextOffset}.`}]`,
+          );
           return createCodingToolResult({
             title: `Directory ${targetPath}`,
             output: renderedEntries.join('\n'),
@@ -116,12 +124,39 @@ Read a file before editing it: edit and apply_patch match text literally, so the
               kind: 'read',
               path: targetPath,
               bytes: 0,
-              entryCount: entries.length,
+              entryCount: selectedEntries.length,
+              totalEntries: entries.length,
+              offset,
+              ...(nextOffset === undefined ? {} : { nextOffset }),
               isDirectory: true,
             },
           });
         }
-        const buffer = await readFile(absolutePath);
+        const sourceStat = await stat(absolutePath);
+        const cacheKey = readCacheKey(absolutePath, offset, limit);
+        const cached = readCache.get(cacheKey);
+        if (
+          cached !== undefined &&
+          cached.mtimeMs === sourceStat.mtimeMs &&
+          cached.size === sourceStat.size
+        ) {
+          return createCodingToolResult({
+            title: `Unchanged ${targetPath}`,
+            output: `File unchanged since the previous read of ${targetPath} lines ${cached.lineStart}-${cached.lineEnd}. Reuse the earlier content already present in this thread.`,
+            metadata: {
+              kind: 'read',
+              path: targetPath,
+              bytes: cached.size,
+              lineStart: cached.lineStart,
+              lineEnd: cached.lineEnd,
+              totalLines: cached.totalLines,
+              mime: 'text/plain; charset=utf-8',
+              unchanged: true,
+            },
+          });
+        }
+        const stableRead = await readStableFile(absolutePath, sourceStat);
+        const buffer = stableRead.buffer;
         if (isBinary(buffer)) {
           return createCodingToolResult({
             title: `Binary file ${targetPath}`,
@@ -147,23 +182,36 @@ Read a file before editing it: edit and apply_patch match text literally, so the
         const text = buffer.toString('utf8');
         const lines = text.split(/\r?\n/u);
         const slice = lines.slice(offset - 1, offset - 1 + limit);
-        const content = truncate(
-          slice
-            .map(
-              (line, index) =>
-                `${String(offset + index).padStart(5, ' ')}  ${line}`,
-            )
-            .join('\n'),
-        );
+        const lineEnd = offset + slice.length - 1;
+        const content = slice
+          .map(
+            (line, index) =>
+              `${String(offset + index).padStart(5, ' ')}  ${line}`,
+          )
+          .join('\n');
+        const nextOffset = lineEnd < lines.length ? lineEnd + 1 : undefined;
+        const modelOutput = [
+          content,
+          `[Read lines ${offset}-${lineEnd} of ${lines.length}.${nextOffset === undefined ? '' : ` Continue with offset ${nextOffset}.`}]`,
+        ]
+          .filter((part) => part !== '')
+          .join('\n');
+        readCache.set(cacheKey, {
+          mtimeMs: stableRead.version.mtimeMs,
+          size: stableRead.version.size,
+          lineStart: offset,
+          lineEnd,
+          totalLines: lines.length,
+        });
         return createCodingToolResult({
           title: `Read ${targetPath}`,
-          output: content,
+          output: modelOutput,
           metadata: {
             kind: 'read',
             path: targetPath,
             bytes: buffer.byteLength,
             lineStart: offset,
-            lineEnd: offset + slice.length - 1,
+            lineEnd,
             totalLines: lines.length,
             mime: 'text/plain; charset=utf-8',
           },
@@ -366,6 +414,47 @@ Boundaries: use write to create a single new file, edit for one fragment in one 
       },
     }),
   ];
+}
+
+interface CachedRead {
+  readonly mtimeMs: number;
+  readonly size: number;
+  readonly lineStart: number;
+  readonly lineEnd: number;
+  readonly totalLines: number;
+}
+
+interface FileVersion {
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+async function readStableFile(
+  absolutePath: string,
+  initialVersion: FileVersion,
+): Promise<{ readonly buffer: Buffer; readonly version: FileVersion }> {
+  let before = initialVersion;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const buffer = await readFile(absolutePath);
+    const after = await stat(absolutePath);
+    if (
+      before.mtimeMs === after.mtimeMs &&
+      before.size === after.size &&
+      buffer.byteLength === after.size
+    ) {
+      return { buffer, version: after };
+    }
+    before = after;
+  }
+  throw new Error(`File changed while it was being read: ${absolutePath}`);
+}
+
+function readCacheKey(
+  absolutePath: string,
+  offset: number,
+  limit: number,
+): string {
+  return `${absolutePath}\u0000${offset}\u0000${limit}`;
 }
 
 /**

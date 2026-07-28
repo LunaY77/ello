@@ -170,7 +170,108 @@ describe('round normalization', () => {
     expect(normalized.tools).toHaveLength(1);
     expect(normalized.usage.status).toBe('unavailable');
   });
+
+  it('keeps tool ownership separate when recovered runs reuse turn indexes', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-bench-rounds-'));
+    const eventLogPath = path.join(root, 'events.jsonl');
+    const firstIdentity = {
+      runId: 'run-1',
+      turnIndex: 0,
+      modelCallId: 'call-1',
+      agentName: 'build',
+      modelSelector: 'primary_model',
+      configuredModel: 'benchmark-pro',
+      protocol: 'openai',
+      apiModel: 'model',
+    };
+    const secondIdentity = {
+      ...firstIdentity,
+      runId: 'run-2',
+      modelCallId: 'call-2',
+    };
+    const completedUsage = {
+      finishReason: 'stop',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        cacheReadTokens: 3,
+        cacheWriteTokens: 0,
+        toolCalls: 1,
+      },
+    };
+    const lines = [
+      capture(
+        1,
+        'model.started',
+        modelEvent('model.started', 1, firstIdentity),
+      ),
+      capture(2, 'model.completed', {
+        ...modelEvent('model.completed', 2, firstIdentity),
+        response: completedUsage,
+      }),
+      toolEvent(3, 'tool.started', 'run-1', 'tool-1'),
+      toolEvent(4, 'tool.completed', 'run-1', 'tool-1'),
+      capture(5, 'run.failed', {
+        type: 'run.failed',
+        sequence: 5,
+        runId: 'run-1',
+        occurredAt: '2026-07-23T00:00:05.000Z',
+      }),
+      capture(
+        6,
+        'model.started',
+        modelEvent('model.started', 1, secondIdentity),
+      ),
+      capture(7, 'model.completed', {
+        ...modelEvent('model.completed', 2, secondIdentity),
+        response: completedUsage,
+      }),
+      toolEvent(8, 'tool.started', 'run-2', 'tool-2'),
+      toolEvent(9, 'tool.completed', 'run-2', 'tool-2'),
+      capture(10, 'run.completed', {
+        type: 'run.completed',
+        sequence: 5,
+        runId: 'run-2',
+        occurredAt: '2026-07-23T00:00:10.000Z',
+      }),
+    ];
+    await writeFile(
+      eventLogPath,
+      `${lines.map(JSON.stringify).join('\n')}\n`,
+      'utf8',
+    );
+
+    const normalized = await normalizeEventCapture({
+      eventLogPath,
+      roundsPath: path.join(root, 'rounds.jsonl'),
+      allowIncomplete: false,
+    });
+
+    expect(normalized.providerFailure).toBe(false);
+    expect(normalized.rounds).toHaveLength(2);
+    expect(normalized.rounds[0]?.toolCalls).toMatchObject([{ id: 'tool-1' }]);
+    expect(normalized.rounds[1]?.toolCalls).toMatchObject([{ id: 'tool-2' }]);
+  });
 });
+
+function toolEvent(
+  sequence: number,
+  event: 'tool.started' | 'tool.completed',
+  runId: string,
+  toolCallId: string,
+) {
+  return capture(sequence, event, {
+    type: event,
+    sequence,
+    runId,
+    occurredAt: `2026-07-23T00:00:${String(sequence).padStart(2, '0')}.000Z`,
+    turnIndex: 0,
+    toolCallId,
+    ...(event === 'tool.started'
+      ? { name: 'read', input: { filePath: 'README.md' } }
+      : {}),
+  });
+}
 
 function modelEvent(
   type: string,
@@ -180,7 +281,7 @@ function modelEvent(
   return {
     type,
     sequence,
-    runId: 'run-1',
+    runId: identity.runId,
     occurredAt: `2026-07-23T00:00:0${sequence}.000Z`,
     identity,
   };

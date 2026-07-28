@@ -304,17 +304,21 @@ describe('Goal 生产 Turn 契约', () => {
     expect(runtime.systemSection({} as AgentRunContext)).toBeNull();
   });
 
-  it('没有 Goal 时查询和更新都明确失败', async () => {
-    const runtime = createThreadGoalRuntime(null);
-    expect(() =>
-      immediateTool(runtime.tools, 'get_goal').execute({}, TOOL_CONTEXT),
-    ).toThrow('No goal exists');
-    expect(() =>
-      immediateTool(runtime.tools, 'update_goal').execute(
-        { status: 'complete' },
-        TOOL_CONTEXT,
-      ),
-    ).toThrow('No goal exists');
+  it('仅在 Goal 显式活动时向模型注入 Goal 工具', async () => {
+    const absent = createThreadGoalRuntime(null);
+    expect(absent.tools).toEqual([]);
+    expect(absent.systemSection({} as AgentRunContext)).toBeNull();
+
+    const paused = createThreadGoalRuntime({
+      id: 'goal-paused',
+      objective: '等待用户恢复',
+      status: 'paused',
+      tokensUsed: 10,
+      createdAt: '2026-07-19T00:00:00.000Z',
+      updatedAt: '2026-07-19T00:00:00.000Z',
+    });
+    expect(paused.tools).toEqual([]);
+    expect(paused.systemSection({} as AgentRunContext)).toBeNull();
   });
 });
 

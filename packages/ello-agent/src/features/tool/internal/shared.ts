@@ -10,41 +10,10 @@ import type {
   AgentToolContext,
 } from '../../agent/engine/index.js';
 
-/** 工具输出最大字符数，避免单个 tool result 撑爆上下文和 TUI。 */
-export const MAX_TOOL_OUTPUT = 12_000;
-
 /**
  * 保留的头部占比；测试与构建工具把失败摘要放在输出末尾，因此尾部权重更高。
  */
 export const TRUNCATION_HEAD_RATIO = 0.3;
-
-/**
- * 截断超长文本，同时保留头部与尾部，并标注被省略的字节数。
- *
- * 头部保留 {@link TRUNCATION_HEAD_RATIO}、尾部保留其余额度：命令回显和早期
- * 日志在头部，测试 runner 的失败摘要在尾部，两端都不能丢。中间标记给出省略
- * 字节数，调用方据此判断是否需要收窄命令重新执行。
- *
- * Args:
- * - `value`: 要由 `truncate` 读取或写入的单个领域值；所有权仍归调用方。
- *
- * Returns:
- * - 返回 `truncate` 计算出的声明结果；返回值不包含未声明的兜底状态。
- */
-export function truncate(value: string): string {
-  if (value.length <= MAX_TOOL_OUTPUT) {
-    return value;
-  }
-  const headLength = Math.floor(MAX_TOOL_OUTPUT * TRUNCATION_HEAD_RATIO);
-  const tailLength = MAX_TOOL_OUTPUT - headLength;
-  const head = value.slice(0, headLength);
-  const tail = value.slice(value.length - tailLength);
-  const omittedBytes = Buffer.byteLength(
-    value.slice(headLength, value.length - tailLength),
-    'utf8',
-  );
-  return `${head}\n${truncationMarker(omittedBytes)}\n${tail}`;
-}
 
 /** 文件中与目标文本最接近的一行；行号是 1-based。 */
 export interface NearestLine {

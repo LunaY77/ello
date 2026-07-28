@@ -30,6 +30,7 @@ import {
   prepareApplyPatch,
 } from '../../src/features/tool/internal/apply-patch.js';
 import { projectToolEvent } from '../../src/features/tool/internal/event-projection.js';
+import { createFsTools } from '../../src/features/tool/internal/fs.js';
 import {
   createCallTool,
   createMetaToolRuntime,
@@ -200,8 +201,28 @@ describe('搜索工具契约', () => {
       { pattern: 'abc-\\d+', filePath: '.', limit: 1 },
       searchContext(root),
     );
-    expect(limited.output).toBe('a.txt:1:abc-123');
+    expect(limited.output).toBe(
+      'a.txt:1:abc-123\n[More matches available. Retry with offset 1.]',
+    );
     expect(limited.metadata.matchCount).toBe(1);
+    expect(limited.metadata).toMatchObject({
+      truncated: true,
+      nextOffset: 1,
+    });
+
+    const next = await grep.execute(
+      {
+        pattern: 'abc-\\d+',
+        filePath: '.',
+        limit: 1,
+        offset: 1,
+        context: 1,
+      },
+      searchContext(root),
+    );
+    expect(next.output).toContain('a.txt-1-abc-123');
+    expect(next.output).toContain('a.txt:2:abc-456');
+    expect(next.output).toContain('a.txt-3-abc-xyz');
 
     const empty = await grep.execute(
       { pattern: 'missing', filePath: '.', limit: 10 },
@@ -248,8 +269,67 @@ describe('搜索工具契约', () => {
       { pattern: '**/*.ts', filePath: '.', limit: 2 },
       searchContext(root),
     );
-    expect(result.output.split('\n')).toEqual(['src/a.ts', 'src/nested/b.ts']);
+    expect(result.output.split('\n')).toEqual([
+      'src/a.ts',
+      'src/nested/b.ts',
+      '[More paths available. Retry with offset 2.]',
+    ]);
     expect(result.metadata.matchCount).toBe(2);
+
+    const next = await glob.execute(
+      { pattern: '**/*.ts', filePath: '.', limit: 2, offset: 2 },
+      searchContext(root),
+    );
+    expect(next.output).toBe('src/z.ts');
+    expect(next.metadata.truncated).toBe(false);
+  });
+});
+
+describe('读取工具契约', () => {
+  it('相同未变更区间只返回短标记，文件变化后重新返回内容', async () => {
+    const root = await temporaryDirectory('ello-read-cache-');
+    await writeFile(path.join(root, 'a.txt'), 'first\nsecond\n', 'utf8');
+    const read = createFsTools({} as CodingAgentConfig, () => 'auto').find(
+      (candidate) => candidate.name === 'read',
+    );
+    if (read === undefined) throw new Error('read tool missing');
+    const context = searchContext(root);
+    const input = { filePath: 'a.txt', offset: 1, limit: 10 };
+
+    const first = await read.execute(input, context);
+    expect(first.output).toContain('first');
+    expect(first.output).toContain('[Read lines 1-3 of 3.]');
+    expect(first.metadata.unchanged).toBeUndefined();
+
+    const duplicate = await read.execute(input, context);
+    expect(duplicate.output).toContain('File unchanged');
+    expect(duplicate.metadata.unchanged).toBe(true);
+
+    await writeFile(path.join(root, 'a.txt'), 'updated\ncontent\nlonger\n');
+    const changed = await read.execute(input, context);
+    expect(changed.output).toContain('updated');
+    expect(changed.metadata.unchanged).toBeUndefined();
+  });
+
+  it('返回完整原始结果并由上层 output store 统一限制上下文', async () => {
+    const root = await temporaryDirectory('ello-read-output-');
+    const source = Array.from(
+      { length: 500 },
+      (_, index) => `${String(index).padStart(4, '0')} ${'x'.repeat(40)}`,
+    ).join('\n');
+    await writeFile(path.join(root, 'large.txt'), source, 'utf8');
+    const read = createFsTools({} as CodingAgentConfig, () => 'auto').find(
+      (candidate) => candidate.name === 'read',
+    );
+    if (read === undefined) throw new Error('read tool missing');
+
+    const result = await read.execute(
+      { filePath: 'large.txt', offset: 1, limit: 500 },
+      searchContext(root),
+    );
+
+    expect(result.output.length).toBeGreaterThan(12_000);
+    expect(result.output).toContain('[Read lines 1-500 of 500.]');
   });
 });
 

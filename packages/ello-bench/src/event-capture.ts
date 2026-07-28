@@ -33,7 +33,7 @@ class JsonlEventCaptureRecorder implements EventCaptureRecorder {
   /** 落盘链尾指针，保证序号校验与追加写入成对且互不交错。 */
   private writes: Promise<void> = Promise.resolve();
   private closed = false;
-  private lastSequence = 0;
+  private readonly lastSequenceByRun = new Map<string, number>();
   private eventCount = 0;
   private runCount = 0;
   private turnCount = 0;
@@ -83,27 +83,28 @@ class JsonlEventCaptureRecorder implements EventCaptureRecorder {
     if (!isRecord(payload)) {
       throw new TypeError('Engine event must serialize to an object payload.');
     }
-    const capture = EventCaptureSchema.parse({
-      schema: 'ello.benchmark.event-capture.v1',
-      sequence: event.sequence,
-      event: event.type,
-      payload,
-    });
     // 序号校验与落盘之间不能存在 await：否则并发 record 会全部先通过校验、再
     // 乱序写入，校验形同虚设。把两者串进同一条写入链，使校验与写入原子。
     const written = this.writes.then(async () => {
-      if (event.sequence <= this.lastSequence) {
+      const previousSequence = this.lastSequenceByRun.get(event.runId) ?? 0;
+      if (event.sequence <= previousSequence) {
         throw new Error(
-          `Engine event sequence must increase: ${event.sequence} after ${this.lastSequence}.`,
+          `Engine event sequence must increase for run ${event.runId}: ${event.sequence} after ${previousSequence}.`,
         );
       }
+      const capture = EventCaptureSchema.parse({
+        schema: 'ello.benchmark.event-capture.v1',
+        sequence: this.eventCount + 1,
+        event: event.type,
+        payload,
+      });
       await this.ready;
       await appendFile(
         this.eventLogPath,
         `${JSON.stringify(capture)}\n`,
         'utf8',
       );
-      this.lastSequence = event.sequence;
+      this.lastSequenceByRun.set(event.runId, event.sequence);
       this.eventCount += 1;
       if (event.type === 'run.started') this.runCount += 1;
       if (event.type === 'turn.started') this.turnCount += 1;
