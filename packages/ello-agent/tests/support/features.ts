@@ -5,6 +5,11 @@
  * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
  */
 import { createAgentRoutes } from '../../src/features/agent/routes.js';
+import {
+  AgentTaskRpcFeature,
+  AgentTaskService,
+  AgentTaskStore,
+} from '../../src/features/agent/subagents/index.js';
 import { createArtifactFeature } from '../../src/features/artifact/index.js';
 import { createConfigFeature } from '../../src/features/config/index.js';
 import { createFsFeature } from '../../src/features/fs/index.js';
@@ -45,10 +50,16 @@ export function createTestFeatures(input: {
 }) {
   const artifacts = createArtifactFeature(input.storage.artifacts);
   const fs = createFsFeature(input.storage.artifacts);
+  const agentTasks = new AgentTaskService(
+    new AgentTaskStore(input.storage.db),
+    () => Promise.reject(new Error('Test Agent task does not run.')),
+  );
+  const agentTaskRpc = new AgentTaskRpcFeature(agentTasks);
   const routes = {
     ...createConfigFeature().routes,
     ...createModelFeature().routes,
     ...createAgentRoutes(),
+    ...agentTaskRpc.routes,
     ...createToolFeature(input.storage.taskBoards).routes,
     ...createSkillFeature().routes,
     ...createMemoryFeature().routes,
@@ -74,8 +85,10 @@ export function createTestFeatures(input: {
   return {
     routes,
     initialize: () => artifacts.initialize(),
-    releaseConnection: (connectionId: string) =>
-      fs.releaseConnection(connectionId),
+    releaseConnection: (connectionId: string) => {
+      fs.releaseConnection(connectionId);
+      agentTaskRpc.releaseConnection(connectionId);
+    },
     /**
      * 停止 测试夹具的 `features` 模块 的异步工作并释放其拥有的资源；关闭完成后不再接受新操作。
      *
@@ -89,6 +102,8 @@ export function createTestFeatures(input: {
      * - 当 测试夹具的 `features` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
      */
     async close(): Promise<void> {
+      agentTaskRpc.close();
+      await agentTasks.close();
       await fs.close();
       await artifacts.close();
     },

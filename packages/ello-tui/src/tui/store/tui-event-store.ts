@@ -82,6 +82,10 @@ export type TuiEventInput =
     }
   | { readonly type: 'ui.compaction.cleared' }
   | {
+      readonly type: 'ui.subagent.committed';
+      readonly entry: Extract<HistoryEntry, { readonly kind: 'subagent' }>;
+    }
+  | {
       readonly type: 'interaction.resolved';
       readonly requestId: string;
       readonly resolution?: UserInputResolution;
@@ -209,6 +213,8 @@ export function reduceTuiEvent(
         ...state,
         live: { ...state.live, compactionText: '' },
       };
+    case 'ui.subagent.committed':
+      return upsertSubagentHistory(state, event.entry);
     case 'interaction.resolved': {
       const request = state.pendingRequest;
       const next =
@@ -368,6 +374,9 @@ function reduceServerNotification(
     case 'skills/changed':
     case 'fs/changed':
     case 'memory/job/updated':
+    case 'agent/task/updated':
+    case 'agent/task/event':
+    case 'agent/task/removed':
     case 'warning':
     case 'server/ready':
       return state;
@@ -485,6 +494,28 @@ function appendHistory(
     ...state,
     history: appendCommittedHistory({ entries: state.history }, entry).entries,
   };
+}
+
+function upsertSubagentHistory(
+  state: TuiEventState,
+  entry: Extract<HistoryEntry, { readonly kind: 'subagent' }>,
+): TuiEventState {
+  const index = state.history.findIndex(
+    (candidate) => candidate.id === entry.id,
+  );
+  if (index === -1) return appendHistory(state, entry);
+  const current = state.history[index];
+  if (current?.kind !== 'subagent') return state;
+  if (
+    current.run.revision !== undefined &&
+    entry.run.revision !== undefined &&
+    entry.run.revision < current.run.revision
+  ) {
+    return state;
+  }
+  const history = [...state.history];
+  history[index] = entry;
+  return { ...state, history };
 }
 
 function findItem(

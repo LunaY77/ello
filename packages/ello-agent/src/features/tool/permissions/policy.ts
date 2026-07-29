@@ -80,10 +80,39 @@ export function makeApprovalPolicy(
   return (descriptor: PermissionDescriptor): AgentApprovalDecision => {
     assertDescriptor(descriptor);
     const currentMode = mode().mode;
-    // Bypass 是显式开启的会话级安全边界，不能再被配置或历史规则降级成审批。
-    if (currentMode === 'bypass') {
-      return 'auto';
+    const boundaryRules = dynamicRules().filter(
+      (rule) => rule.action === 'deny',
+    );
+    const externalDirs = externalPaths(
+      config.cwd,
+      descriptor.paths ?? [],
+      descriptor.permission === 'read' || descriptor.permission === 'search'
+        ? readRoots()
+        : [],
+    );
+    // definition、父级 deny 与路径边界始终先于会话模式，bypass 也不能扩大 child 能力。
+    if (
+      descriptor.patterns.some(
+        (pattern) =>
+          evaluatePermission(
+            boundaryRules,
+            descriptor.permission,
+            pattern,
+          ) === 'deny',
+      ) ||
+      externalDirs.some(
+        (externalDir) =>
+          evaluatePermission(
+            boundaryRules,
+            'external_directory',
+            externalDir,
+          ) === 'deny',
+      )
+    ) {
+      return buildDecision('denied', descriptor, externalDirs);
     }
+    // Bypass 只跳过普通审批，前面的硬边界仍然有效。
+    if (currentMode === 'bypass') return 'auto';
     // Plan 规则是安全边界而非默认偏好，因此不能被配置或历史审批规则覆盖。
     // Accept edits 会忽略 edit 类 need_approval，并在下方把普通 ask 提升为 allow；
     // 显式 deny 和 external_directory 仍保留，避免自动编辑扩大禁止项或路径边界。
@@ -126,13 +155,6 @@ export function makeApprovalPolicy(
       }
     }
 
-    const externalDirs = externalPaths(
-      config.cwd,
-      descriptor.paths ?? [],
-      descriptor.permission === 'read' || descriptor.permission === 'search'
-        ? readRoots()
-        : [],
-    );
     // 路径越界是独立权限维度；Skill 根目录只放行只读和搜索，不扩大写权限。
     for (const externalDir of externalDirs) {
       const action = evaluatePermission(

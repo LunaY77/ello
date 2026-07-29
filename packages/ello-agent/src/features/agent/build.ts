@@ -84,6 +84,9 @@ export async function buildAgent(
           ...(tools.routingInstructions === undefined
             ? {}
             : { routingInstructions: tools.routingInstructions }),
+          ...(tools.taskNotificationSection === undefined
+            ? {}
+            : { taskNotificationSection: tools.taskNotificationSection }),
         }),
         providerOptions: model.providerOptions,
         prepare: model.prepareModelInput,
@@ -104,7 +107,10 @@ export async function buildAgent(
   }
   return {
     engine,
-    maxTurns: definition.definition.maxTurns,
+    maxTurns: request.delegation?.maxTurns ?? definition.definition.maxTurns,
+    ...(tools.waitForTaskNotification === undefined
+      ? {}
+      : { waitForTaskNotification: tools.waitForTaskNotification }),
     modelCompactor: () => engine.modelCompactor(),
     setMode: tools.setMode,
     close: () => closeBuiltAgent(engine, tracing.close),

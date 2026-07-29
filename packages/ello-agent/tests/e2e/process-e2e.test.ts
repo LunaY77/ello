@@ -638,7 +638,7 @@ describe.sequential('actual App Server process', () => {
             outputTokens: 24,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            toolCalls: 7,
+            toolCalls: 2,
           },
         },
       ],
@@ -648,7 +648,7 @@ describe.sequential('actual App Server process', () => {
         outputTokens: 24,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        toolCalls: 7,
+        toolCalls: 2,
       },
       pendingServerRequests: [],
     });

@@ -40,7 +40,11 @@ export function parseJsonLines(source: string, label: string): unknown[] {
         { cause: error },
       );
     }
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       throw new AgentAdapterError(
         'agent_evidence',
         `Agent JSONL in ${label} line ${index + 1} is not an object.`,
@@ -119,7 +123,9 @@ export async function artifactReference(
 export function aggregateUsage(
   rounds: readonly BenchmarkRound[],
 ): UsageEvidence {
-  const unavailable = rounds.find((round) => round.usage.status === 'unavailable');
+  const unavailable = rounds.find(
+    (round) => round.usage.status === 'unavailable',
+  );
   if (unavailable?.usage.status === 'unavailable') {
     return {
       status: 'unavailable',
@@ -211,6 +217,27 @@ export function summarizeTools(
         ? null
         : elapsedMs(firstStartedAt, firstMutation.startedAt),
   };
+}
+
+/**
+ * 返回最后一个真正执行验证命令的模型 round；没有验证工具时返回 `null`。
+ */
+export function lastVerificationRound(
+  rounds: readonly BenchmarkRound[],
+): number | null {
+  const matched = [...rounds]
+    .reverse()
+    .find((round) =>
+      round.toolCalls.some(
+        (tool) =>
+          tool.category === 'shell' &&
+          tool.command !== null &&
+          /(?:^|\s)(?:test|pytest|vitest|jest|mocha|cargo\s+(?:test|check)|go\s+test|typecheck|lint|build|check|tsc)(?:\s|$)/iu.test(
+            tool.command,
+          ),
+      ),
+    );
+  return matched?.round ?? null;
 }
 
 function countCategory(

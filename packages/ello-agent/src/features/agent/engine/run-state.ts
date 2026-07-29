@@ -239,13 +239,16 @@ export function createRunState(options: {
   readonly modelAdapter: ModelAdapter;
   readonly compactorState: RunState['compactorState'];
 }): RunState {
-  const maxTurns = options.runOptions.maxTurns;
+  const configuredMaxTurns = options.runOptions.maxTurns;
   if (
-    maxTurns !== undefined &&
-    (!Number.isInteger(maxTurns) || maxTurns <= 0)
+    configuredMaxTurns !== undefined &&
+    (!Number.isInteger(configuredMaxTurns) ||
+      configuredMaxTurns === 0 ||
+      configuredMaxTurns < -1)
   ) {
-    throw new Error('maxTurns must be a positive integer.');
+    throw new Error('maxTurns must be a positive integer or -1.');
   }
+  const maxTurns = configuredMaxTurns === -1 ? undefined : configuredMaxTurns;
   const abortController = new AbortController();
   bridgeAbortSignal(options.runOptions.signal, abortController);
   const runId = options.runOptions.runId ?? randomUUID();

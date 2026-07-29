@@ -16,6 +16,7 @@ const required = [
   'features/config/templates/config.yaml',
   'features/agent/context/prompts/core-behavior.md',
   'features/agent/subagents/bundled/explore.md',
+  'features/agent/subagents/bundled/worker.md',
   'infra/database/migrations/0000_tiny_swordsman.sql',
   'infra/database/migrations/meta/_journal.json',
 ];

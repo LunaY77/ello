@@ -1181,6 +1181,44 @@ describe('createAgent', () => {
     await agent.close();
   });
 
+  it('treats maxTurns -1 as no turn limit', async () => {
+    let calls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          calls += 1;
+          const complete = calls === 3;
+          const content = complete ? 'done' : `continue-${calls}`;
+          return {
+            text: content,
+            messages: [...request.messages, { role: 'assistant', content }],
+            newMessages: [{ role: 'assistant', content }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: complete ? 'stop' : 'tool-calls',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('hi', { maxTurns: -1 });
+
+    expect(calls).toBe(3);
+    expect(result.finishReason).toBe('stop');
+    await agent.close();
+  });
+
   it('rejects an invalid maxTurns value', async () => {
     const agent = createAgent({
       model: 'test:model',
@@ -1195,7 +1233,10 @@ describe('createAgent', () => {
     });
 
     await expect(agent.run('hi', { maxTurns: 0 })).rejects.toThrow(
-      'maxTurns must be a positive integer.',
+      'maxTurns must be a positive integer or -1.',
+    );
+    await expect(agent.run('hi', { maxTurns: -2 })).rejects.toThrow(
+      'maxTurns must be a positive integer or -1.',
     );
     await agent.close();
   });
@@ -1373,6 +1414,7 @@ describe('createAgent', () => {
     expect(secondTurn).toContain('"type":"tool-call"');
     expect(secondTurn).toContain('"type":"tool-result"');
     expect(secondTurn).toContain('call_1');
+    expect(result.usage.toolCalls).toBe(1);
     await agent.close();
   });
 

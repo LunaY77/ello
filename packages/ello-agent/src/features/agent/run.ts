@@ -55,6 +55,24 @@ interface RunningAgentOptions {
   readonly history: ReadonlyArray<AgentMessage>;
   readonly input: string;
   readonly maxTurns: number | undefined;
+  /**
+   * 主模型自然停止后等待后台任务的持久通知。
+   *
+   * Args:
+   * - `signal`: 当前等待阶段的取消信号；用户输入或 run 中断都会取消等待。
+   *
+   * Returns:
+   * - 有通知时返回下一轮模型输入，没有活动后台任务时返回 `undefined`。
+   */
+  readonly waitForTaskNotification?: (
+    signal: AbortSignal,
+  ) => Promise<string | undefined>;
+}
+
+interface QueuedRunInput {
+  readonly kind: 'steer' | 'notification';
+  readonly id: string;
+  readonly text: string;
 }
 
 /**
@@ -83,6 +101,9 @@ export function startAgentRun(
     history: request.history,
     input: request.input,
     maxTurns: built.maxTurns,
+    ...(built.waitForTaskNotification === undefined
+      ? {}
+      : { waitForTaskNotification: built.waitForTaskNotification }),
   });
 }
 
@@ -97,11 +118,13 @@ class RunningAgent implements AgentRun {
   private readonly pendingCompactions: Array<
     Extract<EngineEvent, { type: 'context.compaction' }>
   > = [];
-  private readonly pendingSteers: Array<{
-    readonly steerId: string;
-    readonly text: string;
-  }> = [];
+  private readonly pendingInputs: QueuedRunInput[] = [];
+  private readonly waitingInputs: QueuedRunInput[] = [];
+  private readonly abortController = new AbortController();
   private activeStream: AgentStream | undefined;
+  private phase: 'transitioning' | 'streaming' | 'waiting' | 'closed' =
+    'transitioning';
+  private wakeWaitingInput: (() => void) | undefined;
   private interruptReason: string | undefined;
 
   constructor(private readonly options: RunningAgentOptions) {
@@ -114,20 +137,24 @@ class RunningAgent implements AgentRun {
   }
 
   steer(steerId: string, input: string): void {
-    const stream = this.activeStream;
-    if (stream === undefined) {
-      throw new Error('Agent run is not accepting steering.');
-    }
-    stream.steer({
-      role: 'user',
-      content: input,
+    this.enqueueInput({ kind: 'steer', id: steerId, text: input });
+  }
+
+  notify(notificationId: string, input: string): void {
+    this.enqueueInput({
+      kind: 'notification',
+      id: notificationId,
+      text: input,
     });
-    this.pendingSteers.push({ steerId, text: input });
   }
 
   interrupt(reason: string): void {
     this.interruptReason = reason;
+    if (!this.abortController.signal.aborted) {
+      this.abortController.abort(reason);
+    }
     this.activeStream?.abort(reason);
+    this.wakeWaitingInput?.();
     this.interactions.interrupt(reason);
   }
 
@@ -145,8 +172,11 @@ class RunningAgent implements AgentRun {
       );
       while (true) {
         this.activeStream = stream;
+        this.phase = 'streaming';
         for await (const event of stream) await this.publish(event);
         const result = await stream.final;
+        this.activeStream = undefined;
+        this.phase = 'transitioning';
         usage = addUsage(usage, result.usage);
         this.completeOpenMessages();
         if (result.newMessages.length > 0) {
@@ -181,17 +211,51 @@ class RunningAgent implements AgentRun {
         }
         const pending = result.pending;
         if (pending.length === 0) {
-          this.queue.end();
           if (isFailure(result)) {
+            this.queue.end();
             return {
               status: 'failed',
               usage,
               error: {
                 code: 'AGENT_RUN_FAILED',
-                message: `Agent finished with ${result.finishReason}.`,
+                message:
+                  result.finishReason === 'length' &&
+                  result.output.trim() === ''
+                    ? 'Agent reached max turns without a final answer.'
+                    : `Agent finished with ${result.finishReason}.`,
               },
             };
           }
+          const notification = await this.waitForContinuation();
+          if (this.interruptReason !== undefined) {
+            this.phase = 'closed';
+            this.queue.end();
+            return {
+              status: 'interrupted',
+              usage,
+              reason: this.interruptReason,
+            };
+          }
+          if (notification !== undefined) {
+            stream = this.options.agent.stream(
+              { messages, prompt: notification },
+              this.runOptions(),
+            );
+            this.forwardWaitingInputs(stream);
+            continue;
+          }
+          const input = this.waitingInputs.shift();
+          if (input !== undefined) {
+            if (input.kind === 'steer') this.publishConsumedInput(input);
+            stream = this.options.agent.stream(
+              { messages, prompt: input.text },
+              this.runOptions(),
+            );
+            this.forwardWaitingInputs(stream);
+            continue;
+          }
+          this.phase = 'closed';
+          this.queue.end();
           return { status: 'completed', usage };
         }
         const resolution = await this.interactions.resolveDeferred(pending);
@@ -208,6 +272,7 @@ class RunningAgent implements AgentRun {
         );
       }
     } catch (error) {
+      this.phase = 'closed';
       this.queue.fail(error);
       if (this.interruptReason !== undefined) {
         return {
@@ -225,9 +290,73 @@ class RunningAgent implements AgentRun {
         },
       };
     } finally {
+      this.phase = 'closed';
       this.activeStream = undefined;
+      this.wakeWaitingInput?.();
       await this.options.closeAgent();
     }
+  }
+
+  private enqueueInput(input: QueuedRunInput): void {
+    const stream = this.activeStream;
+    if (stream !== undefined && this.phase === 'streaming') {
+      stream.steer({ role: 'user', content: input.text });
+      this.pendingInputs.push(input);
+      return;
+    }
+    if (this.phase !== 'waiting') {
+      throw new Error('Agent run is not accepting input.');
+    }
+    this.waitingInputs.push(input);
+    this.wakeWaitingInput?.();
+  }
+
+  private async waitForContinuation(): Promise<string | undefined> {
+    const waitForTaskNotification = this.options.waitForTaskNotification;
+    if (waitForTaskNotification === undefined) return undefined;
+    this.phase = 'waiting';
+    const waitController = new AbortController();
+    const abortWait = () =>
+      waitController.abort(this.abortController.signal.reason);
+    this.abortController.signal.addEventListener('abort', abortWait, {
+      once: true,
+    });
+    try {
+      return await Promise.race([
+        waitForTaskNotification(waitController.signal),
+        this.waitForWaitingInput().then(() => undefined),
+      ]);
+    } finally {
+      this.phase = 'transitioning';
+      this.wakeWaitingInput = undefined;
+      this.abortController.signal.removeEventListener('abort', abortWait);
+      if (!waitController.signal.aborted) waitController.abort();
+    }
+  }
+
+  private waitForWaitingInput(): Promise<void> {
+    if (this.waitingInputs.length > 0 || this.abortController.signal.aborted) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.wakeWaitingInput = resolve;
+    });
+  }
+
+  private forwardWaitingInputs(stream: AgentStream): void {
+    for (const input of this.waitingInputs.splice(0)) {
+      stream.steer({ role: 'user', content: input.text });
+      this.pendingInputs.push(input);
+    }
+  }
+
+  private publishConsumedInput(input: QueuedRunInput): void {
+    this.queue.push({
+      type: 'steeringConsumed',
+      steerId: input.id,
+      text: input.text,
+      occurredAt: new Date().toISOString(),
+    });
   }
 
   private runOptions() {
@@ -360,7 +489,7 @@ class RunningAgent implements AgentRun {
         return;
       case 'queue.drained':
         if (event.queue === 'steering') {
-          this.publishConsumedSteers(event.count, event.occurredAt);
+          this.publishConsumedInputs(event.count, event.occurredAt);
         }
         return;
       case 'run.completed':
@@ -386,7 +515,7 @@ class RunningAgent implements AgentRun {
   }
 
   /**
-   * 把 engine 的 steering drain 事实关联回产品层 steer，并按 FIFO 发布消费事件。
+   * 把 engine 的 steering drain 事实关联回产品层输入，只为用户 steer 发布消费事件。
    *
    * Args:
    * - `count`: engine 本回合实际抽取的 steering 数量。
@@ -396,25 +525,27 @@ class RunningAgent implements AgentRun {
    * - 所有对应事件完成入队后同步返回。
    *
    * Throws:
-   * - 当 engine 抽取数量超过产品层已登记 steer 时抛错，避免错误关联。
+   * - 当 engine 抽取数量超过产品层已登记输入时抛错，避免错误关联。
    */
-  private publishConsumedSteers(count: number, occurredAt: string): void {
-    if (count > this.pendingSteers.length) {
+  private publishConsumedInputs(count: number, occurredAt: string): void {
+    if (count > this.pendingInputs.length) {
       throw new Error(
-        `Engine drained ${count} steering messages with only ${this.pendingSteers.length} pending.`,
+        `Engine drained ${count} steering messages with only ${this.pendingInputs.length} pending.`,
       );
     }
     for (let index = 0; index < count; index += 1) {
-      const steer = this.pendingSteers.shift();
-      if (steer === undefined) {
-        throw new Error('Pending steering correlation was unexpectedly empty.');
+      const input = this.pendingInputs.shift();
+      if (input === undefined) {
+        throw new Error('Pending input correlation was unexpectedly empty.');
       }
-      this.queue.push({
-        type: 'steeringConsumed',
-        steerId: steer.steerId,
-        text: steer.text,
-        occurredAt,
-      });
+      if (input.kind === 'steer') {
+        this.queue.push({
+          type: 'steeringConsumed',
+          steerId: input.id,
+          text: input.text,
+          occurredAt,
+        });
+      }
     }
   }
 
@@ -657,8 +788,9 @@ function isFailure(result: EngineRunResult): boolean {
     case 'no-progress':
     case 'unknown':
       return true;
-    case 'stop':
     case 'length':
+      return result.output.trim() === '';
+    case 'stop':
     case 'tool-calls':
     case 'approval-required':
     case 'tool-result-required':

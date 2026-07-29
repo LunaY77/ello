@@ -18,6 +18,127 @@ import {
 } from '../../src/tui/store/tui-event-store.js';
 
 describe('tui-event-store', () => {
+  it('终态 Agent 摘要只提交一次，后续消息继续追加在摘要之后', () => {
+    let state = createInitialTuiEventState(fixtureSnapshot());
+    const entry = {
+      kind: 'subagent' as const,
+      id: 'agent-task:job_explore',
+      run: {
+        runId: 'job_explore',
+        revision: 7,
+        agentName: 'explore',
+        description: '调研 skill 能力',
+        background: true,
+        status: 'completed' as const,
+        startedAt: fixtureTimestamp,
+        completedAt: fixtureTimestamp,
+        toolCount: 72,
+        tools: [],
+        output: '完整调研报告',
+      },
+    };
+
+    state = reduceTuiEvent(state, {
+      type: 'ui.subagent.committed',
+      entry,
+    });
+    state = reduceTuiEvent(state, {
+      type: 'ui.subagent.committed',
+      entry,
+    });
+    state = reduceTuiEvent(state, {
+      type: 'ui.message',
+      text: 'next assistant output',
+    });
+
+    expect(state.history.map((item) => item.id)).toEqual([
+      'thread-header-thread-1',
+      'agent-task:job_explore',
+      'ui-message-2',
+    ]);
+  });
+
+  it('history snapshot 重置后允许按同一稳定 ID 重新提交终态 Agent 摘要', () => {
+    const snapshot = fixtureSnapshot();
+    const entry = {
+      kind: 'subagent' as const,
+      id: 'agent-task:job_explore',
+      run: {
+        runId: 'job_explore',
+        revision: 7,
+        agentName: 'explore',
+        description: '调研 skill 能力',
+        background: true,
+        status: 'completed' as const,
+        startedAt: fixtureTimestamp,
+        completedAt: fixtureTimestamp,
+        toolCount: 72,
+        tools: [],
+        output: '完整调研报告',
+      },
+    };
+    let state = createInitialTuiEventState(snapshot);
+    state = reduceTuiEvent(state, {
+      type: 'ui.subagent.committed',
+      entry,
+    });
+
+    state = reduceTuiEvent(state, { type: 'snapshot', snapshot });
+    expect(state.history.some((item) => item.id === entry.id)).toBe(false);
+    state = reduceTuiEvent(state, {
+      type: 'ui.subagent.committed',
+      entry,
+    });
+    state = reduceTuiEvent(state, {
+      type: 'ui.subagent.committed',
+      entry,
+    });
+
+    expect(state.history.filter((item) => item.id === entry.id)).toHaveLength(
+      1,
+    );
+  });
+
+  it('同一 Agent task 的晚到终态 revision 原位更新而不追加卡片', () => {
+    let state = createInitialTuiEventState(fixtureSnapshot());
+    const entry = {
+      kind: 'subagent' as const,
+      id: 'agent-task:job_explore',
+      run: {
+        runId: 'job_explore',
+        revision: 171,
+        agentName: 'explore',
+        description: '调研 agent 架构',
+        background: false,
+        status: 'killed' as const,
+        startedAt: fixtureTimestamp,
+        completedAt: fixtureTimestamp,
+        toolCount: 13,
+        tools: [],
+      },
+    };
+
+    state = reduceTuiEvent(state, {
+      type: 'ui.subagent.committed',
+      entry,
+    });
+    state = reduceTuiEvent(state, {
+      type: 'ui.subagent.committed',
+      entry: {
+        ...entry,
+        run: { ...entry.run, revision: 174, toolCount: 14 },
+      },
+    });
+
+    expect(
+      state.history.filter((item) => item.id === 'agent-task:job_explore'),
+    ).toHaveLength(1);
+    expect(state.history.at(-1)).toMatchObject({
+      kind: 'subagent',
+      run: { revision: 174, toolCount: 14 },
+    });
+  });
+
   it('projects persisted snapshot history and active items', () => {
     const turn = turnFixture({
       id: 'turn-1',
@@ -599,6 +720,42 @@ describe('tui-event-store', () => {
         error: { message: 'Path not allowed: /outside/packages' },
       },
     });
+  });
+
+  it('hides successful delegate tool rows but preserves failed delegates', () => {
+    const delegate = (
+      id: string,
+      status: 'completed' | 'failed',
+    ): Extract<ThreadItem, { type: 'toolCall' }> => ({
+      id,
+      turnId: 'turn-1',
+      type: 'toolCall',
+      toolName: 'delegate_to_subagent',
+      headline: 'Delegate',
+      status,
+      ...(status === 'failed' ? { error: 'cwd policy rejected' } : {}),
+      createdAt: fixtureTimestamp,
+    });
+    const state = createInitialTuiEventState(
+      fixtureSnapshot({
+        turns: [
+          turnFixture({
+            items: [
+              delegate('delegate-completed', 'completed'),
+              delegate('delegate-failed', 'failed'),
+            ],
+            completedAt: fixtureTimestamp,
+          }),
+        ],
+      }),
+    );
+
+    expect(state.history.filter((entry) => entry.kind === 'tool')).toEqual([
+      expect.objectContaining({
+        id: 'delegate-failed',
+        tool: expect.objectContaining({ status: 'fail' }),
+      }),
+    ]);
   });
 });
 

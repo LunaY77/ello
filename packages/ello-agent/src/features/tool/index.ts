@@ -44,6 +44,15 @@ export type {
   ToolAttachment,
   ToolMetadata,
 } from './internal/runtime/coding-tool.js';
+export {
+  CodingToolExecutionError,
+  ToolFailureTracker,
+  type ToolFailureDiagnostic,
+} from './internal/runtime/tool-errors.js';
+export {
+  AgentWorkflowState,
+  type AgentWorkflowPhase,
+} from './internal/runtime/workflow-state.js';
 export { RulesStore } from './permissions/rules-store.js';
 export {
   genericApprovalFor,

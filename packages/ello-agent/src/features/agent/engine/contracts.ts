@@ -381,6 +381,7 @@ export type AgentInput =
 export interface AgentRunOptions {
   readonly runId?: string;
   readonly modelSettings?: AgentModelSettings;
+  /** 正整数限制模型轮次；`-1` 表示不设置上限。 */
   readonly maxTurns?: number;
   readonly signal?: AbortSignal;
   readonly metadata?: Record<string, unknown>;

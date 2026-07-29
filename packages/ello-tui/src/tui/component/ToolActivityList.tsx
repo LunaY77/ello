@@ -1,5 +1,4 @@
 import { Box, Text } from 'ink';
-import { useState } from 'react';
 
 import { DiffPreview, presenterFor } from '../presenters/index.js';
 import type { ToolCallView } from '../store/history-entry.js';
@@ -10,16 +9,18 @@ export function ToolActivityList({
   tools,
   cwd,
   indent = 0,
+  expanded = false,
 }: {
   readonly tools: readonly ToolCallView[];
   readonly cwd: string;
   readonly indent?: number;
+  readonly expanded?: boolean;
 }) {
   return (
     <Box flexDirection="column">
       {tools.map((tool) => (
         <Box key={tool.id} marginLeft={indent} marginBottom={1}>
-          <ToolCard call={tool} cwd={cwd} />
+          <ToolCard call={tool} cwd={cwd} expanded={expanded} />
         </Box>
       ))}
     </Box>
@@ -30,23 +31,24 @@ function ToolCard({
   call,
   cwd,
   compact = false,
+  expanded = false,
 }: {
   readonly call: ToolCallView;
   readonly cwd: string;
   readonly compact?: boolean;
+  readonly expanded?: boolean;
 }) {
   const theme = useTheme();
   const model = buildToolCardModel(call, { cwd });
   const presenter = presenterFor(call.name);
-  const [collapsed] = useState(() => compact || model.defaultCollapsed);
+  const collapsed = compact || (!expanded && model.defaultCollapsed);
   const color = statusColor(theme, model.status);
 
   return (
     <Box flexDirection="column">
       <Box gap={1}>
-        <Text color={color}>{toolStatusLabel(call.status)}</Text>
         <Text color={color} wrap="truncate-middle">
-          {model.headline}
+          {`${toolStatusLabel(call.status)} ${model.headline}`}
         </Text>
         {model.metaRight !== '' ? (
           <Text color={theme.textMuted}>{model.metaRight}</Text>

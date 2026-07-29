@@ -1,4 +1,8 @@
-/** Built-in configuration is a complete, credential-free model directory. */
+/**
+ * 本文件定义不含凭据的内置模型目录与默认模型角色。
+ *
+ * 目录只声明协议、端点和能力上限；真实密钥始终通过环境变量注入。
+ */
 import type { ModelConfig } from './schema.js';
 
 export interface BuiltinModelConfig {

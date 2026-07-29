@@ -154,6 +154,10 @@ describe('Agent run event ordering', () => {
 
     await firstModelStarted.promise;
     run.steer('steer_focus', 'focus tests');
+    run.notify(
+      'notification_background',
+      '<task-notification>background done</task-notification>',
+    );
     expect(events.some((event) => event.type === 'steeringConsumed')).toBe(
       false,
     );
@@ -172,6 +176,247 @@ describe('Agent run event ordering', () => {
       role: 'user',
       content: 'focus tests',
     });
+    expect(secondRequest?.messages).toContainEqual({
+      role: 'user',
+      content: '<task-notification>background done</task-notification>',
+    });
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: 'steeringConsumed',
+        steerId: 'notification_background',
+      }),
+    );
+  });
+
+  it('continues the same run when a background task finishes after a natural answer', async () => {
+    const notification = deferred<string | undefined>();
+    const requests: AgentModelRequest[] = [];
+    const inspect = defineTool({
+      name: 'inspect',
+      description: 'Inspect one step.',
+      discovery: { aliases: [], risk: 'readonly' },
+      input: z.object({}).strict(),
+      execute: () => ({ inspected: true }),
+    });
+    const engine = createAgent({
+      model: 'test:model',
+      modelCall: {
+        agentName: 'test-agent',
+        modelSelector: 'primary_model',
+        configuredModel: 'test-model',
+        protocol: 'openai',
+        apiModel: 'model',
+      },
+      modelAdapter: {
+        generate: async () => {
+          throw new Error('Streaming adapter should not call generate.');
+        },
+        async *stream(request) {
+          requests.push(request);
+          const text = requests.length === 1 ? 'waiting' : 'synthesized';
+          yield {
+            type: 'final',
+            response: finalResponseWithText(request, text),
+          };
+        },
+      },
+      environment: {},
+      executionTools: [inspect],
+      modelTools: [inspect],
+    });
+    let notificationWaits = 0;
+    const built: BuiltAgent = {
+      engine,
+      maxTurns: undefined,
+      waitForTaskNotification: () =>
+        notificationWaits++ === 0
+          ? notification.promise
+          : Promise.resolve(undefined),
+      modelCompactor: () => undefined,
+      setMode: () => undefined,
+      close: () => engine.close(),
+    };
+    const run = startAgentRun(built, {
+      threadId: 'thread-background',
+      turnId: 'turn-background',
+      cwd: '/workspace',
+      selection: { mode: 'ask-before-changes', agent: 'test-agent' },
+      history: [],
+      input: 'delegate in background',
+      goal: null,
+      permission: { rules: () => [], externalPaths: () => [] },
+    });
+    const events: AgentRunEvent[] = [];
+    const collectEvents = (async () => {
+      for await (const event of run.events) events.push(event);
+    })();
+
+    await expect.poll(() => requests.length).toBe(1);
+    let settled = false;
+    void run.result.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    notification.resolve('<task-notification>done</task-notification>');
+    await collectEvents;
+    await expect(run.result).resolves.toMatchObject({ status: 'completed' });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.messages).toContainEqual({
+      role: 'user',
+      content: '<task-notification>done</task-notification>',
+    });
+    expect(
+      events
+        .filter((event) => event.type === 'messageCompleted')
+        .map((event) => event.text),
+    ).toEqual(['waiting', 'synthesized']);
+  });
+
+  it('accepts user steering while waiting for a background task notification', async () => {
+    const waitingNotification = deferred<string | undefined>();
+    const requests: AgentModelRequest[] = [];
+    const inspect = defineTool({
+      name: 'inspect',
+      description: 'Inspect one step.',
+      discovery: { aliases: [], risk: 'readonly' },
+      input: z.object({}).strict(),
+      execute: () => ({ inspected: true }),
+    });
+    const engine = createAgent({
+      model: 'test:model',
+      modelCall: {
+        agentName: 'test-agent',
+        modelSelector: 'primary_model',
+        configuredModel: 'test-model',
+        protocol: 'openai',
+        apiModel: 'model',
+      },
+      modelAdapter: {
+        generate: async () => {
+          throw new Error('Streaming adapter should not call generate.');
+        },
+        async *stream(request) {
+          requests.push(request);
+          yield {
+            type: 'final',
+            response: finalResponseWithText(
+              request,
+              requests.length === 1 ? 'waiting' : 'steered response',
+            ),
+          };
+        },
+      },
+      environment: {},
+      executionTools: [inspect],
+      modelTools: [inspect],
+    });
+    let notificationWaits = 0;
+    const built: BuiltAgent = {
+      engine,
+      maxTurns: undefined,
+      waitForTaskNotification: () =>
+        notificationWaits++ === 0
+          ? waitingNotification.promise
+          : Promise.resolve(undefined),
+      modelCompactor: () => undefined,
+      setMode: () => undefined,
+      close: () => engine.close(),
+    };
+    const run = startAgentRun(built, {
+      threadId: 'thread-waiting-steer',
+      turnId: 'turn-waiting-steer',
+      cwd: '/workspace',
+      selection: { mode: 'ask-before-changes', agent: 'test-agent' },
+      history: [],
+      input: 'delegate in background',
+      goal: null,
+      permission: { rules: () => [], externalPaths: () => [] },
+    });
+    const events: AgentRunEvent[] = [];
+    const collectEvents = (async () => {
+      for await (const event of run.events) events.push(event);
+    })();
+
+    await expect.poll(() => requests.length).toBe(1);
+    run.steer('steer_follow_up', 'also inspect the TUI');
+    await collectEvents;
+    await expect(run.result).resolves.toMatchObject({ status: 'completed' });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.messages).toContainEqual({
+      role: 'user',
+      content: 'also inspect the TUI',
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'steeringConsumed',
+        steerId: 'steer_follow_up',
+        text: 'also inspect the TUI',
+      }),
+    );
+  });
+
+  it('fails when maxTurns is reached before a final answer', async () => {
+    const inspect = defineTool({
+      name: 'inspect',
+      description: 'Inspect one step.',
+      discovery: { aliases: [], risk: 'readonly' },
+      input: z.object({}).strict(),
+      execute: () => ({ inspected: true }),
+    });
+    const engine = createAgent({
+      model: 'test:model',
+      modelCall: {
+        agentName: 'test-agent',
+        modelSelector: 'primary_model',
+        configuredModel: 'test-model',
+        protocol: 'openai',
+        apiModel: 'model',
+      },
+      modelAdapter: {
+        generate: (request) => Promise.resolve(toolResponse(request)),
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+      environment: {},
+      executionTools: [inspect],
+      modelTools: [inspect],
+    });
+    const built: BuiltAgent = {
+      engine,
+      maxTurns: 1,
+      modelCompactor: () => undefined,
+      setMode: () => undefined,
+      close: () => engine.close(),
+    };
+    const run = startAgentRun(built, {
+      threadId: 'thread-max-turns',
+      turnId: 'turn-max-turns',
+      cwd: '/workspace',
+      selection: { mode: 'ask-before-changes', agent: 'test-agent' },
+      history: [],
+      input: 'inspect once',
+      goal: null,
+      permission: { rules: () => [], externalPaths: () => [] },
+    });
+    const collectEvents = (async () => {
+      for await (const _event of run.events) {
+        // Drain the event stream so the run can close normally.
+      }
+    })();
+
+    await expect(run.result).resolves.toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'AGENT_RUN_FAILED',
+        message: 'Agent reached max turns without a final answer.',
+      },
+    });
+    await collectEvents;
   });
 });
 
@@ -199,9 +444,16 @@ function toolResponse(request: AgentModelRequest): AgentModelResponse {
 }
 
 function finalResponse(request: AgentModelRequest): AgentModelResponse {
-  const message: AgentMessage = { role: 'assistant', content: 'done' };
+  return finalResponseWithText(request, 'done');
+}
+
+function finalResponseWithText(
+  request: AgentModelRequest,
+  text: string,
+): AgentModelResponse {
+  const message: AgentMessage = { role: 'assistant', content: text };
   return {
-    text: 'done',
+    text,
     messages: [...request.messages, message],
     newMessages: [message],
     usage: testUsage(),

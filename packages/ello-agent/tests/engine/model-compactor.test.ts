@@ -76,7 +76,7 @@ describe('model compactor', () => {
           requests.push(request);
           return response(request, 'restored checkpoint');
         },
-        async *stream() {
+        stream() {
           throw new Error('Compact must not start a normal Agent run.');
         },
       },

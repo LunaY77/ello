@@ -28,6 +28,8 @@ import {
   type ToolOutputLimits,
   type ToolOutputStore,
 } from './output-store.js';
+import { ToolFailureTracker } from './tool-errors.js';
+import type { AgentWorkflowState } from './workflow-state.js';
 
 export interface CodingToolAdapterOptions {
   readonly config: CodingAgentConfig;
@@ -35,6 +37,8 @@ export interface CodingToolAdapterOptions {
   /** 跨工具共享的命令轮次记录；同一批工具必须共用同一实例才能识别重复。 */
   readonly commandHistory: ShellCommandHistory;
   readonly fileState: SessionFileState;
+  readonly failures: ToolFailureTracker;
+  readonly workflow: AgentWorkflowState;
 }
 
 /**
@@ -80,7 +84,14 @@ export function adaptCodingTool(
         : (input, ctx) => approval(input, createContext(ctx, options.config)),
     execute: async (input, ctx) => {
       const codingContext = createContext(ctx, options.config);
-      const result = await tool.execute(input, codingContext);
+      let result: CodingToolResult;
+      try {
+        result = await tool.execute(input, codingContext);
+      } catch (error) {
+        options.workflow.observeFailure();
+        throw options.failures.create(tool.name, error);
+      }
+      options.workflow.observeResult(result);
       invalidateChangedFiles(
         options.fileState,
         options.config.cwd,

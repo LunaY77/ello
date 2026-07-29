@@ -11,6 +11,7 @@ export class AsyncByteQueue implements AsyncIterable<Uint8Array> {
     readonly resolve: (result: IteratorResult<Uint8Array>) => void;
     readonly reject: (error: unknown) => void;
   }> = [];
+  private readonly capacityListeners = new Set<() => void>();
   private ended = false;
   private failure: unknown;
   private queuedBytes = 0;
@@ -37,18 +38,25 @@ export class AsyncByteQueue implements AsyncIterable<Uint8Array> {
    * - 成功交付或入队返回 true；队列已结束或超限返回 false。
    */
   push(value: Uint8Array): boolean {
+    if (this.tryPush(value)) return true;
     if (this.ended) return false;
+    this.fail(
+      new Error(
+        `Transport inbound queue exceeds ${this.maxLength} messages or ${this.maxBytes} bytes.`,
+      ),
+    );
+    return false;
+  }
+
+  /** 尝试入队；容量不足时保留队列状态，让可暂停的 transport 施加背压。 */
+  tryPush(value: Uint8Array): boolean {
+    if (this.ended || value.byteLength > this.maxBytes) return false;
     const waiter = this.waiters.shift();
     if (waiter === undefined) {
       if (
         this.values.length >= this.maxLength ||
         this.queuedBytes + value.byteLength > this.maxBytes
       ) {
-        this.fail(
-          new Error(
-            `Transport inbound queue exceeds ${this.maxLength} messages or ${this.maxBytes} bytes.`,
-          ),
-        );
         return false;
       }
       const copy = value.slice();
@@ -58,6 +66,20 @@ export class AsyncByteQueue implements AsyncIterable<Uint8Array> {
     return true;
   }
 
+  /** 注册容量释放通知，供可暂停的底层 stream 恢复读取。 */
+  onCapacityAvailable(listener: () => void): () => void {
+    this.capacityListeners.add(listener);
+    return () => this.capacityListeners.delete(listener);
+  }
+
+  /** 队列接近任一硬上限时应暂停继续接收，预留半个字节预算给下一条合法消息。 */
+  get shouldApplyBackpressure(): boolean {
+    return (
+      this.values.length >= this.maxLength ||
+      this.queuedBytes >= this.maxBytes / 2
+    );
+  }
+
   /** 正常结束队列，并让所有等待中的 iterator 收到 done。 */
   end(): void {
     if (this.ended) return;
@@ -65,6 +87,7 @@ export class AsyncByteQueue implements AsyncIterable<Uint8Array> {
     for (const waiter of this.waiters.splice(0)) {
       waiter.resolve({ done: true, value: undefined });
     }
+    this.capacityListeners.clear();
   }
 
   /**
@@ -78,6 +101,7 @@ export class AsyncByteQueue implements AsyncIterable<Uint8Array> {
     this.failure = error;
     this.ended = true;
     for (const waiter of this.waiters.splice(0)) waiter.reject(error);
+    this.capacityListeners.clear();
   }
 
   /** 返回消费当前队列的唯一异步 iterator。 */
@@ -87,6 +111,7 @@ export class AsyncByteQueue implements AsyncIterable<Uint8Array> {
         const value = this.values.shift();
         if (value !== undefined) {
           this.queuedBytes -= value.byteLength;
+          for (const listener of this.capacityListeners) listener();
           return Promise.resolve({ done: false, value });
         }
         if (this.failure !== undefined) return Promise.reject(this.failure);

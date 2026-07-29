@@ -120,7 +120,7 @@ describe('ServerServices runtime contracts', () => {
     ).rejects.toMatchObject({ type: 'invalidParams' });
   });
 
-  it('未装配 delegation runner 的 Subagent 在目录中明确标记不可用', async () => {
+  it('已装配的 Subagent 在目录中标记为可委派运行时', async () => {
     const storage = createStorage(home);
     const service = createService(storage, threadSnapshot(home));
     const response = (await invokeServiceRoute(
@@ -134,17 +134,17 @@ describe('ServerServices runtime contracts', () => {
         readonly metadata: Record<string, unknown>;
       }[];
     };
-    const unavailable = response.data.filter(
+    const subagents = response.data.filter(
       (agent) => agent.metadata.mode === 'subagent',
     );
 
-    expect(unavailable.length).toBeGreaterThan(0);
-    expect(unavailable).toEqual(
+    expect(subagents.length).toBeGreaterThan(0);
+    expect(subagents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          enabled: false,
+          enabled: true,
           metadata: expect.objectContaining({
-            runtime: 'unavailable:no-delegation-runner',
+            runtime: 'delegation',
           }),
         }),
       ]),

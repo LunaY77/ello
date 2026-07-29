@@ -44,7 +44,12 @@ export function createRuntimeEnvironment(
   const writePaths = () =>
     mode() === 'bypass'
       ? [path.parse(cwd).root]
-      : runtimeAllowedPaths(cwd, rules(), threadExternalPaths());
+      : runtimeAllowedPaths(
+          cwd,
+          config.allowed_paths ?? [],
+          rules(),
+          threadExternalPaths(),
+        );
   return createEnvironment({
     cwd,
     paths: {

@@ -9,6 +9,7 @@ import {
 import { sha256 } from './hash.js';
 import { errorMessage } from './io.js';
 import type { ResolvedTaskFiles } from './task-corpus.js';
+import { collectVerifierAssertions } from './verifier-assertions.js';
 import {
   executeVerifierProcess,
   VerifierExecutionError,
@@ -22,6 +23,7 @@ export async function runVerifier(options: {
   readonly taskFiles: ResolvedTaskFiles;
   readonly patch: PatchArtifact;
   readonly runtime: 'docker' | 'local';
+  readonly lastAgentVerificationRound: number | null;
 }): Promise<HarnessReport> {
   const task = options.taskFiles.task;
   const prepared = await prepareVerifierWorkspace(options);
@@ -64,6 +66,17 @@ export async function runVerifier(options: {
       newTestsExitCode: process.newTestsExitCode,
       hiddenPatchChangedFiles: prepared.hiddenPatchChangedFiles,
       patchConflictFiles: prepared.patchConflictFiles,
+      modelPatchChangedFiles: options.patch.changedFiles,
+      verifierAssertions: await collectVerifierAssertions({
+        verifierOutput: prepared.verifierOutput,
+        baselineExitCode: process.baselineExitCode,
+        newTestsExitCode: process.newTestsExitCode,
+        reward,
+        ...(options.taskFiles.benchmark === 'swe-bench-pro'
+          ? { testSpec: options.taskFiles.testSpec }
+          : {}),
+      }),
+      lastAgentVerificationRound: options.lastAgentVerificationRound,
       reportPath: path.join(prepared.harnessRoot, 'report.json'),
       completedAt: new Date().toISOString(),
     });

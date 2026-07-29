@@ -15,6 +15,27 @@
       "when": 1785203484133,
       "tag": "0001_remove_change_checkpoints",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785296401207,
+      "tag": "0002_moaning_inertia",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785296692638,
+      "tag": "0003_brief_titania",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785310775525,
+      "tag": "0004_agent_task_runtime_projection",
+      "breakpoints": true
     }
   ]
 }

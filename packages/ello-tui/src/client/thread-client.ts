@@ -14,6 +14,7 @@ import {
   type ClientServerRequest,
 } from '../api/server-requests.js';
 
+import { AgentTaskClient } from './agent-task-client.js';
 import type {
   ThreadClientEvent,
   ThreadClientListener,
@@ -80,6 +81,11 @@ export class ThreadClient {
   }
   get stale(): boolean {
     return this.projection.stale;
+  }
+
+  /** 为当前 root thread 建立独立的 Agent task 订阅。 */
+  createAgentTaskClient(): Promise<AgentTaskClient> {
+    return AgentTaskClient.connect(this.server, this.threadId);
   }
 
   /**

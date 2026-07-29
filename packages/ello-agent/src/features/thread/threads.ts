@@ -10,15 +10,21 @@ import {
   type Goal,
   type ParsedClientParams,
   type Plan,
+  type SessionMode,
   type ThreadSnapshot,
   type ThreadSummary,
   type Turn,
   type UserInput,
 } from '../../protocol/v1/index.js';
 import { parseCursor } from '../../server/rpc/route.js';
-import type { AgentFeature } from '../agent/index.js';
+import type {
+  AgentFeature,
+  AgentInteraction,
+  AgentRun,
+} from '../agent/index.js';
 
 import { createForkRecords, filterSnapshot } from './fork.js';
+import type { AgentInteractionAttribution } from './interactions.js';
 import { projectThreadSnapshot } from './records.js';
 import {
   assertSubscriptionListener,
@@ -41,6 +47,20 @@ export interface CreateThreadsInput {
   readonly startAgentRun: AgentFeature['startRun'];
   readonly unloadGraceMs: number;
   readonly titleGenerator?: ThreadTitleGenerator;
+  /**
+   * 在 root Turn 中断写入终态前停止其活动子代理树。
+   *
+   * Args:
+   * - `threadId`: 正在中断的 root Thread 标识。
+   * - `reason`: 传递给全部活动子任务的中断原因。
+   *
+   * Returns:
+   * - Promise 在子任务与挂起交互全部收口后兑现。
+   */
+  readonly beforeInterrupt?: (
+    threadId: string,
+    reason: string,
+  ) => Promise<void>;
   /**
    * 在 Thread Thread 用例 模块 中执行 `resolveInitialSettings` 完整流程，并在返回前完成其必要副作用。
    *
@@ -201,6 +221,10 @@ export function createThreads(options: CreateThreadsInput) {
       };
     },
     loaded: () => pool.loaded(),
+    /** 供 child 工具权限运行时读取 root Thread 的实时模式。 */
+    currentMode(threadId: string): SessionMode {
+      return pool.currentMode(threadId);
+    },
     async fork(
       connectionId: string,
       params: ParsedClientParams<'thread/fork'>,
@@ -274,13 +298,42 @@ export function createThreads(options: CreateThreadsInput) {
         state.steerTurn(turnId, steerId, input),
       );
     },
-    interruptTurn(
+    async interruptTurn(
       threadId: string,
       turnId: string,
       reason?: string,
     ): Promise<Turn> {
+      const interruptReason = reason ?? 'client request';
+      await options.beforeInterrupt?.(threadId, interruptReason);
       return pool.withState(threadId, false, (state) =>
-        state.interruptTurn(turnId, reason),
+        state.interruptTurn(turnId, interruptReason),
+      );
+    },
+    registerAgentInteraction(
+      threadId: string,
+      taskId: string,
+      startedAt: string,
+      interaction: AgentInteraction,
+      run: AgentRun,
+      attribution: AgentInteractionAttribution,
+    ): Promise<void> {
+      return pool.withState(threadId, false, (state) =>
+        state.registerAgentInteraction(
+          taskId,
+          startedAt,
+          interaction,
+          run,
+          attribution,
+        ),
+      );
+    },
+    cancelAgentInteractions(
+      threadId: string,
+      taskIds: readonly string[] | undefined,
+      reason: string,
+    ): Promise<void> {
+      return pool.withState(threadId, false, (state) =>
+        state.cancelAgentInteractions(taskIds, reason),
       );
     },
     async goal(threadId: string): Promise<Goal | null> {

@@ -21,22 +21,18 @@ Drop low-value detail:
 - transient planning prose;
 - speculation that was not confirmed.
 
-Return exactly these sections:
+Return exactly these ledger sections. Facts must name their evidence source; tests must include command, phase, exit code, and coverage. Use `none` instead of omitting a section.
 
 ## Goal
 
-## Constraints & Preferences
+## Facts
 
-## Progress
+## Changes
 
-## Key Decisions
+## Failures
 
-## Next Steps
+## Tests
 
-## Critical Context
+## Next
 
-## Relevant Files
-
-## Validation
-
-## Risks or Blockers
+## Environment

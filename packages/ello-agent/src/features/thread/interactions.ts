@@ -31,8 +31,17 @@ import { projectApprovalItem, type RulesStore } from '../tool/index.js';
 import { readPlanArtifact } from './plan.js';
 
 interface PendingInteraction {
+  readonly taskId: string;
   readonly interaction: AgentInteraction;
   readonly run: AgentRun;
+}
+
+export interface AgentInteractionAttribution {
+  readonly taskId: string;
+  readonly name: string;
+  readonly definitionName: string;
+  readonly description: string;
+  readonly cwd: string;
 }
 
 interface ThreadInteractionsOptions {
@@ -79,10 +88,17 @@ export function createThreadInteractions(options: ThreadInteractionsOptions) {
     turn: Turn,
     interaction: AgentInteraction,
     run: AgentRun,
+    attribution?: AgentInteractionAttribution,
   ): Promise<void> => {
     const requestId = createEntityId('srvreq');
-    const request = await projectRequest(options, requestId, turn, interaction);
-    pending.set(requestId, { interaction, run });
+    const request = await projectRequest(
+      options,
+      requestId,
+      turn,
+      interaction,
+      attribution,
+    );
+    pending.set(requestId, { taskId: turn.id, interaction, run });
     try {
       await options.append({ kind: 'serverRequest.created', request });
     } catch (error) {
@@ -138,7 +154,66 @@ export function createThreadInteractions(options: ThreadInteractionsOptions) {
     pending.delete(requestId);
   };
 
-  return { register, resolve, reject };
+  const close = async (error: {
+    readonly code: number;
+    readonly message: string;
+  }): Promise<void> => {
+    const failures: unknown[] = [];
+    for (const [requestId, entry] of [...pending]) {
+      try {
+        if (
+          options
+            .snapshot()
+            .pendingServerRequests.some((request) => request.id === requestId)
+        ) {
+          await appendResolution(options, requestId, 'rejected');
+        }
+        pending.delete(requestId);
+        entry.run.resume({
+          type: 'rejected',
+          interactionId: entry.interaction.interactionId,
+          error,
+        });
+      } catch (closeError) {
+        failures.push(closeError);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        'Thread interactions failed to close cleanly.',
+      );
+    }
+  };
+
+  const cancel = async (
+    taskIds: readonly string[] | undefined,
+    error: { readonly code: number; readonly message: string },
+  ): Promise<void> => {
+    const selected = taskIds === undefined ? undefined : new Set(taskIds);
+    for (const [requestId, entry] of [...pending]) {
+      if (selected !== undefined && !selected.has(entry.taskId)) continue;
+      if (
+        options
+          .snapshot()
+          .pendingServerRequests.some((request) => request.id === requestId)
+      ) {
+        await appendResolution(options, requestId, 'rejected');
+      }
+      pending.delete(requestId);
+      try {
+        entry.run.resume({
+          type: 'rejected',
+          interactionId: entry.interaction.interactionId,
+          error,
+        });
+      } catch {
+        // run 可能已经收到中断；持久请求已收口，不再用晚到的 resume 覆盖取消结果。
+      }
+    }
+  };
+
+  return { register, resolve, reject, cancel, close };
 }
 
 async function projectRequest(
@@ -146,6 +221,7 @@ async function projectRequest(
   requestId: string,
   turn: Turn,
   interaction: AgentInteraction,
+  attribution?: AgentInteractionAttribution,
 ): Promise<PendingServerRequest> {
   if (interaction.type === 'approval') {
     const projected = projectApprovalItem(interaction.item);
@@ -162,6 +238,7 @@ async function projectRequest(
       reason:
         projected.reason ?? readString(metadata.reason) ?? 'Approval required.',
       availableDecisions: ['accept', 'acceptForSession', 'decline', 'cancel'],
+      ...(attribution === undefined ? {} : { agent: attribution }),
     } as const;
     const params =
       method === 'item/commandExecution/requestApproval'
@@ -210,6 +287,7 @@ async function projectRequest(
         turnId: turn.id,
         itemId: interaction.item.toolCallId,
         reason: 'The agent needs user input to continue.',
+        ...(attribution === undefined ? {} : { agent: attribution }),
         questions: input.questions.map((question) => ({
           id: question.id,
           header: question.header,

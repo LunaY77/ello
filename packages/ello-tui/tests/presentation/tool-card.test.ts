@@ -197,6 +197,24 @@ describe('buildToolCardModel', () => {
     });
   });
 
+  it('使用 artifactId 渲染子代理转存的工具结果', () => {
+    const artifactId =
+      '877233fdfb274dcbadc35918b6a9f7b2877233fdfb274dcbadc35918b6a9f7b2';
+    const model = buildToolCardModel(
+      call({
+        output: {
+          output: 'preview',
+          metadata: { artifactId, artifactBytes: 48_000, truncated: true },
+        },
+      }),
+    );
+
+    expect(model.artifact).toEqual({
+      displayPath: '877233fd…f7b2',
+      fullPath: artifactId,
+    });
+  });
+
   it('shortens absolute paths in headlines, summaries and diffs', () => {
     const targetPath = '/home/alice/project/src/a.ts';
     const model = buildToolCardModel(

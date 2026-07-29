@@ -52,6 +52,18 @@ export const RunProvenanceSchema = z.discriminatedUnion('scope', [
 
 export type RunProvenance = z.infer<typeof RunProvenanceSchema>;
 
+export const VerifierAssertionSchema = z
+  .object({
+    id: z.string().min(1),
+    scope: z.enum(['baseline', 'new', 'reward']),
+    status: z.enum(['passed', 'failed', 'skipped', 'error']),
+    exitCode: z.number().int().nonnegative().nullable(),
+    source: z.enum(['harness', 'parser']),
+  })
+  .strict();
+
+export type VerifierAssertion = z.infer<typeof VerifierAssertionSchema>;
+
 export const HarnessReportSchema = z
   .object({
     schema: z.literal('ello.benchmark.harness.v1'),
@@ -69,6 +81,14 @@ export const HarnessReportSchema = z
     newTestsExitCode: z.number().int().nonnegative(),
     hiddenPatchChangedFiles: z.array(z.string().min(1)),
     patchConflictFiles: z.array(z.string().min(1)),
+    modelPatchChangedFiles: z.array(z.string().min(1)).default([]),
+    verifierAssertions: z.array(VerifierAssertionSchema).default([]),
+    lastAgentVerificationRound: z
+      .number()
+      .int()
+      .positive()
+      .nullable()
+      .default(null),
     reportPath: z.string().min(1),
     completedAt: z.string().datetime(),
   })
@@ -84,6 +104,18 @@ export const HarnessReportSchema = z
         path: ['verifierImageId'],
         message: 'Docker verifier requires image and image id.',
       });
+    }
+    const assertionIds = new Set<string>();
+    for (const [index, assertion] of report.verifierAssertions.entries()) {
+      const key = `${assertion.scope}:${assertion.id}`;
+      if (assertionIds.has(key)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['verifierAssertions', index, 'id'],
+          message: `Duplicate verifier assertion: ${key}.`,
+        });
+      }
+      assertionIds.add(key);
     }
     const expectedStatus = report.reward === 1 ? 'passed' : 'failed';
     if (report.status !== expectedStatus) {

@@ -17,11 +17,18 @@ import {
 } from './features/agent/engine/index.js';
 import {
   createAgentRegistry,
+  createAgentTaskEventPreparer,
   createAgentRoutes,
   createAgentFeature,
   createCodingSystemPromptSection,
   createRequestUserInputTool,
+  createSubagentTools,
+  AgentTaskService,
+  AgentTaskStore,
+  AgentTaskRpcFeature,
   PLAN_EXIT_TOOL_NAME,
+  type AgentFeature,
+  type AgentTask,
   type CreateAgentTools,
   type AgentRuntime,
   type AgentRunRequest,
@@ -70,6 +77,7 @@ import {
   createThreadRoutes,
   createThreadStore,
   createThreadTitleGenerator,
+  type ThreadFeature,
   writePlanArtifact,
 } from './features/thread/index.js';
 import {
@@ -140,15 +148,38 @@ export async function createApp(
     repositories,
     workspaces: workspaceStore,
   });
+  const agentHolder: { current?: AgentFeature } = {};
+  const threadHolder: { current?: ThreadFeature } = {};
+  const agentTasks = new AgentTaskService(
+    new AgentTaskStore(database.db),
+    (task) =>
+      requireAgentFeature(agentHolder.current).startRun(
+        agentTaskRunRequest(task, () =>
+          requireThreadFeature(threadHolder.current).currentMode(
+            task.rootThreadId,
+          ),
+        ),
+      ),
+    createAgentTaskEventPreparer(artifactStore),
+  );
   const agent = createAgentFeature({
     resolveDefinition: resolveAgentDefinition,
     resolveModel: resolveAgentModel,
     loadContext: loadAgentContext,
-    createTools: createAgentTools(taskBoards, mcp),
+    createTools: createAgentTools(taskBoards, mcp, agentTasks),
     createCompactor: (compactorOptions) =>
       createThreadCompactor(compactorOptions),
     runtime: options.agentRuntime,
   });
+  agentHolder.current = agent;
+  agentTasks.setNotifier((threadId, notificationId, message) =>
+    requireAgentFeature(agentHolder.current).notify(
+      threadId,
+      notificationId,
+      message,
+    ),
+  );
+  const agentTaskRpc = new AgentTaskRpcFeature(agentTasks);
   const threads = createThreadFeature({
     store: threadStore,
     startAgentRun: agent.startRun,
@@ -156,9 +187,38 @@ export async function createApp(
     titleGenerator: createThreadTitleGenerator({
       modelAdapter: createAiSdkModelAdapter(),
     }),
+    beforeInterrupt: async (threadId, reason) => {
+      requireAgentFeature(agentHolder.current).interrupt(threadId, reason);
+      await agentTasks.stopRoot(threadId, reason);
+      await requireThreadFeature(threadHolder.current).cancelAgentInteractions(
+        threadId,
+        undefined,
+        reason,
+      );
+    },
     resolveInitialSettings,
     resolveSettingsUpdate,
   });
+  threadHolder.current = threads;
+  agentTasks.setInteractionHandler((task, interaction, run) =>
+    threads.registerAgentInteraction(
+      task.rootThreadId,
+      task.id,
+      task.startedAt ?? task.createdAt,
+      interaction,
+      run,
+      {
+        taskId: task.id,
+        name: task.name ?? task.definitionName,
+        definitionName: task.definitionName,
+        description: task.description,
+        cwd: task.cwd,
+      },
+    ),
+  );
+  agentTasks.setInteractionCanceller((threadId, taskIds, reason) =>
+    threads.cancelAgentInteractions(threadId, taskIds, reason),
+  );
   const compactionControllers = new Map<string, AbortController>();
   const compact = async (threadId: string) => {
     if (compactionControllers.has(threadId)) {
@@ -231,6 +291,7 @@ export async function createApp(
     ...config.routes,
     ...models.routes,
     ...createAgentRoutes(),
+    ...agentTaskRpc.routes,
     ...tools.routes,
     ...skills.routes,
     ...memory.routes,
@@ -262,14 +323,21 @@ export async function createApp(
     initialize: async () => {
       await artifacts.initialize();
       await threads.initialize();
+      agentTasks.initialize();
     },
     releaseConnection: async (connectionId) => {
       await threads.releaseConnection(connectionId);
       fs.releaseConnection(connectionId);
+      agentTaskRpc.releaseConnection(connectionId);
     },
     closeResources: () =>
       closeAppResources([
         () => threads.close(),
+        () => {
+          agentTaskRpc.close();
+          return Promise.resolve();
+        },
+        () => agentTasks.close(),
         () => agent.close(),
         () => mcp.close(),
         () => fs.close(),
@@ -294,18 +362,31 @@ const resolveAgentDefinition: ResolveAgentDefinition = async (request) => {
       ? config.default_agent
       : request.selection.agent;
   const definition = agentRegistry.get(agentName);
-  if (
-    (definition.mode !== 'primary' && definition.mode !== 'all') ||
-    definition.hidden === true
+  if (request.delegation === undefined) {
+    if (
+      (definition.mode !== 'primary' && definition.mode !== 'all') ||
+      definition.hidden === true
+    ) {
+      throw new Error(`Agent is not selectable as primary: ${agentName}`);
+    }
+  } else if (
+    !agentRegistry
+      .delegatable()
+      .some((candidate) => candidate.name === definition.name)
   ) {
-    throw new Error(`Agent is not selectable as primary: ${agentName}`);
+    throw new Error(`Agent is not delegatable: ${agentName}`);
   }
   return { config, definition, agentRegistry };
 };
 
-const resolveAgentModel: ResolveAgentModel = async ({ definition }) => {
+const resolveAgentModel: ResolveAgentModel = async ({
+  request,
+  definition,
+}) => {
   const registry = createModelRegistry(definition.config);
-  const model = registry.resolveSelector(definition.definition.model);
+  const selector =
+    request.delegation?.modelSelector ?? definition.definition.model;
+  const model = registry.resolveSelector(selector);
   const modelInputBudget = modelInputBudgetFromRuntimeModel(
     model,
     definition.config.context,
@@ -313,7 +394,7 @@ const resolveAgentModel: ResolveAgentModel = async ({ definition }) => {
   return {
     modelCall: {
       agentName: definition.definition.name,
-      modelSelector: definition.definition.model,
+      modelSelector: selector,
       configuredModel: model.name,
       protocol: model.protocol,
       apiModel: model.apiModel,
@@ -349,6 +430,7 @@ const loadAgentContext: LoadAgentContext = async ({ definition, model }) => {
       memoryIndexLoader,
       goalSystemSection,
       routingInstructions,
+      taskNotificationSection,
     }) => [
       skillIndexContext({ skills, contextWindow: model.contextWindow }),
       createCodingSystemPromptSection(definition.config, {
@@ -366,6 +448,9 @@ const loadAgentContext: LoadAgentContext = async ({ definition, model }) => {
       ...(routingInstructions === undefined
         ? []
         : [dynamicSystemSection(() => routingInstructions)]),
+      ...(taskNotificationSection === undefined
+        ? []
+        : [dynamicSystemSection(taskNotificationSection)]),
     ],
   };
 };
@@ -373,6 +458,7 @@ const loadAgentContext: LoadAgentContext = async ({ definition, model }) => {
 function createAgentTools(
   taskBoards: TaskBoardStore,
   mcp: McpManager,
+  agentTasks: AgentTaskService,
 ): CreateAgentTools {
   const fileStates = new SessionFileStateRegistry();
   return async ({ request, definition, context }) => {
@@ -382,6 +468,7 @@ function createAgentTools(
       source: 'resume',
       changedAt: new Date().toISOString(),
     };
+    const currentMode = () => request.modeSource?.() ?? modeState.mode;
     const mcpTools = await mcp.toolsForConfig(definition.config);
     const productionTools = createProductionToolRuntime({
       config: definition.config,
@@ -391,7 +478,7 @@ function createAgentTools(
         sessionId: request.threadId,
       },
       rules: () => request.permission.rules(),
-      mode: () => modeState,
+      mode: () => ({ ...modeState, mode: currentMode() }),
       readRoots: context.readRoots,
       fileState: fileStates.forSession(request.threadId),
       ...(mcpTools.length === 0 ? {} : { additionalTools: mcpTools }),
@@ -406,18 +493,54 @@ function createAgentTools(
     const availableTools = memory.enabled
       ? [...productionTools.tools, ...memory.tools]
       : productionTools.tools;
-    const selected = selectAgentTools(
-      availableTools,
-      definition.definition.tools,
-    );
     const goalRuntime = createThreadGoalRuntime(request.goal);
-    const directTools: AnyAgentTool[] = [
+    const baseDirectTools: AnyAgentTool[] = [
       context.activationTool,
       createRequestUserInputTool(),
       ...goalRuntime.tools,
     ].map(markCoreTool);
     if (request.selection.mode === 'plan') {
-      directTools.push(...createPlanAgentTools(request));
+      baseDirectTools.push(...createPlanAgentTools(request));
+    }
+    const definitionWhitelist = definition.definition.tools;
+    const initiallySelected = selectAgentTools(
+      availableTools,
+      request.delegation?.contextMode === 'fork'
+        ? undefined
+        : definitionWhitelist,
+    );
+    const parentToolNames = [
+      ...initiallySelected.map((tool) => tool.name),
+      ...baseDirectTools.map((tool) => tool.name),
+      'delegate_to_subagent',
+      'task_output',
+      'task_stop',
+    ];
+    const subagentTools = createSubagentTools({
+      request,
+      definition,
+      parentToolNames,
+      service: agentTasks,
+      approval: productionTools.approval,
+    }).map(markCoreTool);
+    const exactToolNames = request.delegation?.exactToolNames;
+    const selected =
+      exactToolNames === undefined
+        ? initiallySelected
+        : filterExactTools(availableTools, exactToolNames);
+    const directTools =
+      exactToolNames === undefined
+        ? [...baseDirectTools, ...subagentTools]
+        : filterExactTools(
+            [...baseDirectTools, ...subagentTools],
+            exactToolNames,
+          );
+    if (exactToolNames !== undefined) {
+      assertExactTools(
+        [...selected, ...directTools],
+        exactToolNames,
+        request.delegation?.taskId ?? request.threadId,
+      );
     }
     const runtime = createMetaToolRuntime(
       selected,
@@ -432,7 +555,20 @@ function createAgentTools(
       ...(runtime.usesToolRouting
         ? { routingInstructions: TOOL_ROUTING_INSTRUCTIONS }
         : {}),
-      mode: () => modeState.mode,
+      taskNotificationSection: () =>
+        [
+          productionTools.workflowInstructions(),
+          agentTasks.takeNotifications(request.threadId),
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      ...(request.delegation === undefined
+        ? {
+            waitForTaskNotification: (signal: AbortSignal) =>
+              agentTasks.waitForNotification(request.threadId, signal),
+          }
+        : {}),
+      mode: currentMode,
       setMode(mode) {
         modeState = {
           mode,
@@ -443,6 +579,28 @@ function createAgentTools(
       },
     };
   };
+}
+
+function filterExactTools(
+  tools: readonly AnyAgentTool[],
+  exactToolNames: readonly string[],
+): AnyAgentTool[] {
+  const selected = new Set(exactToolNames);
+  return tools.filter((tool) => selected.has(tool.name));
+}
+
+function assertExactTools(
+  tools: readonly AnyAgentTool[],
+  exactToolNames: readonly string[],
+  taskId: string,
+): void {
+  const available = new Set(tools.map((tool) => tool.name));
+  const missing = exactToolNames.filter((name) => !available.has(name));
+  if (missing.length > 0) {
+    throw new Error(
+      `Fork task ${taskId} cannot restore exact tools: ${missing.join(', ')}`,
+    );
+  }
 }
 
 function createPlanAgentTools(
@@ -502,6 +660,64 @@ function selectAgentTools(
   }
   const selected = new Set(whitelist);
   return tools.filter((tool) => selected.has(tool.name));
+}
+
+function agentTaskRunRequest(
+  task: AgentTask,
+  modeSource: () => AgentRunRequest['selection']['mode'],
+): AgentRunRequest {
+  const mode = modeSource();
+  return {
+    threadId: task.id,
+    turnId: task.id,
+    cwd: task.cwd,
+    selection: {
+      mode,
+      agent: task.definitionName,
+    },
+    modeSource,
+    history: task.sidechain,
+    input: task.prompt,
+    goal: null,
+    permission: {
+      rules: () => task.permissionRules,
+      externalPaths: () => task.externalPaths,
+    },
+    delegation: {
+      taskId: task.id,
+      agentId: task.agentId,
+      rootThreadId: task.rootThreadId,
+      ...(task.parentTaskId === undefined
+        ? {}
+        : { parentTaskId: task.parentTaskId }),
+      depth: task.depth,
+      contextMode: task.contextMode,
+      executionMode: task.executionMode,
+      maxTurns: task.maxTurns,
+      ...(task.modelSelector === undefined
+        ? {}
+        : { modelSelector: task.modelSelector }),
+      ...(task.contextMode === 'fork'
+        ? { exactToolNames: task.toolNames }
+        : {}),
+    },
+  };
+}
+
+function requireThreadFeature(
+  threads: ThreadFeature | undefined,
+): ThreadFeature {
+  if (threads === undefined) {
+    throw new Error('Thread feature is not ready for subagent execution.');
+  }
+  return threads;
+}
+
+function requireAgentFeature(agent: AgentFeature | undefined): AgentFeature {
+  if (agent === undefined) {
+    throw new Error('Agent feature is not ready for subagent execution.');
+  }
+  return agent;
 }
 
 async function resolveInitialSettings(

@@ -14,6 +14,8 @@ import {
   UsageSchema,
 } from './common.js';
 import {
+  AgentTaskEventSchema,
+  AgentTaskSummarySchema,
   FileChangeSchema,
   GoalSchema,
   PlanSchema,
@@ -161,6 +163,29 @@ export const SERVER_NOTIFICATION_SCHEMAS = {
       jobId: OpaqueIdSchema,
       status: z.enum(['queued', 'running', 'completed', 'failed']),
       details: z.record(z.string(), JsonValueSchema).optional(),
+    })
+    .strict(),
+  'agent/task/updated': z
+    .object({
+      rootThreadId: OpaqueIdSchema,
+      seq: z.number().int().positive(),
+      task: AgentTaskSummarySchema,
+    })
+    .strict(),
+  'agent/task/event': z
+    .object({
+      rootThreadId: OpaqueIdSchema,
+      seq: z.number().int().positive(),
+      taskId: OpaqueIdSchema,
+      task: AgentTaskSummarySchema.optional(),
+      event: AgentTaskEventSchema,
+    })
+    .strict(),
+  'agent/task/removed': z
+    .object({
+      rootThreadId: OpaqueIdSchema,
+      seq: z.number().int().positive(),
+      taskId: OpaqueIdSchema,
     })
     .strict(),
   warning: z

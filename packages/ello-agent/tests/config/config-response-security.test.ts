@@ -1,3 +1,6 @@
+/**
+ * 本文件验证配置 RPC 不泄露凭据，并只返回客户端允许观察的模型信息。
+ */
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -89,8 +92,14 @@ describe('config RPC credential boundary', () => {
     expect(() => parseClientResult('config/settings', response)).not.toThrow();
     expect(response).toMatchObject({
       data: expect.arrayContaining([
-        expect.objectContaining({ id: 'primary_model', value: 'openai-gpt-5.5' }),
-        expect.objectContaining({ id: 'auxiliary_model', value: 'openai-gpt-5.4' }),
+        expect.objectContaining({
+          id: 'primary_model',
+          value: 'openai-gpt-5.5',
+        }),
+        expect.objectContaining({
+          id: 'auxiliary_model',
+          value: 'openai-gpt-5.4',
+        }),
       ]),
     });
     expect(JSON.stringify(response)).not.toContain('active_profile');

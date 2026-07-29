@@ -67,6 +67,7 @@ export {
 } from './paths.js';
 export {
   AgentConfigSchema,
+  AgentMaxTurnsSchema,
   AgentModelSelectorSchema,
   AgentModeSchema,
   AnthropicAuthSchemeSchema,
@@ -78,6 +79,7 @@ export {
   PermissionActionSchema,
   PermissionRuleSchema,
   PermissionScopeSchema,
+  SubagentsConfigSchema,
   ToolConfigSchema,
   WorkspaceConfigSchema,
   type AgentConfigEntry,
@@ -95,6 +97,7 @@ export {
   type PermissionAction,
   type PermissionRule,
   type PermissionScope,
+  type SubagentsConfig,
   type ToolConfig,
   type WorkspaceConfig,
 } from './schema.js';

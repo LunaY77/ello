@@ -1,4 +1,4 @@
-import { useApp, useInput } from 'ink';
+import { useApp, useInput, useStdout } from 'ink';
 import React, {
   useCallback,
   useEffect,
@@ -10,10 +10,17 @@ import React, {
 import { cycleSessionMode } from '../api/protocol-types.js';
 import { ThreadClient } from '../client/thread-client.js';
 
+import { AgentSwitcher } from './component/AgentSwitcher.js';
+import { AgentTranscript } from './component/AgentTranscript.js';
 import { AppShell } from './component/AppShell.js';
-import { Composer } from './component/Composer.js';
+import {
+  Composer,
+  composerTextWidthForTerminal,
+} from './component/Composer.js';
 import { OverlayHost } from './component/OverlayHost.js';
 import { TerminalHistoryOutput } from './component/TerminalHistoryOutput.js';
+import { useAgentNavigation } from './hooks/use-agent-navigation.js';
+import { useAgentTasks } from './hooks/use-agent-tasks.js';
 import { useCatalogs } from './hooks/use-catalogs.js';
 import type { CatalogLoadState } from './hooks/use-catalogs.js';
 import { useComposerState } from './hooks/use-composer-state.js';
@@ -39,6 +46,10 @@ import {
   bypassEnabledFromConfig,
   globalModelSelectionsFromConfig,
 } from './settings/config.js';
+import {
+  agentTaskToRunView,
+  terminalAgentTaskEntry,
+} from './store/agent-task-view.js';
 import { resolveTheme, ThemeProvider } from './theme/index.js';
 import { createThreadCommandRunner } from './thread-command-runner.js';
 
@@ -123,8 +134,22 @@ function ReadyThreadScreen({
   onError(error: unknown): void;
 }): React.ReactElement {
   const { exit } = useApp();
+  const { stdout } = useStdout();
   const { state, workingSeconds, dispatch, queueSteer } = runtimeEvents;
   const { overlay, setOverlay } = useOverlay();
+  const commitTerminalTask = useCallback(
+    (task: Parameters<typeof terminalAgentTaskEntry>[0]) => {
+      const entry = terminalAgentTaskEntry(task);
+      if (entry !== undefined) {
+        dispatch({ type: 'ui.subagent.committed', entry });
+      }
+    },
+    [dispatch],
+  );
+  const agentTasks = useAgentTasks(thread, onError, commitTerminalTask);
+  useEffect(() => {
+    for (const task of agentTasks.tasks) commitTerminalTask(task);
+  }, [agentTasks.tasks, commitTerminalTask, state.historyResetKey]);
   const { draft, setDraft, cursor, setCursor, fileSearch, setFileSearch } =
     useComposerState(initialDraft);
   const { themeName, themeEpoch, setThemeName, setThemeEpoch } =
@@ -150,6 +175,19 @@ function ReadyThreadScreen({
     state.status === 'running' ||
     state.status === 'awaitingApproval' ||
     state.status === 'awaitingUserInput';
+  const visibleAgentTasks = agentTasks.tasks.filter((task) => {
+    if (task.status === 'queued' || task.status === 'running') return true;
+    if (
+      agentTasks.activeView.kind === 'task' &&
+      agentTasks.activeView.taskId === task.taskId
+    ) {
+      return true;
+    }
+    return (
+      state.runStartedAt !== undefined &&
+      Date.parse(task.createdAt) >= state.runStartedAt
+    );
+  });
   const submission = useSubmission({
     thread,
     state,
@@ -225,21 +263,20 @@ function ReadyThreadScreen({
     if (effectiveOverlay.type === 'none' || !key.ctrl || input !== 'c') return;
     handleCancel();
   });
-  useInput(
-    (_input, key) => {
-      if (!key.escape) return;
-      if (effectiveOverlay.type !== 'none') {
-        setOverlay({ type: 'none' });
-      } else if (running) {
-        void thread.interrupt('user interrupted from TUI').catch(onError);
-      }
-    },
-    { isActive: true },
-  );
+  useAgentNavigation({
+    thread,
+    agentTasks,
+    visibleTasks: visibleAgentTasks,
+    overlay: effectiveOverlay,
+    running,
+    setOverlay,
+    onError,
+  });
   useInput(
     (input, key) => {
       if (
         effectiveOverlay.type !== 'none' ||
+        agentTasks.focus !== 'composer' ||
         !isShiftTab(input, key) ||
         switchingMode.current
       ) {
@@ -268,11 +305,25 @@ function ReadyThreadScreen({
   );
   const ctrlCInterrupts =
     running || submission.submissionPending || runtime.compactionRunning;
+  const taskRunViews = agentTasks.tasks.map(agentTaskToRunView);
+  const runningTaskViews = taskRunViews.filter(
+    (task) => task.status === 'queued' || task.status === 'running',
+  );
+  useEffect(() => {
+    if (
+      visibleAgentTasks.length === 0 &&
+      agentTasks.focus === 'agent-switcher'
+    ) {
+      agentTasks.setFocus('composer');
+    }
+  }, [agentTasks, visibleAgentTasks.length]);
   return (
     <ThemeProvider theme={resolveTheme(themeName)}>
       <TerminalHistoryOutput
-        entries={state.history}
-        resetKey={state.historyResetKey + themeEpoch}
+        entries={agentTasks.activeView.kind === 'main' ? state.history : []}
+        resetKey={
+          state.historyResetKey + themeEpoch + agentTasks.viewEpoch * 1_000_000
+        }
         cwd={thread.cwd}
         settings={state.settings}
       />
@@ -287,14 +338,22 @@ function ReadyThreadScreen({
         liveReasoningText={state.live.reasoningText}
         liveCompactionText={state.live.compactionText}
         runningTools={[...state.live.runningTools.values()]}
-        runningSubagents={[...state.live.runningSubagents.values()]}
-        running={running}
+        runningSubagents={
+          agentTasks.activeView.kind === 'main'
+            ? runningTaskViews
+            : [...state.live.runningSubagents.values()]
+        }
+        running={
+          agentTasks.activeTask === undefined
+            ? running
+            : agentTasks.activeTask.status === 'running'
+        }
         {...(workingSeconds === undefined ? {} : { workingSeconds })}
         {...(state.interruptNotice === undefined
           ? {}
           : { interruptNotice: state.interruptNotice })}
         pendingSteers={state.pendingSteers.map((steer) => steer.text)}
-        usage={state.usage}
+        usage={agentTasks.activeTask?.usage ?? state.usage}
         {...(state.goal === undefined ? {} : { goal: state.goal })}
         overlay={
           <OverlayHost
@@ -346,15 +405,58 @@ function ReadyThreadScreen({
               }
             }}
             onUpdateSetting={settings.updateSetting}
+            onConfirmAgentStop={(taskId) => {
+              void agentTasks.client
+                ?.stop(taskId)
+                .then(() => setOverlay({ type: 'none' }))
+                .catch(onError);
+            }}
+            onCancelAgentStop={() => setOverlay({ type: 'none' })}
+          />
+        }
+        agentTranscript={
+          agentTasks.activeTask === undefined ? undefined : (
+            <AgentTranscript
+              task={agentTasks.activeTask}
+              {...(agentTasks.activeDetail === undefined
+                ? {}
+                : { detail: agentTasks.activeDetail })}
+            />
+          )
+        }
+        agentSwitcher={
+          <AgentSwitcher
+            tasks={visibleAgentTasks}
+            activeView={agentTasks.activeView}
+            focus={agentTasks.focus}
+            highlightedTaskId={agentTasks.highlightedTaskId}
           />
         }
         composer={
           <Composer
-            isActive={effectiveOverlay.type === 'none'}
-            running={ctrlCInterrupts}
+            isActive={
+              effectiveOverlay.type === 'none' &&
+              agentTasks.focus === 'composer'
+            }
+            running={
+              agentTasks.activeTask === undefined
+                ? ctrlCInterrupts
+                : agentTasks.activeTask.status === 'running'
+            }
             history={submission.inputHistory}
-            {...(suggestions === undefined ? {} : { suggestions })}
+            {...(agentTasks.activeTask === undefined &&
+            suggestions !== undefined
+              ? { suggestions }
+              : {})}
+            {...(agentTasks.activeTask === undefined
+              ? {}
+              : {
+                  target:
+                    agentTasks.activeTask.name ??
+                    agentTasks.activeTask.definitionName,
+                })}
             value={draft}
+            textWidth={composerTextWidthForTerminal(stdout.columns ?? 100)}
             onChange={(value, nextCursor) => {
               setDraft(value);
               setCursor(nextCursor);
@@ -362,17 +464,33 @@ function ReadyThreadScreen({
             onSuggestionAccepted={() => undefined}
             onSubmit={(value) => {
               submission.rememberInput(value);
-              void submitPrompt(value).catch(onError);
+              if (agentTasks.activeTask === undefined) {
+                void submitPrompt(value).catch(onError);
+              } else if (agentTasks.activeTask.status === 'running') {
+                void agentTasks.client
+                  ?.steer(value, agentTasks.activeTask.taskId)
+                  .catch(onError);
+              } else {
+                onError(
+                  new Error(
+                    `Agent task ${agentTasks.activeTask.taskId} is ${agentTasks.activeTask.status}; resume it explicitly.`,
+                  ),
+                );
+              }
             }}
             onCancel={handleCancel}
-            onEscape={() => {
-              if (effectiveOverlay.type !== 'none') {
-                setOverlay({ type: 'none' });
-              } else if (running) {
-                void thread
-                  .interrupt('user interrupted from TUI')
-                  .catch(onError);
+            onEscape={() => undefined}
+            onMovePastEnd={() => {
+              if (visibleAgentTasks.length > 0) {
+                agentTasks.setHighlightedTaskId(
+                  agentTasks.activeView.kind === 'task'
+                    ? agentTasks.activeView.taskId
+                    : visibleAgentTasks[0]!.taskId,
+                );
+                agentTasks.setFocus('agent-switcher');
+                return true;
               }
+              return false;
             }}
           />
         }

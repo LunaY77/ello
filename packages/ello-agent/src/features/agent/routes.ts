@@ -13,7 +13,7 @@ import { loadCodingAgentConfig, writeConfigPath } from '../config/index.js';
 
 import { createAgentRegistry } from './subagents/registry.js';
 
-/** agent catalog 明确区分 primary 可选项、内部 agent 与未装配的 subagent。 */
+/** agent catalog 明确区分 primary、可委派 subagent 与内部 agent。 */
 const agentHandlers = {
   'agent/list': async (_context, params) => {
     const config = await loadCodingAgentConfig({ cwd: params.cwd });
@@ -23,19 +23,22 @@ const agentHandlers = {
         const primaryAvailable =
           agent.hidden !== true &&
           (agent.mode === 'primary' || agent.mode === 'all');
+        const delegationAvailable =
+          agent.hidden !== true &&
+          (agent.mode === 'subagent' || agent.mode === 'all');
         return {
           id: agent.name,
           name: agent.name,
           description: agent.description,
-          enabled: primaryAvailable,
+          enabled: primaryAvailable || delegationAvailable,
           metadata: {
             mode: agent.mode,
             model: agent.model,
             source: agent.source,
             runtime: primaryAvailable
               ? 'primary'
-              : agent.mode === 'subagent'
-                ? 'unavailable:no-delegation-runner'
+              : delegationAvailable
+                ? 'delegation'
                 : 'internal-only',
           },
         };

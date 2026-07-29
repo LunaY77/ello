@@ -2,6 +2,7 @@ import type {
   AgentRuntimeProvenance,
   AgentSpec,
   ArtifactReference,
+  BenchmarkRound,
   NormalizedAgentEvidence,
   ProcessResult,
   ToolAudit,
@@ -42,6 +43,7 @@ export interface AgentProcessExecution {
 export interface NormalizedAgentExecution {
   readonly runtime: AgentRuntimeProvenance;
   readonly evidence: NormalizedAgentEvidence;
+  readonly rounds: readonly BenchmarkRound[];
   readonly evidenceArtifact: ArtifactReference;
   readonly toolAudit: ToolAudit;
   readonly toolAuditArtifact: ArtifactReference;

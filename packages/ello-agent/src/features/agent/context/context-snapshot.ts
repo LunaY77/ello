@@ -128,6 +128,9 @@ async function loadEnvironmentSource(
     `  <working-directory>${config.cwd}</working-directory>`,
     `  <allowed-paths>\n${indent(allowed)}\n  </allowed-paths>`,
     '</shell>',
+    '<delegation>',
+    `  <cwd-policy>${config.subagents.cwd_policy}</cwd-policy>`,
+    '</delegation>',
     '<approval>',
     // runtime 构建时 config.initial_mode 已被替换为当前 session mode，而非启动快照。
     `  <mode>${config.initial_mode}</mode>`,

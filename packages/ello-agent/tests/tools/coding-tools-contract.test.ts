@@ -23,9 +23,16 @@ import { z } from 'zod';
 import {
   defineTool,
   type AgentFileSystem,
+  type AgentShell,
   type AgentToolContext,
 } from '../../src/features/agent/engine/index.js';
 import type { CodingAgentConfig } from '../../src/features/config/index.js';
+import {
+  AgentWorkflowState,
+  CodingToolExecutionError,
+  createCodingToolResult,
+  ToolFailureTracker,
+} from '../../src/features/tool/index.js';
 import {
   parseApplyPatch,
   prepareApplyPatch,
@@ -40,8 +47,10 @@ import {
 import type { CodingToolContext } from '../../src/features/tool/internal/runtime/coding-tool.js';
 import { SessionFileState } from '../../src/features/tool/internal/runtime/file-state.js';
 import { createToolSearchIndex } from '../../src/features/tool/internal/search-index.js';
-import { createSearchTools } from '../../src/features/tool/internal/search.js';
 import type { SearchProvider } from '../../src/features/tool/internal/search-provider.js';
+import { createSearchTools } from '../../src/features/tool/internal/search.js';
+import { createShellTools } from '../../src/features/tool/internal/shell.js';
+import { createWorkspaceSnapshotTools } from '../../src/features/tool/internal/workspace-snapshot.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -669,6 +678,173 @@ describe('Meta Tool 路由契约', () => {
   });
 });
 
+describe('工具恢复与阶段化验证契约', () => {
+  it('相同错误生成稳定指纹，并在第二次失败后要求切换策略', () => {
+    const tracker = new ToolFailureTracker();
+    const first = tracker.create(
+      'read',
+      new Error('No such file at line 12: missing-123.txt'),
+    );
+    const second = tracker.create(
+      'read',
+      new Error('No such file at line 99: missing-456.txt'),
+    );
+
+    expect(first).toBeInstanceOf(CodingToolExecutionError);
+    expect(first.diagnostic).toMatchObject({
+      code: 'PATH_NOT_FOUND',
+      attempt: 1,
+      attemptsRemaining: 1,
+      retryable: true,
+      strategy: 'retry_with_context',
+    });
+    expect(second.diagnostic).toMatchObject({
+      fingerprint: first.diagnostic.fingerprint,
+      attempt: 2,
+      attemptsRemaining: 0,
+      retryable: false,
+      strategy: 'switch_strategy',
+    });
+  });
+
+  it('真实工具结果驱动 explore、implement、verify 和 recover 阶段切换', () => {
+    const workflow = new AgentWorkflowState();
+    expect(workflow.instructions()).toContain('phase="explore"');
+
+    workflow.observeResult(
+      createCodingToolResult({
+        title: 'Edit file',
+        output: 'updated',
+        metadata: { kind: 'edit' },
+      }),
+    );
+    expect(workflow.instructions()).toContain('phase="implement"');
+
+    workflow.observeResult(
+      createCodingToolResult({
+        title: 'Targeted verification',
+        output: 'passed',
+        metadata: { kind: 'shell', phase: 'targeted' },
+      }),
+    );
+    expect(workflow.instructions()).toContain('phase="verify"');
+
+    workflow.observeFailure();
+    expect(workflow.instructions()).toContain('phase="recover"');
+    workflow.observeResult(
+      createCodingToolResult({
+        title: 'Read evidence',
+        output: 'fact',
+        metadata: { kind: 'read' },
+      }),
+    );
+    expect(workflow.instructions()).toContain('phase="explore"');
+  });
+
+  it('workspace_snapshot 一次返回 Git、根目录、依赖和验证命令', async () => {
+    const root = await temporaryDirectory('ello-workspace-snapshot-');
+    await Promise.all([
+      mkdir(path.join(root, 'src')),
+      writeFile(path.join(root, 'package.json'), '{}\n', 'utf8'),
+      writeFile(
+        path.join(root, 'pnpm-lock.yaml'),
+        'lockfileVersion: 9\n',
+        'utf8',
+      ),
+    ]);
+    const commands: string[] = [];
+    const shell: AgentShell = {
+      async run(command) {
+        commands.push(command);
+        if (command === 'git rev-parse HEAD') {
+          return shellResult({ stdout: `${'a'.repeat(40)}\n` });
+        }
+        if (command === 'git branch --show-current') {
+          return shellResult({ stdout: 'main\n' });
+        }
+        return shellResult({ stdout: '## main\n M src/index.ts\n' });
+      },
+    };
+    const tool = createWorkspaceSnapshotTools(
+      { cwd: root } as CodingAgentConfig,
+      () => 'auto',
+    )[0]!;
+
+    const result = await tool.execute(
+      { include_untracked: true },
+      toolContext(root, shell),
+    );
+    const snapshot = JSON.parse(result.output) as Record<string, unknown>;
+    expect(snapshot).toMatchObject({
+      schema: 'ello.workspace-snapshot.v1',
+      cwd: root,
+      git: {
+        available: true,
+        head: 'a'.repeat(40),
+        branch: 'main',
+        status: ['## main', ' M src/index.ts'],
+      },
+      manifests: ['package.json'],
+      lockfiles: ['pnpm-lock.yaml'],
+      verificationCommands: ['pnpm test', 'pnpm typecheck', 'pnpm lint'],
+    });
+    expect(commands).toEqual([
+      'git rev-parse HEAD',
+      'git branch --show-current',
+      'git status --short --branch',
+    ]);
+    expect(result.metadata).toMatchObject({
+      kind: 'workspace',
+      dirty: true,
+    });
+  });
+
+  it('test 工具在模型可见输出和元数据中保留验证阶段与退出状态', async () => {
+    const root = await temporaryDirectory('ello-test-tool-');
+    const testTool = createShellTools(
+      { cwd: root } as CodingAgentConfig,
+      () => 'auto',
+    ).find((tool) => tool.name === 'test');
+    if (testTool === undefined) throw new Error('缺少 test 工具。');
+    const shell: AgentShell = {
+      run: () =>
+        Promise.resolve(
+          shellResult({
+            exitCode: 1,
+            stdout: '1 test failed\n',
+            stderr: 'assertion error\n',
+          }),
+        ),
+    };
+
+    const result = await testTool.execute(
+      {
+        phase: 'targeted',
+        command: 'pnpm vitest src/example.test.ts',
+        timeoutMs: 5_000,
+      },
+      toolContext(root, shell),
+    );
+    const summary = JSON.parse(result.output.split('\n')[0]!) as Record<
+      string,
+      unknown
+    >;
+    expect(summary).toMatchObject({
+      phase: 'targeted',
+      command: 'pnpm vitest src/example.test.ts',
+      cwd: root,
+      exitCode: 1,
+      timedOut: false,
+    });
+    expect(result.output).toContain('stderr:\nassertion error');
+    expect(result.metadata).toMatchObject({
+      kind: 'shell',
+      phase: 'targeted',
+      exitCode: 1,
+    });
+  });
+});
+
 const agentToolContext: AgentToolContext = {
   runId: 'run-1',
   turnIndex: 0,
@@ -718,6 +894,34 @@ function searchContext(root: string): CodingToolContext {
       metadata: {},
       signal: new AbortController().signal,
     },
+  };
+}
+
+function toolContext(root: string, shell: AgentShell): CodingToolContext {
+  const context = searchContext(root);
+  return {
+    ...context,
+    agent: {
+      ...context.agent,
+      environment: { ...context.agent.environment, shell },
+    },
+  };
+}
+
+function shellResult(
+  overrides: Partial<{
+    readonly exitCode: number;
+    readonly stdout: string;
+    readonly stderr: string;
+    readonly timedOut: boolean;
+  }> = {},
+) {
+  return {
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+    timedOut: false,
+    ...overrides,
   };
 }
 

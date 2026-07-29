@@ -18,12 +18,15 @@ import type { PermissionRule } from '../permissions/types.js';
 
 import type { AnyCodingTool } from './runtime/coding-tool.js';
 import type { SessionFileState } from './runtime/file-state.js';
+import { AgentWorkflowState } from './runtime/workflow-state.js';
 
 import { createCodingTools } from './index.js';
 
 export interface ProductionToolRuntime {
   readonly tools: readonly AnyAgentTool[];
   readonly approval: ApprovalFor;
+  /** 读取当前工具执行阶段对应的短动态提示。 */
+  readonly workflowInstructions: () => string;
 }
 
 export interface CreateProductionToolRuntimeOptions {
@@ -87,6 +90,7 @@ export function createProductionToolRuntime(
     withAdditionalToolApproval(tool, decide),
   );
   const additionalNames = new Set(additionalTools.map((tool) => tool.name));
+  const workflow = new AgentWorkflowState();
   const codingTools = createCodingTools({
     config: options.config,
     taskBoards: options.taskBoards,
@@ -101,12 +105,14 @@ export function createProductionToolRuntime(
       : { fileState: options.fileState }),
     ...(additionalTools.length === 0 ? {} : { additionalTools }),
     decide,
+    workflow,
   }).map((tool) =>
     additionalNames.has(tool.name) ? tool : markCoreTool(tool),
   );
   return {
     tools: codingTools,
     approval: genericApprovalFor(decide),
+    workflowInstructions: () => workflow.instructions(),
   };
 }
 

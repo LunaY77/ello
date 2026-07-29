@@ -6,6 +6,8 @@ import { render } from 'ink-testing-library';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  AgentTaskDetail,
+  AgentTaskSummary,
   ServerNotification,
   ThreadSnapshot,
   ThreadSummary,
@@ -28,6 +30,104 @@ afterEach(async () => {
 });
 
 describe('App typed client behavior', () => {
+  it('composer 下方可选择 child、进入 transcript、steer 并原地后台化', async () => {
+    const task = agentTask();
+    const harness = createThreadHarness(snapshot(), {
+      agentTasks: [task],
+      agentDetail: {
+        task,
+        prompt: '检查取消链路',
+        events: [
+          {
+            rootThreadId: 'thr_1',
+            taskId: task.taskId,
+            sequence: 1,
+            rootSequence: 1,
+            eventType: 'messageCompleted',
+            payload: { messageId: 'message_1', text: '已定位入口' },
+            createdAt,
+          },
+        ],
+      },
+    });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('检查取消链路'));
+
+    view.stdin.write('\u001b[B');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('Enter to view · x to stop'),
+    );
+    view.stdin.write('\u001b[Z');
+    expect(harness.setMode).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('❯ ○ reader'));
+    view.stdin.write('\r');
+    await vi.waitFor(() => {
+      expect(harness.agentRead).toHaveBeenCalledWith(task.taskId);
+      expect(view.lastFrame()).toContain('@reader');
+      expect(view.lastFrame()).toContain('已定位入口');
+    });
+
+    view.stdin.write('继续检查测试');
+    view.stdin.write('\r');
+    await vi.waitFor(() =>
+      expect(harness.agentSteer).toHaveBeenCalledWith(
+        '继续检查测试',
+        task.taskId,
+      ),
+    );
+    view.stdin.write('\x02');
+    await vi.waitFor(() =>
+      expect(harness.agentBackground).toHaveBeenCalledWith(task.taskId),
+    );
+    view.unmount();
+  });
+
+  it('主 Turn 结束后不再常驻已经完成的 Agent 列表', async () => {
+    const task = agentTask();
+    const harness = createThreadHarness(snapshot(), {
+      agentTasks: [
+        {
+          ...task,
+          status: 'completed',
+          revision: 2,
+          completedAt: createdAt,
+          resultPreview: '调研完成',
+        },
+      ],
+    });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await vi.waitFor(() =>
+      expect(harness.createAgentTaskClient).toHaveBeenCalledOnce(),
+    );
+    expect(view.lastFrame()).not.toContain('○ reader');
+    view.unmount();
+  });
+
+  it('thread snapshot 重置后仍只显示一份已完成 Agent 摘要', async () => {
+    const task: AgentTaskSummary = {
+      ...agentTask(),
+      status: 'completed',
+      revision: 2,
+      completedAt: createdAt,
+      resultPreview: '调研完成',
+    };
+    const harness = createThreadHarness(snapshot(), { agentTasks: [task] });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('调研完成'));
+
+    harness.replaceSnapshot(snapshot());
+
+    await vi.waitFor(() => {
+      expect(view.lastFrame()).toContain('调研完成');
+      expect(view.lastFrame()?.match(/调研完成/gu)).toHaveLength(1);
+    });
+    view.unmount();
+  });
+
   it('/workspace 只通过 workspace/list 加载 Server 数据', async () => {
     const harness = createThreadHarness(snapshot());
     const view = render(<App thread={harness.thread} />);
@@ -605,7 +705,13 @@ interface ThreadHarness {
   readonly setMode: ReturnType<typeof vi.fn>;
   readonly submitInput: ReturnType<typeof vi.fn>;
   readonly steerInput: ReturnType<typeof vi.fn>;
+  readonly agentRead: ReturnType<typeof vi.fn>;
+  readonly agentSteer: ReturnType<typeof vi.fn>;
+  readonly agentBackground: ReturnType<typeof vi.fn>;
+  readonly agentStop: ReturnType<typeof vi.fn>;
+  readonly createAgentTaskClient: ReturnType<typeof vi.fn>;
   emit(notification: ServerNotification): void;
+  replaceSnapshot(snapshot: ThreadSnapshot): void;
   disconnect(error: Error): void;
 }
 
@@ -616,6 +722,8 @@ function createThreadHarness(
     readonly fileSearchError?: Error;
     readonly submitInput?: () => Promise<string>;
     readonly sessions?: readonly ThreadSummary[];
+    readonly agentTasks?: readonly AgentTaskSummary[];
+    readonly agentDetail?: AgentTaskDetail;
   } = {},
 ): ThreadHarness {
   const config = modelConfig();
@@ -744,6 +852,40 @@ function createThreadHarness(
   const submitInput = vi.fn(options.submitInput ?? (async () => 'turn_new'));
   const steerInput = vi.fn(async () => undefined);
   const listeners = new Set<(event: ThreadClientEvent) => void>();
+  const agentListeners = new Set<
+    (event: { type: string; detail?: AgentTaskDetail }) => void
+  >();
+  const agentRead = vi.fn(async () => {
+    if (options.agentDetail !== undefined) {
+      for (const listener of agentListeners) {
+        listener({ type: 'detail', detail: options.agentDetail });
+      }
+    }
+    return options.agentDetail;
+  });
+  const agentSteer = vi.fn(async () => options.agentTasks?.[0]);
+  const agentBackground = vi.fn(async () => options.agentTasks?.[0]);
+  const agentStop = vi.fn(async () => options.agentTasks?.[0]);
+  const agentTaskSnapshot = {
+    rootThreadId: initialSnapshot.thread.id,
+    seq: options.agentTasks?.length ?? 0,
+    tasks: options.agentTasks ?? [],
+  } as const;
+  const createAgentTaskClient = vi.fn(async () => ({
+    snapshot: agentTaskSnapshot,
+    subscribe: (
+      listener: (event: { type: string; detail?: AgentTaskDetail }) => void,
+    ) => {
+      agentListeners.add(listener);
+      return () => agentListeners.delete(listener);
+    },
+    close: async () => undefined,
+    detail: () => undefined,
+    read: agentRead,
+    steer: agentSteer,
+    background: agentBackground,
+    stop: agentStop,
+  }));
   const thread = {
     threadId: initialSnapshot.thread.id,
     cwd: initialSnapshot.thread.cwd,
@@ -760,6 +902,7 @@ function createThreadHarness(
     setMode,
     submitInput,
     steerInput,
+    createAgentTaskClient,
   } as unknown as ThreadClient;
   return {
     thread,
@@ -770,10 +913,19 @@ function createThreadHarness(
     setMode,
     submitInput,
     steerInput,
+    agentRead,
+    agentSteer,
+    agentBackground,
+    agentStop,
+    createAgentTaskClient,
     emit: (notification: ServerNotification) => {
       for (const listener of listeners) {
         listener({ type: 'notification', notification });
       }
+    },
+    replaceSnapshot: (snapshot: ThreadSnapshot) => {
+      for (const listener of listeners)
+        listener({ type: 'snapshot', snapshot });
     },
     disconnect: (error: Error) => {
       for (const listener of listeners) {
@@ -806,6 +958,29 @@ function runningSnapshot(): ThreadSnapshot {
         startedAt: createdAt,
       },
     ],
+  };
+}
+
+function agentTask(): AgentTaskSummary {
+  return {
+    taskId: 'job_reader',
+    agentId: 'agent_reader',
+    rootThreadId: 'thr_1',
+    name: 'reader',
+    definitionName: 'explore',
+    description: '检查取消链路',
+    contextMode: 'fresh',
+    executionMode: 'foreground',
+    status: 'running',
+    cwd: '/workspace',
+    isolation: 'shared',
+    revision: 1,
+    eventSequence: 1,
+    toolCount: 0,
+    recentTools: [],
+    createdAt,
+    startedAt: createdAt,
+    updatedAt: createdAt,
   };
 }
 

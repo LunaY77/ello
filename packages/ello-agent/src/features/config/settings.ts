@@ -46,11 +46,7 @@ interface SettingMetadata {
   readonly sensitive?: boolean;
 }
 
-const EXCLUDED_ROOTS = new Set([
-  'cwd',
-  'models',
-  'session_id',
-]);
+const EXCLUDED_ROOTS = new Set(['cwd', 'models', 'session_id']);
 
 const METADATA: Readonly<Record<string, SettingMetadata>> = {
   default_agent: {
@@ -78,6 +74,12 @@ const METADATA: Readonly<Record<string, SettingMetadata>> = {
   tui: { effect: 'restart' },
   json: { effect: 'restart' },
   'workspace.mount': { effect: 'restart' },
+  'subagents.cwd_policy': {
+    type: 'enum',
+    options: ['allowed_paths', 'workspace'],
+    description:
+      'Allow child working directories in authorized roots or restrict them to the parent workspace.',
+  },
   'agent.*.mode': {
     type: 'enum',
     options: ['primary', 'subagent', 'internal', 'all'],
@@ -239,6 +241,7 @@ function groupFor(root: string): string {
   if (root === 'goal') return 'Goal';
   if (root === 'observability') return 'Observability';
   if (root === 'workspace') return 'Workspace';
+  if (root === 'subagents') return 'Security';
   if (
     root === 'allowed_paths' ||
     root === 'bypass_enabled' ||

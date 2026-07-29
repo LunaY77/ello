@@ -16,6 +16,7 @@ export function BottomDock({
   goal,
   overlay,
   composer,
+  agentSwitcher,
   contextPercent,
   contextWindow,
 }: {
@@ -26,6 +27,7 @@ export function BottomDock({
   readonly goal?: Goal;
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
+  readonly agentSwitcher?: ReactNode;
   readonly contextPercent?: number;
   readonly contextWindow?: number;
 }) {
@@ -72,6 +74,7 @@ export function BottomDock({
           <Text color={theme.textMuted}>{cacheLabel}</Text>
         </Box>
       </Box>
+      {agentSwitcher}
     </Box>
   );
 }

@@ -12,6 +12,8 @@ export type EntityIdPrefix =
   | 'item'
   | 'srvreq'
   | 'job'
+  | 'agent'
+  | 'notification'
   | 'watch';
 
 /**

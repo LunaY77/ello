@@ -1,4 +1,4 @@
-import type { UserInputResolution } from '../../api/protocol-types.js';
+import type { Usage, UserInputResolution } from '../../api/protocol-types.js';
 import type { ClientServerRequest } from '../../api/server-requests.js';
 
 export interface ToolCallView {
@@ -19,13 +19,23 @@ export interface ToolResultView {
 
 export interface SubagentRunView {
   readonly runId: string;
+  readonly revision?: number;
   readonly agentName: string;
   readonly description: string;
   readonly background: boolean;
-  readonly status: 'running' | 'completed' | 'fail';
+  readonly status:
+    | 'queued'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'killed'
+    | 'recovered'
+    | 'fail';
   readonly startedAt: string;
   readonly completedAt?: string;
+  readonly toolCount?: number;
   readonly tools: readonly ToolCallView[];
+  readonly usage?: Usage;
   readonly output?: string;
   readonly error?: string;
 }

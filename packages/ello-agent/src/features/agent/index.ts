@@ -30,6 +30,7 @@ export function createAgentFeature(
   input: CreateAgentFeatureInput,
 ): AgentFeature {
   const activeRuns = new Set<AgentRun>();
+  const activeRunsByThread = new Map<string, Set<AgentRun>>();
   const startingRuns = new Set<Promise<AgentRun>>();
   const modelCompactors = new Map<string, ModelCompactor>();
   let closing = false;
@@ -47,8 +48,13 @@ export function createAgentFeature(
     }
     const run = startAgentRun(built, runInput);
     activeRuns.add(run);
+    const threadRuns = activeRunsByThread.get(runInput.threadId) ?? new Set();
+    threadRuns.add(run);
+    activeRunsByThread.set(runInput.threadId, threadRuns);
     const clear = () => {
       activeRuns.delete(run);
+      threadRuns.delete(run);
+      if (threadRuns.size === 0) activeRunsByThread.delete(runInput.threadId);
       const compactor = built.modelCompactor();
       if (compactor !== undefined) {
         modelCompactors.set(runInput.threadId, compactor);
@@ -100,6 +106,25 @@ export function createAgentFeature(
         await built.close();
       }
     },
+    notify(threadId, notificationId, message) {
+      const runs = activeRunsByThread.get(threadId);
+      if (runs === undefined) return false;
+      for (const run of runs) {
+        try {
+          run.notify(notificationId, message);
+          return true;
+        } catch {
+          // run 可能刚好完成；通知继续留在持久队列，下一轮再注入。
+        }
+      }
+      return false;
+    },
+    interrupt(threadId, reason) {
+      const runs = activeRunsByThread.get(threadId);
+      if (runs === undefined) return false;
+      for (const run of runs) run.interrupt(reason);
+      return runs.size > 0;
+    },
     /**
      * 停止 产品 Agent 公开入口 模块 的异步工作并释放其拥有的资源；关闭完成后不再接受新操作。
      *
@@ -120,11 +145,13 @@ export function createAgentFeature(
       for (const run of runs) run.interrupt('agent closing');
       await Promise.all(runs.map((run) => run.result));
       modelCompactors.clear();
+      activeRunsByThread.clear();
     },
   };
 }
 
 export type {
+  AgentDelegationContext,
   AgentRunContextParts,
   AgentRunTools,
   AgentFeature,
@@ -152,6 +179,14 @@ export { PLAN_EXIT_TOOL_NAME } from './contracts.js';
 export { createAgentRoutes } from './routes.js';
 export { createCodingSystemPromptSection } from './context/prompts.js';
 export { createAgentRegistry } from './subagents/registry.js';
+export {
+  AgentTaskService,
+  AgentTaskStore,
+  AgentTaskRpcFeature,
+  createAgentTaskEventPreparer,
+  createSubagentTools,
+  type AgentTask,
+} from './subagents/index.js';
 export {
   estimateTextTokens,
   type ContextSourceLoadResult,

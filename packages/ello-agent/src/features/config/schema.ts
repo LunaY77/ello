@@ -51,6 +51,12 @@ const HttpHeaderValueSchema = z
   .regex(/^[^\r\n]+$/u);
 const HttpHeadersSchema = z.record(HttpHeaderNameSchema, HttpHeaderValueSchema);
 
+/** Agent 回合上限；`-1` 明确表示不设置回合上限。 */
+export const AgentMaxTurnsSchema = z.union([
+  z.literal(-1),
+  z.number().int().positive(),
+]);
+
 /** config.yaml `agent:` 映射下单个 agent 的声明。 */
 export const AgentConfigSchema = z
   .object({
@@ -61,7 +67,7 @@ export const AgentConfigSchema = z
     prompt: z.string().optional(),
     tools: z.array(z.string()).optional(),
     permission: z.array(PermissionRuleSchema).optional(),
-    max_turns: z.number().int().positive(),
+    max_turns: AgentMaxTurnsSchema,
     color: z.string().optional(),
   })
   .strict();
@@ -333,6 +339,10 @@ export const WorkspaceConfigSchema = z.object({
   mount: z.string().default('~/.ello'),
 });
 
+export const SubagentsConfigSchema = z.object({
+  cwd_policy: z.enum(['workspace', 'allowed_paths']).default('allowed_paths'),
+});
+
 /**
  * 运行时最终配置 schema。
  *
@@ -349,6 +359,9 @@ export const CodingAgentConfigSchema = z
     auxiliary_model: z.string().min(1),
     projects: z.record(z.string(), ProjectTrustSchema).default({}),
     workspace: WorkspaceConfigSchema.default({ mount: '~/.ello' }),
+    subagents: SubagentsConfigSchema.default({
+      cwd_policy: 'allowed_paths',
+    }),
     tools: ToolConfigSchema.default(DEFAULT_TOOL_CONFIG),
     tool_output: ToolOutputConfigSchema.default({
       max_bytes: 12_000,
@@ -477,5 +490,6 @@ export type LangfuseTracingConfig = Extract<
 >;
 export type ObservabilityConfig = z.infer<typeof ObservabilityConfigSchema>;
 export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
+export type SubagentsConfig = z.infer<typeof SubagentsConfigSchema>;
 export type CodingAgentConfig = z.infer<typeof CodingAgentConfigSchema>;
 export type CodingAgentConfigOverrides = Partial<CodingAgentConfig>;

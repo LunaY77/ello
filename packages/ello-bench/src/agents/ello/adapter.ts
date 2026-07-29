@@ -232,6 +232,7 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
           return {
             runtime,
             evidence,
+            rounds: normalized.rounds,
             evidenceArtifact: artifacts.evidenceArtifact,
             toolAudit: audit,
             toolAuditArtifact: artifacts.toolAuditArtifact,

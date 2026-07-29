@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 import type {
   AgentCatalogEntry,
+  AgentTaskSummary,
   AgentSkill,
   ApprovalDecision,
   CatalogEntry,
@@ -47,6 +48,7 @@ export type OverlayState =
   | { readonly type: 'agents'; readonly agents: readonly AgentCatalogEntry[] }
   | { readonly type: 'skills'; readonly skills: readonly AgentSkill[] }
   | { readonly type: 'tasks'; readonly tasks: readonly Task[] }
+  | { readonly type: 'agent-stop-confirm'; readonly task: AgentTaskSummary }
   | {
       readonly type: 'workspace';
       readonly workspaces: readonly WorkspaceSummary[];
@@ -87,6 +89,8 @@ export interface OverlayHostProps {
   onSelectSession(threadId: string): void;
   onSelectRewind(entryId: string): void;
   onUpdateSetting(update: SettingUpdate): Promise<void>;
+  onConfirmAgentStop?(taskId: string): void;
+  onCancelAgentStop?(): void;
 }
 
 /**
@@ -108,6 +112,8 @@ export function OverlayHost({
   onSelectSession,
   onSelectRewind,
   onUpdateSetting,
+  onConfirmAgentStop,
+  onCancelAgentStop,
 }: OverlayHostProps) {
   const theme = useTheme();
   if (overlay.type === 'none') return null;
@@ -181,6 +187,23 @@ export function OverlayHost({
         <CatalogPanel title="Skills" entries={overlay.skills} />
       ) : null}
       {overlay.type === 'tasks' ? <TaskPanel tasks={overlay.tasks} /> : null}
+      {overlay.type === 'agent-stop-confirm' ? (
+        <Panel title="Stop Agent" color={theme.error}>
+          <Text wrap="wrap">
+            {`Stop @${overlay.task.name ?? overlay.task.definitionName}? Its current run cannot be resumed in place.`}
+          </Text>
+          <InlineSelect
+            options={[
+              { value: 'stop', label: 'Stop' },
+              { value: 'cancel', label: 'Cancel' },
+            ]}
+            onChange={(value) => {
+              if (value === 'stop') onConfirmAgentStop?.(overlay.task.taskId);
+              else onCancelAgentStop?.();
+            }}
+          />
+        </Panel>
+      ) : null}
       {overlay.type === 'workspace' ? (
         <CatalogPanel
           title="Workspaces"
@@ -256,6 +279,19 @@ function ApprovalPanel({
   }));
   return (
     <Panel title={`Approve ${view.title}`} color={theme.warning}>
+      {request.params.agent === undefined ? null : (
+        <>
+          <Text
+            color={theme.accent}
+          >{`Agent @${request.params.agent.name} · ${view.title}`}</Text>
+          <Text color={theme.textMuted}>
+            {request.params.agent.description}
+          </Text>
+          <Text
+            color={theme.textMuted}
+          >{`cwd: ${request.params.agent.cwd}`}</Text>
+        </>
+      )}
       {view.fields.map((field) => (
         <Text
           key={`${field.label}:${field.value}`}
@@ -374,8 +410,8 @@ function HelpPanel() {
   return (
     <Panel title="Commands" color={theme.accent}>
       <Text wrap="wrap">
-        /help /mode /models /settings /resume /fork /tasks /skills
-        /goal /compact /quit
+        /help /mode /models /settings /resume /fork /tasks /skills /goal
+        /compact /quit
       </Text>
       <Text color={theme.textMuted}>
         @path sends a file reference through fs/search; !cmd runs

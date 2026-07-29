@@ -29,6 +29,10 @@ import {
   PASTE_TRUNCATION_THRESHOLD,
   resolvePastePlaceholders,
 } from '../store/composer-paste.js';
+import {
+  layoutTerminalText,
+  nextGraphemeBoundary,
+} from '../store/terminal-text.js';
 import { useTheme } from '../theme/index.js';
 
 export interface ComposerProps {
@@ -37,6 +41,8 @@ export interface ComposerProps {
   readonly suggestions?: readonly ComposerSuggestion[];
   readonly history?: readonly string[];
   readonly value?: string;
+  readonly target?: string;
+  readonly textWidth?: number;
   onChange?(
     value: string,
     cursor: { readonly line: number; readonly column: number },
@@ -45,6 +51,7 @@ export interface ComposerProps {
   onSubmit(value: string): void;
   onCancel(): void;
   onEscape(): void;
+  onMovePastEnd?(): boolean;
 }
 
 export type ComposerSuggestion =
@@ -69,7 +76,10 @@ export function Composer(props: ComposerProps) {
   const bufferRef = useRef(buffer);
   const pastesRef = useRef<Map<number, string>>(new Map());
   const nextPasteIdRef = useRef(1);
-  const wrapWidth = Math.max(1, (stdout.columns ?? 100) - 10);
+  const wrapWidth = Math.max(
+    1,
+    props.textWidth ?? composerTextWidthForTerminal(stdout.columns ?? 100),
+  );
 
   const replaceBuffer = useCallback(
     (next: ComposerBuffer): void => {
@@ -241,19 +251,23 @@ export function Composer(props: ComposerProps) {
         return;
       }
       if (key.downArrow) {
-        if (visualLineCount(current, wrapWidth) > 1) {
-          const moved = moveDownVisual(current, wrapWidth);
-          if (moved !== current) replaceBuffer(moved);
-          else if (historyIndexRef.current === null) return;
-        } else if (historyIndexRef.current !== null) {
-          moveHistory(1);
-        } else if (
+        if (
           props.suggestions !== undefined &&
           props.suggestions.length > 0
         ) {
           moveSuggestion(1);
-        } else if (isEmpty(current)) {
+        } else if (visualLineCount(current, wrapWidth) > 1) {
+          const moved = moveDownVisual(current, wrapWidth);
+          if (moved !== current) replaceBuffer(moved);
+          else if (historyIndexRef.current === null) {
+            const handled = props.onMovePastEnd?.() ?? false;
+            if (!handled && isEmpty(current)) moveHistory(1);
+          }
+        } else if (historyIndexRef.current !== null) {
           moveHistory(1);
+        } else {
+          const handled = props.onMovePastEnd?.() ?? false;
+          if (!handled && isEmpty(current)) moveHistory(1);
         }
         return;
       }
@@ -324,6 +338,9 @@ export function Composer(props: ComposerProps) {
 
   return (
     <Box flexDirection="column" paddingX={1} width="100%">
+      {props.target === undefined ? null : (
+        <Text color={theme.accent}>{`Steer @${props.target}`}</Text>
+      )}
       <Box flexDirection="column" width="100%">
         {visualLines.map((visualLine, index) => (
           <ComposerLine
@@ -331,7 +348,7 @@ export function Composer(props: ComposerProps) {
             line={visualLine.text}
             lineIndex={index}
             activeLine={visualLine.active ? index : -1}
-            cursorColumn={visualLine.cursorColumn}
+            cursorOffset={visualLine.cursorOffset}
             showCursor={showCursor}
             prompt={visualLine.continuation ? '|' : '>'}
           />
@@ -362,7 +379,7 @@ interface VisualComposerLine {
   readonly start: number;
   readonly text: string;
   readonly active: boolean;
-  readonly cursorColumn: number;
+  readonly cursorOffset: number;
   readonly continuation: boolean;
 }
 
@@ -370,56 +387,48 @@ function wrapComposerLines(
   buffer: ComposerBuffer,
   width: number,
 ): readonly VisualComposerLine[] {
-  const safeWidth = Math.max(1, Math.floor(width));
-  const rows: VisualComposerLine[] = [];
-  for (const [lineIndex, line] of buffer.lines.entries()) {
-    const active = lineIndex === buffer.cursor.line;
-    const baseCount = Math.max(1, Math.ceil(line.length / safeWidth));
-    const rowCount =
-      active && line.length > 0 && line.length % safeWidth === 0
-        ? baseCount + 1
-        : baseCount;
-    for (let row = 0; row < rowCount; row += 1) {
-      const start = row * safeWidth;
-      const cursorOnRow =
-        active &&
-        buffer.cursor.column >= start &&
-        buffer.cursor.column < start + safeWidth;
-      rows.push({
-        lineIndex,
-        start,
-        text: line.slice(start, start + safeWidth),
-        active: cursorOnRow,
-        cursorColumn: cursorOnRow ? buffer.cursor.column - start : 0,
-        continuation: lineIndex > 0 || row > 0,
-      });
-    }
-  }
-  return rows;
+  const layout = layoutTerminalText(buffer.lines, buffer.cursor, width);
+  return layout.rows.map((row, index) => ({
+    lineIndex: row.logicalLine,
+    start: row.startOffset,
+    text: (buffer.lines[row.logicalLine] ?? '').slice(
+      row.startOffset,
+      row.endOffset,
+    ),
+    active: index === layout.cursorRow,
+    cursorOffset:
+      index === layout.cursorRow ? buffer.cursor.column - row.startOffset : 0,
+    continuation: row.logicalLine > 0 || row.startOffset > 0,
+  }));
 }
 
 function ComposerLine({
   line,
   lineIndex,
   activeLine,
-  cursorColumn,
+  cursorOffset,
   showCursor,
   prompt,
 }: {
   readonly line: string;
   readonly lineIndex: number;
   readonly activeLine: number;
-  readonly cursorColumn: number;
+  readonly cursorOffset: number;
   readonly showCursor: boolean;
   readonly prompt: string;
 }) {
   const theme = useTheme();
   const isCursorLine = lineIndex === activeLine;
-  const beforeCursor = isCursorLine ? line.slice(0, cursorColumn) : line;
-  const cursorChar = isCursorLine ? (line[cursorColumn] ?? ' ') : '';
+  const beforeCursor = isCursorLine ? line.slice(0, cursorOffset) : line;
+  const cursorEnd = isCursorLine
+    ? nextGraphemeBoundary(line, cursorOffset)
+    : cursorOffset;
+  const cursorChar = isCursorLine
+    ? line.slice(cursorOffset, cursorEnd) || ' '
+    : '';
   const afterCursor =
-    isCursorLine && cursorColumn < line.length
-      ? line.slice(cursorColumn + 1)
+    isCursorLine && cursorOffset < line.length
+      ? line.slice(cursorEnd)
       : '';
   return (
     <Box gap={1}>
@@ -439,6 +448,24 @@ function ComposerLine({
         {afterCursor}
       </Text>
     </Box>
+  );
+}
+
+/** 把 AppShell、边框、padding、提示符和 gap 占用的宽度集中在一处。 */
+export function composerTextWidthForTerminal(columns: number): number {
+  const appPadding = 2;
+  const dockBorder = 2;
+  const dockPadding = 2;
+  const composerPadding = 2;
+  const promptAndGap = 2;
+  return Math.max(
+    1,
+    columns -
+      appPadding -
+      dockBorder -
+      dockPadding -
+      composerPadding -
+      promptAndGap,
   );
 }
 

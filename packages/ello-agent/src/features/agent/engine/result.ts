@@ -60,8 +60,8 @@ export function createRunDiagnostics(options: {
 /**
  * 装配对外的运行结果 {@link AgentRunResult}。
  *
- * 文本取自最终模型响应；只有在模型调用前被中断的 run 才返回空文本。usage 在累计值之上把当前 run 实际发生的
- * 工具调用数补加进 `toolCalls`；`finishReason` 由内部停止原因映射而来；
+ * 文本取自最终模型响应；只有在模型调用前被中断的 run 才返回空文本。usage 的
+ * `toolCalls` 以 engine 实际调度的调用记录为准；`finishReason` 由内部停止原因映射而来；
  * 同时附带消息快照、工具调用列表、待办快照与诊断/元数据。
  *
  * Args:
@@ -81,10 +81,9 @@ export function createRunResult(options: {
   const response = options.run.finalResponse;
   const text = resolveRunText(options.run);
   const finishReason = finishReasonForStop(options.run.stopReason, options.run);
-  // 把当前 run 记录的工具调用条数并入累计 usage。
   const usage = {
     ...options.run.usage,
-    toolCalls: options.run.usage.toolCalls + options.run.toolCalls.length,
+    toolCalls: options.run.toolCalls.length,
   };
   return {
     id: options.run.runId,

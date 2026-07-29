@@ -1,18 +1,13 @@
 import { Box, Text } from 'ink';
 
 import type { UserInputResolution } from '../../api/protocol-types.js';
+import { SubagentActivity } from '../component/SubagentActivity.js';
 import { DiffPreview } from '../presenters/index.js';
 import { useTheme, type TuiTheme } from '../theme/index.js';
 import { glyphs } from '../ui/glyphs.js';
 
-import type {
-  HistoryEntry,
-  SubagentRunView,
-  ToolCallView,
-} from './history-entry.js';
+import type { HistoryEntry, ToolCallView } from './history-entry.js';
 import { buildToolCardModel } from './tool-card.js';
-
-const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
 
 export function HistoryEntryRenderer({
   entry,
@@ -88,7 +83,7 @@ function renderHistoryEntryContent(
         </Box>
       );
     case 'subagent':
-      return <HistorySubagent run={entry.run} />;
+      return <SubagentActivity run={entry.run} cwd={cwd} />;
     case 'separator':
       return <RunSeparator text={entry.text} />;
     case 'system':
@@ -265,41 +260,6 @@ function toolStatusColor(
 function RunSeparator({ text }: { readonly text: string }) {
   const theme = useTheme();
   return <Text color={theme.border}>{`─ ${text} ${'─'.repeat(72)}`}</Text>;
-}
-
-function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
-  const theme = useTheme();
-  const hidden = Math.max(0, run.tools.length - SUBAGENT_VISIBLE_TOOL_LIMIT);
-  const visibleTools = run.tools.slice(-SUBAGENT_VISIBLE_TOOL_LIMIT);
-  return (
-    <Box flexDirection="column">
-      <Text color={run.status === 'fail' ? theme.error : theme.warning}>
-        {`${glyphs.subagent} ${run.agentName} ${run.background ? 'background' : 'foreground'} ${run.status}`}
-      </Text>
-      <Text color={theme.text}>{`  ${run.description}`}</Text>
-      {hidden > 0 ? (
-        <Text color={theme.textMuted}>{`  +${hidden} earlier tool calls`}</Text>
-      ) : null}
-      {visibleTools.map((tool) => (
-        <Text key={tool.id} color={theme.textMuted}>
-          {`  ${tool.name} ${tool.status}`}
-        </Text>
-      ))}
-      {run.output !== undefined && run.output.trim() !== '' ? (
-        <Text color={theme.textMuted}>{`  ${compactText(run.output)}`}</Text>
-      ) : null}
-      {run.error !== undefined ? (
-        <Text color={theme.error}>{`  ${run.error}`}</Text>
-      ) : null}
-    </Box>
-  );
-}
-
-function compactText(text: string): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  return normalized.length <= 240
-    ? normalized
-    : `${normalized.slice(0, 239)}...`;
 }
 
 function compactPath(cwd: string): string {

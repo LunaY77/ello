@@ -69,6 +69,10 @@ ask-before-changes → accept-edits → plan → ask-before-changes
 底部状态栏显示当前模式。模式会保存到 Thread，后续 Turn 继续使用。完整权限表和规则配置见
 [权限与审批](../permission/README.md)。Plan 的审阅流程见 [Plan 模式](../plan/README.md)。
 
+同一 root Thread 下的 Subagent 在每次工具调用时读取这个会话模式，不维护独立副本。main
+为 `bypass` 时 child 不产生工具审批；切换模式后，main 与仍在运行的 child 从下一次工具
+调用开始使用新模式。definition 的工具白名单和明确 deny 仍可缩小 child 能力。
+
 ## 新会话、分支和回退
 
 这些操作对历史的处理方式不同：
@@ -124,15 +128,19 @@ flowchart TD
 
 ## 中断和退出
 
-`Ctrl+C` 和 `Esc` 都可以中断正在运行的 Turn。两者在空闲状态下的行为不同：
+`Ctrl+C` 和 main 视图中的 `Esc` 都可以中断正在运行的 Turn。Server 会先建立 root
+cancellation barrier，再停止主 Agent、全部 queued/running Subagent 及其活动后代；TUI 不按
+列表逐个停止。child 详情中的 `Esc` 只返回父视图。
 
-| 操作                    | 结果               |
-| ----------------------- | ------------------ |
-| 输入框有草稿时 `Ctrl+C` | 清空草稿           |
-| 输入框为空时 `Ctrl+C`   | 关闭当前连接并退出 |
-| 普通面板打开时 `Esc`    | 关闭面板           |
-| Turn 运行时 `Esc`       | 中断 Turn          |
-| `/quit` 或 `/exit`      | 关闭当前连接并退出 |
+| 操作                          | 结果                       |
+| ----------------------------- | -------------------------- |
+| Turn 运行时 `Ctrl+C`          | 中断 main 与全部活动 child |
+| 空闲且输入框有草稿时 `Ctrl+C` | 清空草稿                   |
+| 空闲且输入框为空时 `Ctrl+C`   | 关闭当前连接并退出         |
+| 普通面板打开时 `Esc`          | 关闭面板                   |
+| main Turn 运行时 `Esc`        | 使用相同级联语义中断 Turn  |
+| child 详情中 `Esc`            | 返回父 Agent，不中断任务   |
+| `/quit` 或 `/exit`            | 关闭当前连接并退出         |
 
 已产生的消息和工具结果保留在 Thread 中。下次恢复时，TUI 会从 Server 保存的状态重建显示。
 

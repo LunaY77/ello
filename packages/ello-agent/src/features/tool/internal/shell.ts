@@ -124,6 +124,84 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
         });
       },
     }),
+    defineCodingTool({
+      name: 'test',
+      description:
+        'Run one verification command with an explicit phase and return a structured result. Use preflight before relying on an environment, baseline before edits when practical, targeted during implementation, new for newly added tests, and final for the broad acceptance check.',
+      discovery: {
+        aliases: ['verify', 'check tests'],
+        risk: 'external',
+      },
+      capabilities: () => ({
+        concurrencySafe: false,
+        readOnly: false,
+        destructive: false,
+        interruptible: true,
+        telemetryTag: 'test.command',
+      }),
+      input: z
+        .object({
+          phase: z.enum(['preflight', 'baseline', 'targeted', 'new', 'final']),
+          command: z.string().min(1),
+          timeoutMs: z.number().int().min(1000).max(120_000).default(30_000),
+          cwd: z.string().optional(),
+        })
+        .strict(),
+      approval: (input, ctx) =>
+        decide(
+          {
+            permission: 'bash',
+            patterns: [input.command],
+            always: [input.command],
+            paths: [input.cwd ?? config.cwd],
+            metadata: {
+              kind: 'shell',
+              command: input.command,
+              cwd: input.cwd ?? config.cwd,
+              risk: 'normal',
+            },
+          },
+          ctx.agent,
+        ),
+      execute: async ({ phase, command, timeoutMs, cwd }, ctx) => {
+        const started = Date.now();
+        const workingDirectory = cwd ?? config.cwd;
+        const result = await requireShell(ctx.agent).run(command, {
+          timeout: timeoutMs,
+          cwd: workingDirectory,
+        });
+        const durationMs = Date.now() - started;
+        const output = [
+          JSON.stringify({
+            phase,
+            command,
+            cwd: workingDirectory,
+            exitCode: result.exitCode,
+            timedOut: result.timedOut,
+            durationMs,
+          }),
+          result.stdout,
+          result.stderr === '' ? '' : `stderr:\n${result.stderr}`,
+        ]
+          .filter(Boolean)
+          .join('\n');
+        return createCodingToolResult({
+          title: `${phase} verification`,
+          output,
+          metadata: {
+            kind: 'shell',
+            command,
+            cwd: workingDirectory,
+            phase,
+            exitCode: result.exitCode,
+            timedOut: result.timedOut,
+            durationMs,
+            stdoutBytes: Buffer.byteLength(result.stdout),
+            stderrBytes: Buffer.byteLength(result.stderr),
+          },
+        });
+      },
+    }),
   ];
 }
 

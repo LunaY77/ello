@@ -100,6 +100,33 @@
       "effort": "high"
     },
     "agent/list": { "cwd": "/workspace" },
+    "agent/task/subscribe": { "threadId": "thr_fixture" },
+    "agent/task/unsubscribe": { "threadId": "thr_fixture" },
+    "agent/task/list": { "threadId": "thr_fixture" },
+    "agent/task/read": {
+      "threadId": "thr_fixture",
+      "taskId": "job_fixture"
+    },
+    "agent/task/steer": {
+      "threadId": "thr_fixture",
+      "taskId": "job_fixture",
+      "steerId": "steer_fixture",
+      "input": "继续检查"
+    },
+    "agent/task/stop": {
+      "threadId": "thr_fixture",
+      "taskId": "job_fixture"
+    },
+    "agent/task/resume": {
+      "threadId": "thr_fixture",
+      "taskId": "job_fixture",
+      "prompt": "继续完成任务",
+      "executionMode": "background"
+    },
+    "agent/task/background": {
+      "threadId": "thr_fixture",
+      "taskId": "job_fixture"
+    },
     "tool/list": { "cwd": "/workspace" },
     "skills/list": { "cwd": "/workspace", "query": "fixture" },
     "skills/get": { "cwd": "/workspace", "name": "fixture" },
@@ -216,6 +243,9 @@
     "skills/changed",
     "fs/changed",
     "memory/job/updated",
+    "agent/task/updated",
+    "agent/task/event",
+    "agent/task/removed",
     "warning",
     "server/ready"
   ],

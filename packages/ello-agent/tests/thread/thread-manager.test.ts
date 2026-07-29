@@ -815,6 +815,101 @@ describe('ThreadFeature', () => {
     });
   });
 
+  it('child 交互通过 root thread 上浮，并携带 Agent 归属信息', async () => {
+    const attachment = await startThread(manager, 'connection-1');
+    const childRun = new FakeAgentRun();
+    const childStartedAt = new Date().toISOString();
+    await attachment.runtime.registerAgentInteraction(
+      'job_child',
+      childStartedAt,
+      {
+        type: 'approval',
+        interactionId: 'child_approval',
+        item: {
+          kind: 'approval',
+          toolCallId: 'child_approval',
+          toolName: 'bash',
+          input: { command: 'pwd' },
+          metadata: {
+            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
+          },
+        },
+        occurredAt: childStartedAt,
+      },
+      childRun,
+      {
+        taskId: 'job_child',
+        name: 'explore',
+        definitionName: 'explore',
+        description: '检查仓库',
+        cwd: '/workspace',
+      },
+    );
+
+    const pending = (await attachment.runtime.snapshot())
+      .pendingServerRequests[0];
+    expect(pending?.params).toMatchObject({
+      agent: {
+        taskId: 'job_child',
+        name: 'explore',
+        description: '检查仓库',
+        cwd: '/workspace',
+      },
+    });
+    if (pending === undefined) throw new Error('Missing child approval.');
+    await attachment.runtime.resolveServerRequest(pending.id, {
+      decision: 'accept',
+    });
+    expect(childRun.resolutions).toEqual(['child_approval']);
+  });
+
+  it('正常关闭会持久拒绝 child 待处理交互，不留下失去运行句柄的请求', async () => {
+    const attachment = await startThread(manager, 'connection-1');
+    const childRun = new FakeAgentRun();
+    const childStartedAt = new Date().toISOString();
+    await attachment.runtime.registerAgentInteraction(
+      'job_child_close',
+      childStartedAt,
+      {
+        type: 'approval',
+        interactionId: 'child_approval_close',
+        item: {
+          kind: 'approval',
+          toolCallId: 'child_approval_close',
+          toolName: 'bash',
+          input: { command: 'pwd' },
+          metadata: {
+            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
+          },
+        },
+        occurredAt: childStartedAt,
+      },
+      childRun,
+      {
+        taskId: 'job_child_close',
+        name: 'explore',
+        definitionName: 'explore',
+        description: '检查关闭流程',
+        cwd: '/workspace',
+      },
+    );
+
+    await manager.close();
+
+    expect(childRun.rejections).toEqual([
+      expect.objectContaining({
+        type: 'rejected',
+        interactionId: 'child_approval_close',
+      }),
+    ]);
+    expect(await logs.read(attachment.snapshot.thread.id)).toContainEqual(
+      expect.objectContaining({
+        kind: 'serverRequest.resolved',
+        resolution: 'rejected',
+      }),
+    );
+  });
+
   it('Server Request 只接受第一条 response', async () => {
     const attachment = await startThread(manager, 'connection-1');
     await attachment.runtime.startTurn([{ type: 'text', text: 'approval' }]);
@@ -1045,6 +1140,8 @@ class FakeAgentRun implements AgentRun {
   steer(steerId: string, input: string): void {
     this.steers.push({ steerId, text: input });
   }
+
+  notify(): void {}
 
   interrupt(reason: string): void {
     this.finish({ status: 'interrupted', usage: EMPTY_USAGE, reason });

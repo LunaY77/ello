@@ -255,6 +255,39 @@ export const CLIENT_REQUEST_SCHEMAS = {
     })
     .strict(),
   'agent/list': OptionalThreadParamsSchema,
+  'agent/task/subscribe': ThreadIdParamsSchema,
+  'agent/task/unsubscribe': ThreadIdParamsSchema,
+  'agent/task/list': ThreadIdParamsSchema,
+  'agent/task/read': z
+    .object({ threadId: OpaqueIdSchema, taskId: OpaqueIdSchema })
+    .strict(),
+  'agent/task/steer': z
+    .object({
+      threadId: OpaqueIdSchema,
+      taskId: OpaqueIdSchema,
+      steerId: OpaqueIdSchema,
+      input: z.string().trim().min(1),
+    })
+    .strict(),
+  'agent/task/stop': z
+    .object({ threadId: OpaqueIdSchema, taskId: OpaqueIdSchema })
+    .strict(),
+  'agent/task/resume': z
+    .object({
+      threadId: OpaqueIdSchema,
+      taskId: OpaqueIdSchema,
+      prompt: z.string().trim().min(1),
+      name: z
+        .string()
+        .regex(/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/u)
+        .optional(),
+      description: z.string().trim().min(1).optional(),
+      executionMode: z.enum(['foreground', 'background']).default('background'),
+    })
+    .strict(),
+  'agent/task/background': z
+    .object({ threadId: OpaqueIdSchema, taskId: OpaqueIdSchema })
+    .strict(),
   'tool/list': OptionalThreadParamsSchema,
   'skills/list': OptionalThreadParamsSchema.extend({
     query: z.string().optional(),

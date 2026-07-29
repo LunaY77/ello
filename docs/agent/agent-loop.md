@@ -204,7 +204,7 @@ interface QueueDrainDiagnostic {
 
 **挂起等待。** `waiting-approval`（工具需要用户审批）和 `waiting-tool-result`（deferred 工具需要宿主回填）。这两种情况下的循环退出是正常的挂起行为。外部调用方通过 `result.pending` 获取挂起的项目，审批后调用 `agent.resume()` 启动新的 run 继续执行。
 
-**异常终止。** `max-turns`（达到上限）、`interrupted`（收到中断信号）、`no-progress`（本回合没有产生新消息）、`error`（某步骤抛错）。
+**异常终止。** `max-turns`（达到正整数上限；配置为 `-1` 时不启用）、`interrupted`（收到中断信号）、`no-progress`（本回合没有产生新消息）、`error`（某步骤抛错）。
 
 `no-progress` 值得单独说。它的检测逻辑在 `finishTurn()` 中：比对本回合开始前的消息列表和结束后的消息列表。如果模型调用后没有新增消息，且模型没有产生 tool-calls，则判定为无进展。某些 provider 在上下文过长时可能返回空响应或只包含 `stop` 但 `content` 为空——靠常规的 `natural-completed` 检测不到这种情况，`no-progress` 作为兜底防止空转。
 

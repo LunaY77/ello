@@ -1,3 +1,6 @@
+/**
+ * 本文件验证各模型协议的认证参数、请求头和 provider 创建边界。
+ */
 import { describe, expect, it } from 'vitest';
 
 import {

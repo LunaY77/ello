@@ -371,7 +371,7 @@ describe('AppShell', () => {
     );
   });
 
-  it('indents every live reasoning line after the Thinking label', () => {
+  it('preserves line breaks in live reasoning', () => {
     const output = renderToString(
       <AppShell
         cwd="/workspace"
@@ -388,7 +388,7 @@ describe('AppShell', () => {
       { columns: 100 },
     );
 
-    expect(output).toContain(' Thinking: first line\n           second line');
+    expect(output).toContain('Thinking: first line\n           second line');
   });
 
   it('does not render blank assistant stream chunks as empty message lines', () => {
@@ -495,7 +495,6 @@ describe('AppShell', () => {
     );
 
     expect(output).toContain('explore');
-    expect(output).toContain('foreground');
     expect(output).toContain('inspect loader');
     expect(output).toContain('Read');
     expect(output).toContain('src/config.ts');
@@ -537,7 +536,7 @@ describe('AppShell', () => {
       { columns: 100 },
     );
 
-    expect(output).toContain('+2 earlier tool calls');
+    expect(output).toContain('+2 tool uses');
     expect(output).not.toContain('src/file-0.ts');
     expect(output).not.toContain('src/file-1.ts');
     expect(output).toContain('src/file-2.ts');

@@ -1,9 +1,15 @@
+/**
+ * 本文件把已校验的模型配置转换为运行时模型目录。
+ *
+ * Registry 负责名称与角色解析，provider 创建仍由对应协议适配器完成。
+ */
 import type { AgentModel } from '../../../agent/engine/index.js';
 import type { CodingAgentConfig } from '../../../config/index.js';
 import { createAiSdkLanguageModel } from '../ai-sdk/ai-sdk-provider.js';
 
 import type { ModelRegistry, RuntimeModel } from './types.js';
 
+/** 根据当前配置创建只读模型目录，未知名称和缺失凭据直接报错。 */
 export function createModelRegistry(config: CodingAgentConfig): ModelRegistry {
   return new DefaultModelRegistry(config);
 }

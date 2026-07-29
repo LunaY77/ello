@@ -7,6 +7,7 @@
 import { z } from 'zod';
 
 import {
+  AgentMaxTurnsSchema,
   AgentModelSelectorSchema,
   AgentModeSchema,
   PermissionRuleSchema,
@@ -47,6 +48,7 @@ export interface CodingAgentDefinition {
   readonly tools?: readonly string[];
   /** 静态 permission 规则（与派生规则、运行期规则合并）。 */
   readonly permission?: readonly PermissionRule[];
+  /** 正整数限制模型轮次；`-1` 表示不设置上限。 */
   readonly maxTurns?: number;
   readonly color?: string;
   readonly source: CodingAgentSource;
@@ -65,7 +67,7 @@ export const MarkdownAgentFrontmatterSchema = z
     'inherit-tools': z.boolean().optional(),
     inheritTools: z.boolean().optional(),
     permission: z.array(PermissionRuleSchema).optional(),
-    'max-turns': z.number().int().positive(),
+    'max-turns': AgentMaxTurnsSchema,
     color: z.string().optional(),
   })
   .strict();

@@ -82,6 +82,7 @@ export function canonicalTarget(target: string): string {
  *
  * Args:
  * - `cwd`: 运行工作目录的规范路径。
+ * - `configuredPaths`: 配置层声明的允许路径。
  * - `rules`: 当前生效的 permission 规则快照。
  * - `threadExternalPaths`: 当前 Thread 已批准的外部路径快照。
  *
@@ -90,6 +91,7 @@ export function canonicalTarget(target: string): string {
  */
 export function runtimeAllowedPaths(
   cwd: string,
+  configuredPaths: ReadonlyArray<string>,
   rules: ReadonlyArray<{
     readonly permission: string;
     readonly pattern: string;
@@ -97,7 +99,7 @@ export function runtimeAllowedPaths(
   }>,
   threadExternalPaths: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
-  const roots = [cwd, ...threadExternalPaths];
+  const roots = [cwd, ...configuredPaths, ...threadExternalPaths];
   for (const rule of rules) {
     if (rule.permission === 'external_directory' && rule.action === 'allow') {
       roots.push(resolveAbsolute(cwd, rule.pattern));

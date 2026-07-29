@@ -362,6 +362,7 @@ export function buildToolCardModel(
   const diff = unifiedDiffFromFileChanges(sourceFileChanges);
   const hasDiff = diff !== '';
   const outputPath = text(metadata?.outputPath);
+  const artifactId = text(metadata?.artifactId);
 
   return {
     status: call.status,
@@ -378,11 +379,14 @@ export function buildToolCardModel(
         : metadata?.kind === 'shell' || call.name === 'bash'
           ? outputPreview(call.output)
           : [],
-    ...(outputPath !== ''
+    ...(outputPath !== '' || artifactId !== ''
       ? {
           artifact: {
-            displayPath: formatArtifactPath(outputPath),
-            fullPath: outputPath,
+            displayPath:
+              outputPath === ''
+                ? compactArtifactId(artifactId)
+                : formatArtifactPath(outputPath),
+            fullPath: outputPath || artifactId,
           },
         }
       : {}),
@@ -392,6 +396,12 @@ export function buildToolCardModel(
     // 默认折叠普通成功工具；diff / 失败默认展开。
     defaultCollapsed: !hasDiff && call.status !== 'fail',
   };
+}
+
+function compactArtifactId(artifactId: string): string {
+  return artifactId.length <= 16
+    ? artifactId
+    : `${artifactId.slice(0, 8)}…${artifactId.slice(-4)}`;
 }
 
 function compactToolPath(value: string, maxLength: number): string {

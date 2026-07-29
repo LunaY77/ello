@@ -7,6 +7,7 @@ import {
   type NormalizedAgentExecution,
   type PreparedAgent,
 } from './agents/adapter.js';
+import { lastVerificationRound } from './agents/evidence.js';
 import { createAgentAdapter } from './agents/factory.js';
 import type {
   AgentSpec,
@@ -269,6 +270,10 @@ export async function runBenchmarkJob(options: {
         taskFiles: options.taskFiles,
         patch,
         runtime: options.runtime,
+        lastAgentVerificationRound:
+          normalized === undefined
+            ? null
+            : lastVerificationRound(normalized.rounds),
       }),
     );
     await writeJsonAtomic(harness.reportPath, harness);

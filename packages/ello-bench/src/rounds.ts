@@ -297,7 +297,7 @@ function normalizeElloTool(options: {
         ? null
         : elapsedMilliseconds(options.startedAt, options.completedAt),
   };
-  if (options.name === 'bash') {
+  if (options.name === 'bash' || options.name === 'test') {
     return {
       ...common,
       category: 'shell',

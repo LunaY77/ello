@@ -1,3 +1,6 @@
+/**
+ * 本文件验证配置项描述只暴露可编辑字段及其生效范围。
+ */
 import { describe, expect, it } from 'vitest';
 
 import { describeConfigSettings } from '../../src/features/config/settings.js';
@@ -14,6 +17,7 @@ describe('config settings descriptors', () => {
         initial_mode: 'ask-before-changes',
         title_generation: false,
         allowed_paths: ['/workspace'],
+        subagents: { cwd_policy: 'workspace' },
         tools: { routing_enabled: false },
         context: { max_input_tokens: 160_000 },
         agent: { reviewer: { model: 'primary_model' } },
@@ -27,6 +31,7 @@ describe('config settings descriptors', () => {
             primary_model: 'pro',
             auxiliary_model: 'flash',
             initial_mode: 'ask-before-changes',
+            subagents: { cwd_policy: 'workspace' },
           },
         },
         {
@@ -60,6 +65,12 @@ describe('config settings descriptors', () => {
         }),
         expect.objectContaining({ id: 'allowed_paths', type: 'stringList' }),
         expect.objectContaining({
+          id: 'subagents.cwd_policy',
+          type: 'enum',
+          value: 'workspace',
+          source: 'global',
+        }),
+        expect.objectContaining({
           id: 'title_generation',
           type: 'boolean',
           effect: 'newThread',
@@ -69,7 +80,10 @@ describe('config settings descriptors', () => {
           type: 'boolean',
           source: 'project',
         }),
-        expect.objectContaining({ id: 'context.max_input_tokens', type: 'integer' }),
+        expect.objectContaining({
+          id: 'context.max_input_tokens',
+          type: 'integer',
+        }),
         expect.objectContaining({ id: 'agent.reviewer.model', type: 'enum' }),
         expect.objectContaining({ id: 'projects', type: 'json' }),
         expect.objectContaining({ id: 'observability', type: 'json' }),

@@ -41,6 +41,10 @@ title_generation: false
 # allowed_paths:
 #   - /path/to/project
 
+# 子 Agent 工作目录策略：allowed_paths 允许切换到已授权根，workspace 仅允许当前 cwd 内。
+# subagents:
+#   cwd_policy: allowed_paths
+
 # 细粒度权限规则；通常由权限命令或 TUI 写入，不建议手写复杂规则。
 # permission_rules: []
 

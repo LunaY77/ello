@@ -136,6 +136,7 @@ export function createClaudeCodeAdapter(
           return {
             runtime,
             evidence: normalized.evidence,
+            rounds: normalized.rounds,
             evidenceArtifact: artifacts.evidenceArtifact,
             toolAudit: audit,
             toolAuditArtifact: artifacts.toolAuditArtifact,

@@ -1,6 +1,8 @@
 # ello Coding Agent TUI 设计稿
 
-本文档固化 `@ello/tui` 当前 TUI 实现。视觉、布局和交互契约来自历史 TUI 设计；运行时边界以 `docs/ello-agent-client-server-refactor-plan.md` 为准，所有 Server 能力通过 `ThreadClient` 和 typed JSON-RPC 访问。
+本文档定义 `@ello/tui` 的视觉、布局和交互合同。运行时边界以
+`docs/ello-agent-client-server-refactor-plan.md` 为准，所有 Server 能力通过 `ThreadClient` 和
+typed JSON-RPC 访问。
 
 ## 1. 设计结论
 
@@ -14,10 +16,12 @@
 - tool 展示以 `buildToolCardModel()` 为视图模型源；历史和 live 两条路径可以有不同密度，但不得各自解释 tool result。
 - session resume 和 rewind 都使用 bottom dock 内滚动列表，不使用主屏历史窗口。
 - rewind / resume / clear 会重置 terminal scrollback，再从当前 active path 重放历史。
+- `SubagentActivity` 负责主 Thread 中的有界委派摘要；`AgentSwitcher` 固定在完整 footer
+  下方，`AgentTranscript` 负责 child 详情，三者通过公开任务协议读取 Server 投影。
 
 ## 2. 目录结构
 
-当前 TUI 目录：
+TUI 目录：
 
 ```text
 packages/ello-tui/src/tui/
@@ -34,11 +38,15 @@ packages/ello-tui/src/tui/
     Composer.tsx
     OverlayHost.tsx
     ToolActivityList.tsx
+    AgentSwitcher.tsx
+    AgentTranscript.tsx
 
   commands/
     registry.ts
 
   hooks/
+    use-agent-navigation.ts
+    use-agent-tasks.ts
     use-runtime-events.ts
 
   presenters/
@@ -53,6 +61,7 @@ packages/ello-tui/src/tui/
     history-replay.ts
     permission-view.ts
     prompt-parts.ts
+    terminal-text.ts
     tool-card.ts
     tui-event-store.ts
 
@@ -112,13 +121,15 @@ bottom dock
   overlay
   composer
   footer: model / mode / context XX% left / plan hints / goal ··· cache / token usage
+  agent switcher: main / child status / elapsed / token
 ```
 
 `AppShell` 只渲染 dynamic viewport 和 dock：
 
 - `AppShell.tsx` 读取 terminal columns，使用 `tuiTokens.width.minMain` 作为最小宽度。
 - `LiveViewport` 展示运行中内容。
-- `BottomDock` 展示 overlay、composer 和 footer。
+- `BottomDock` 按 overlay、composer、footer、Agent switcher 的顺序展示；Agent 列表不得插入
+  composer 与 footer 之间。
 
 `TerminalHistoryOutput` 负责历史输出：
 
@@ -147,7 +158,8 @@ diagnostic
 - `user`：首行使用 `>`，后续多行使用 `|`。
 - `assistant`：首行使用 `*`，后续多行缩进。
 - `tool`：使用 `HistoryTool`，按 `buildToolCardModel()` 生成 headline、details、preview、diff。
-- `subagent`：展示 agentName、background/foreground、status、description，最多展示最近 4 个 tool call。
+- `subagent`：展示 `agentName(description)`、终态指标和最多 3 个视觉行的结果预览；运行轨迹
+  最多保留最近 4 个 tool call，超出部分显示 `… +N tool uses`。
 - `separator`：`─ Worked for ... ─`。
 - `system`：`- message`。
 - `diagnostic`：`x message`。
@@ -164,22 +176,30 @@ diagnostic
 
 - 只展示尚未封口的运行态信息。
 - assistant streaming 用 `*` 起始行，空白 stream 不渲染。
+- reasoning streaming 折叠为空白分隔的单行尾部预览；完整内容只在完成后写入静态历史，
+  避免动态区域滚屏后留下重复行。
 - running tools 交给 `ToolActivityList`。
-- running subagents 展示 agentName、前后台、description、最近 4 个 tool call。
-- 超过 4 个 subagent tool call 时显示 `+N earlier tool calls`。
+- running subagents 使用 `agentName(description)` 标题，逐行简要展示最近 4 个 tool call。
+- 超过 4 个 subagent tool call 时显示 `… +N tool uses`；同一 toolCallId 的 delta 不重复计数。
+- subagent 完成后显示 Done、tool count、token、elapsed 和最多 3 行最终消息预览，再一次性进入
+  committed history。
 - 运行中显示 `working Ns`。
 - 中断后显示 `interrupted: ...`。
 - 运行中提交的新输入作为 steer 暂存，显示在 `Messages queued for the running turn` 下。
 
 ## 6. Bottom Dock
 
-`component/BottomDock.tsx` 固定三层：
+`component/BottomDock.tsx` 固定四层：
 
 ```text
 overlay
 single-border composer
 footer
+agent switcher
 ```
+
+Agent switcher 必须在 footer 的 cache/token 最后一行之后渲染。默认态不显示进入 Agent
+列表的常驻方向提示。
 
 footer 左侧：
 
@@ -212,12 +232,58 @@ approval mode 颜色：
   - 多行内移动光标；
   - 有 suggestion 时移动 suggestion；
   - 空输入或正在浏览 history 时移动输入历史。
+  - 没有 suggestion、光标位于最后一个视觉行且存在 child 时，`Down` 把焦点交给 Agent
+    switcher，并保留草稿和光标。
 - `Ctrl-A/E`：行首/行尾。
 - `Ctrl-K/U/W`：删除到行尾、删除到行首、删除前一个词。
-- `Ctrl-C`：输入非空时清空；输入为空时交给 `onCancel()`。
+- `Ctrl-C`：主 Turn 运行时优先触发 root 级联中断；空闲时输入非空则清空，输入为空交给
+  `onCancel()`。
 - `Esc`：交给 `onEscape()`。
 - mouse tracking escape sequence 不写入输入。
 - `isActive=false` 时不接收输入。
+
+### 7.1 终端宽度与视觉行
+
+Composer 的 `cursor.column` 是字符串切片使用的 UTF-16 offset，不能直接当作终端列号。
+中文全角字符通常占 2 个终端单元格，组合字符占 0 个附加单元格，emoji 也可能由多个 code
+point 组成一个 grapheme。视觉换行、光标渲染和上下移动必须共享
+`store/terminal-text.ts` 生成的布局：
+
+```ts
+interface TerminalVisualRow {
+  logicalLine: number;
+  startOffset: number;
+  endOffset: number;
+  displayWidth: number;
+}
+
+interface TerminalTextLayout {
+  rows: TerminalVisualRow[];
+  cursorRow: number;
+  cursorDisplayColumn: number;
+}
+```
+
+布局算法遵守以下合同：
+
+- 使用 `Intl.Segmenter` 按 grapheme cluster 遍历，不能把 surrogate pair、组合字符或 emoji
+  sequence 从中间切开；
+- 使用与 Ink 一致的 `string-width` 语义计算终端单元格宽度，不使用 `text.length`、
+  `Array.from(text).length` 或手写中文区间；
+- 逐 grapheme 累计宽度，加入下一个 grapheme 会超过可用宽度时才创建新视觉行；
+- 文本刚好占满一行且光标位于末尾时，为光标保留下一视觉行；其他情况不生成幽灵空行；
+- `moveUpVisual()`、`moveDownVisual()`、`visualLineCount()`、Composer 渲染和 Agent 列表入口都
+  读取同一个 `TerminalTextLayout`；
+- 左右移动、Backspace 和 Delete 必须落在 grapheme boundary，不能破坏 emoji 或组合字符；
+- completion 的 replaceFrom/replaceTo 继续使用 UTF-16 offset，但传入前必须校验为 grapheme
+  boundary。
+
+可用文本宽度不能使用 `stdout.columns - 10` 一类常量估算。`AppShell/BottomDock` 根据实际
+main width、边框、padding、prompt glyph 和 gap 计算 `composerTextWidth`，作为显式 prop 同时
+传给渲染与 buffer layout。
+
+`Down` 的焦点转移依据 `cursorRow === rows.length - 1`。中文软换行产生的中间视觉行先正常
+移动；只有越过最后一个视觉行时才进入 Agent switcher。
 
 suggestion：
 
@@ -277,7 +343,7 @@ session 和 rewind：
 
 ## 9. Tool 展示
 
-当前 tool 展示以 `store/tool-card.ts` 的 `buildToolCardModel()` 为准。
+tool 展示以 `store/tool-card.ts` 的 `buildToolCardModel()` 为准。
 
 输入：
 
@@ -377,7 +443,7 @@ syntaxKeyword    #bb9af7
 syntaxString     #9ece6a
 ```
 
-当前内置主题：
+内置主题：
 
 - `tokyo-night`
 - `github-dark`
@@ -438,7 +504,7 @@ slash command 的事实源仍是 `src/slash-commands.ts`。
 
 `completion.ts` 消费 command registry 生成 `/` completion，执行仍回到 `handleSlashCommand()`。
 
-当前设计不保留独立 command palette UI；命令 metadata 已经存在，后续新增 palette 时必须复用这份 registry。
+不保留独立 command palette UI；新增 palette 时必须复用命令 registry 的 metadata。
 
 ## 13. 文件和 Prompt 输入
 
@@ -456,15 +522,15 @@ slash command 的事实源仍是 `src/slash-commands.ts`。
 - 候选来自 Server 的 `fs/search`，再经 `rankCandidates()` 排序；Client 不直接 `readdir()`。
 - 目录候选追加 `/`。
 
-## 14. 当前验收测试
+## 14. 验收测试
 
-当前 TUI 相关测试覆盖：
+TUI 测试必须覆盖：
 
 - `AppShell.test.tsx`
   - session header 作为 committed history 输出；
   - history 在 `AppShell` 外渲染；
   - live viewport running / interrupt / queued steer；
-  - subagent 最新 4 个 tool call；
+  - subagent 最新 4 个 tool call、隐藏计数和终态结果预览；
   - write/edit diff 渲染。
 - `PickerList.test.tsx`
   - session selector 6 行窗口和 scrollbar；
@@ -481,6 +547,16 @@ slash command 的事实源仍是 `src/slash-commands.ts`。
   - 多行输入；
   - mouse escape sequence；
   - suggestion 接受。
+- `composer-buffer.test.ts`
+  - ASCII、中文、混合文本、emoji 与组合字符的视觉行；
+  - 精确填满宽度时的行尾光标；
+  - 上下移动保持目标 display column；
+  - 删除操作不拆分 grapheme。
+- `AgentTaskViews.test.tsx`
+  - Agent 列表位于 footer 之后；
+  - composer 最后一个视觉行按 `↓` 进入列表；
+  - `x` 停止高亮 child；
+  - `Ctrl+C` 使用 root 级联中断。
 - `theme.test.ts`
   - theme token。
 - `tool-card.test.ts`
@@ -488,7 +564,7 @@ slash command 的事实源仍是 `src/slash-commands.ts`。
 - `command-registry.test.ts`
   - slash command 与 TUI command metadata 对齐。
 
-## 15. 后续修改准则
+## 15. 修改准则
 
 - 修改 TUI 交互前先判断目标属于 history、live viewport 还是 bottom dock。
 - 已提交历史不得重新进入 `AppShell`。
@@ -498,3 +574,27 @@ slash command 的事实源仍是 `src/slash-commands.ts`。
 - 新列表必须优先复用 `InlineSelect`，除非需要完全不同的输入模型。
 - 新 runtime event 必须补齐 `reduceTuiEvent()`，不能静默忽略。
 - session active path 变化时必须触发 history source reset，保证 shell scrollback 与当前上下文一致。
+- Subagent 导航必须使用公开 protocol projection；TUI 不得读取 Agent Server 的 task service
+  Map 或数据库。
+- 新 Agent switcher 必须纳入统一 focus owner，不能与 Composer 各自注册互相竞争的全局
+  `useInput()`。
+
+## 16. Subagent 导航合同
+
+Subagent 产品闭环采用 bottom dock 底部的 Agent switcher，而不是把运行任务藏进 `/tasks`：
+
+- 默认显示 `main` 与 child 的状态、说明、耗时和 token；
+- Agent switcher 位于完整 footer 的 cache/token 行之后，不显示方向提示文字；
+- composer 光标位于最后一个视觉行时使用 `↓` 进入选择态，`↑` / `↓` 移动，`Enter` 切换完整
+  transcript；
+- `x` 停止选中的活动 child 子树，`Esc` 返回 composer；
+- `SubagentActivity` 最多展示 4 个工具调用，完成后展示有界结果文本；
+- 工具轨迹展开快捷键不属于本设计范围，完整过程进入 child transcript 查看；
+- `Ctrl+C` 通过 Server root cancellation 一次性中断 main 和全部活动 child；
+- foreground task 可以用 `Ctrl+B` 单向转入 background；
+- task tree/detail/event 必须通过 typed JSON-RPC 和 snapshot barrier 提供；
+- TUI 查看任务与父模型 notification delivery 使用不同消费状态。
+
+完整状态机、协议草案、窄终端布局和验收矩阵见
+[Subagent 导航与运行视图设计](subagent-navigation-and-runtime.md)。验收需要覆盖 120、80、
+60、40 列真实 PTY；worktree/container 隔离不属于 TUI 导航设计范围。

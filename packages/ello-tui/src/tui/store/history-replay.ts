@@ -58,6 +58,13 @@ export function snapshotToHistoryEntries(
 
 export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
   if (isToolItem(item)) {
+    if (
+      item.type === 'toolCall' &&
+      item.toolName === 'delegate_to_subagent' &&
+      item.status === 'completed'
+    ) {
+      return undefined;
+    }
     return { kind: 'tool', id: item.id, tool: itemToToolView(item) };
   }
   switch (item.type) {

@@ -12,6 +12,7 @@ import {
   type Goal,
   type PendingServerRequest,
   type Plan,
+  type SessionMode,
   type ServerNotification,
   type ThreadSnapshot,
   type ThreadSummary,
@@ -23,11 +24,16 @@ import type {
   NewThreadRecord,
   ThreadRecord,
 } from '../../storage/threads/thread-record.js';
-import type { AgentFeature } from '../agent/index.js';
+import type {
+  AgentFeature,
+  AgentInteraction,
+  AgentRun,
+} from '../agent/index.js';
 import { RulesStore } from '../tool/index.js';
 
 import { compactionView } from './compact.js';
 import { createThreadInteractions } from './interactions.js';
+import type { AgentInteractionAttribution } from './interactions.js';
 import { notificationsFor } from './notifications.js';
 import { createThreadSnapshotProjection } from './records.js';
 import type { ThreadStore } from './store.js';
@@ -95,6 +101,8 @@ export interface ThreadState {
    * - Promise 在 Thread 状态 模块 的异步读取或状态变更完成后兑现为声明结果。
    */
   snapshot(): Promise<ThreadSnapshot>;
+  /** 同步读取当前模式，供同进程 child 的每次工具权限判定使用。 */
+  currentMode(): SessionMode;
   /**
    * 执行 Thread 状态 模块 定义的 `subscribe` 领域操作，输入和副作用均受该边界约束。
    *
@@ -142,6 +150,31 @@ export interface ThreadState {
    * - 返回谓词判断结果；`true` 与 `false` 分别对应声明中的满足与不满足状态。
    */
   hasPendingServerRequest(): boolean;
+  /**
+   * 把 child Agent 的暂停交互登记到当前 root thread。
+   *
+   * Args:
+   * - `taskId`: 发起交互的子代理任务标识。
+   * - `startedAt`: 子代理开始时间，用于构造稳定请求记录。
+   * - `interaction`: AgentRun 发布的审批或用户问题。
+   * - `run`: 解决请求后需要恢复的原始 child run。
+   * - `attribution`: TUI 展示 Agent 名称、说明和 cwd 所需归属信息。
+   *
+   * Returns:
+   * - Promise 在 Server Request 完成持久化并可向订阅连接派发后兑现。
+   */
+  registerAgentInteraction(
+    taskId: string,
+    startedAt: string,
+    interaction: AgentInteraction,
+    run: AgentRun,
+    attribution: AgentInteractionAttribution,
+  ): Promise<void>;
+  /** 取消指定 child 或整个 root Thread 尚未解决的交互。 */
+  cancelAgentInteractions(
+    taskIds: readonly string[] | undefined,
+    reason: string,
+  ): Promise<void>;
   /**
    * 在 Thread 状态 模块 中执行 `startTurn` 完整流程，并在返回前完成其必要副作用。
    *
@@ -424,6 +457,7 @@ export function createThreadState(
       return projector.current().thread.status;
     },
     snapshot: () => Promise.resolve(projector.current()),
+    currentMode: () => projector.current().settings.mode,
     subscribe(connectionId, listener, requestListener) {
       if (subscribers.has(connectionId)) {
         throw new Error(`Connection ${connectionId} is already subscribed.`);
@@ -446,14 +480,45 @@ export function createThreadState(
     hasActiveTurn: () => turns.hasActiveTurn(),
     hasPendingServerRequest: () =>
       projector.current().pendingServerRequests.length > 0,
+    registerAgentInteraction(taskId, startedAt, interaction, run, attribution) {
+      return enqueue(async () => {
+        assertOpen();
+        await interactions.register(
+          {
+            id: taskId,
+            threadId: id,
+            status: 'inProgress',
+            items: [],
+            startedAt,
+          },
+          interaction,
+          run,
+          attribution,
+        );
+      });
+    },
+    cancelAgentInteractions(taskIds, reason) {
+      return enqueue(() =>
+        interactions.cancel(taskIds, {
+          code: APP_SERVER_ERROR_CODES.internal,
+          message: reason,
+        }),
+      );
+    },
     startTurn: (input, settings) => turns.start(input, settings),
     steerTurn: (turnId, steerId, input) => turns.steer(turnId, steerId, input),
     interruptTurn: (turnId, reason) =>
       turns.interrupt(turnId, reason ?? 'client request'),
     resolveServerRequest: (requestId, result) =>
-      turns.resolveServerRequest(requestId, result),
+      enqueue(() => {
+        assertPendingServerRequest(projector.current(), requestId);
+        return interactions.resolve(requestId, result);
+      }),
     rejectServerRequest: (requestId, error) =>
-      turns.rejectServerRequest(requestId, error),
+      enqueue(() => {
+        assertPendingServerRequest(projector.current(), requestId);
+        return interactions.reject(requestId, error);
+      }),
     updateSettings(settings) {
       return enqueue(async () => {
         assertOpen();
@@ -534,6 +599,11 @@ export function createThreadState(
       if (closing) return;
       closing = true;
       titleAbortController?.abort('thread runtime closing');
+      await mutation;
+      await interactions.close({
+        code: APP_SERVER_ERROR_CODES.internal,
+        message: 'Thread runtime closed while the Agent awaited a response.',
+      });
       await turns.close();
       await mutation;
       await titleTask;
@@ -642,6 +712,21 @@ export function createThreadState(
   return state;
 }
 
+function assertPendingServerRequest(
+  snapshot: ThreadSnapshot,
+  requestId: string,
+): void {
+  if (
+    snapshot.pendingServerRequests.some((request) => request.id === requestId)
+  ) {
+    return;
+  }
+  throw new AppServerError({
+    type: 'requestResolved',
+    message: `Server Request ${requestId} is not pending.`,
+  });
+}
+
 type ServerRequestDispatchResult =
   | { readonly type: 'resolved'; readonly result: unknown }
   | { readonly type: 'controllerUnavailable' };
@@ -725,6 +810,8 @@ export interface ThreadPool {
    * - 当 Thread 状态 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
    */
   loaded(): Promise<ReadonlyArray<ThreadSummary>>;
+  /** 读取已加载 Thread 的实时模式，不触发隐式恢复。 */
+  currentMode(threadId: string): SessionMode;
   /**
    * 执行 Thread 状态 模块 定义的 `unsubscribe` 领域操作，输入和副作用均受该边界约束。
    *
@@ -950,6 +1037,7 @@ export function createThreadPool(options: {
           async (entry) => (await entry.state.snapshot()).thread,
         ),
       ),
+    currentMode: (threadId) => requireLoaded(threadId).state.currentMode(),
     async unsubscribe(connectionId, threadId) {
       const entry = entries.get(threadId);
       if (entry === undefined) return;
