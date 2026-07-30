@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { runProcess } from '../src/process.js';
+import { runProcess } from '../src/infra/process.js';
 
 describe('process runner', () => {
   it('terminates a timed-out process', async () => {

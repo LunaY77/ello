@@ -4,9 +4,9 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { PatchArtifactSchema } from '../src/contracts.js';
-import { capturePatch } from '../src/patch.js';
-import { runChecked } from '../src/process.js';
+import { PatchArtifactSchema } from '../src/domain/contract/index.js';
+import { capturePatch } from '../src/infra/patch.js';
+import { runChecked } from '../src/infra/process.js';
 
 const GIT = {
   timeoutMs: 30_000,

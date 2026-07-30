@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { findElloProviderRecoveryTarget } from '../../src/agents/ello/provider-recovery.js';
+import { findElloProviderRecoveryTarget } from '../../src/infra/agent/ello/provider-recovery.js';
 
 const directories: string[] = [];
 

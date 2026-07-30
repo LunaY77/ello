@@ -5,8 +5,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-import { writeBenchmarkAgentConfig } from '../src/config-writer.js';
-import { ElloAgentSpecSchema } from '../src/contracts.js';
+import { ElloAgentSpecSchema } from '../src/domain/contract/index.js';
+import { writeBenchmarkAgentConfig } from '../src/infra/config-writer.js';
 
 describe('benchmark Agent config', () => {
   it('writes an isolated credential-free named model directory', async () => {

@@ -206,6 +206,117 @@ export default tseslint.config(
   },
 
   {
+    files: ['packages/ello-bench/src/domain/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'node:fs',
+              message: 'Benchmark domain code must not perform filesystem I/O.',
+            },
+            {
+              name: 'node:fs/promises',
+              message: 'Benchmark domain code must not perform filesystem I/O.',
+            },
+            {
+              name: 'node:child_process',
+              message: 'Benchmark domain code must not launch processes.',
+            },
+          ],
+          patterns: [
+            {
+              group: [
+                '**/application/**',
+                '**/cli/**',
+                '**/infra/**',
+                '**/ports/**',
+                '**/render/**',
+              ],
+              message: 'Benchmark domain code cannot depend on outer layers.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
+    files: ['packages/ello-bench/src/application/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['node:*', '**/cli/**', '**/infra/**', '**/render/**'],
+              message:
+                'Benchmark application code may import only domain and ports.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
+    files: ['packages/ello-bench/src/ports/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                'node:*',
+                '**/application/**',
+                '**/cli/**',
+                '**/infra/**',
+                '**/render/**',
+              ],
+              message: 'Benchmark ports contain contracts only.',
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'Program > :matches(FunctionDeclaration, ClassDeclaration, VariableDeclaration, TSEnumDeclaration)',
+          message:
+            'Benchmark ports contain type and interface declarations only.',
+        },
+      ],
+    },
+  },
+
+  {
+    files: ['packages/ello-bench/src/render/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                'node:*',
+                '**/application/**',
+                '**/cli/**',
+                '**/infra/**',
+                '**/ports/**',
+              ],
+              message:
+                'Benchmark render code must remain pure and free of I/O.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
     files: ['packages/ello-tui/src/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [

@@ -4,14 +4,14 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { loadBenchmarkConfig } from '../src/config.js';
-import { createPlan, selectAll } from '../src/matrix.js';
+import { createPlan, selectAll } from '../src/domain/suite/plan.js';
+import { loadBenchmarkConfig } from '../src/infra/config/toml-loader.js';
 import {
   invalidateRun,
   openSuiteManifest,
   selectAttempt,
   transitionRun,
-} from '../src/run-state.js';
+} from '../src/infra/run-state.js';
 
 import { EXAMPLE_CONFIG_PATH } from './example-config.js';
 

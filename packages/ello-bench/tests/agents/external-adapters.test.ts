@@ -5,21 +5,22 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
-  AgentProcessExecution,
-  AgentRunContext,
-  NormalizedAgentExecution,
-} from '../../src/agents/adapter.js';
-import {
-  claudeCodeBaseUrlIssue,
-  requireClaudeCodeBaseUrl,
-} from '../../src/agents/claude-code/base-url.js';
-import { createAgentAdapter } from '../../src/agents/factory.js';
-import type {
   AgentSpec,
   ClaudeCodeAgentSpec,
   ResolvedTask,
-} from '../../src/contracts.js';
-import { sha256, stableJson } from '../../src/hash.js';
+} from '../../src/domain/contract/index.js';
+import { sha256, stableJson } from '../../src/domain/hash.js';
+import {
+  claudeCodeBaseUrlIssue,
+  requireClaudeCodeBaseUrl,
+} from '../../src/infra/agent/claude-code/base-url.js';
+import { createAgentAdapter } from '../../src/infra/agent/factory.js';
+import type {
+  AgentProcessExecution,
+  AgentRunContext,
+  NormalizedAgentExecution,
+} from '../../src/ports/agent.js';
+import { FakeContainerHandle } from '../fake-container.js';
 
 const originalEnvironment = new Map<string, string | undefined>();
 
@@ -143,13 +144,15 @@ describe('Claude Code Agent adapter', () => {
     expect(result.normalized.evidence.usage.status).toBe('unavailable');
   });
 
-  it('fails tool audit for a host shell command', async () => {
+  it('fails tool audit for a nested Docker command', async () => {
     const fixture = await createFixture('routing-violation');
     const result = await executeFixture(fixture);
 
     expect(result.normalized.toolAudit.status).toBe('failed');
     expect(result.normalized.toolAudit.violations).toEqual(
-      expect.arrayContaining([expect.objectContaining({ kind: 'host_shell' })]),
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'docker_shell' }),
+      ]),
     );
   });
 
@@ -226,16 +229,16 @@ async function createFixture(
   const workspace = path.join(root, 'workspace');
   const rawAgentRoot = path.join(root, 'raw', 'agent');
   const agentStateRoot = path.join(root, 'agent-state');
+  const containerRoot = path.join(root, 'container');
   const binRoot = path.join(root, 'bin');
   await Promise.all([
     mkdir(workspace, { recursive: true }),
     mkdir(rawAgentRoot, { recursive: true }),
     mkdir(agentStateRoot, { recursive: true }),
+    mkdir(containerRoot, { recursive: true }),
     mkdir(binRoot, { recursive: true }),
   ]);
   await writeFile(path.join(workspace, 'README.md'), 'fixture\n', 'utf8');
-  await createFakeDocker(binRoot, workspace);
-  setEnvironment('PATH', `${binRoot}:${process.env.PATH ?? ''}`);
   const executablePath = path.join(binRoot, 'claude');
   await writeExecutable(executablePath, claudeExecutableSource(mode));
   const binarySha256 = sha256(await readFile(executablePath));
@@ -265,10 +268,8 @@ async function createFixture(
     agentConfigHash: sha256(stableJson(agent)),
     agentStateRoot,
     workspace,
-    runtime: 'docker',
-    containerName: 'bench-container',
-    containerWorkspace: '/app',
     rawAgentRoot,
+    container: new FakeContainerHandle(workspace, containerRoot),
     taskFiles: {
       task,
       taskRoot: root,
@@ -297,35 +298,17 @@ async function executeFixture(fixture: {
   return { execution, normalized };
 }
 
-async function createFakeDocker(
-  binRoot: string,
-  workspace: string,
-): Promise<void> {
-  await writeExecutable(
-    path.join(binRoot, 'docker'),
-    `#!/usr/bin/env node
-const { spawnSync } = require('node:child_process');
-const args = process.argv.slice(2);
-if (args[0] !== 'exec' || args[1] !== '-w' || args[2] !== '/app' || args[3] !== 'bench-container' || args[4] !== 'bash' || args[5] !== '-lc' || typeof args[6] !== 'string') process.exit(64);
-const result = spawnSync('/bin/bash', ['-lc', args[6]], { cwd: ${JSON.stringify(workspace)}, stdio: 'inherit' });
-process.exit(result.status ?? 1);
-`,
-  );
-}
-
 function claudeExecutableSource(mode: FixtureMode): string {
   return `#!/usr/bin/env node
 const fs = require('node:fs');
-const { spawnSync } = require('node:child_process');
 const mode = ${JSON.stringify(mode)};
 if (process.argv.includes('--version')) { process.stdout.write('2.1.217 (Claude Code)\\n'); process.exit(0); }
 if (mode === 'malformed') { process.stdout.write('{bad json\\n'); process.exit(1); }
 const args = process.argv.slice(2);
 const selectedModel = args[args.indexOf('--model') + 1];
 const boundary = args[args.indexOf('--append-system-prompt') + 1];
-const container = new RegExp('docker exec -w /app ([A-Za-z0-9_.-]+) bash -lc').exec(boundary)?.[1];
 fs.readFileSync(0, 'utf8');
-if (!container) process.exit(65);
+if (!boundary.includes('Run repository commands directly; do not invoke Docker')) process.exit(65);
 if (process.env.ANTHROPIC_BASE_URL !== 'https://example.test/anthropic') process.exit(67);
 if (process.env.ANTHROPIC_AUTH_TOKEN !== 'claude-test-key') process.exit(68);
 const tools = mode === 'reordered-tools'
@@ -345,10 +328,9 @@ if (mode === 'provider-error') {
   process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, duration_ms: 1, num_turns: 1, result, session_id: 'session-1', usage, api_error_status: 404, terminal_reason: 'api_error' }) + '\\n');
   process.exit(7);
 }
-const command = mode === 'routing-violation' ? 'git status' : 'docker exec -w /app ' + container + " bash -lc 'echo claude-code > agent-output.txt'";
+const command = mode === 'routing-violation' ? 'docker exec forbidden true' : 'echo claude-code > agent-output.txt';
 if (mode !== 'routing-violation') {
-  const result = spawnSync('docker', ['exec', '-w', '/app', container, 'bash', '-lc', 'echo claude-code > agent-output.txt']);
-  if (result.status !== 0) process.exit(66);
+  fs.writeFileSync('agent-output.txt', 'claude-code\\n');
 }
 process.stdout.write(JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-test', id: 'msg-1', type: 'message', role: 'assistant', content: [{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command } }], stop_reason: null, usage }, session_id: 'session-1' }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'ok', is_error: false }] }, session_id: 'session-1' }) + '\\n');

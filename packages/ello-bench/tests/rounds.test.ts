@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { normalizeEventCapture } from '../src/rounds.js';
+import { normalizeEventCapture } from '../src/infra/rounds.js';
 
 describe('round normalization', () => {
   it('normalizes model calls and sums per-call usage', async () => {

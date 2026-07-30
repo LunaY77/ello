@@ -8,11 +8,12 @@ import {
   HarnessReportSchema,
   RunManifestSchema,
   SuiteManifestSchema,
-} from '../src/contracts.js';
-import { sha256, stableJson } from '../src/hash.js';
-import { writeJsonAtomic } from '../src/io.js';
-import { generateSuiteReport } from '../src/report.js';
-import { getBenchmarkSuite } from '../src/suite.js';
+} from '../src/domain/contract/index.js';
+import { sha256, stableJson } from '../src/domain/hash.js';
+import { classifyAttempt } from '../src/domain/scoring/attempt-outcome.js';
+import { getBenchmarkSuite } from '../src/infra/corpus/suite.js';
+import { writeJsonAtomic } from '../src/infra/io.js';
+import { generateSuiteReport } from '../src/infra/report/fs-report.js';
 
 describe('suite report', () => {
   it('separates valid results from infrastructure failures', async () => {
@@ -98,6 +99,56 @@ describe('suite report', () => {
         cacheWriteTokens: 0,
         reasoningTokens: 0,
         toolCalls: 0,
+      },
+      threads: [
+        {
+          threadId: 'thr_main',
+          kind: 'main',
+          rawSource: {
+            path: path.join(runRoot, 'events.jsonl'),
+            sha256: sha256(''),
+            bytes: 0,
+          },
+          rounds: {
+            path: roundsPath,
+            sha256: sha256(roundsContent),
+            bytes: roundsContent.byteLength,
+          },
+          roundCount: 1,
+          usage: {
+            status: 'complete',
+            requests: 1,
+            inputTokens: 10,
+            outputTokens: 4,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+            toolCalls: 0,
+          },
+        },
+      ],
+      threadUsage: {
+        main: {
+          status: 'complete',
+          requests: 1,
+          inputTokens: 10,
+          outputTokens: 4,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: 0,
+          toolCalls: 0,
+        },
+        subagents: zeroUsage(),
+        combined: {
+          status: 'complete',
+          requests: 1,
+          inputTokens: 10,
+          outputTokens: 4,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: 0,
+          toolCalls: 0,
+        },
       },
       tools: {
         total: 0,
@@ -397,118 +448,54 @@ describe('evidence degradation', () => {
     ).toThrow('Completed run requires agentEvidence');
   });
 
-  it('rejects an invalid run that claims evidence degradation', () => {
-    expect(() =>
-      RunManifestSchema.parse({
-        ...baseRun(
-          '/tmp/x',
-          'bbbbbbbbbbbbbbbbbbbbbbbb',
-          '2222222222222222',
-          'task-a',
-          'ello',
-        ),
-        status: 'invalid_infrastructure',
-        phase: 'prepare-workspace',
-        startedAt: '2026-07-23T00:00:00.000Z',
-        completedAt: '2026-07-23T00:00:01.000Z',
-        failure: {
-          kind: 'container',
-          phase: 'prepare-workspace',
-          message: 'container unavailable',
-        },
-        evidenceDegradation: {
-          phase: 'normalize-agent-evidence',
-          message: 'parser failed',
-        },
-      }),
-    ).toThrow('Invalid run cannot declare evidence degradation');
-  });
-});
-
-describe('execution runtime artifact compatibility', () => {
-  it('defaults legacy run and harness artifacts to Docker', () => {
-    const verifierProcess = {
-      path: '/tmp/x/verifier.json',
-      sha256: '2'.repeat(64),
-    };
-    const harness = HarnessReportSchema.parse(
-      harnessReport('/tmp/x', verifierProcess, 1),
-    );
-
-    expect(harness.verifierRuntime).toBe('docker');
-
-    const run = RunManifestSchema.parse({
+  it('allows invalidity and evidence degradation to remain orthogonal', () => {
+    const invalid = RunManifestSchema.parse({
       ...baseRun(
         '/tmp/x',
-        'aaaaaaaaaaaaaaaaaaaaaaaa',
-        '1111111111111111',
+        'bbbbbbbbbbbbbbbbbbbbbbbb',
+        '2222222222222222',
         'task-a',
         'ello',
       ),
       status: 'invalid_infrastructure',
       phase: 'prepare-workspace',
+      startedAt: '2026-07-23T00:00:00.000Z',
       completedAt: '2026-07-23T00:00:01.000Z',
       failure: {
         kind: 'container',
         phase: 'prepare-workspace',
         message: 'container unavailable',
       },
-    });
-    expect(run.executionRuntime).toBe('docker');
-  });
-
-  it('accepts a completed local run without image or container ids', () => {
-    const verifierProcess = {
-      path: '/tmp/x/verifier.json',
-      sha256: '2'.repeat(64),
-    };
-    const legacyHarness = harnessReport('/tmp/x', verifierProcess, 1);
-    const {
-      verifierImage: _image,
-      verifierImageId: _imageId,
-      ...common
-    } = legacyHarness;
-    const harness = HarnessReportSchema.parse({
-      ...common,
-      verifierRuntime: 'local',
-    });
-    const run = RunManifestSchema.parse({
-      ...baseRun(
-        '/tmp/x',
-        'aaaaaaaaaaaaaaaaaaaaaaaa',
-        '1111111111111111',
-        'task-a',
-        'ello',
-      ),
-      executionRuntime: 'local',
-      status: 'completed',
-      phase: 'completed',
-      startedAt: '2026-07-23T00:00:00.000Z',
-      completedAt: '2026-07-23T00:00:02.000Z',
-      task: resolvedTask('task-a'),
-      baselineTree: 'b'.repeat(40),
-      client: processResult(2000),
-      agentProcess: { path: '/tmp/x/agent.json', sha256: '3'.repeat(64) },
-      patch: {
-        path: '/tmp/x/model.patch',
-        sha256: 'a'.repeat(64),
-        bytes: 0,
-        changedFiles: [],
-        baselineTree: 'b'.repeat(40),
-      },
-      verifierProcess,
-      phaseTimingsPath: '/tmp/x/timings.json',
-      harness,
-      outcome: 'passed',
       evidenceDegradation: {
         phase: 'normalize-agent-evidence',
-        message: 'evidence unavailable',
+        message: 'parser failed',
       },
     });
 
-    expect(run.executionRuntime).toBe('local');
-    expect(run.imageId).toBeUndefined();
-    expect(run.containerName).toBeUndefined();
+    expect(invalid).toMatchObject({
+      status: 'invalid_infrastructure',
+      evidenceDegradation: { phase: 'normalize-agent-evidence' },
+    });
+  });
+});
+
+describe('attempt classification', () => {
+  it('classifies a nonzero baseline as infrastructure-invalid', () => {
+    const harness = HarnessReportSchema.parse({
+      ...harnessReport(
+        '/tmp/x',
+        { path: '/tmp/x/verifier.json', sha256: '2'.repeat(64) },
+        0,
+      ),
+      baselineTestExitCode: 127,
+      newTestsExitCode: 1,
+    });
+
+    expect(classifyAttempt(harness)).toEqual({
+      kind: 'invalid',
+      reason: 'baseline-unhealthy',
+      exitCode: 127,
+    });
   });
 });
 
@@ -539,7 +526,7 @@ function harnessReport(
 
 function reportConfig() {
   return {
-    schema: 'ello.benchmark.report-config.v1' as const,
+    schema: 'ello.benchmark.report-config.v2' as const,
     renderCharts: false,
     publishability: {
       requireCompleteMatrix: true,
@@ -551,7 +538,7 @@ function reportConfig() {
 
 function relaxedReportConfig() {
   return {
-    schema: 'ello.benchmark.report-config.v1' as const,
+    schema: 'ello.benchmark.report-config.v2' as const,
     renderCharts: false,
     publishability: {
       requireCompleteMatrix: false,
@@ -710,5 +697,18 @@ function elloRuntime() {
     kind: 'ello' as const,
     primaryModel: agent.primaryModel,
     auxiliaryModel: agent.auxiliaryModel,
+  };
+}
+
+function zeroUsage() {
+  return {
+    status: 'complete' as const,
+    requests: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
+    toolCalls: 0,
   };
 }

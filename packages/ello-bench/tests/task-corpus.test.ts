@@ -5,8 +5,8 @@ import { pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { runChecked } from '../src/process.js';
-import { ensureTaskCorpus } from '../src/task-corpus.js';
+import { ensureTaskCorpus } from '../src/infra/corpus/git-corpus.js';
+import { runChecked } from '../src/infra/process.js';
 
 const PROCESS_OPTIONS = {
   timeoutMs: 30_000,

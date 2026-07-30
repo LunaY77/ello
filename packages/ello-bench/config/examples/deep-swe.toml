@@ -1,0 +1,21 @@
+schema = "ello.benchmark.config.v2"
+suite = "deep-swe-v1.1"
+agents_file = "agents.toml"
+
+[execution]
+replicates = 1
+concurrency = 4
+max_infrastructure_retries = 1
+
+[report]
+render_charts = true
+
+[report.publishability]
+require_complete_matrix = true
+require_complete_usage = true
+require_tool_audit = true
+
+[container]
+pull_policy = "if-absent"
+network = "task"
+cleanup = "always"

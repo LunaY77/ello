@@ -4,9 +4,9 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createEventCaptureRecorder } from '../src/event-capture.js';
-import { validateEventEvidence } from '../src/event-evidence.js';
-import { sha256 } from '../src/hash.js';
+import { sha256 } from '../src/domain/hash.js';
+import { createEventCaptureRecorder } from '../src/infra/event-capture.js';
+import { validateEventEvidence } from '../src/infra/event-evidence.js';
 
 const directories: string[] = [];
 
@@ -119,10 +119,62 @@ describe('event capture', () => {
     await capture.close();
   });
 
+  it('appends after recorder restart without losing sequence state', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'ello-bench-events-'));
+    directories.push(directory);
+    const eventLogPath = path.join(directory, 'events.jsonl');
+    const initial = createEventCaptureRecorder(eventLogPath);
+
+    await initial.recorder.record(
+      {
+        type: 'run.started',
+        runId: 'run_1',
+        sequence: 1,
+        occurredAt: '2026-07-23T00:00:00.000Z',
+      },
+      {},
+    );
+    await initial.close();
+
+    const resumed = createEventCaptureRecorder(eventLogPath);
+    await resumed.recorder.record(
+      {
+        type: 'turn.started',
+        runId: 'run_1',
+        sequence: 2,
+        occurredAt: '2026-07-23T00:00:01.000Z',
+        turnIndex: 1,
+      },
+      {},
+    );
+    await resumed.close();
+
+    const captures = (await readFile(eventLogPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            readonly sequence: number;
+            readonly event: string;
+          },
+      );
+    const marker = JSON.parse(await readFile(resumed.completePath, 'utf8')) as {
+      readonly eventCount: number;
+      readonly turnCount: number;
+    };
+
+    expect(captures).toEqual([
+      expect.objectContaining({ sequence: 1, event: 'run.started' }),
+      expect.objectContaining({ sequence: 2, event: 'turn.started' }),
+    ]);
+    expect(marker).toMatchObject({ eventCount: 2, turnCount: 1 });
+  });
+
   it('recomputes lifecycle counts from the raw event log', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'ello-bench-events-'));
     directories.push(directory);
-    const eventLogPath = path.join(directory, 'engine-events-thread.jsonl');
+    const eventLogPath = path.join(directory, 'engine-events-thr_main.jsonl');
     const content = `${[
       event(1, 'run.started'),
       event(2, 'turn.started'),
@@ -144,7 +196,37 @@ describe('event capture', () => {
     };
     await writeFile(completePath, JSON.stringify(marker), 'utf8');
 
-    await expect(validateEventEvidence(directory)).resolves.toEqual(marker);
+    const subagentLogPath = path.join(
+      directory,
+      'engine-events-job_subagent.jsonl',
+    );
+    const subagentContent = `${[
+      event(1, 'run.started'),
+      event(2, 'turn.started'),
+      event(3, 'model.started'),
+    ]
+      .map(JSON.stringify)
+      .join('\n')}\n`;
+    await writeFile(subagentLogPath, subagentContent, 'utf8');
+    const subagentMarker = {
+      schema: 'ello.benchmark.event-capture.complete.v1',
+      eventLogPath: subagentLogPath,
+      eventCount: 3,
+      runCount: 1,
+      turnCount: 1,
+      modelCallCount: 1,
+      sha256: sha256(subagentContent),
+    };
+    await writeFile(
+      `${subagentLogPath}.complete.json`,
+      JSON.stringify(subagentMarker),
+      'utf8',
+    );
+
+    await expect(validateEventEvidence(directory)).resolves.toEqual({
+      main: { ...marker, threadId: 'thr_main' },
+      subagents: [{ ...subagentMarker, threadId: 'job_subagent' }],
+    });
     await writeFile(
       completePath,
       JSON.stringify({ ...marker, modelCallCount: 2 }),
@@ -154,7 +236,46 @@ describe('event capture', () => {
       'lifecycle count mismatch',
     );
   });
+
+  it('rejects captures whose thread id has an unknown prefix', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'ello-bench-events-'));
+    directories.push(directory);
+    await writeCapture(directory, 'thr_main');
+    await writeCapture(directory, 'session_unknown');
+
+    await expect(validateEventEvidence(directory)).rejects.toThrow(
+      'Unknown EngineEvent thread id prefix',
+    );
+  });
 });
+
+async function writeCapture(
+  directory: string,
+  threadId: string,
+): Promise<void> {
+  const eventLogPath = path.join(directory, `engine-events-${threadId}.jsonl`);
+  const content = `${[
+    event(1, 'run.started'),
+    event(2, 'turn.started'),
+    event(3, 'model.started'),
+  ]
+    .map(JSON.stringify)
+    .join('\n')}\n`;
+  await writeFile(eventLogPath, content, 'utf8');
+  await writeFile(
+    `${eventLogPath}.complete.json`,
+    JSON.stringify({
+      schema: 'ello.benchmark.event-capture.complete.v1',
+      eventLogPath,
+      eventCount: 3,
+      runCount: 1,
+      turnCount: 1,
+      modelCallCount: 1,
+      sha256: sha256(content),
+    }),
+    'utf8',
+  );
+}
 
 function event(sequence: number, name: string) {
   return {

@@ -1,8 +1,6 @@
 raw/
 results/
 
-# 本地 benchmark 配置，含私有 endpoint、模型 id 与凭据环境变量名。
-config/benchmark.config.mjs
-config/agents.config.mjs
-config/report.config.mjs
-config/benchmark.json
+# 本地 benchmark 配置
+config/agents.toml
+config/benchmark.toml

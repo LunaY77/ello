@@ -5,17 +5,18 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
-  AgentProcessExecution,
-  AgentRunContext,
-  NormalizedAgentExecution,
-} from '../../src/agents/adapter.js';
-import { createAgentAdapter } from '../../src/agents/factory.js';
-import type {
   AgentSpec,
   CodexAgentSpec,
   ResolvedTask,
-} from '../../src/contracts.js';
-import { sha256, stableJson } from '../../src/hash.js';
+} from '../../src/domain/contract/index.js';
+import { sha256, stableJson } from '../../src/domain/hash.js';
+import { createAgentAdapter } from '../../src/infra/agent/factory.js';
+import type {
+  AgentProcessExecution,
+  AgentRunContext,
+  NormalizedAgentExecution,
+} from '../../src/ports/agent.js';
+import { FakeContainerHandle } from '../fake-container.js';
 
 const originalEnvironment = new Map<string, string | undefined>();
 
@@ -139,13 +140,15 @@ describe('Codex Agent adapter', () => {
     expect(result.normalized.toolAudit.shellCalls).toBe(1);
   });
 
-  it('fails the tool audit for a host shell command', async () => {
+  it('fails the tool audit for a nested Docker command', async () => {
     const fixture = await createFixture('routing-violation');
     const result = await executeFixture(fixture);
 
     expect(result.normalized.toolAudit.status).toBe('failed');
     expect(result.normalized.toolAudit.violations).toEqual(
-      expect.arrayContaining([expect.objectContaining({ kind: 'host_shell' })]),
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'docker_shell' }),
+      ]),
     );
   });
 
@@ -202,16 +205,16 @@ async function createFixture(
   const workspace = path.join(root, 'workspace');
   const rawAgentRoot = path.join(root, 'raw', 'agent');
   const agentStateRoot = path.join(root, 'agent-state');
+  const containerRoot = path.join(root, 'container');
   const binRoot = path.join(root, 'bin');
   await Promise.all([
     mkdir(workspace, { recursive: true }),
     mkdir(rawAgentRoot, { recursive: true }),
     mkdir(agentStateRoot, { recursive: true }),
+    mkdir(containerRoot, { recursive: true }),
     mkdir(binRoot, { recursive: true }),
   ]);
   await writeFile(path.join(workspace, 'README.md'), 'fixture\n', 'utf8');
-  await createFakeDocker(binRoot, workspace);
-  setEnvironment('PATH', `${binRoot}:${process.env.PATH ?? ''}`);
   const executablePath = path.join(binRoot, 'codex');
   await writeExecutable(executablePath, codexExecutableSource(mode));
   const binarySha256 = sha256(await readFile(executablePath));
@@ -243,10 +246,8 @@ async function createFixture(
     agentConfigHash: sha256(stableJson(agent)),
     agentStateRoot,
     workspace,
-    runtime: 'docker',
-    containerName: 'bench-container',
-    containerWorkspace: '/app',
     rawAgentRoot,
+    container: new FakeContainerHandle(workspace, containerRoot),
     taskFiles: {
       task,
       taskRoot: root,
@@ -275,48 +276,28 @@ async function executeFixture(fixture: {
   return { execution, normalized };
 }
 
-async function createFakeDocker(
-  binRoot: string,
-  workspace: string,
-): Promise<void> {
-  await writeExecutable(
-    path.join(binRoot, 'docker'),
-    `#!/usr/bin/env node
-const { spawnSync } = require('node:child_process');
-const args = process.argv.slice(2);
-if (args[0] !== 'exec' || args[1] !== '-w' || args[2] !== '/app' || args[3] !== 'bench-container' || args[4] !== 'bash' || args[5] !== '-lc' || typeof args[6] !== 'string') process.exit(64);
-const result = spawnSync('/bin/bash', ['-lc', args[6]], { cwd: ${JSON.stringify(workspace)}, stdio: 'inherit' });
-process.exit(result.status ?? 1);
-`,
-  );
-}
-
 function codexExecutableSource(mode: FixtureMode): string {
   return `#!/usr/bin/env node
 const fs = require('node:fs');
-const { spawnSync } = require('node:child_process');
 const mode = ${JSON.stringify(mode)};
 if (process.argv.includes('--version')) { process.stdout.write('codex-cli 0.145.0\\n'); process.exit(0); }
 const args = process.argv.slice(2);
 if (args[0] !== 'exec' || !args.includes('--json') || !args.includes('--strict-config') || !args.includes('--ignore-user-config') || !args.includes('--ignore-rules')) process.exit(61);
 const selectedModel = args[args.indexOf('-m') + 1];
-const workspace = args[args.indexOf('-C') + 1];
 const prompt = fs.readFileSync(0, 'utf8');
-const container = new RegExp('docker exec -w /app ([A-Za-z0-9_.-]+) bash -lc').exec(prompt)?.[1];
-if (!container || selectedModel !== 'gpt-codex-test') process.exit(62);
-if (!process.env.CODEX_HOME?.endsWith('agent-state/codex-home')) process.exit(63);
+if (!prompt.includes('Run repository commands directly; do not invoke Docker') || selectedModel !== 'gpt-codex-test') process.exit(62);
+if (!process.env.CODEX_HOME?.endsWith('/codex/codex-home')) process.exit(63);
 if (process.env.ELLO_TEST_CODEX_API_KEY !== 'codex-test-key') process.exit(64);
 if (!args.some((value) => value.includes('base_url=\\"https://example.test/openai/v1\\"'))) process.exit(65);
 if (mode === 'malformed') { process.stdout.write('{bad json\\n'); process.exit(1); }
 const event = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
 event({ type: 'thread.started', thread_id: 'thread-1' });
 event({ type: 'turn.started', turn_id: 'turn-1', timestamp: '2026-07-28T00:00:00.000Z' });
-const command = mode === 'routing-violation' ? 'git status' : 'docker exec -w /app ' + container + " bash -lc 'echo codex > agent-output.txt'";
+const command = mode === 'routing-violation' ? 'docker exec forbidden true' : 'echo codex > agent-output.txt';
 event({ type: 'item.started', timestamp: '2026-07-28T00:00:01.000Z', item: { id: 'command-1', type: 'command_execution', command, aggregated_output: '', exit_code: null, status: 'in_progress' } });
 if (mode === 'timeout') while (true) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
 if (mode !== 'routing-violation') {
-  const result = spawnSync('docker', ['exec', '-w', '/app', container, 'bash', '-lc', 'echo codex > agent-output.txt']);
-  if (result.status !== 0) process.exit(66);
+  fs.writeFileSync('agent-output.txt', 'codex\\n');
 }
 const commandItem = { id: 'command-1', type: 'command_execution', command, aggregated_output: 'ok', exit_code: 0, status: 'completed' };
 if (mode === 'upstream-drift') commandItem.future_item_field = true;

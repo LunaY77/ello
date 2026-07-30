@@ -4,8 +4,8 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { PhaseTimingsArtifactSchema } from '../src/contracts.js';
-import { PhaseTimingsRecorder } from '../src/phase-timings.js';
+import { PhaseTimingsArtifactSchema } from '../src/domain/contract/index.js';
+import { PhaseTimingsRecorder } from '../src/infra/phase-timings.js';
 
 describe('benchmark phase timings', () => {
   it('persists completed and failed phases in execution order', async () => {

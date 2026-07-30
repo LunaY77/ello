@@ -1,0 +1,458 @@
+import { copyFile, mkdir } from 'node:fs/promises';
+import path from 'node:path';
+
+import {
+  AgentRuntimeProvenanceSchema,
+  NormalizedAgentEvidenceSchema,
+  type ElloAgentSpec,
+} from '../../../domain/contract/index.js';
+import { auditElloTools } from '../../../domain/evidence/routing-audit.js';
+import { combineThreadRounds } from '../../../domain/evidence/thread-evidence.js';
+import { sha256, stableJson } from '../../../domain/hash.js';
+import {
+  type AgentAdapter,
+  type AgentProcessExecution,
+  type AgentRunContext,
+  type PreparedAgent,
+} from '../../../ports/agent.js';
+import { writeBenchmarkAgentConfig } from '../../config-writer.js';
+import { runElloCli } from '../../ello-cli.js';
+import {
+  startBenchmarkServerProcess,
+  type BenchmarkServerProcess,
+} from '../../ello-server.js';
+import { validateEventEvidence } from '../../event-evidence.js';
+import { writeJsonAtomic, writeJsonLines } from '../../io.js';
+import { normalizeEventCapture } from '../../rounds.js';
+import { AgentAdapterError } from '../error.js';
+import {
+  aggregateUsage,
+  fileEvidence,
+  summarizeTools,
+  terminalStopReason,
+  validateJsonLines,
+  writeAgentProcessArtifact,
+  writeNormalizedEvidence,
+} from '../evidence.js';
+
+import { findElloProviderRecoveryTarget } from './provider-recovery.js';
+
+const PROVIDER_RECOVERY_PROMPT = `The previous turn ended because the model provider connection failed after bounded retries. Continue the original task from the current thread and workspace. Inspect the existing progress, finish the implementation, run the relevant tests, and report the result. Do not restart from scratch.`;
+
+export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
+  return {
+    async prepare(context: AgentRunContext): Promise<PreparedAgent> {
+      if (context.agent.kind !== 'ello' || context.agent.id !== agent.id) {
+        throw new AgentAdapterError(
+          'agent_setup',
+          `Ello adapter received Agent ${context.agent.id}.`,
+        );
+      }
+      if (sha256(stableJson(agent)) !== context.agentConfigHash) {
+        throw new AgentAdapterError(
+          'agent_setup',
+          `Ello Agent config hash mismatch for ${agent.id}.`,
+        );
+      }
+      requireCredential(agent);
+      const configSnapshotPath = path.join(
+        context.rawAgentRoot,
+        'config-snapshot.json',
+      );
+      await writeBenchmarkAgentConfig({
+        elloHome: context.agentStateRoot,
+        workspace: context.workspace,
+        agentWorkspace: context.container.workspace,
+        agent,
+        snapshotPath: configSnapshotPath,
+      });
+      const invocationPath = path.join(context.rawAgentRoot, 'invocation.json');
+      await writeJsonAtomic(invocationPath, {
+        schema: 'ello.benchmark.agent-invocation.v1',
+        agentId: agent.id,
+        kind: agent.kind,
+        primaryModel: agent.primaryModel,
+        auxiliaryModel: agent.auxiliaryModel,
+        workspace: context.container.workspace,
+        executionRuntime: 'docker',
+        containerName: context.container.name,
+        containerWorkspace: context.container.workspace,
+        instructionSha256: context.taskFiles.task.instructionSha256,
+        configSnapshotPath,
+      });
+      const serverBase = {
+        workspace: context.workspace,
+        elloHome: context.agentStateRoot,
+        socketPath: path.join(
+          process.env.TMPDIR ?? '/tmp',
+          `ello-bench-${context.attemptId}.sock`,
+        ),
+        rawRoot: path.join(context.rawAgentRoot, 'adapter'),
+        stdoutPath: path.join(context.rawAgentRoot, 'server.stdout.log'),
+        stderrPath: path.join(context.rawAgentRoot, 'server.stderr.log'),
+      } as const;
+      let server: BenchmarkServerProcess | undefined =
+        await startBenchmarkServerProcess({
+          ...serverBase,
+          containerName: context.container.name,
+          storageMb: context.taskFiles.task.environment.storageMb,
+        });
+      return {
+        async run(): Promise<AgentProcessExecution> {
+          if (server === undefined) {
+            throw new AgentAdapterError(
+              'agent_process',
+              'Ello App Server is not running.',
+            );
+          }
+          const stdoutPath = path.join(context.rawAgentRoot, 'stdout.jsonl');
+          const stderrPath = path.join(context.rawAgentRoot, 'stderr.log');
+          const startedAt = new Date().toISOString();
+          const initialProcess = await runElloCli({
+            endpoint: server.endpoint,
+            workspace: context.workspace,
+            agentWorkspace: context.container.workspace,
+            elloHome: context.agentStateRoot,
+            instruction: context.taskFiles.instruction,
+            timeoutMs: context.taskFiles.task.agentTimeoutMs,
+            stdoutPath,
+            stderrPath,
+          });
+          await validateJsonLines(stdoutPath);
+          const recovery = await recoverProviderFailure({
+            endpoint: server.endpoint,
+            workspace: context.workspace,
+            agentWorkspace: context.container.workspace,
+            elloHome: context.agentStateRoot,
+            timeoutMs: context.taskFiles.task.agentTimeoutMs,
+            rawAgentRoot: context.rawAgentRoot,
+            eventRoot: path.join(context.rawAgentRoot, 'adapter'),
+            stdoutPath,
+            stderrPath,
+            initialProcess,
+          });
+          const process = recovery?.process ?? initialProcess;
+          const completedAt = new Date().toISOString();
+          if (recovery !== null) await validateJsonLines(stdoutPath);
+          const processArtifact = await writeAgentProcessArtifact({
+            rawAgentRoot: context.rawAgentRoot,
+            execution: {
+              process,
+              startedAt,
+              completedAt,
+              stdoutPath,
+              stderrPath,
+            },
+            invocationPath,
+          });
+          return {
+            process,
+            startedAt,
+            completedAt,
+            artifact: processArtifact.reference,
+            stdoutPath,
+            stderrPath,
+          };
+        },
+        async close(): Promise<void> {
+          if (server === undefined) return;
+          const active = server;
+          server = undefined;
+          await active.close();
+        },
+        async normalize(execution: AgentProcessExecution) {
+          const adapterRoot = path.join(context.rawAgentRoot, 'adapter');
+          const captures = await validateEventEvidence(adapterRoot);
+          const mainRoundsPath = path.join(
+            context.rawAgentRoot,
+            `rounds-${captures.main.threadId}.jsonl`,
+          );
+          const main = await normalizeEventCapture({
+            eventLogPath: captures.main.eventLogPath,
+            roundsPath: mainRoundsPath,
+            allowIncomplete: execution.process.timedOut,
+          });
+          const subagents = await Promise.all(
+            captures.subagents.map(async (capture) => {
+              const threadRoundsPath = path.join(
+                context.rawAgentRoot,
+                `rounds-${capture.threadId}.jsonl`,
+              );
+              return {
+                capture,
+                roundsPath: threadRoundsPath,
+                normalized: await normalizeEventCapture({
+                  eventLogPath: capture.eventLogPath,
+                  roundsPath: threadRoundsPath,
+                  allowIncomplete: execution.process.timedOut,
+                }),
+              };
+            }),
+          );
+          const combinedRounds = combineThreadRounds([
+            ...main.rounds,
+            ...subagents.flatMap((thread) => thread.normalized.rounds),
+          ]);
+          const combinedTools = [
+            ...main.tools,
+            ...subagents.flatMap((thread) => thread.normalized.tools),
+          ];
+          const roundsPath = path.join(context.rawAgentRoot, 'rounds.jsonl');
+          await writeJsonLines(roundsPath, combinedRounds);
+          const elloRounds = requireElloRounds(combinedRounds);
+          validateElloRounds(agent, elloRounds);
+          const firstRound = requireElloRounds(main.rounds)[0];
+          if (firstRound === undefined)
+            throw new Error('Ello observed model is missing.');
+          const observedModel = firstRound.apiModel;
+          const primaryModel = agent.models[agent.primaryModel];
+          if (primaryModel === undefined) {
+            throw new Error(
+              `Ello primary model is missing: ${agent.primaryModel}.`,
+            );
+          }
+          const evidence = NormalizedAgentEvidenceSchema.parse({
+            schema: 'ello.benchmark.agent-evidence.v1',
+            agentId: agent.id,
+            kind: agent.kind,
+            observedModel,
+            terminalStatus: execution.process.timedOut
+              ? 'timed_out'
+              : main.providerFailure
+                ? 'failed'
+                : 'completed',
+            providerFailure: main.providerFailure,
+            parserCoverage: 'complete',
+            terminalStopReason: terminalStopReason(main.rounds),
+            unknownFields: [],
+            rawSource: await fileEvidence(captures.main.eventLogPath),
+            rounds: await fileEvidence(roundsPath),
+            roundCount: combinedRounds.length,
+            usage: aggregateUsage(combinedRounds),
+            tools: summarizeTools(combinedRounds),
+            threads: [
+              {
+                threadId: captures.main.threadId,
+                kind: 'main',
+                rawSource: await fileEvidence(captures.main.eventLogPath),
+                rounds: await fileEvidence(mainRoundsPath),
+                roundCount: main.rounds.length,
+                usage: main.usage,
+              },
+              ...(await Promise.all(
+                subagents.map(async (thread) => ({
+                  threadId: thread.capture.threadId,
+                  kind: 'subagent' as const,
+                  rawSource: await fileEvidence(thread.capture.eventLogPath),
+                  rounds: await fileEvidence(thread.roundsPath),
+                  roundCount: thread.normalized.rounds.length,
+                  usage: thread.normalized.usage,
+                })),
+              )),
+            ],
+            threadUsage: {
+              main: main.usage,
+              subagents: aggregateUsage(
+                subagents.flatMap((thread) => thread.normalized.rounds),
+              ),
+              combined: aggregateUsage(combinedRounds),
+            },
+          });
+          const audit = auditElloTools(combinedTools);
+          const runtime = AgentRuntimeProvenanceSchema.parse({
+            schema: 'ello.benchmark.agent-runtime.v1',
+            agentId: agent.id,
+            displayName: agent.displayName,
+            agentConfigHash: context.agentConfigHash,
+            adapterContractVersion: '1',
+            expectedModel: primaryModel.apiModel,
+            observedModel,
+            configSha256: sha256(stableJson(agent)),
+            kind: agent.kind,
+            primaryModel: agent.primaryModel,
+            auxiliaryModel: agent.auxiliaryModel,
+          });
+          await writeJsonAtomic(
+            path.join(context.rawAgentRoot, 'identity.json'),
+            runtime,
+          );
+          const artifacts = await writeNormalizedEvidence({
+            rawAgentRoot: context.rawAgentRoot,
+            evidence,
+            audit,
+          });
+          return {
+            runtime,
+            evidence,
+            rounds: combinedRounds,
+            evidenceArtifact: artifacts.evidenceArtifact,
+            toolAudit: audit,
+            toolAuditArtifact: artifacts.toolAuditArtifact,
+            providerFailure: main.providerFailure,
+            providerFailureMessage: main.providerFailure
+              ? providerFailureMessage(main.rounds)
+              : null,
+          };
+        },
+      };
+    },
+  };
+}
+
+async function recoverProviderFailure(options: {
+  readonly endpoint: string;
+  readonly workspace: string;
+  readonly agentWorkspace: string;
+  readonly elloHome: string;
+  readonly timeoutMs: number;
+  readonly rawAgentRoot: string;
+  readonly eventRoot: string;
+  readonly stdoutPath: string;
+  readonly stderrPath: string;
+  readonly initialProcess: import('../../../domain/contract/index.js').ProcessResult;
+}): Promise<{
+  readonly process: import('../../../domain/contract/index.js').ProcessResult;
+} | null> {
+  if (
+    options.initialProcess.timedOut ||
+    options.initialProcess.exitCode === 0
+  ) {
+    return null;
+  }
+  const remainingTimeoutMs = Math.floor(
+    options.timeoutMs - options.initialProcess.durationMs,
+  );
+  if (remainingTimeoutMs <= 0) return null;
+  const target = await findElloProviderRecoveryTarget({
+    stdoutPath: options.stdoutPath,
+    eventRoot: options.eventRoot,
+  });
+  if (target === null) return null;
+
+  const recoveryRoot = path.join(options.rawAgentRoot, 'provider-recovery');
+  const initialStdoutPath = path.join(recoveryRoot, 'initial.stdout.jsonl');
+  const initialStderrPath = path.join(recoveryRoot, 'initial.stderr.log');
+  await mkdir(recoveryRoot, { recursive: true });
+  await Promise.all([
+    copyFile(options.stdoutPath, initialStdoutPath),
+    copyFile(options.stderrPath, initialStderrPath),
+  ]);
+  const recoveryStartedAt = new Date().toISOString();
+  const recoveredProcess = await runElloCli({
+    endpoint: options.endpoint,
+    workspace: options.workspace,
+    agentWorkspace: options.agentWorkspace,
+    elloHome: options.elloHome,
+    instruction: PROVIDER_RECOVERY_PROMPT,
+    threadId: target.threadId,
+    timeoutMs: remainingTimeoutMs,
+    stdoutPath: options.stdoutPath,
+    stderrPath: options.stderrPath,
+  });
+  const recoveryCompletedAt = new Date().toISOString();
+  const process = {
+    ...recoveredProcess,
+    durationMs: options.initialProcess.durationMs + recoveredProcess.durationMs,
+  };
+  await writeJsonAtomic(
+    path.join(options.rawAgentRoot, 'provider-recovery.json'),
+    {
+      schema: 'ello.benchmark.provider-recovery.v1',
+      threadId: target.threadId,
+      eventLogPath: target.eventLogPath,
+      remainingTimeoutMs,
+      initial: {
+        process: options.initialProcess,
+        stdoutPath: initialStdoutPath,
+        stderrPath: initialStderrPath,
+      },
+      recovery: {
+        startedAt: recoveryStartedAt,
+        completedAt: recoveryCompletedAt,
+        process: recoveredProcess,
+        stdoutPath: options.stdoutPath,
+        stderrPath: options.stderrPath,
+      },
+    },
+  );
+  return { process };
+}
+
+function providerFailureMessage(
+  rounds: readonly import('../../../domain/contract/index.js').BenchmarkRound[],
+): string | null {
+  const failed = rounds.filter((round) => round.status === 'failed');
+  if (failed.length === 0) return null;
+  const messages = failed.map((round) => round.error);
+  if (messages.some((message) => message === undefined)) {
+    throw new Error('Ello failed model round is missing its provider error.');
+  }
+  return `Ello provider error: ${messages.join(' | ')}`;
+}
+
+function validateElloRounds(
+  agent: ElloAgentSpec,
+  rounds: readonly Extract<
+    import('../../../domain/contract/index.js').BenchmarkRound,
+    { readonly modelSelector: 'primary_model' | 'auxiliary_model' }
+  >[],
+): void {
+  for (const round of rounds) {
+    const configuredModel =
+      round.modelSelector === 'primary_model'
+        ? agent.primaryModel
+        : agent.auxiliaryModel;
+    if (round.configuredModel !== configuredModel) {
+      throw new AgentAdapterError(
+        'agent_evidence',
+        `Ello round ${round.round} configured model mismatch: ${round.configuredModel}.`,
+      );
+    }
+    const model = agent.models[configuredModel];
+    if (model === undefined) {
+      throw new AgentAdapterError(
+        'agent_evidence',
+        `Unknown configured model: ${configuredModel}.`,
+      );
+    }
+    if (
+      round.agentName === '' ||
+      round.protocol !== model.protocol ||
+      round.apiModel !== model.apiModel
+    ) {
+      throw new AgentAdapterError(
+        'agent_evidence',
+        `Ello round ${round.round} model identity does not match ${configuredModel}.`,
+      );
+    }
+  }
+}
+
+function requireElloRounds(
+  rounds: readonly import('../../../domain/contract/index.js').BenchmarkRound[],
+): readonly Extract<
+  import('../../../domain/contract/index.js').BenchmarkRound,
+  { readonly modelSelector: 'primary_model' | 'auxiliary_model' }
+>[] {
+  return rounds.map((round) => {
+    if (!('modelSelector' in round)) {
+      throw new AgentAdapterError(
+        'agent_evidence',
+        'Ello round has no model identity.',
+      );
+    }
+    return round;
+  });
+}
+
+function requireCredential(agent: ElloAgentSpec): void {
+  for (const model of Object.values(agent.models)) {
+    const value = process.env[model.apiKeyEnv];
+    if (value === undefined || value === '') {
+      throw new AgentAdapterError(
+        'agent_setup',
+        `Missing model credential: ${model.apiKeyEnv}.`,
+      );
+    }
+  }
+}

@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-import { appendFile, mkdir } from 'node:fs/promises';
-import path from 'node:path';
+import { mkdir } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 
-import type { DockerShellEvent } from './docker-shell.js';
-import { createBenchmarkAgentRuntime } from './runtime.js';
-import { startBenchmarkServer } from './server.js';
+import { attachDockerContainer } from './infra/container/docker.js';
+import { createBenchmarkAgentRuntime } from './infra/runtime.js';
+import { startBenchmarkServer } from './infra/server.js';
 
 const { values } = parseArgs({
   args: process.argv.slice(2),
@@ -13,11 +12,9 @@ const { values } = parseArgs({
     root: { type: 'string' },
     socket: { type: 'string' },
     workspace: { type: 'string' },
-    runtime: { type: 'string' },
     container: { type: 'string' },
-    'container-workspace': { type: 'string' },
-    'shell-mode': { type: 'string' },
     'raw-root': { type: 'string' },
+    'storage-mb': { type: 'string' },
   },
   strict: true,
   allowPositionals: false,
@@ -26,37 +23,26 @@ const { values } = parseArgs({
 const root = required(values.root, '--root');
 const socketPath = required(values.socket, '--socket');
 const workspace = required(values.workspace, '--workspace');
-const runtime = requiredRuntime(values.runtime);
+const container = required(values.container, '--container');
 const rawRoot = required(values['raw-root'], '--raw-root');
+const storageMb = positiveNumber(
+  required(values['storage-mb'], '--storage-mb'),
+  '--storage-mb',
+);
 const hasParentChannel = typeof process.send === 'function';
 await mkdir(rawRoot, { recursive: true });
-const shellLogPath = path.join(rawRoot, 'shell-events.jsonl');
-let shellWrites = Promise.resolve();
-const runtimeOptions =
-  runtime === 'docker'
-    ? {
-        runtime,
-        containerName: required(values.container, '--container'),
-        containerWorkspace: required(
-          values['container-workspace'],
-          '--container-workspace',
-        ),
-        shellMode: requiredShellMode(values['shell-mode']),
-        recordShell: (event: DockerShellEvent) => {
-          shellWrites = shellWrites.then(() =>
-            appendFile(shellLogPath, `${JSON.stringify(event)}\n`, 'utf8'),
-          );
-          return shellWrites;
-        },
-      }
-    : { runtime };
+const attachedContainer = attachDockerContainer(
+  container,
+  workspace,
+  storageMb,
+);
 const server = await startBenchmarkServer({
   root,
   socketPath,
   runtime: createBenchmarkAgentRuntime({
     workspace,
     rawRoot,
-    ...runtimeOptions,
+    container: attachedContainer,
   }),
 });
 
@@ -94,6 +80,11 @@ await new Promise<void>((resolve) => {
     }
   }
 });
+try {
+  await attachedContainer.assertStorageLimit();
+} finally {
+  await attachedContainer.stopStorageMonitoring();
+}
 
 function required(value: string | undefined, option: string): string {
   if (value === undefined || value === '')
@@ -101,18 +92,10 @@ function required(value: string | undefined, option: string): string {
   return value;
 }
 
-function requiredShellMode(
-  value: string | undefined,
-): 'login' | 'preserve-environment' {
-  if (value !== 'login' && value !== 'preserve-environment') {
-    throw new Error('--shell-mode must be login or preserve-environment.');
+function positiveNumber(value: string, option: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${option} must be a positive number.`);
   }
-  return value;
-}
-
-function requiredRuntime(value: string | undefined): 'docker' | 'local' {
-  if (value !== 'docker' && value !== 'local') {
-    throw new Error('--runtime must be docker or local.');
-  }
-  return value;
+  return parsed;
 }

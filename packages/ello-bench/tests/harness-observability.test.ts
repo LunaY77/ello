@@ -4,13 +4,13 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { lastVerificationRound } from '../src/agents/evidence.js';
 import {
   HarnessReportSchema,
   type BenchmarkRound,
   type VerifierAssertion,
-} from '../src/contracts.js';
-import { collectVerifierAssertions } from '../src/verifier-assertions.js';
+} from '../src/domain/contract/index.js';
+import { lastVerificationRound } from '../src/infra/agent/evidence.js';
+import { collectVerifierAssertions } from '../src/infra/verifier/assertions.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -151,7 +151,9 @@ function harnessReport(overrides: Record<string, unknown> = {}) {
     status: 'passed',
     reward: 1,
     verifierProcess: { path: '/tmp/verifier.json', sha256: 'b'.repeat(64) },
-    verifierRuntime: 'local',
+    verifierRuntime: 'docker',
+    verifierImage: 'example/image:fixed',
+    verifierImageId: 'sha256:image',
     modelPatchSha256: 'a'.repeat(64),
     appliedPatchSha256: 'a'.repeat(64),
     verifierCapturedPatchSha256: 'a'.repeat(64),

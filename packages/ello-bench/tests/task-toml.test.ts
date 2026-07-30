@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseTaskToml } from '../src/task-toml.js';
+import { parseTaskToml } from '../src/infra/corpus/task-toml.js';
 
 describe('task.toml parser', () => {
   it('parses the fixed corpus scalar contract', () => {
@@ -37,9 +37,9 @@ storage_mb = 20480
     expect(task.agent.timeout_sec).toBe(5400);
   });
 
-  it('rejects syntax outside the declared scalar subset', () => {
+  it('rejects fields outside the task contract after full TOML parsing', () => {
     expect(() => parseTaskToml(`version = "1.0"\nvalues = [1, 2]\n`)).toThrow(
-      'Unsupported task.toml value',
+      'Unrecognized key',
     );
   });
 });

@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   loadSweBenchProRows,
   loadSweBenchProTask,
-} from '../src/swe-bench-pro-corpus.js';
+} from '../src/infra/corpus/swe-bench-pro.js';
 
 describe('SWE-bench Pro corpus', () => {
   it('resolves the pinned JSONL, workspace setup, scripts, and test contract', async () => {

@@ -4,13 +4,16 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { RunManifestSchema, SuiteManifestSchema } from '../src/contracts.js';
-import { sha256, stableJson } from '../src/hash.js';
-import { writeJsonAtomic } from '../src/io.js';
-import { generateSuiteReport } from '../src/report.js';
-import { normalizeEventCaptureSource } from '../src/rounds.js';
-import { getBenchmarkSuite } from '../src/suite.js';
-import { validateRunRoot } from '../src/validation.js';
+import {
+  RunManifestSchema,
+  SuiteManifestSchema,
+} from '../src/domain/contract/index.js';
+import { sha256, stableJson } from '../src/domain/hash.js';
+import { getBenchmarkSuite } from '../src/infra/corpus/suite.js';
+import { writeJsonAtomic } from '../src/infra/io.js';
+import { generateSuiteReport } from '../src/infra/report/fs-report.js';
+import { normalizeEventCaptureSource } from '../src/infra/rounds.js';
+import { validateRunRoot } from '../src/infra/validation/fs-validation.js';
 
 describe('run root validation', () => {
   it('recomputes published reports from terminal attempt evidence', async () => {
@@ -70,7 +73,7 @@ async function createFixture(): Promise<{
   );
   const rawRoot = path.join(attemptRoot, 'raw');
   await mkdir(rawRoot, { recursive: true });
-  const eventLogPath = path.join(rawRoot, 'engine-events-thread.jsonl');
+  const eventLogPath = path.join(rawRoot, 'engine-events-thr_main.jsonl');
   const identity = {
     runId: 'run-1',
     turnIndex: 0,
@@ -174,6 +177,30 @@ async function createFixture(): Promise<{
     rounds: await fileEvidence(roundsPath),
     roundCount: normalized.rounds.length,
     usage: normalized.usage,
+    threads: [
+      {
+        threadId: 'thr_main',
+        kind: 'main',
+        rawSource: await fileEvidence(eventLogPath),
+        rounds: await fileEvidence(roundsPath),
+        roundCount: normalized.rounds.length,
+        usage: normalized.usage,
+      },
+    ],
+    threadUsage: {
+      main: normalized.usage,
+      subagents: {
+        status: 'complete',
+        requests: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+        toolCalls: 0,
+      },
+      combined: normalized.usage,
+    },
     tools: {
       total: 0,
       failed: 0,
@@ -356,7 +383,7 @@ async function createFixture(): Promise<{
     schema: 'ello.benchmark.suite-manifest.v3',
     suite: getBenchmarkSuite('deep-swe-v1.1').metadata,
     report: {
-      schema: 'ello.benchmark.report-config.v1',
+      schema: 'ello.benchmark.report-config.v2',
       renderCharts: false,
       publishability: {
         requireCompleteMatrix: true,

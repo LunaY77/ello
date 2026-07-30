@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { loadBenchmarkConfig } from '../src/config.js';
-import { BenchmarkExecutionConfigSchema } from '../src/contracts.js';
-import { sha256, stableJson } from '../src/hash.js';
-import { createPlan, expandJobs, selectAll } from '../src/matrix.js';
-import {
-  SWE_BENCH_PRO_SOURCE_REPOSITORY,
-  SWE_BENCH_PRO_TASK_SET_HASH,
-  SWE_BENCH_PRO_TASKS,
-} from '../src/swe-bench-pro-tasks.js';
+import { BenchmarkExecutionConfigSchema } from '../src/domain/contract/index.js';
+import { sha256, stableJson } from '../src/domain/hash.js';
 import {
   DEEP_SWE_SOURCE_REPOSITORY,
   DEEP_SWE_TASK_SET_HASH,
   DEEP_SWE_TASKS,
-} from '../src/tasks.js';
+} from '../src/domain/suite/deep-swe.js';
+import { createPlan, expandJobs, selectAll } from '../src/domain/suite/plan.js';
+import {
+  SWE_BENCH_PRO_SOURCE_REPOSITORY,
+  SWE_BENCH_PRO_TASK_SET_HASH,
+  SWE_BENCH_PRO_TASKS,
+} from '../src/domain/suite/swe-bench-pro.js';
+import { loadBenchmarkConfig } from '../src/infra/config/toml-loader.js';
 
 import {
   EXAMPLE_CONFIG_PATH,
@@ -21,21 +21,29 @@ import {
 } from './example-config.js';
 
 describe('benchmark matrix', () => {
-  it('keeps Docker as the default for legacy configs', () => {
-    expect(
-      BenchmarkExecutionConfigSchema.parse({
-        replicates: 1,
-        concurrency: 1,
-        maxInfrastructureRetries: 1,
-      }).runtime,
-    ).toBe('docker');
+  it('does not expose a selectable runtime in v2 execution config', () => {
+    const execution = BenchmarkExecutionConfigSchema.parse({
+      replicates: 1,
+      concurrency: 1,
+      maxInfrastructureRetries: 1,
+    });
+
+    expect(execution).not.toHaveProperty('runtime');
+    expect(() =>
+      BenchmarkExecutionConfigSchema.parse({ ...execution, runtime: 'local' }),
+    ).toThrow();
   });
 
   it('uses the fixed twenty-task declaration in the example config', async () => {
     const config = await loadBenchmarkConfig(EXAMPLE_CONFIG_PATH);
 
     expect(config.suite.source.repository).toBe(DEEP_SWE_SOURCE_REPOSITORY);
-    expect(config.execution.runtime).toBe('docker');
+    expect(config.execution).not.toHaveProperty('runtime');
+    expect(config.container).toEqual({
+      pullPolicy: 'if-absent',
+      network: 'task',
+      cleanup: 'always',
+    });
     expect(config.tasks).toEqual(DEEP_SWE_TASKS);
     expect(config.agents).toContainEqual(
       expect.objectContaining({

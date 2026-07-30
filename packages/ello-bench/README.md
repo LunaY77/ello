@@ -1,296 +1,255 @@
 # @ello/bench
 
-`@ello/bench` is a coding-agent benchmark harness. It compares Ello, Claude Code, and Codex by running each agent through the same tasks, instructions, execution runtime, and verifier, producing a scored `task × agent × replicate` matrix with full evidence provenance.
+`@ello/bench` is a reproducible coding-agent benchmark harness. It expands a
+strict TOML definition into a `task x agent x replicate` matrix, runs every job
+against the task's pinned Docker image, preserves raw evidence, verifies the
+result in a fresh container, and renders JSON, Markdown, and SVG reports.
 
-## The two benchmarks
+The default DeepSWE matrix compares three agents:
 
-| | DeepSWE v1.1 | SWE-bench Pro calibration |
-|---|---|---|
-| **Suite ID** | `deep-swe-v1.1` | `swe-bench-pro-calibration` |
-| **Tasks** | 20, curated | 30, selected from 731 |
-| **Selection** | Hand-picked for diversity | Balanced across language groups and public-trajectory difficulty |
-| **Source repo** | Bundled with the suite | `scaleapi/SWE-bench_Pro-os` (external) |
-| **Purpose** | Stable optimization target | Upstream comparability |
-| **Corpus** | Auto-cloned, no extra setup | Needs `--corpus-root` or auto-clone from GitHub |
-| **Verifier** | `test.sh` harness | Upstream `run_script.sh` + `parser.py` |
+- `ello`: Ello with subagents enabled
+- `ello-no-subagent`: the same Ello models with subagents disabled
+- `codex`: Codex using the same primary model and reasoning effort
 
-**DeepSWE** is the primary suite for day-to-day iteration — the task set is fixed, the corpus ships with the suite, and there's no external dependency.
+## Suites
 
-**SWE-bench Pro** uses a fixed 30-task calibration set from the public 731-task dataset. Python, Go, and TypeScript/JavaScript contribute 10 tasks each; the four difficulty bands contain 8, 7, 8, and 7 tasks.
+| Suite                       | Tasks | Purpose                            | Corpus                                      |
+| --------------------------- | ----: | ---------------------------------- | ------------------------------------------- |
+| `deep-swe-v1.1`             |    20 | Stable optimization and A/B target | Pinned `datacurve-ai/deep-swe` revision     |
+| `swe-bench-pro-calibration` |    30 | Cross-harness calibration          | Pinned `scaleapi/SWE-bench_Pro-os` revision |
 
-## Chinese methodology and records
+If `--corpus-root` is omitted, the selected corpus is cloned into
+`packages/ello-bench/raw/_cache/<suite>/`. An existing corpus checkout must
+have the configured origin, pinned revision, and a clean working tree.
 
-- [Architecture and evidence boundaries](../../docs/benchmark/architecture-zh.md)
-- [Benchmark methodology](../../docs/benchmark/benchmark-methodology-zh.md)
-- [SWE-bench Pro 30-task selection record](../../docs/benchmark/swe-bench-pro-selection-zh.md)
-- [Early Ello / Claude Code calibration record](../../docs/benchmark/current-test-set-record-zh.md)
-- [How to read rounds, tools, and tokens](../../docs/benchmark/blog-rounds-tools-tokens-zh.md)
+## Requirements
 
-## Quick start
+- Node.js 24+
+- pnpm 11
+- Git
+- Docker CLI and an accessible Docker daemon
+- Credentials and pinned external agent binaries required by the selected
+  agents
 
-### 1. Create your config files
+The harness has no host Python or plotting dependency. A task image may still
+run a Python verifier when that is part of the task contract, as it is for
+SWE-bench Pro.
 
-```bash
-cp packages/ello-bench/config/examples/agents.config.mjs \
-   packages/ello-bench/config/agents.config.mjs
-cp packages/ello-bench/config/examples/report.config.mjs \
-   packages/ello-bench/config/report.config.mjs
+## Configuration
+
+TOML is the only accepted configuration format. The default entry point is
+[`config/benchmark.toml`](config/benchmark.toml), which references
+[`config/agents.toml`](config/agents.toml) through `agents_file`.
+
+```toml
+schema = "ello.benchmark.config.v2"
+suite = "deep-swe-v1.1"
+agents_file = "agents.toml"
+
+[execution]
+replicates = 1
+concurrency = 2
+max_infrastructure_retries = 1
+
+[report]
+render_charts = true
+
+[report.publishability]
+require_complete_matrix = true
+require_complete_usage = true
+require_tool_audit = true
+
+[container]
+pull_policy = "if-absent"
+network = "task"
+cleanup = "always"
 ```
 
-Pick a suite:
+Configuration is strict: unknown fields, missing values, duplicate IDs, or an
+invalid combination fail before execution. `network = "task"` is mandatory;
+the effective Docker network is derived from each task's `allow_internet`
+contract and cannot be overridden by a benchmark run.
+
+The resolved object is frozen after schema validation. Its semantic hash is
+computed from recursively key-sorted normalized JSON, so TOML comments,
+formatting, and key order do not change `configHash`.
+
+Inspect the exact resolved input before a run:
 
 ```bash
-# DeepSWE (no external corpus needed):
-cp packages/ello-bench/config/examples/deep-swe.config.mjs \
-   packages/ello-bench/config/benchmark.config.mjs
-
-# or SWE-bench Pro:
-cp packages/ello-bench/config/examples/swe-bench-pro.config.mjs \
-   packages/ello-bench/config/benchmark.config.mjs
+pnpm --filter @ello/bench bench config print --resolved
 ```
 
-### 2. Fill in your credentials and model details
+To start from templates, use
+[`config/examples/agents.toml`](config/examples/agents.toml),
+[`config/examples/deep-swe.toml`](config/examples/deep-swe.toml), or
+[`config/examples/swe-bench-pro.toml`](config/examples/swe-bench-pro.toml).
+The benchmark and agents files may live anywhere, but `agents_file` is resolved
+relative to the benchmark TOML file.
 
-Edit `config/agents.config.mjs`. The template is valid syntax but contains placeholder values. You must replace:
-
-| Field | What to put |
-|---|---|
-| `models.<name>.apiModel` | Your provider's model ID |
-| `models.<name>.baseUrl` | Provider base URL |
-| `models.<name>.apiKeyEnv` | Name of the env var holding your API key |
-| `binary.pathEnv` (Claude Code/Codex) | Name of the env var holding the CLI's absolute path |
-| `binary.expectedVersion` | Pinned CLI version validated against canonical `--version` output |
-| `binary.sha256` | SHA-256 of the CLI executable |
-| `connection.baseUrl` (Codex) | OpenAI Responses-compatible API root, including `/v1` |
-| `reasoningEffort` (Codex) | Pinned Codex reasoning effort |
-
-Get the Claude Code checksum:
+Agent credentials are named, never embedded:
 
 ```bash
-sha256sum "$ELLO_BENCH_CLAUDE_EXE" | cut -d' ' -f1
-```
-
-Get the Codex checksum:
-
-```bash
-sha256sum "$ELLO_BENCH_CODEX_EXE" | cut -d' ' -f1
-```
-
-Codex runs with an isolated `CODEX_HOME` and ignores user config. The adapter
-configures a Responses-compatible provider from `connection`, so it does not
-reuse an interactive Codex login.
-
-### 3. Set environment variables
-
-```bash
-export ELLO_BENCH_API_KEY=<your-api-token>
-export ELLO_BENCH_CLAUDE_EXE=/absolute/path/to/claude
+export ELLO_BENCH_API_KEY=<token>
 export ELLO_BENCH_CODEX_EXE=/absolute/path/to/codex
+# Required only when a selected config contains Claude Code:
+export ELLO_BENCH_CLAUDE_EXE=/absolute/path/to/claude
 ```
 
-### 4. Build and verify
+External agent entries pin both `expected_version` and `sha256`. `doctor`
+checks the file, checksum, canonical version output, and required noninteractive
+JSON flags.
 
-```bash
-pnpm install
-pnpm build
+## Docker Execution
 
-pnpm bench:validate    # confirm config & suite integrity
-pnpm bench:agents      # list configured agents
-pnpm bench:doctor --all-agents  # full preflight
-```
+There is no local runtime. Every task workspace is extracted from its pinned
+image and every verifier runs in a fresh container using the same image.
 
-### 5. Run a pilot
+- `allow_internet = false` becomes `docker run --network none`; otherwise it
+  becomes `bridge`.
+- Task `cpus` and `memory_mb` become Docker-native resource limits.
+- `storage_mb` is enforced by a watchdog that combines apparent bytes in the
+  bind-mounted workspace with Docker `SizeRw` for the container writable
+  layer. It does not follow workspace symlinks, kills the owning container on
+  overflow, and is audited before patch capture and after verifier execution.
+  This works across Docker storage drivers, unlike `--storage-opt`, which does
+  not constrain bind mounts.
+- Containers run as the host UID/GID with a writable benchmark HOME.
+- Codex and Claude Code binaries are copied into the task container and run
+  there.
+- Ello's App Server remains on the host, while all task shell and filesystem
+  operations are routed through the task container at `/app`.
+- `cleanup = "always" | "on-success" | "never"` controls retained agent
+  containers. Verifier containers are always removed.
 
-DeepSWE (no extra setup):
-
-```bash
-pnpm bench:run \
-  --task actionlint-action-pinning-lint \
-  --all-agents \
-  --run-root raw/pilot-001
-```
-
-SWE-bench Pro (needs the corpus — see below):
-
-```bash
-pnpm bench:run \
-  --config config/benchmark.config.mjs \
-  --corpus-root ../../../SWE-bench_Pro-os \
-  --task swepro-navidrome-29b7b740 \
-  --agent ello \
-  --run-root raw/swepro-pilot-001
-```
-
-Run the complete 30-task matrix:
-
-```bash
-pnpm bench:run \
-  --all \
-  --all-agents \
-  --run-root raw/publish-001
-```
-
-### 6. Generate the report
-
-```bash
-pnpm bench:report \
-  --run-root raw/pilot-001
-```
-
-Add `--report` to `bench:run` to generate the report in a single command:
-
-```bash
-pnpm bench:run --all --all-agents --run-root ... --report
-```
-
-## What `--corpus-root` is
-
-Each benchmark suite needs a local Git checkout of the task corpus — the repository that contains each task's source code, tests, and Docker setup.
-
-- **DeepSWE**: the corpus is small and bundled; `--corpus-root` is optional. If omitted, it auto-clones into `raw/_cache/deep-swe/`.
-
-- **SWE-bench Pro**: the corpus is `scaleapi/SWE-bench_Pro-os` — a large external repository. If you already have it cloned (e.g. at `../SWE-bench_Pro-os` relative to `repos/ello`), pass `--corpus-root ../SWE-bench_Pro-os` to reuse that clone. Otherwise the harness clones it fresh into `raw/_cache/swe-bench-pro/`.
-
-In short: `--corpus-root` points the harness at an existing clone so you don't download it again.
+The attempt records the effective image, user, network, CPU, memory, and
+storage policy in `docker-preflight.json` and `network-policy.json`.
 
 ## Commands
 
-All commands have `pnpm bench:<name>` shortcuts defined at the repo root. Pass flags directly:
+Build before invoking the compiled CLI:
 
 ```bash
-pnpm bench:run --all --all-agents --run-root packages/ello-bench/raw/publish-001
-pnpm bench:report --run-root packages/ello-bench/raw/publish-001
+pnpm --filter @ello/bench build
 ```
 
-The raw CLI is also available:
-
-```
-ello-bench list [--config PATH]              List tasks in the configured suite
-ello-bench agents [--config PATH]            List configured agents
-ello-bench plan (--task ID | --all)          Dry-run: print the job matrix
-                 (--agent ID | --all-agents)
-                 [--config PATH]
-ello-bench doctor (--agent ID | --all-agents)  Preflight checks (no model calls)
-                  [--config PATH]
-ello-bench run (--task ID | --all)           Execute the benchmark
-               (--agent ID | --all-agents)
-               --run-root PATH
-               [--corpus-root PATH]
-               [--report]
-               [--config PATH]
-ello-bench report --run-root PATH            Aggregate results into JSON + charts
-ello-bench validate [--run-root PATH]        Validate config (no arg) or a
-                 [--config PATH]             completed run (with --run-root)
+```text
+ello-bench list [--config PATH]
+ello-bench config print --resolved [--config PATH]
+ello-bench agents [--config PATH]
+ello-bench plan (--task ID | --all) (--agent ID | --all-agents) [--config PATH]
+ello-bench doctor (--agent ID | --all-agents) [--config PATH]
+ello-bench run (--task ID | --all) (--agent ID | --all-agents)
+               --run-root PATH [--corpus-root PATH] [--report] [--config PATH]
+ello-bench report --run-root PATH
+ello-bench validate [--run-root PATH] [--config PATH]
 ```
 
-Agent selection is **mandatory** for `run`, `plan`, and `doctor`. There is no default agent.
+Agent and task selection are explicit for `plan` and `run`; agent selection is
+also explicit for `doctor`. Start with a single-task pilot:
 
-Each `run` produces artifacts under `--run-root`. A run root permanently records the config hash, plan hash, task selection, and agent selection. Any input change requires a new run root.
+```bash
+pnpm --filter @ello/bench bench doctor --all-agents
 
-## Configuration layout
-
-Three files, kept in `packages/ello-bench/config/`:
-
-| File | Purpose |
-|---|---|
-| `benchmark.config.mjs` | Suite selection + execution params (replicates, concurrency, retries) |
-| `agents.config.mjs` | Agent definitions, model endpoints, executable paths |
-| `report.config.mjs` | Chart rendering toggle + publishability gates |
-
-All three are ESM modules with strict schema validation. Unknown fields, missing fields, duplicate agents, or illegal states fail immediately. JSON configuration is not accepted.
-
-### Docker or local execution
-
-Set `execution.runtime` in `benchmark.config.mjs`:
-
-```js
-execution: {
-  runtime: 'local', // or 'docker'; omitted values default to 'docker'
-  replicates: 1,
-  concurrency: 2,
-  maxInfrastructureRetries: 1,
-}
+pnpm --filter @ello/bench bench run \
+  --task actionlint-action-pinning-lint \
+  --all-agents \
+  --run-root /absolute/path/to/deep-swe-pilot-001 \
+  --report
 ```
 
-`docker` uses the pinned task image for the Agent workspace and verifier. `local` never invokes Docker: it clones `repositoryUrl` at `baseCommitHash` for the Agent, creates a second clone for verification, and runs all shell commands directly on the host. Ello, Claude Code, and Codex themselves remain host processes in both modes.
+Run the complete Part A three-agent matrix:
 
-Local mode requires the repository's language runtimes, system packages, and project dependencies to already be available on the host. The image CPU, memory, network, and dependency guarantees do not apply, so local results are convenient for development but are not directly comparable with published Docker runs. `bench:doctor` skips all Docker checks in this mode and checks the basic host toolchain instead.
-
-### Publishability gates
-
-In `report.config.mjs`:
-
-```js
-export const report = {
-  renderCharts: true,         // Set false to skip Python chart generation
-  publishability: {
-    requireCompleteMatrix: true,   // Every planned job must have a final attempt
-    requireCompleteUsage: true,    // Every scored run must report token usage
-    requireToolAudit: true,        // Every run must pass tool audit
-  },
-};
+```bash
+pnpm --filter @ello/bench bench run \
+  --all \
+  --all-agents \
+  --run-root /absolute/path/to/deep-swe-part-a-001 \
+  --report
 ```
 
-When `renderCharts` is `false`, the `report` command only produces JSON — no `report.md` and no PNG charts.
+A run root permanently binds its semantic `configHash`, `planHash`, task set,
+agent set, and replicate set. Resume with the same inputs; use a new empty run
+root after any input change.
 
-## What a run produces
+## Outcomes And Retries
 
+An attempt has one application-owned phase machine. Failures in corpus,
+container, agent setup/process/evidence, patch capture, or verifier execution
+are infrastructure-invalid and may be retried up to
+`max_infrastructure_retries`.
+
+A nonzero verifier baseline is classified as `baseline-unhealthy`, not as an
+agent failure and not as reward `0`. It is listed in the report's invalid
+ledger. Only a healthy baseline enters the scored denominator; the new-test
+exit code then determines reward `0` or `1`.
+
+## Evidence And Reports
+
+Ello archives redacted EngineEvents as recovery-safe append-only JSONL. Exactly
+one `thr_*` capture is required for the main thread; zero or more `job_*`
+captures are accepted as subagents. Unknown prefixes, missing captures,
+sequence gaps, lifecycle-count mismatches, and checksum mismatches fail
+validation.
+
+Normalized evidence exposes main, subagent, and combined token/tool usage.
+Publishability gates consume the combined usage, preventing delegated work from
+being omitted from cost reporting.
+
+`report` writes:
+
+```text
+<run-root>/
+├── suite-manifest.json
+├── runs/<task>/<agent>/r<replicate>/<attempt>/
+│   ├── run.json
+│   ├── workspace/
+│   ├── agent-state/
+│   └── raw/
+│       ├── docker-preflight.json
+│       ├── network-policy.json
+│       ├── model.patch
+│       ├── phase-timings.json
+│       ├── agent/
+│       │   ├── evidence.json
+│       │   ├── rounds.jsonl
+│       │   └── tool-audit.json
+│       └── harness/
+│           ├── process.json
+│           └── report.json
+└── results/
+    ├── suite-report.json
+    ├── report.md
+    ├── agents/
+    ├── tasks/
+    ├── comparisons/
+    └── charts/*.svg
 ```
-<attempt-root>/
-├── run.json
-├── workspace/              # The agent's view of the task repo
-├── agent-state/            # Agent-internal state checkpoint
-└── raw/
-    ├── task/
-    │   ├── instruction.md
-    │   └── resolved-task.json
-    ├── docker-preflight.json  # Docker mode
-    ├── local-preflight.json   # local mode (one of these two is present)
-    ├── agent/
-    │   ├── identity.json       # Agent, model, commit
-    │   ├── invocation.json     # Exact CLI args and env
-    │   ├── process.json        # PID, exit code, timing
-    │   ├── stdout.jsonl
-    │   ├── stderr.log
-    │   ├── evidence.json       # Normalized model + tool events
-    │   ├── tool-audit.json     # Every tool call validated
-    │   ├── rounds.jsonl
-    │   └── adapter/            # Agent-specific raw capture
-    ├── phase-timings.json
-    ├── git-status.txt
-    ├── model.patch
-    └── harness/                # Verifier output
+
+The report stack is pure TypeScript. Markdown and all seven charts are
+deterministic text renderers; chart output is SVG. `render_charts = false`
+still writes JSON and `report.md`, but skips the `charts/` directory.
+
+Always validate a completed run independently:
+
+```bash
+pnpm --filter @ello/bench bench report --run-root /absolute/path/to/run
+pnpm --filter @ello/bench bench validate --run-root /absolute/path/to/run
 ```
 
-Validation re-parses raw agent output and compares it with normalized evidence — it never trusts the runner's in-memory state. Every artifact is linked by path, byte count, and SHA-256.
+## Architecture
 
-## Report output
+The source tree enforces inward dependencies:
 
-After `bench report --run-root ...`:
+- `domain/`: contracts and pure planning, evidence, and scoring logic
+- `application/`: attempt and matrix orchestration through ports
+- `ports/`: type/interface-only runtime contracts
+- `infra/`: filesystem, processes, Docker, agents, verifier, corpus, and report
+  persistence
+- `render/`: pure Markdown and SVG rendering
+- `cli/`: composition-facing command interface
 
-```
-<run-root>/results/
-├── suite-report.json                        # Full matrix, scores, publishability
-├── agents/<agent-id>.json                   # Per-agent pass rate & resource stats
-├── tasks/<task-id>/<agent-id>.json          # Per-task per-agent score
-├── comparisons/<left>-vs-<right>.json       # Paired win/tie/loss across agents
-├── report.md                                # (if renderCharts: true)
-└── charts/*.png                             # (if renderCharts: true)
-```
-
-Reports never pool pass rates across agents. An infrastructure-invalid pair is excluded, not scored as a win for the other side.
-
-## Environment variables
-
-Credentials stay in env vars, never in config files, CLI args, or run artifacts.
-
-| Variable | Used by |
-|---|---|
-| `ELLO_BENCH_API_KEY` | Ello agent (or whatever `apiKeyEnv` you configure) |
-| `ELLO_BENCH_CLAUDE_EXE` | Claude Code agent (or whatever `pathEnv` you configure) |
-| `ELLO_BENCH_CODEX_EXE` | Codex agent (or whatever `pathEnv` you configure) |
-| `PYTHON` | Optional Python executable used by the local verifier (defaults to `python3`) |
-| `ANTHROPIC_BASE_URL` | Injected into Claude Code subprocess only |
-| `ANTHROPIC_AUTH_TOKEN` | Injected into Claude Code subprocess only |
-
-中文说明见 [README-zh.md](README-zh.md).
+ESLint prevents domain/application/ports/render from importing forbidden outer
+layers or Node I/O APIs. The source root contains only the package export and
+the two executable process entries; active implementations live in the layers
+above.
