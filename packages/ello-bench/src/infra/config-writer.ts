@@ -60,6 +60,10 @@ export async function writeBenchmarkAgentConfig(options: {
     initial_mode: 'bypass',
     bypass_enabled: true,
     title_generation: false,
+    subagents: {
+      enabled: options.agent.features.subagents,
+      cwd_policy: 'allowed_paths',
+    },
     tools: {
       disabled: [],
       need_approval: [],
@@ -80,16 +84,6 @@ export async function writeBenchmarkAgentConfig(options: {
         extraction: { enabled: false, recent_messages: 40, max_attempts: 2 },
       },
     },
-    agent: options.agent.features.subagents
-      ? {}
-      : {
-          build: {
-            description: 'Primary benchmark coding agent.',
-            mode: 'primary',
-            model: 'primary_model',
-            tools: ['*', '!delegate_to_subagent', '!task_output'],
-          },
-        },
   };
   assertCredentialFree(config);
   await mkdir(elloHome, { recursive: true });

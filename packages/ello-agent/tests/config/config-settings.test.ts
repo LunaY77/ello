@@ -17,7 +17,7 @@ describe('config settings descriptors', () => {
         initial_mode: 'ask-before-changes',
         title_generation: false,
         allowed_paths: ['/workspace'],
-        subagents: { cwd_policy: 'workspace' },
+        subagents: { enabled: true, cwd_policy: 'workspace' },
         tools: { routing_enabled: false },
         context: { max_input_tokens: 160_000 },
         agent: { reviewer: { model: 'primary_model' } },
@@ -31,7 +31,7 @@ describe('config settings descriptors', () => {
             primary_model: 'pro',
             auxiliary_model: 'flash',
             initial_mode: 'ask-before-changes',
-            subagents: { cwd_policy: 'workspace' },
+            subagents: { enabled: true, cwd_policy: 'workspace' },
           },
         },
         {
@@ -64,6 +64,12 @@ describe('config settings descriptors', () => {
           effect: 'newThread',
         }),
         expect.objectContaining({ id: 'allowed_paths', type: 'stringList' }),
+        expect.objectContaining({
+          id: 'subagents.enabled',
+          type: 'boolean',
+          value: true,
+          source: 'global',
+        }),
         expect.objectContaining({
           id: 'subagents.cwd_policy',
           type: 'enum',

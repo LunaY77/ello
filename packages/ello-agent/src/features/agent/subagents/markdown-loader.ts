@@ -14,6 +14,7 @@ import {
   parseYamlConfig,
   projectAgentsDir,
 } from '../../config/index.js';
+import { renderAgentPrompt } from '../context/prompts.js';
 
 import {
   MarkdownAgentFrontmatterSchema,
@@ -27,7 +28,8 @@ import {
  *
  * 目录优先级：bundled < global(`~/.ello/agents`) < project(`<cwd>/.ello/agents`)，同名时
  * 高优先级定义覆盖低优先级定义。frontmatter
- * 由 {@link MarkdownAgentFrontmatterSchema} 破坏性校验；正文即 prompt。
+ * 由 {@link MarkdownAgentFrontmatterSchema} 破坏性校验；正文通过共享 prompt
+ * loader 渲染后成为 instructions。
  *
  * Args:
  * - `cwd`: 调用方指定的文件系统位置；路径边界和存在性由当前操作显式校验。
@@ -65,10 +67,19 @@ async function loadFromDir(
     const filePath = path.join(dir, entry);
     const raw = await readFile(filePath, 'utf8');
     const { frontmatter, body } = parseMarkdown(raw, filePath);
+    const parsedFrontmatter = MarkdownAgentFrontmatterSchema.parse(frontmatter);
+    let prompt: string;
+    try {
+      prompt = renderAgentPrompt(body);
+    } catch (error) {
+      throw new Error(`Failed to render agent prompt: ${filePath}`, {
+        cause: error,
+      });
+    }
     definitions.push(
       agentDefinitionFromMarkdown({
-        frontmatter: MarkdownAgentFrontmatterSchema.parse(frontmatter),
-        body,
+        frontmatter: parsedFrontmatter,
+        body: prompt,
         defaultName: path.basename(entry, '.md'),
         source,
       }),
@@ -97,7 +108,7 @@ function parseMarkdown(
   readonly frontmatter: Record<string, unknown>;
   readonly body: string;
 } {
- // 接受 LF 和 CRLF 行尾；Windows 检出常把 bundled .md 转成 CRLF。
+  // 接受 LF 和 CRLF 行尾；Windows 检出常把 bundled .md 转成 CRLF。
   const openMatch = /^---\r?\n/u.exec(raw);
   const openDelimiter = openMatch?.[0];
   if (openDelimiter === undefined) {

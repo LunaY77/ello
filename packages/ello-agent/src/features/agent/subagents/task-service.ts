@@ -4,6 +4,7 @@
  * Store 是事实源；Service 只保留可中断 run、前台交付门和实时订阅。进程重启后这些句柄
  * 会消失，数据库中的 recovered 状态、transcript 和通知仍然完整。
  */
+import { renderPromptTemplate } from '../context/prompts.js';
 import type {
   AgentInteraction,
   AgentRun,
@@ -333,10 +334,14 @@ export class AgentTaskService {
   takeNotifications(rootThreadId: string): string {
     const notifications = this.store.pendingNotifications(rootThreadId);
     if (notifications.length === 0) return '';
+    const entries = notifications.map((notification) => ({
+      notification,
+      task: this.store.require(notification.taskId),
+    }));
     this.store.markNotificationsDelivered(
       notifications.map((notification) => notification.id),
     );
-    return renderNotifications(notifications);
+    return renderNotifications(entries);
   }
 
   /** 主 run 自然停止时等待下一批后台任务通知；没有活动后台任务时立即返回。 */
@@ -683,7 +688,7 @@ export class AgentTaskService {
       notifier(
         task.rootThreadId,
         notification.id,
-        renderNotifications([notification]),
+        renderNotifications([{ notification, task }]),
       )
     ) {
       this.store.markNotificationsDelivered([notification.id]);
@@ -735,11 +740,15 @@ function createDeliveryGate(): DeliveryGate {
 }
 
 function renderNotifications(
-  notifications: readonly AgentTaskNotification[],
+  entries: readonly {
+    readonly notification: AgentTaskNotification;
+    readonly task: AgentTask;
+  }[],
 ): string {
-  return notifications
-    .map((notification) =>
-      [
+  return entries
+    .map(({ notification, task }) => {
+      const reportContract = renderReportContract(task.definitionName);
+      return [
         '<task-notification>',
         `  <notification-id>${notification.id}</notification-id>`,
         `  <task-id>${notification.taskId}</task-id>`,
@@ -747,11 +756,22 @@ function renderNotifications(
         `  <summary>${escapeXml(notification.summary)}</summary>`,
         ...(notification.result === undefined
           ? []
-          : [`  <result>${escapeXml(notification.result)}</result>`]),
+          : [
+              `  <result>${escapeXml(notification.result)}</result>`,
+              `  <how-to-consume>${escapeXml(reportContract)}</how-to-consume>`,
+            ]),
         '</task-notification>',
-      ].join('\n'),
-    )
+      ].join('\n');
+    })
     .join('\n');
+}
+
+function renderReportContract(definitionName: string): string {
+  const contracts = [renderPromptTemplate('report-contract/any')];
+  if (definitionName === 'explore' || definitionName === 'worker') {
+    contracts.push(renderPromptTemplate(`report-contract/${definitionName}`));
+  }
+  return contracts.join('\n\n');
 }
 
 function escapeXml(value: string): string {

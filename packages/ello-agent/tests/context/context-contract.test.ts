@@ -123,6 +123,32 @@ describe('context source contract', () => {
     expect(prompt).not.toContain('multi_tool_use.parallel');
   });
 
+  it('关闭 subagent 时同时移除委派规则和 runtime delegation context', async () => {
+    const root = await temporaryRoot();
+    const config = CodingAgentConfigSchema.parse({
+      cwd: root,
+      initial_mode: 'ask-before-changes',
+      ...modelConfig(),
+      subagents: { enabled: false },
+      context: {
+        instructions: {
+          global: [],
+          project: [],
+          extra: [],
+          nearby: false,
+        },
+      },
+    });
+    const section = createCodingSystemPromptSection(config, {
+      model: 'test-model',
+    });
+
+    const prompt = await section(promptRunContext());
+
+    expect(prompt).not.toContain('# Delegation');
+    expect(prompt).not.toContain('<delegation>');
+  });
+
   it('glob 结果稳定排序，并按真实文件来源去重', async () => {
     const root = await temporaryRoot();
     await mkdir(path.join(root, 'rules'));

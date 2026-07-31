@@ -119,6 +119,13 @@ async function loadEnvironmentSource(
     config.allowed_paths.length > 0
       ? [...config.allowed_paths].sort().join('\n')
       : config.cwd;
+  const delegation = config.subagents.enabled
+    ? [
+        '<delegation>',
+        `  <cwd-policy>${config.subagents.cwd_policy}</cwd-policy>`,
+        '</delegation>',
+      ]
+    : [];
   const content = [
     '<file-system>',
     `  <working-directory>${config.cwd}</working-directory>`,
@@ -128,9 +135,7 @@ async function loadEnvironmentSource(
     `  <working-directory>${config.cwd}</working-directory>`,
     `  <allowed-paths>\n${indent(allowed)}\n  </allowed-paths>`,
     '</shell>',
-    '<delegation>',
-    `  <cwd-policy>${config.subagents.cwd_policy}</cwd-policy>`,
-    '</delegation>',
+    ...delegation,
     '<approval>',
     // runtime 构建时 config.initial_mode 已被替换为当前 session mode，而非启动快照。
     `  <mode>${config.initial_mode}</mode>`,

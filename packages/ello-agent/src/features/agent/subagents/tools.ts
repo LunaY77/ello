@@ -29,6 +29,7 @@ export function createSubagentTools(input: {
   readonly service: AgentTaskService;
   readonly approval: ApprovalFor;
 }): readonly AnyAgentTool[] {
+  if (!input.definition.config.subagents.enabled) return [];
   const controls: AnyAgentTool[] = [
     createTaskOutputTool(input),
     createTaskStopTool(input),
@@ -243,7 +244,7 @@ function createTaskOutputTool(input: {
       .object({
         task_id: z.string().min(1),
         block: z.boolean().default(false),
-        timeout_ms: z.number().int().min(100).max(60_000).default(30_000),
+        timeout_ms: z.number().int().min(100).max(180_000).default(30_000),
       })
       .strict(),
     capabilities: () => ({
@@ -313,7 +314,7 @@ function resolveChildCwd(
 }
 
 function cwdPolicy(config: CodingAgentConfig): 'workspace' | 'allowed_paths' {
-  return config.subagents?.cwd_policy ?? 'allowed_paths';
+  return config.subagents.cwd_policy;
 }
 
 function authorizedChildRoots(input: {

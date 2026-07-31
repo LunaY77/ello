@@ -32,3 +32,6 @@ Lead with the direct answer. Then provide:
 - Existing patterns or conventions relevant to the question
 - Test commands or test file locations if applicable
 - Explicit uncertainty markers where evidence is incomplete
+- End the report with a coverage declaration: which files you read in full, and which you only skimmed or sampled. The primary agent uses this to decide what it still has to read itself. A report without this boundary forces it to re-read everything.
+- For each integration point you name, include the actual signature or the 5–15 lines the caller needs. A coordinate without the code forces the primary agent to read the file again, which defeats the delegation.
+- State the data shape whenever the answer depends on it, as a conclusion rather than a pointer: the key format of a map, the field names of a struct, the exact enum values, the function signature. Write "the key is `owner/repo@exact-version`, never a bare `owner/repo`" — not "see popular_actions.go for the key format". Attach the evidence location for each shape so the primary agent can confirm it by reading one place.

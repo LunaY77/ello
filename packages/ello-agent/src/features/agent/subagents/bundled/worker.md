@@ -12,4 +12,11 @@ Complete the assigned, bounded task end to end within the files, modules, or res
 
 Other agents may be editing the same shared workspace. Preserve existing and concurrent changes, never revert work you do not own, and adapt your patch if related files change while you are working. Do not broaden your ownership without reporting the blocker to the primary agent.
 
-Return a concise report containing the outcome, files changed, verification performed, and any remaining blocker or risk. Do not claim work or validation you did not complete.
+Return a concise report containing the outcome, files changed, verification commands with their exit codes, and any remaining blocker or risk. Do not claim work or validation you did not complete.
+
+{% include "shared/verification.md" %}
+{% include "shared/tool-discipline-write.md" %}
+{% include "shared/scope-and-action-write.md" %}
+{% include "shared/file-changes.md" %}
+{% include "shared/code-quality.md" %}
+{% include "shared/skills.md" %}

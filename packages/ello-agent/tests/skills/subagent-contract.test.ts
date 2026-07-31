@@ -31,6 +31,7 @@ import {
 import { ArtifactStore } from '../../src/features/artifact/index.js';
 import {
   AgentConfigSchema,
+  SubagentsConfigSchema,
   type CodingAgentConfig,
 } from '../../src/features/config/index.js';
 import type { PermissionRule } from '../../src/features/tool/permissions/types.js';
@@ -60,8 +61,17 @@ async function createRegistry(
 ): ReturnType<typeof createAgentRegistry> {
   const cwd = await mkdtemp(path.join(tmpdir(), 'ello-subagent-contract-'));
   temporaryDirectories.push(cwd);
-  return createAgentRegistry({ cwd, agent } as CodingAgentConfig);
+  return createAgentRegistry({
+    cwd,
+    agent,
+    subagents: enabledSubagents,
+  } as CodingAgentConfig);
 }
+
+const enabledSubagents = {
+  enabled: true,
+  cwd_policy: 'allowed_paths',
+} as const;
 
 const subagentDefinition: CodingAgentDefinition = {
   name: 'tester',
@@ -86,6 +96,14 @@ describe('Subagent 注册与隔离契约', () => {
         max_turns: -2,
       }).success,
     ).toBe(false);
+  });
+
+  it('subagent 开关默认启用且允许显式关闭', () => {
+    expect(SubagentsConfigSchema.parse({})).toEqual({
+      enabled: true,
+      cwd_policy: 'allowed_paths',
+    });
+    expect(SubagentsConfigSchema.parse({ enabled: false }).enabled).toBe(false);
   });
 
   it('仅向主代理选择器和委派选择器暴露各自允许的非隐藏代理', async () => {
@@ -141,6 +159,7 @@ tools:
     const registry = await createAgentRegistry({
       cwd,
       agent: {},
+      subagents: enabledSubagents,
     } as CodingAgentConfig);
 
     expect(registry.get('explore')).toMatchObject({
@@ -184,8 +203,38 @@ unknown-field: true
     );
 
     await expect(
-      createAgentRegistry({ cwd, agent: {} } as CodingAgentConfig),
+      createAgentRegistry({
+        cwd,
+        agent: {},
+        subagents: enabledSubagents,
+      } as CodingAgentConfig),
     ).rejects.toThrow('Unrecognized key');
+  });
+
+  it('关闭 subagent 时 registry 不暴露委派候选且不注册控制工具', async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), 'ello-subagent-disabled-'));
+    temporaryDirectories.push(cwd);
+    const config = {
+      cwd,
+      agent: {},
+      subagents: { enabled: false, cwd_policy: 'allowed_paths' },
+    } as CodingAgentConfig;
+    const registry = await createAgentRegistry(config);
+
+    expect(registry.delegatable()).toEqual([]);
+    expect(
+      createSubagentTools({
+        request: parentRequest(cwd),
+        definition: {
+          config,
+          definition: registry.get('build'),
+          agentRegistry: registry,
+        },
+        parentToolNames: [],
+        service: {} as AgentTaskService,
+        approval: () => () => ({ action: 'auto' }),
+      }),
+    ).toEqual([]);
   });
 
   it('子代理仅继承父级拒绝和外部目录边界，不继承父级允许', () => {
@@ -262,7 +311,10 @@ describe('Subagent 后台任务契约', () => {
     const tools = createSubagentTools({
       request,
       definition: {
-        config: { cwd: '/workspace' } as CodingAgentConfig,
+        config: {
+          cwd: '/workspace',
+          subagents: enabledSubagents,
+        } as CodingAgentConfig,
         definition: registry.get('build'),
         agentRegistry: registry,
       },
@@ -271,7 +323,9 @@ describe('Subagent 后台任务契约', () => {
       approval: () => () => ({ action: 'auto' }),
     });
     const delegate = tools.find((tool) => tool.name === 'delegate_to_subagent');
+    const taskOutput = tools.find((tool) => tool.name === 'task_output');
     if (delegate === undefined) throw new Error('主代理缺少委派工具。');
+    if (taskOutput === undefined) throw new Error('主代理缺少任务输出工具。');
 
     expect(delegate.description).toContain('Available subagents:');
     expect(delegate.description).toContain('- explore:');
@@ -290,6 +344,20 @@ describe('Subagent 后台任务契约', () => {
         description: '检查代码',
       }).success,
     ).toBe(true);
+    expect(
+      taskOutput.input.safeParse({
+        task_id: 'job_test',
+        block: true,
+        timeout_ms: 180_000,
+      }).success,
+    ).toBe(true);
+    expect(
+      taskOutput.input.safeParse({
+        task_id: 'job_test',
+        block: true,
+        timeout_ms: 180_001,
+      }).success,
+    ).toBe(false);
   });
 
   it('fork 保留父级委派工具 schema，但默认深度明确拒绝递归', async () => {
@@ -320,7 +388,10 @@ describe('Subagent 后台任务契约', () => {
       },
     };
     const definition: ResolvedAgentDefinition = {
-      config: { cwd: '/workspace' } as CodingAgentConfig,
+      config: {
+        cwd: '/workspace',
+        subagents: enabledSubagents,
+      } as CodingAgentConfig,
       definition: registry.get('explore'),
       agentRegistry: registry,
     };
@@ -364,7 +435,10 @@ describe('Subagent 后台任务契约', () => {
     const tools = createSubagentTools({
       request: parentRequest('/workspace'),
       definition: {
-        config: { cwd: '/workspace' } as CodingAgentConfig,
+        config: {
+          cwd: '/workspace',
+          subagents: enabledSubagents,
+        } as CodingAgentConfig,
         definition: registry.get('build'),
         agentRegistry: registry,
       },
@@ -390,7 +464,7 @@ describe('Subagent 后台任务契约', () => {
     const config = {
       cwd: parentCwd,
       allowed_paths: [root],
-      subagents: { cwd_policy: 'allowed_paths' },
+      subagents: enabledSubagents,
       agent: {},
     } as CodingAgentConfig;
     const registry = await createAgentRegistry(config);
@@ -428,7 +502,7 @@ describe('Subagent 后台任务契约', () => {
     const config = {
       cwd: parentCwd,
       allowed_paths: [root],
-      subagents: { cwd_policy: 'workspace' },
+      subagents: { enabled: true, cwd_policy: 'workspace' },
       agent: {},
     } as CodingAgentConfig;
     const registry = await createAgentRegistry(config);
@@ -465,7 +539,7 @@ describe('Subagent 后台任务契约', () => {
     const config = {
       cwd: parentCwd,
       allowed_paths: [root],
-      subagents: { cwd_policy: 'allowed_paths' },
+      subagents: enabledSubagents,
       agent: {},
     } as CodingAgentConfig;
     const registry = await createAgentRegistry(config);

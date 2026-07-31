@@ -30,6 +30,11 @@ describe('benchmark Agent config', () => {
     expect(config.auxiliary_model).toBe('benchmark-flash');
     expect(config.initial_mode).toBe('bypass');
     expect(config.title_generation).toBe(false);
+    expect(config.subagents).toEqual({
+      enabled: true,
+      cwd_policy: 'allowed_paths',
+    });
+    expect(config.agent).toBeUndefined();
     expect(config.models).toMatchObject({
       'benchmark-pro': {
         auth_scheme: 'bearer',
@@ -40,6 +45,32 @@ describe('benchmark Agent config', () => {
     expect(await readFile(path.join(elloHome, 'mcp.json'), 'utf8')).toContain(
       '"servers"',
     );
+  });
+
+  it('uses the runtime switch for a clean no-subagent control', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-bench-config-'));
+    const workspace = path.join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+
+    const files = await writeBenchmarkAgentConfig({
+      elloHome: path.join(root, 'ello-home'),
+      workspace,
+      agent: ElloAgentSpecSchema.parse({
+        ...agentFixture(),
+        features: { subagents: false, ptc: false },
+      }),
+      snapshotPath: path.join(root, 'snapshot.json'),
+    });
+    const config = parse(await readFile(files.configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+
+    expect(config.subagents).toEqual({
+      enabled: false,
+      cwd_policy: 'allowed_paths',
+    });
+    expect(config.agent).toBeUndefined();
   });
 
   it('rejects project state that could override the isolated config', async () => {

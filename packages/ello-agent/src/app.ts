@@ -417,7 +417,11 @@ const resolveAgentModel: ResolveAgentModel = async ({
   };
 };
 
-const loadAgentContext: LoadAgentContext = async ({ definition, model }) => {
+const loadAgentContext: LoadAgentContext = async ({
+  request,
+  definition,
+  model,
+}) => {
   const catalog = new SkillCatalog(definition.config);
   const skills = await catalog.initialize();
   const activation = new SkillActivationService(catalog);
@@ -435,6 +439,11 @@ const loadAgentContext: LoadAgentContext = async ({ definition, model }) => {
       skillIndexContext({ skills, contextWindow: model.contextWindow }),
       createCodingSystemPromptSection(definition.config, {
         model: model.modelCall.configuredModel,
+        ...(definition.definition.mode === 'subagent' ||
+        (definition.definition.mode === 'all' &&
+          request.delegation !== undefined)
+          ? { profile: 'subagent' }
+          : {}),
         ...(memoryIndexLoader === undefined
           ? {}
           : {

@@ -340,6 +340,7 @@ export const WorkspaceConfigSchema = z.object({
 });
 
 export const SubagentsConfigSchema = z.object({
+  enabled: z.boolean().default(true),
   cwd_policy: z.enum(['workspace', 'allowed_paths']).default('allowed_paths'),
 });
 
@@ -360,6 +361,7 @@ export const CodingAgentConfigSchema = z
     projects: z.record(z.string(), ProjectTrustSchema).default({}),
     workspace: WorkspaceConfigSchema.default({ mount: '~/.ello' }),
     subagents: SubagentsConfigSchema.default({
+      enabled: true,
       cwd_policy: 'allowed_paths',
     }),
     tools: ToolConfigSchema.default(DEFAULT_TOOL_CONFIG),

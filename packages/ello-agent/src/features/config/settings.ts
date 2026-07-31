@@ -80,6 +80,10 @@ const METADATA: Readonly<Record<string, SettingMetadata>> = {
     description:
       'Allow child working directories in authorized roots or restrict them to the parent workspace.',
   },
+  'subagents.enabled': {
+    description:
+      'Register subagent tools and include delegation instructions for new turns.',
+  },
   'agent.*.mode': {
     type: 'enum',
     options: ['primary', 'subagent', 'internal', 'all'],
