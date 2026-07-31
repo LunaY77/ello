@@ -6,20 +6,19 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type {
-  AgentEventRecorder,
-  AgentModelRequest,
-  AgentModelResponse,
-  EngineEvent,
-  ModelAdapter,
-  AnyAgentTool,
-  CreateAgentOptions,
-} from '../../src/features/agent/engine/index.js';
 import {
   createAgent as createBaseAgent,
   defineTool,
   z,
+  type AnyAgentTool,
+  AgentEventRecorder,
+  AgentModelRequest,
+  AgentModelResponse,
+  type CreateAgentOptions,
+  EngineEvent,
+  ModelAdapter,
 } from '../../src/features/agent/engine/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 const testTool = defineTool({
   name: 'test_noop',
@@ -48,7 +47,7 @@ function createAgent(
       protocol: 'openai',
       apiModel: 'model-a',
     },
-    environment: {},
+    environment: createTestEnvironmentHandle(),
     executionTools: selected,
     modelTools: selected,
   });

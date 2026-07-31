@@ -20,6 +20,7 @@ export type ToolMetadataKind =
   | 'search'
   | 'edit'
   | 'shell'
+  | 'process'
   | 'network'
   | 'task'
   | 'workspace'
@@ -70,7 +71,6 @@ export interface CodingPermissionRequestDraft {
 
 export interface CodingToolContext {
   readonly cwd: string;
-  readonly allowedPaths: readonly string[];
   readonly sessionId: string;
   readonly runId: string;
   readonly callId: string;

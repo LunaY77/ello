@@ -5,9 +5,10 @@
  * 每次 `stream()` 都创建独立 `RunState`。文件内的回合循环按“初始化 → 模型输入 → 模型调用 →
  * 工具执行 → 回合结算 → 终态”线性推进，不读取 Thread、JSON-RPC 或产品持久化状态。
  */
+import type { EnvironmentHandle } from '../../environment/index.js';
+
 import type {
   Agent,
-  AgentEnvironment,
   AgentInput,
   AgentResumeInput,
   AgentRunOptions,
@@ -15,7 +16,6 @@ import type {
   AgentStream,
   CreateAgentOptions,
 } from './contracts.js';
-import { closeAgentResources } from './events.js';
 import { buildModelInput } from './model-input.js';
 import { callModel, type ModelAdapter } from './model.js';
 import { createModelCompactor } from './model.js';
@@ -69,7 +69,7 @@ export function createAgent(options: CreateAgentOptions): Agent {
  */
 class ElloAgent implements Agent {
   /** 运行环境由创建者显式注入，并由 Agent 在 close 时释放。 */
-  private readonly environment: AgentEnvironment;
+  private readonly environment: EnvironmentHandle;
   /** 模型适配器由创建者显式注入，所有 run 共享同一无会话状态边界。 */
   private readonly modelAdapter: ModelAdapter;
   private readonly compactorState;
@@ -183,7 +183,6 @@ class ElloAgent implements Agent {
       modelAdapter: this.modelAdapter,
       compactorState: this.compactorState,
     });
-    await run.environment.setup?.(run.ctx);
     run.state.messages.push(...input.contextMessages);
     const modelInput = await buildModelInput(run);
     const compactor = createModelCompactor(run, modelInput);
@@ -212,7 +211,7 @@ class ElloAgent implements Agent {
    * - 共享环境释放失败时直接拒绝，并保留底层失败原因。
    */
   async close(): Promise<void> {
-    await closeAgentResources(this.environment);
+    await this.environment.close();
   }
 }
 

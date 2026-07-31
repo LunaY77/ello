@@ -33,6 +33,7 @@ import {
   type MemoryStore,
 } from '../../src/features/memory/index.js';
 import { createProductionToolRuntime } from '../../src/features/tool/internal/production.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 import { createTestStores } from '../support/stores.js';
 
@@ -82,7 +83,7 @@ function memoryRunContext(input: AgentInput): AgentRunContext {
     input,
     context: undefined,
     options: {},
-    environment: {},
+    environment: createTestEnvironmentHandle(),
     metadata: {},
   };
 }
@@ -574,7 +575,7 @@ const TOOL_CONTEXT: AgentToolContext = {
   runId: 'run-memory',
   turnIndex: 0,
   toolCallId: 'call-memory',
-  environment: {},
+  environment: createTestEnvironmentHandle(),
   metadata: {},
   signal: new AbortController().signal,
 };

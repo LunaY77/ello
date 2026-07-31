@@ -4,11 +4,13 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
+import type { AgentToolContext } from '../../agent/engine/index.js';
 import type {
-  AgentFileSystem,
-  AgentShell,
-  AgentToolContext,
-} from '../../agent/engine/index.js';
+  EnvironmentFileStat,
+  EnvironmentFileSystem,
+  EnvironmentProcesses,
+  ProcessOutputSnapshot,
+} from '../../environment/index.js';
 
 /**
  * 保留的头部占比；测试与构建工具把失败摘要放在输出末尾，因此尾部权重更高。
@@ -75,7 +77,7 @@ export function truncationMarker(omittedBytes: number): string {
 }
 
 /**
- * 取出环境的文件系统能力；所有路径边界检查都应委托给运行时环境。
+ * 取出 coding Environment 必备的文件系统能力。
  *
  * Args:
  * - `ctx`: 调用方拥有的运行上下文；本函数仅在调用生命周期内读取或调用其公开能力。
@@ -83,34 +85,23 @@ export function truncationMarker(omittedBytes: number): string {
  * Returns:
  * - 返回 `requireFs` 计算出的声明结果；返回值不包含未声明的兜底状态。
  *
- * Throws:
- * - 当 工具 `shared` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
-export function requireFs(ctx: AgentToolContext): AgentFileSystem {
-  const fs = ctx.environment.fileSystem;
-  if (fs === undefined) {
-    throw new Error('Environment has no file system; cannot run file tools.');
-  }
-  return fs;
+export function requireFs(ctx: AgentToolContext): EnvironmentFileSystem {
+  return ctx.environment.fileSystem;
 }
 
 /**
- * 取出环境的 shell 能力；能力未注入时直接抛出清晰错误。
+ * 取出 coding Environment 必备的进程能力。
  *
  * Args:
  * - `ctx`: 调用方拥有的运行上下文；本函数仅在调用生命周期内读取或调用其公开能力。
  *
  * Returns:
- * - 返回 `requireShell` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ * - 返回统一的前台与受管进程接口。
  *
- * Throws:
- * - 当 工具 `shared` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
-export function requireShell(ctx: AgentToolContext): AgentShell {
-  if (ctx.environment.shell === undefined) {
-    throw new Error('Environment has no shell; cannot run shell tools.');
-  }
-  return ctx.environment.shell;
+export function requireProcesses(ctx: AgentToolContext): EnvironmentProcesses {
+  return ctx.environment.processes;
 }
 
 /**
@@ -127,7 +118,7 @@ export function requireShell(ctx: AgentToolContext): AgentShell {
  * - 当 工具 `shared` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
 export function resolveRuntimePath(
-  fs: AgentFileSystem,
+  fs: EnvironmentFileSystem,
   targetPath: string,
 ): string {
   return fs.resolvePath(targetPath);
@@ -144,8 +135,27 @@ export function resolveRuntimePath(
  * - Promise 在 工具 `shared` 模块 的异步读取或状态变更完成后兑现为声明结果。
  */
 export async function statRuntimePath(
-  fs: AgentFileSystem,
+  fs: EnvironmentFileSystem,
   targetPath: string,
-): Promise<{ isDirectory(): boolean }> {
+): Promise<EnvironmentFileStat> {
   return fs.stat(targetPath);
+}
+
+/**
+ * 把进程输出字节转换为 UTF-8，并显式声明 Environment 缓冲截断。
+ *
+ * Args:
+ * - `stream`: stdout 或 stderr 的有界输出快照。
+ * - `label`: 用于截断提示的 stream 名称。
+ *
+ * Returns:
+ * - 返回可直接进入工具结果的 UTF-8 文本。
+ */
+export function processOutputText(
+  stream: ProcessOutputSnapshot,
+  label: 'stdout' | 'stderr',
+): string {
+  const output = Buffer.from(stream.data).toString('utf8');
+  if (stream.truncatedBytes === 0) return output;
+  return `[${label} truncated by Environment: ${stream.truncatedBytes} earlier bytes were discarded]\n${output}`;
 }

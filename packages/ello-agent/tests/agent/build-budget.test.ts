@@ -17,6 +17,7 @@ import {
 import type { AgentRegistry } from '../../src/features/agent/subagents/index.js';
 import type { CodingAgentDefinition } from '../../src/features/agent/subagents/schema.js';
 import { CodingAgentConfigSchema } from '../../src/features/config/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 const tool = defineTool({
   name: 'noop',
@@ -149,7 +150,12 @@ describe('buildAgent model input budget', () => {
         };
       },
       runtime: {
-        createEnvironment: () => ({}),
+        environments: {
+          attach: () => Promise.resolve(createTestEnvironmentHandle()),
+          close: () => Promise.resolve(),
+        },
+        defaultEnvironmentRef: 'test',
+        environmentGrant: { isolation: 'none' },
         createTracing: () => ({ close: async () => undefined }),
       },
     };
@@ -160,7 +166,10 @@ describe('buildAgent model input budget', () => {
     const runRequest: AgentRunRequest = {
       threadId: 'thr_budget',
       turnId: 'turn_budget',
-      cwd: '/workspace',
+      executionLocation: {
+        environmentRef: 'test',
+        workingDirectory: '/workspace',
+      },
       selection: { mode: 'ask-before-changes', agent: 'primary' },
       history,
       input: 'new task',

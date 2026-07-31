@@ -190,7 +190,6 @@ function createContext(
 ): CodingToolContext {
   return {
     cwd: config.cwd,
-    allowedPaths: config.allowed_paths,
     sessionId: readString(ctx.metadata.sessionId) ?? 'default',
     runId: ctx.runId,
     callId: readString(ctx.metadata.toolCallId) ?? ctx.runId,

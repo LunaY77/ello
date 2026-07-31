@@ -10,7 +10,7 @@ import {
   createCodingToolResult,
   defineCodingTool,
 } from './runtime/coding-tool.js';
-import { requireFs, requireShell } from './shared.js';
+import { processOutputText, requireFs, requireProcesses } from './shared.js';
 
 const LOCKFILES = [
   'pnpm-lock.yaml',
@@ -84,21 +84,30 @@ export function createWorkspaceSnapshotTools(
       }),
       execute: async ({ include_untracked }, ctx) => {
         const fs = requireFs(ctx.agent);
-        const shell = requireShell(ctx.agent);
+        const processes = requireProcesses(ctx.agent);
         const [entries, head, branch, status] = await Promise.all([
           fs.listDir(config.cwd),
-          shell.run('git rev-parse HEAD', { cwd: config.cwd, timeout: 10_000 }),
-          shell.run('git branch --show-current', {
+          processes.exec({
+            command: 'git rev-parse HEAD',
             cwd: config.cwd,
-            timeout: 10_000,
+            maxRuntimeMs: 10_000,
           }),
-          shell.run(
-            include_untracked
+          processes.exec({
+            command: 'git branch --show-current',
+            cwd: config.cwd,
+            maxRuntimeMs: 10_000,
+          }),
+          processes.exec({
+            command: include_untracked
               ? 'git status --short --branch'
               : 'git status --short --branch --untracked-files=no',
-            { cwd: config.cwd, timeout: 10_000 },
-          ),
+            cwd: config.cwd,
+            maxRuntimeMs: 10_000,
+          }),
         ]);
+        const headText = processOutputText(head.stdout, 'stdout');
+        const branchText = processOutputText(branch.stdout, 'stdout');
+        const statusText = processOutputText(status.stdout, 'stdout');
         const sortedEntries = [...entries].sort();
         const manifests = MANIFESTS.filter((name) =>
           sortedEntries.includes(name),
@@ -111,9 +120,9 @@ export function createWorkspaceSnapshotTools(
           cwd: config.cwd,
           git: {
             available: head.exitCode === 0,
-            head: head.exitCode === 0 ? head.stdout.trim() : null,
-            branch: branch.exitCode === 0 ? branch.stdout.trim() : null,
-            status: status.stdout.trim().split('\n').filter(Boolean),
+            head: head.exitCode === 0 ? headText.trim() : null,
+            branch: branch.exitCode === 0 ? branchText.trim() : null,
+            status: statusText.trim().split('\n').filter(Boolean),
           },
           rootEntries: sortedEntries.slice(0, 200),
           rootEntriesTruncated: sortedEntries.length > 200,

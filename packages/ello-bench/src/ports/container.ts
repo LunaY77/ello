@@ -22,7 +22,7 @@ export interface ContainerSpec {
 export interface ContainerExecOptions {
   readonly cwd: string;
   readonly env?: Readonly<Record<string, string>>;
-  readonly input?: string;
+  readonly input?: string | Uint8Array;
   readonly timeoutMs: number;
   readonly killGraceMs?: number;
   readonly maxOutputBytes?: number;
@@ -34,6 +34,29 @@ export interface ContainerExecResult {
   readonly process: ProcessResult;
   readonly stdout?: string;
   readonly stderr?: string;
+}
+
+export type ContainerProcessSignal = 'SIGINT' | 'SIGTERM' | 'SIGKILL';
+
+export interface ContainerSpawnOptions {
+  readonly cwd: string;
+  readonly env?: Readonly<Record<string, string>>;
+  readonly onStdout: (chunk: Uint8Array) => void;
+  readonly onStderr: (chunk: Uint8Array) => void;
+}
+
+export interface ContainerProcessExit {
+  readonly exitCode: number | null;
+  readonly signal: string | null;
+  readonly durationMs: number;
+}
+
+/** Container adapter 内部持有的流式进程；不会暴露给 Agent 或模型。 */
+export interface ContainerProcess {
+  readonly exit: Promise<ContainerProcessExit>;
+  write(data: Uint8Array): Promise<void>;
+  closeStdin(): Promise<void>;
+  signal(signal: ContainerProcessSignal): Promise<void>;
 }
 
 export interface ContainerHandle {
@@ -52,6 +75,10 @@ export interface ContainerHandle {
     command: readonly string[],
     options: ContainerExecOptions,
   ): Promise<ContainerExecResult>;
+  spawn(
+    command: readonly string[],
+    options: ContainerSpawnOptions,
+  ): Promise<ContainerProcess>;
   copyIn(hostPath: string, containerPath: string): Promise<void>;
   copyOut(containerPath: string, hostPath: string): Promise<void>;
   assertStorageLimit(): Promise<void>;

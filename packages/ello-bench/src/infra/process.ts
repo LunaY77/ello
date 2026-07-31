@@ -11,7 +11,7 @@ import {
 interface CommonProcessOptions {
   readonly cwd: string;
   readonly env?: NodeJS.ProcessEnv;
-  readonly input?: string;
+  readonly input?: string | Uint8Array;
   readonly timeoutMs: number;
   readonly killGraceMs: number;
 }

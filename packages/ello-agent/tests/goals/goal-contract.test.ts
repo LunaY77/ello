@@ -21,6 +21,7 @@ import {
   type GoalPersistencePort,
 } from '../../src/features/thread/goals/service.js';
 import type { GoalState } from '../../src/features/thread/goals/types.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 function createHarness(maxContinuations = 20) {
   let snapshot: GoalState | null = null;
@@ -326,7 +327,7 @@ const TOOL_CONTEXT: AgentToolContext = {
   runId: 'run-goal',
   turnIndex: 0,
   toolCallId: 'call-goal',
-  environment: {},
+  environment: createTestEnvironmentHandle(),
   metadata: {},
   signal: new AbortController().signal,
 };

@@ -40,6 +40,7 @@ import {
   type DatabaseHandle,
 } from '../../src/infra/database/index.js';
 import type { ServerNotification } from '../../src/protocol/v1/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 
 const temporaryDirectories: string[] = [];
@@ -301,7 +302,10 @@ describe('Subagent 后台任务契约', () => {
     const request: AgentRunRequest = {
       threadId: 'parent-a',
       turnId: 'turn-parent',
-      cwd: '/workspace',
+      executionLocation: {
+        environmentRef: 'test',
+        workingDirectory: '/workspace',
+      },
       selection: { mode: 'accept-edits', agent: 'build' },
       history: [],
       input: '列出可用子代理',
@@ -365,7 +369,10 @@ describe('Subagent 后台任务契约', () => {
     const request: AgentRunRequest = {
       threadId: 'job_parent',
       turnId: 'turn-parent',
-      cwd: '/workspace',
+      executionLocation: {
+        environmentRef: 'test',
+        workingDirectory: '/workspace',
+      },
       selection: { mode: 'accept-edits', agent: 'explore' },
       history: [],
       input: '继续探索',
@@ -1079,7 +1086,10 @@ function parentRequest(cwd: string): AgentRunRequest {
   return {
     threadId: 'parent-a',
     turnId: 'turn-parent',
-    cwd,
+    executionLocation: {
+      environmentRef: 'test',
+      workingDirectory: cwd,
+    },
     selection: { mode: 'accept-edits', agent: 'build' },
     history: [],
     input: '委派任务',
@@ -1202,7 +1212,7 @@ const agentToolContext = {
   runId: 'run-parent',
   turnIndex: 0,
   toolCallId: 'tool-parent',
-  environment: {},
+  environment: createTestEnvironmentHandle(),
   metadata: {},
   signal: new AbortController().signal,
 } as const;

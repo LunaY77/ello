@@ -186,6 +186,14 @@ export async function createApp(
     unloadGraceMs: 30_000,
     titleGenerator: createThreadTitleGenerator({
       modelAdapter: createAiSdkModelAdapter(),
+      attachEnvironment: (workingDirectory) =>
+        options.agentRuntime.environments.attach(
+          {
+            environmentRef: options.agentRuntime.defaultEnvironmentRef,
+            workingDirectory,
+          },
+          options.agentRuntime.environmentGrant,
+        ),
     }),
     beforeInterrupt: async (threadId, reason) => {
       requireAgentFeature(agentHolder.current).interrupt(threadId, reason);
@@ -270,7 +278,7 @@ export async function createApp(
           rules: () => [],
           externalPaths: () => [],
         },
-      } satisfies AgentRunRequest;
+      } satisfies import('./features/agent/index.js').AgentRunInput;
       const compactor = await createProductionThreadCompactor({
         store: threadStore,
         snapshot,
@@ -339,6 +347,7 @@ export async function createApp(
         },
         () => agentTasks.close(),
         () => agent.close(),
+        () => options.agentRuntime.environments.close(),
         () => mcp.close(),
         () => fs.close(),
         () => artifacts.close(),
@@ -353,7 +362,7 @@ export async function createApp(
 
 const resolveAgentDefinition: ResolveAgentDefinition = async (request) => {
   const config = await loadCodingAgentConfig({
-    cwd: request.cwd,
+    cwd: request.executionLocation.workingDirectory,
     initial_mode: request.selection.mode,
   });
   const agentRegistry = await createAgentRegistry(config);
@@ -628,7 +637,7 @@ function createPlanAgentTools(
           .strict(),
         execute: async ({ content }) => {
           const artifact = await writePlanArtifact({
-            cwd: request.cwd,
+            cwd: request.executionLocation.workingDirectory,
             sessionId: request.threadId,
             content,
           });
@@ -674,7 +683,7 @@ function selectAgentTools(
 function agentTaskRunRequest(
   task: AgentTask,
   modeSource: () => AgentRunRequest['selection']['mode'],
-): AgentRunRequest {
+): import('./features/agent/index.js').AgentRunInput {
   const mode = modeSource();
   return {
     threadId: task.id,

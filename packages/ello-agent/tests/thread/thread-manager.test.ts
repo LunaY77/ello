@@ -13,8 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   AgentRun,
   AgentRunEvent,
+  AgentRunInput,
   AgentRunResult,
-  AgentRunRequest,
 } from '../../src/features/agent/index.js';
 import { compactionView } from '../../src/features/thread/compact.js';
 import {
@@ -1067,7 +1067,7 @@ class FakeAgent {
    * Throws:
    * - 当 测试夹具的 `thread-manager.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
    */
-  startRun(input: AgentRunRequest): Promise<AgentRun> {
+  startRun(input: AgentRunInput): Promise<AgentRun> {
     this.started += 1;
     const run = new FakeAgentRun();
     this.runs.set(input.threadId, run);

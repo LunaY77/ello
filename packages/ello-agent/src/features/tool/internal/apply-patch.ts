@@ -5,10 +5,8 @@
  * 还可以声明 Move。模块刻意分成 parse、prepare、apply 三段：审批阶段只做解析和
  * 完整预览，真正获批后才一次性写入，避免长 patch 在中途失败时留下半成品。
  */
-import { rm } from 'node:fs/promises';
-
 import { errnoCode } from '../../../infra/filesystem.js';
-import type { AgentFileSystem } from '../../agent/engine/index.js';
+import type { EnvironmentFileSystem } from '../../environment/index.js';
 
 import { createFileChange, type FileChange } from './file-change.js';
 import { findNearestLine, resolveRuntimePath } from './shared.js';
@@ -43,6 +41,28 @@ export type ApplyPatchOperation =
 /** 一次 patch 调用包含的有序文件操作。 */
 export interface ApplyPatch {
   readonly operations: readonly ApplyPatchOperation[];
+}
+
+/**
+ * 从已解析 patch 中提取所有 source/move 路径，不访问 Environment。
+ *
+ * Args:
+ * - `patch`: 已通过语法校验的结构化 patch。
+ *
+ * Returns:
+ * - 返回按首次出现顺序去重的路径，供 Tool Policy 在文件预览前判定边界。
+ */
+export function applyPatchPaths(patch: ApplyPatch): string[] {
+  return [
+    ...new Set(
+      patch.operations.flatMap((operation) => [
+        operation.path,
+        ...(operation.kind === 'update' && operation.movePath !== undefined
+          ? [operation.movePath]
+          : []),
+      ]),
+    ),
+  ];
 }
 
 /**
@@ -160,7 +180,7 @@ export function parseApplyPatch(patchText: string): ApplyPatch {
  * - Promise 在 工具 `apply-patch` 模块 的异步读取或状态变更完成后兑现为声明结果。
  */
 export async function prepareApplyPatch(
-  fs: AgentFileSystem,
+  fs: EnvironmentFileSystem,
   patch: ApplyPatch,
 ): Promise<PreparedApplyPatch> {
   const initial = new Map<string, string | null>();
@@ -231,7 +251,7 @@ export async function prepareApplyPatch(
       // 先删除再写入，保证 move 的源路径不会覆盖目标路径的最终内容。
       for (const [path, content] of current) {
         if (content === null && initial.get(path) !== null) {
-          await rm(resolveRuntimePath(fs, path));
+          await fs.remove(path);
         }
       }
       for (const [path, content] of current) {
@@ -465,10 +485,7 @@ function applyUpdateChunks(
 }
 
 /** 把最近似行渲染成错误句子；没有近似行时说明原因，不合成假位置。 */
-function nearestLineReport(
-  lines: readonly string[],
-  expected: string,
-): string {
+function nearestLineReport(lines: readonly string[], expected: string): string {
   const nearest = findNearestLine(lines, expected);
   return nearest === undefined
     ? 'No line in the file shares a prefix with the expected content.'
@@ -555,14 +572,15 @@ function invalidLine(
   message: string,
   line: string | undefined,
 ): Error {
-  const actual = line === undefined ? '<past end of patch>' : JSON.stringify(line);
+  const actual =
+    line === undefined ? '<past end of patch>' : JSON.stringify(line);
   return new Error(
     `Invalid patch at line ${index + 1}: ${message}. Offending line: ${actual}.`,
   );
 }
 
 async function readOptional(
-  fs: AgentFileSystem,
+  fs: EnvironmentFileSystem,
   path: string,
 ): Promise<string | null> {
   try {

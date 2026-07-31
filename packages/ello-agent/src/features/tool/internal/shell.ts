@@ -14,12 +14,12 @@ import {
   createCodingToolResult,
   defineCodingTool,
 } from './runtime/coding-tool.js';
-import { requireShell } from './shared.js';
+import { processOutputText, requireProcesses } from './shared.js';
 
 /**
  * Shell 工具：bash。
  *
- * 执行与 cwd 边界检查委托给 `ctx.environment.shell`；默认审批策略为 `required`
+ * 执行与进程树生命周期委托给 `ctx.environment.processes`；默认审批策略为 `required`
  * （命令有任意副作用）。返回结构化结果供 presenter 渲染。
  *
  * Args:
@@ -89,17 +89,16 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
           ctx.agent,
         ),
       execute: async ({ command, timeoutMs, cwd }, ctx) => {
-        const started = Date.now();
         const workingDirectory = cwd ?? config.cwd;
-        const result = await requireShell(ctx.agent).run(command, {
-          timeout: timeoutMs,
+        const result = await requireProcesses(ctx.agent).exec({
+          command,
+          maxRuntimeMs: timeoutMs,
           cwd: workingDirectory,
+          ...(ctx.abortSignal === undefined ? {} : { signal: ctx.abortSignal }),
         });
-        const durationMs = Date.now() - started;
-        const output = [
-          result.stdout.length > 0 ? result.stdout : '',
-          result.stderr.length > 0 ? `stderr:\n${result.stderr}` : '',
-        ]
+        const stdout = processOutputText(result.stdout, 'stdout');
+        const stderr = processOutputText(result.stderr, 'stderr');
+        const output = [stdout, stderr.length > 0 ? `stderr:\n${stderr}` : '']
           .filter(Boolean)
           .join('\n');
         // 超时进程被终止，输出通常缺少测试 runner 的失败摘要；不给出收窄建议
@@ -111,15 +110,15 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
         // 长输出由统一 adapter 处理；退出码行始终保留在模型可见首行。
         return createCodingToolResult({
           title: `bash ${command}`,
-          output: `${exitCodeLine(result.exitCode)}\n${body}`,
+          output: `${exitCodeLine(result.exitCode, result.signal)}\n${body}`,
           metadata: {
             kind: 'shell',
             command,
             cwd: workingDirectory,
-            exitCode: result.exitCode,
-            durationMs,
-            stdoutBytes: Buffer.byteLength(result.stdout),
-            stderrBytes: Buffer.byteLength(result.stderr),
+            exitCode: result.exitCode ?? -1,
+            durationMs: result.durationMs,
+            stdoutBytes: result.stdout.totalBytes,
+            stderrBytes: result.stderr.totalBytes,
           },
         });
       },
@@ -164,13 +163,15 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
           ctx.agent,
         ),
       execute: async ({ phase, command, timeoutMs, cwd }, ctx) => {
-        const started = Date.now();
         const workingDirectory = cwd ?? config.cwd;
-        const result = await requireShell(ctx.agent).run(command, {
-          timeout: timeoutMs,
+        const result = await requireProcesses(ctx.agent).exec({
+          command,
+          maxRuntimeMs: timeoutMs,
           cwd: workingDirectory,
+          ...(ctx.abortSignal === undefined ? {} : { signal: ctx.abortSignal }),
         });
-        const durationMs = Date.now() - started;
+        const stdout = processOutputText(result.stdout, 'stdout');
+        const stderr = processOutputText(result.stderr, 'stderr');
         const output = [
           JSON.stringify({
             phase,
@@ -178,10 +179,11 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
             cwd: workingDirectory,
             exitCode: result.exitCode,
             timedOut: result.timedOut,
-            durationMs,
+            signal: result.signal,
+            durationMs: result.durationMs,
           }),
-          result.stdout,
-          result.stderr === '' ? '' : `stderr:\n${result.stderr}`,
+          stdout,
+          stderr === '' ? '' : `stderr:\n${stderr}`,
         ]
           .filter(Boolean)
           .join('\n');
@@ -193,11 +195,11 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
             command,
             cwd: workingDirectory,
             phase,
-            exitCode: result.exitCode,
+            exitCode: result.exitCode ?? -1,
             timedOut: result.timedOut,
-            durationMs,
-            stdoutBytes: Buffer.byteLength(result.stdout),
-            stderrBytes: Buffer.byteLength(result.stderr),
+            durationMs: result.durationMs,
+            stdoutBytes: result.stdout.totalBytes,
+            stderrBytes: result.stderr.totalBytes,
           },
         });
       },
@@ -223,9 +225,9 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
  * Returns:
  * - 返回置于输出首行的单行退出码描述。
  */
-function exitCodeLine(exitCode: number): string {
-  return exitCode === -1
-    ? 'exit code: killed by signal (no exit code)'
+function exitCodeLine(exitCode: number | null, signal: string | null): string {
+  return exitCode === null
+    ? `exit code: killed by ${signal ?? 'signal'} (no exit code)`
     : `exit code: ${exitCode}`;
 }
 

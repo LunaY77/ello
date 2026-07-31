@@ -115,10 +115,9 @@ export class ContextSnapshot {
 async function loadEnvironmentSource(
   config: CodingAgentConfig,
 ): Promise<ContextSourceLoadResult> {
-  const allowed =
-    config.allowed_paths.length > 0
-      ? [...config.allowed_paths].sort().join('\n')
-      : config.cwd;
+  const authorized = [config.cwd, ...config.allowed_paths]
+    .sort()
+    .join('\n');
   const delegation = config.subagents.enabled
     ? [
         '<delegation>',
@@ -127,28 +126,24 @@ async function loadEnvironmentSource(
       ]
     : [];
   const content = [
-    '<file-system>',
+    '<coding-scope>',
     `  <working-directory>${config.cwd}</working-directory>`,
-    `  <allowed-paths>\n${indent(allowed)}\n  </allowed-paths>`,
-    '</file-system>',
-    '<shell>',
-    `  <working-directory>${config.cwd}</working-directory>`,
-    `  <allowed-paths>\n${indent(allowed)}\n  </allowed-paths>`,
-    '</shell>',
+    `  <authorized-paths>\n${indent(authorized)}\n  </authorized-paths>`,
+    '</coding-scope>',
     ...delegation,
     '<approval>',
     // runtime 构建时 config.initial_mode 已被替换为当前 session mode，而非启动快照。
     `  <mode>${config.initial_mode}</mode>`,
     `  <guidance>${modeGuidance(config.initial_mode)}</guidance>`,
     '</approval>',
-    'Stay within the allowed paths unless the user explicitly broadens the scope.',
+    'Treat authorized paths as the current coding scope. Access outside that scope requires Tool Policy approval; it is not an Environment isolation claim.',
   ].join('\n');
   return {
     sources: [
       {
-        id: 'environment:runtime',
-        type: 'environment',
-        title: 'Runtime environment',
+        id: 'policy:runtime',
+        type: 'policy',
+        title: 'Runtime tool policy',
         priority: 60,
         content,
         origin: config.cwd,

@@ -9,11 +9,12 @@ import { describe, expect, it } from 'vitest';
 import {
   defineDeferredTool,
   defineTool,
-  type AgentEnvironment,
   type AnyAgentTool,
   z,
 } from '../../src/features/agent/engine/index.js';
 import { ToolScheduler } from '../../src/features/agent/engine/tool-scheduler.js';
+import type { EnvironmentHandle } from '../../src/features/environment/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 describe('ToolScheduler', () => {
   it('在审批和执行前统一校验 immediate 工具输入', async () => {
@@ -37,7 +38,7 @@ describe('ToolScheduler', () => {
       turnIndex: () => 0,
       tools: [tool],
       callableToolNames: new Set([tool.name]),
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       metadata: {},
       signal: new AbortController().signal,
     });
@@ -71,7 +72,7 @@ describe('ToolScheduler', () => {
       turnIndex: () => 0,
       tools: [tool],
       callableToolNames: new Set([tool.name]),
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       metadata: {},
       signal: new AbortController().signal,
     });
@@ -107,7 +108,7 @@ describe('ToolScheduler', () => {
       turnIndex: () => 0,
       tools: [tool],
       callableToolNames: new Set([tool.name]),
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       metadata: {},
       signal: new AbortController().signal,
     });
@@ -154,7 +155,7 @@ describe('ToolScheduler', () => {
       turnIndex: () => 0,
       tools: [tool],
       callableToolNames: new Set([tool.name]),
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       metadata: {},
       signal: new AbortController().signal,
     });
@@ -205,7 +206,7 @@ describe('ToolScheduler', () => {
       turnIndex: () => 0,
       tools: [immediate, deferred],
       callableToolNames: new Set(['write', 'ask']),
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       metadata: {},
       signal: new AbortController().signal,
     });
@@ -262,7 +263,7 @@ describe('ToolScheduler', () => {
       turnIndex: () => 0,
       tools,
       callableToolNames: new Set(tools.map((tool) => tool.name)),
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       metadata: {},
       signal: new AbortController().signal,
     });
@@ -316,7 +317,7 @@ describe('ToolScheduler', () => {
       turnIndex: () => 0,
       tools,
       callableToolNames: new Set(tools.map((tool) => tool.name)),
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       metadata: {},
       signal: new AbortController().signal,
     });
@@ -341,7 +342,7 @@ describe('ToolScheduler', () => {
   });
 
   it('同一 environment 的不同 scheduler 共享读写执行门', async () => {
-    const environment: AgentEnvironment = {};
+    const environment = createTestEnvironmentHandle();
     const order: string[] = [];
     let releaseRead: (() => void) | undefined;
     const readFinished = new Promise<void>((resolve) => {
@@ -415,7 +416,11 @@ describe('ToolScheduler', () => {
         active -= 1;
       },
     });
-    const scheduler = schedulerFor('dynamic', [inspect], {});
+    const scheduler = schedulerFor(
+      'dynamic',
+      [inspect],
+      createTestEnvironmentHandle(),
+    );
 
     await scheduler.schedule(
       [
@@ -433,7 +438,7 @@ describe('ToolScheduler', () => {
 function schedulerFor(
   runId: string,
   tools: readonly AnyAgentTool[],
-  environment: AgentEnvironment,
+  environment: EnvironmentHandle,
 ): ToolScheduler {
   return new ToolScheduler({
     runId,

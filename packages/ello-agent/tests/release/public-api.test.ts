@@ -18,7 +18,8 @@ describe('@ello/agent public API', () => {
 
   it('runtime 子路径只暴露运行时装配端口', () => {
     expect(Object.keys(runtime).sort()).toEqual([
-      'createLocalEnvironment',
+      'LOCAL_HOST_ENVIRONMENT_REFERENCE',
+      'createLocalEnvironments',
       'listenEndpoint',
     ]);
   });

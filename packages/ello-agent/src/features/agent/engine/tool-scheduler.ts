@@ -7,8 +7,9 @@
  * 的工具不会先于人工决定就被执行。
  */
 
+import type { EnvironmentHandle } from '../../environment/index.js';
+
 import type {
-  AgentEnvironment,
   DeferredApprovalItem,
   DeferredToolCallItem,
 } from './contracts.js';
@@ -51,8 +52,8 @@ export interface ToolSchedulerOptions {
   readonly tools: readonly AnyAgentTool[];
   /** 模型实际可以发起的名称；隐藏目标仍在 tools 中供代理调用。 */
   readonly callableToolNames: ReadonlySet<string>;
-  /** 工具运行所处的环境（文件系统、shell、资源等）。 */
-  readonly environment: AgentEnvironment;
+  /** 工具运行所处的 Environment Handle。 */
+  readonly environment: EnvironmentHandle;
   /** 透传给工具上下文的元数据。 */
   readonly metadata: Record<string, unknown>;
   readonly signal: AbortSignal;

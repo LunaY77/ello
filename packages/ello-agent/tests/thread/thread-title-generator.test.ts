@@ -25,6 +25,7 @@ import {
   renderTitleMessage,
 } from '../../src/features/thread/title.js';
 import type { ThreadSnapshot } from '../../src/protocol/v1/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 const roots: string[] = [];
 let previousTestApiKey: string | undefined;
@@ -52,6 +53,8 @@ describe('Thread title generator', () => {
       message: { role: 'user', content: '修复审批按钮无法确认的问题' },
       config: config(root, true),
       modelAdapter: adapter,
+      attachEnvironment: (cwd) =>
+        Promise.resolve(createTestEnvironmentHandle(cwd)),
     });
 
     expect(title).toBe('修复延迟审批响应');
@@ -82,6 +85,8 @@ describe('Thread title generator', () => {
       },
       config: config(root, false),
       modelAdapter: adapter,
+      attachEnvironment: (cwd) =>
+        Promise.resolve(createTestEnvironmentHandle(cwd)),
     });
 
     expect(title).toBe('修复审批按钮 无法确认的问题');
@@ -107,6 +112,8 @@ describe('Thread title generator', () => {
       message: { role: 'user', content: '修复审批按钮无法确认的问题' },
       config: config(root, true),
       modelAdapter: adapter,
+      attachEnvironment: (cwd) =>
+        Promise.resolve(createTestEnvironmentHandle(cwd)),
       signal: controller.signal,
     });
 

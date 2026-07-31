@@ -6,8 +6,9 @@
  */
 import { randomUUID } from 'node:crypto';
 
+import type { EnvironmentHandle } from '../../environment/index.js';
+
 import type {
-  AgentEnvironment,
   AgentFinishReason,
   AgentInput,
   AgentRunContext,
@@ -186,7 +187,7 @@ export interface RunState {
   readonly config: CreateAgentOptions;
   readonly input: AgentInput;
   readonly options: AgentRunOptions;
-  readonly environment: AgentEnvironment;
+  readonly environment: EnvironmentHandle;
   readonly modelAdapter: ModelAdapter;
   readonly abortController: AbortController;
   readonly runId: string;
@@ -235,7 +236,7 @@ export function createRunState(options: {
   readonly config: CreateAgentOptions;
   readonly input: AgentInput;
   readonly runOptions: AgentRunOptions;
-  readonly environment: AgentEnvironment;
+  readonly environment: EnvironmentHandle;
   readonly modelAdapter: ModelAdapter;
   readonly compactorState: RunState['compactorState'];
 }): RunState {
@@ -339,7 +340,7 @@ export function createRunState(options: {
 }
 
 /**
- * 初始化环境、输入队列、resume 数据并发布 run.started。
+ * 初始化输入队列、resume 数据并发布 run.started。
  *
  * Args:
  * - `run`: `initializeRunState` 所需的业务值；函数按声明读取，不补造缺失内容。
@@ -351,7 +352,6 @@ export function createRunState(options: {
  * - 当 产品 Agent Agent engine 运行状态 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
 export async function initializeRunState(run: RunState): Promise<void> {
-  await run.environment.setup?.(run.ctx);
   const normalized = normalizeInput(run.input);
   for (const message of normalized.messages.slice(
     0,

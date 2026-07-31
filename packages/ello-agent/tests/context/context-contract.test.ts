@@ -24,6 +24,7 @@ import {
   type CodingAgentConfig,
 } from '../../src/features/config/schema.js';
 import { createThreadRoutes } from '../../src/features/thread/routes.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 
 describe('context source contract', () => {
@@ -147,6 +148,37 @@ describe('context source contract', () => {
 
     expect(prompt).not.toContain('# Delegation');
     expect(prompt).not.toContain('<delegation>');
+  });
+
+  it('把 coding scope 标为 Tool Policy 而不是 Environment 隔离能力', async () => {
+    const root = await temporaryRoot();
+    const sibling = path.join(path.dirname(root), 'authorized-sibling');
+    const config = CodingAgentConfigSchema.parse({
+      cwd: root,
+      allowed_paths: [sibling],
+      initial_mode: 'ask-before-changes',
+      ...modelConfig(),
+    });
+
+    const rendered = await new ContextSnapshot(
+      config,
+      {},
+      'coding',
+      'base-hash',
+    ).render();
+
+    expect(rendered.system).toContain(
+      '<policy-context id="policy:runtime" title="Runtime tool policy"',
+    );
+    expect(rendered.system).toContain('<coding-scope>');
+    expect(rendered.system).toContain('<authorized-paths>');
+    expect(rendered.system).toContain(root);
+    expect(rendered.system).toContain(sibling);
+    expect(rendered.system).toContain(
+      'it is not an Environment isolation claim',
+    );
+    expect(rendered.system).not.toContain('<file-system>');
+    expect(rendered.system).not.toContain('<shell>');
   });
 
   it('glob 结果稳定排序，并按真实文件来源去重', async () => {
@@ -405,7 +437,7 @@ function promptRunContext(): AgentRunContext {
     input: '你有哪些工具？',
     context: undefined,
     options: {},
-    environment: {},
+    environment: createTestEnvironmentHandle(),
     metadata: {},
   };
 }

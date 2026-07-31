@@ -1,10 +1,13 @@
 import { chmod, cp, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
+import { spawnManagedProcess } from '../src/infra/managed-process.js';
 import { runProcess } from '../src/infra/process.js';
 import type {
   ContainerExecOptions,
   ContainerHandle,
+  ContainerProcess,
+  ContainerSpawnOptions,
 } from '../src/ports/container.js';
 
 export class FakeContainerHandle implements ContainerHandle {
@@ -79,6 +82,34 @@ export class FakeContainerHandle implements ContainerHandle {
       ...(execution.stdout === undefined ? {} : { stdout: execution.stdout }),
       ...(execution.stderr === undefined ? {} : { stderr: execution.stderr }),
     };
+  }
+
+  async spawn(
+    command: readonly string[],
+    options: ContainerSpawnOptions,
+  ): Promise<ContainerProcess> {
+    const executable = command[0];
+    if (executable === undefined) {
+      throw new Error('Container command is empty.');
+    }
+    return await spawnManagedProcess(
+      this.mapPath(executable),
+      command.slice(1).map((value) => this.mapArgument(value)),
+      {
+        cwd: this.mapPath(options.cwd),
+        env: {
+          ...process.env,
+          ...Object.fromEntries(
+            Object.entries(options.env ?? {}).map(([key, value]) => [
+              key,
+              this.mapArgument(value),
+            ]),
+          ),
+        },
+        onStdout: options.onStdout,
+        onStderr: options.onStderr,
+      },
+    );
   }
 
   async copyIn(hostPath: string, containerPath: string): Promise<void> {

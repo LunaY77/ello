@@ -8,8 +8,9 @@
 import { jsonSchema, tool, type ToolSet } from 'ai';
 import { ZodError, type z } from 'zod';
 
+import type { EnvironmentHandle } from '../../environment/index.js';
+
 import type { AgentError } from './contracts.js';
-import type { AgentEnvironment } from './contracts.js';
 import { normalizeAgentError } from './errors.js';
 import { createAgentMessage } from './messages.js';
 import type { AgentMessage, MaybePromise, ModelCallResult } from './model.js';
@@ -145,7 +146,7 @@ export interface AgentToolContext {
   readonly runId: string;
   readonly turnIndex: number;
   readonly toolCallId: string;
-  readonly environment: AgentEnvironment;
+  readonly environment: EnvironmentHandle;
   readonly metadata: Record<string, unknown>;
   readonly signal: AbortSignal;
   /** 当前调用最终采用的工具能力信息。 */

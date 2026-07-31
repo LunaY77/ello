@@ -18,6 +18,7 @@ import {
   type AgentModelResponse,
 } from '../../src/features/agent/engine/index.js';
 import { startAgentRun } from '../../src/features/agent/run.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 describe('Agent run event ordering', () => {
   it('commits each model message before the tools requested by that model call', async () => {
@@ -52,7 +53,7 @@ describe('Agent run event ordering', () => {
           yield { type: 'final', response: await this.generate(request) };
         },
       },
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       executionTools: [inspect],
       modelTools: [inspect],
     });
@@ -66,7 +67,10 @@ describe('Agent run event ordering', () => {
     const run = startAgentRun(built, {
       threadId: 'thread-order',
       turnId: 'turn-order',
-      cwd: '/workspace',
+      executionLocation: {
+        environmentRef: 'test',
+        workingDirectory: '/workspace',
+      },
       selection: { mode: 'ask-before-changes', agent: 'test-agent' },
       history: [],
       input: 'inspect twice',
@@ -126,7 +130,7 @@ describe('Agent run event ordering', () => {
           yield { type: 'final', response: finalResponse(request) };
         },
       },
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       executionTools: [inspect],
       modelTools: [inspect],
     });
@@ -140,7 +144,10 @@ describe('Agent run event ordering', () => {
     const run = startAgentRun(built, {
       threadId: 'thread-steer',
       turnId: 'turn-steer',
-      cwd: '/workspace',
+      executionLocation: {
+        environmentRef: 'test',
+        workingDirectory: '/workspace',
+      },
       selection: { mode: 'ask-before-changes', agent: 'test-agent' },
       history: [],
       input: 'inspect once',
@@ -220,7 +227,7 @@ describe('Agent run event ordering', () => {
           };
         },
       },
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       executionTools: [inspect],
       modelTools: [inspect],
     });
@@ -239,7 +246,10 @@ describe('Agent run event ordering', () => {
     const run = startAgentRun(built, {
       threadId: 'thread-background',
       turnId: 'turn-background',
-      cwd: '/workspace',
+      executionLocation: {
+        environmentRef: 'test',
+        workingDirectory: '/workspace',
+      },
       selection: { mode: 'ask-before-changes', agent: 'test-agent' },
       history: [],
       input: 'delegate in background',
@@ -309,7 +319,7 @@ describe('Agent run event ordering', () => {
           };
         },
       },
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       executionTools: [inspect],
       modelTools: [inspect],
     });
@@ -328,7 +338,10 @@ describe('Agent run event ordering', () => {
     const run = startAgentRun(built, {
       threadId: 'thread-waiting-steer',
       turnId: 'turn-waiting-steer',
-      cwd: '/workspace',
+      executionLocation: {
+        environmentRef: 'test',
+        workingDirectory: '/workspace',
+      },
       selection: { mode: 'ask-before-changes', agent: 'test-agent' },
       history: [],
       input: 'delegate in background',
@@ -382,7 +395,7 @@ describe('Agent run event ordering', () => {
           yield { type: 'final', response: await this.generate(request) };
         },
       },
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       executionTools: [inspect],
       modelTools: [inspect],
     });
@@ -396,7 +409,10 @@ describe('Agent run event ordering', () => {
     const run = startAgentRun(built, {
       threadId: 'thread-max-turns',
       turnId: 'turn-max-turns',
-      cwd: '/workspace',
+      executionLocation: {
+        environmentRef: 'test',
+        workingDirectory: '/workspace',
+      },
       selection: { mode: 'ask-before-changes', agent: 'test-agent' },
       history: [],
       input: 'inspect once',

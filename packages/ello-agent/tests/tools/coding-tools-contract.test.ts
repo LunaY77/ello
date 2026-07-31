@@ -22,11 +22,17 @@ import { z } from 'zod';
 
 import {
   defineTool,
-  type AgentFileSystem,
-  type AgentShell,
   type AgentToolContext,
 } from '../../src/features/agent/engine/index.js';
-import type { CodingAgentConfig } from '../../src/features/config/index.js';
+import {
+  CodingAgentConfigSchema,
+  type CodingAgentConfig,
+} from '../../src/features/config/index.js';
+import type {
+  EnvironmentFileSystem,
+  EnvironmentProcesses,
+  ExecResult,
+} from '../../src/features/environment/index.js';
 import {
   AgentWorkflowState,
   CodingToolExecutionError,
@@ -51,6 +57,8 @@ import type { SearchProvider } from '../../src/features/tool/internal/search-pro
 import { createSearchTools } from '../../src/features/tool/internal/search.js';
 import { createShellTools } from '../../src/features/tool/internal/shell.js';
 import { createWorkspaceSnapshotTools } from '../../src/features/tool/internal/workspace-snapshot.js';
+import { makeApprovalPolicy } from '../../src/features/tool/permissions/policy.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -396,6 +404,109 @@ describe('读取工具契约', () => {
     expect(result.output.length).toBeGreaterThan(12_000);
     expect(result.output).toContain('[Read lines 1-500 of 500.]');
   });
+});
+
+describe('文件写入审批边界', () => {
+  it.each([
+    {
+      name: 'write',
+      input: {
+        filePath: '/external/write.txt',
+        content: 'new\n',
+      },
+      externalDirs: ['/external/write.txt'],
+    },
+    {
+      name: 'edit',
+      input: {
+        filePath: '/external/edit.txt',
+        oldText: 'old',
+        newText: 'new',
+      },
+      externalDirs: ['/external/edit.txt'],
+    },
+    {
+      name: 'apply_patch',
+      input: {
+        patch: `*** Begin Patch
+*** Update File: /external/source.txt
+*** Move to: /external/destination.txt
+@@
+-old
++new
+*** End Patch`,
+      },
+      externalDirs: ['/external/source.txt', '/external/destination.txt'],
+    },
+  ])(
+    '$name 在 external_directory 获批前不读取 Environment',
+    async ({ name, input, externalDirs }) => {
+      const readText = vi.fn(() =>
+        Promise.reject(new Error('approval performed filesystem I/O')),
+      );
+      const environment = createTestEnvironmentHandle('/workspace');
+      const context: CodingToolContext = {
+        cwd: '/workspace',
+        sessionId: 'session',
+        runId: 'run',
+        callId: 'call',
+        agent: {
+          runId: 'run',
+          turnIndex: 0,
+          toolCallId: 'call',
+          environment: {
+            ...environment,
+            fileSystem: { ...environment.fileSystem, readText },
+          },
+          metadata: {},
+          signal: new AbortController().signal,
+        },
+      };
+      const config = CodingAgentConfigSchema.parse({
+        cwd: '/workspace',
+        allowed_paths: [],
+        initial_mode: 'ask-before-changes',
+        models: {
+          test: {
+            protocol: 'openai',
+            endpoint: 'responses',
+            api_model: 'test-model',
+            base_url: 'https://api.example.test/v1',
+            api_key_env: 'TEST_API_KEY',
+            context_window: 128_000,
+            max_output_tokens: 16_000,
+          },
+        },
+        primary_model: 'test',
+        auxiliary_model: 'test',
+      });
+      const decide = makeApprovalPolicy(
+        config,
+        () => [],
+        () => ({
+          mode: 'ask-before-changes',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-07-31T00:00:00.000Z',
+        }),
+      );
+      const tool = createFsTools(config, decide).find(
+        (candidate) => candidate.name === name,
+      );
+      if (tool?.approval === undefined) {
+        throw new Error(`${name} approval missing`);
+      }
+
+      await expect(tool.approval(input, context)).resolves.toMatchObject({
+        action: 'required',
+        metadata: {
+          externalDirs,
+          request: { kind: 'edit' },
+        },
+      });
+      expect(readText).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('Meta Tool 路由契约', () => {
@@ -753,18 +864,16 @@ describe('工具恢复与阶段化验证契约', () => {
       ),
     ]);
     const commands: string[] = [];
-    const shell: AgentShell = {
-      async run(command) {
-        commands.push(command);
-        if (command === 'git rev-parse HEAD') {
-          return shellResult({ stdout: `${'a'.repeat(40)}\n` });
-        }
-        if (command === 'git branch --show-current') {
-          return shellResult({ stdout: 'main\n' });
-        }
-        return shellResult({ stdout: '## main\n M src/index.ts\n' });
-      },
-    };
+    const processes = testProcesses(async ({ command }) => {
+      commands.push(command);
+      if (command === 'git rev-parse HEAD') {
+        return execResult({ stdout: `${'a'.repeat(40)}\n` });
+      }
+      if (command === 'git branch --show-current') {
+        return execResult({ stdout: 'main\n' });
+      }
+      return execResult({ stdout: '## main\n M src/index.ts\n' });
+    });
     const tool = createWorkspaceSnapshotTools(
       { cwd: root } as CodingAgentConfig,
       () => 'auto',
@@ -772,7 +881,7 @@ describe('工具恢复与阶段化验证契约', () => {
 
     const result = await tool.execute(
       { include_untracked: true },
-      toolContext(root, shell),
+      toolContext(root, processes),
     );
     const snapshot = JSON.parse(result.output) as Record<string, unknown>;
     expect(snapshot).toMatchObject({
@@ -806,16 +915,15 @@ describe('工具恢复与阶段化验证契约', () => {
       () => 'auto',
     ).find((tool) => tool.name === 'test');
     if (testTool === undefined) throw new Error('缺少 test 工具。');
-    const shell: AgentShell = {
-      run: () =>
-        Promise.resolve(
-          shellResult({
-            exitCode: 1,
-            stdout: '1 test failed\n',
-            stderr: 'assertion error\n',
-          }),
-        ),
-    };
+    const processes = testProcesses(() =>
+      Promise.resolve(
+        execResult({
+          exitCode: 1,
+          stdout: '1 test failed\n',
+          stderr: 'assertion error\n',
+        }),
+      ),
+    );
 
     const result = await testTool.execute(
       {
@@ -823,7 +931,7 @@ describe('工具恢复与阶段化验证契约', () => {
         command: 'pnpm vitest src/example.test.ts',
         timeoutMs: 5_000,
       },
-      toolContext(root, shell),
+      toolContext(root, processes),
     );
     const summary = JSON.parse(result.output.split('\n')[0]!) as Record<
       string,
@@ -849,7 +957,7 @@ const agentToolContext: AgentToolContext = {
   runId: 'run-1',
   turnIndex: 0,
   toolCallId: 'call-1',
-  environment: {},
+  environment: createTestEnvironmentHandle(),
   metadata: {},
   signal: new AbortController().signal,
 };
@@ -880,9 +988,9 @@ function searchTool(name: 'grep' | 'glob', provider?: SearchProvider) {
 
 function searchContext(root: string): CodingToolContext {
   const fileSystem = testFileSystem(root);
+  const environment = createTestEnvironmentHandle(root);
   return {
     cwd: root,
-    allowedPaths: [root],
     sessionId: 'session',
     runId: 'run',
     callId: 'call',
@@ -890,58 +998,109 @@ function searchContext(root: string): CodingToolContext {
       runId: 'run',
       turnIndex: 0,
       toolCallId: 'call',
-      environment: { fileSystem },
+      environment: {
+        ...environment,
+        fileSystem,
+        processes: noNativeProcesses(),
+      },
       metadata: {},
       signal: new AbortController().signal,
     },
   };
 }
 
-function toolContext(root: string, shell: AgentShell): CodingToolContext {
+function toolContext(
+  root: string,
+  processes: EnvironmentProcesses,
+): CodingToolContext {
   const context = searchContext(root);
   return {
     ...context,
     agent: {
       ...context.agent,
-      environment: { ...context.agent.environment, shell },
+      environment: { ...context.agent.environment, processes },
     },
   };
 }
 
-function shellResult(
+function execResult(
   overrides: Partial<{
-    readonly exitCode: number;
+    readonly exitCode: number | null;
     readonly stdout: string;
     readonly stderr: string;
     readonly timedOut: boolean;
+    readonly signal: string | null;
+    readonly durationMs: number;
   }> = {},
-) {
+): ExecResult {
+  const stdout = overrides.stdout ?? '';
+  const stderr = overrides.stderr ?? '';
   return {
     exitCode: 0,
-    stdout: '',
-    stderr: '',
+    signal: null,
     timedOut: false,
+    durationMs: 1,
     ...overrides,
+    stdout: outputSnapshot(stdout),
+    stderr: outputSnapshot(stderr),
   };
 }
 
-function testFileSystem(root: string): AgentFileSystem & {
-  resolvePath(targetPath: string): string;
-  stat(targetPath: string): ReturnType<typeof stat>;
-} {
+function testFileSystem(root: string): EnvironmentFileSystem {
   const resolvePath = (targetPath: string): string =>
     path.isAbsolute(targetPath)
       ? path.resolve(targetPath)
       : path.resolve(root, targetPath);
   return {
     resolvePath,
+    readFile: (targetPath) => readFile(resolvePath(targetPath)),
     readText: (targetPath) => readFile(resolvePath(targetPath), 'utf8'),
+    async writeFile(targetPath, content) {
+      const resolved = resolvePath(targetPath);
+      await mkdir(path.dirname(resolved), { recursive: true });
+      await writeFile(resolved, content);
+    },
     async writeText(targetPath, content) {
       const resolved = resolvePath(targetPath);
       await mkdir(path.dirname(resolved), { recursive: true });
       await writeFile(resolved, content);
     },
     listDir: (targetPath) => readdir(resolvePath(targetPath)),
-    stat: (targetPath) => stat(resolvePath(targetPath)),
+    async stat(targetPath) {
+      const value = await stat(resolvePath(targetPath));
+      return {
+        kind: value.isDirectory()
+          ? 'directory'
+          : value.isFile()
+            ? 'file'
+            : value.isSymbolicLink()
+              ? 'symlink'
+              : 'other',
+        size: value.size,
+        modifiedAtMs: value.mtimeMs,
+      };
+    },
+    remove: (targetPath) => rm(resolvePath(targetPath)),
   };
+}
+
+function testProcesses(
+  exec: EnvironmentProcesses['exec'],
+): EnvironmentProcesses {
+  return { ...createTestEnvironmentHandle().processes, exec };
+}
+
+function noNativeProcesses(): EnvironmentProcesses {
+  return testProcesses(() =>
+    Promise.reject(
+      Object.assign(new Error('Native process unavailable.'), {
+        code: 'ENOENT',
+      }),
+    ),
+  );
+}
+
+function outputSnapshot(text: string) {
+  const data = Buffer.from(text);
+  return { data, totalBytes: data.byteLength, truncatedBytes: 0 };
 }

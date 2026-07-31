@@ -12,6 +12,7 @@ import {
   type CreateAgentOptions,
   type ModelInput,
 } from '../../src/features/agent/engine/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 const testTool = defineTool({
   name: 'noop',
@@ -38,7 +39,7 @@ function createTestAgent(
   return createAgent({
     ...options,
     modelCall,
-    environment: {},
+    environment: createTestEnvironmentHandle(),
     executionTools: [testTool],
     modelTools: [testTool],
   });

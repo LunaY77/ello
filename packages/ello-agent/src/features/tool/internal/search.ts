@@ -4,13 +4,12 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
-import { lstat, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { z } from 'zod';
 
-import type { AgentFileSystem } from '../../agent/engine/index.js';
 import type { CodingAgentConfig } from '../../config/index.js';
+import type { EnvironmentFileSystem } from '../../environment/index.js';
 import type { DecideApproval } from '../permissions/policy.js';
 
 import {
@@ -22,7 +21,12 @@ import {
   type SearchProvider,
   type SearchProviderMatch,
 } from './search-provider.js';
-import { requireFs, resolveRuntimePath, statRuntimePath } from './shared.js';
+import {
+  requireFs,
+  requireProcesses,
+  resolveRuntimePath,
+  statRuntimePath,
+} from './shared.js';
 
 const MAX_SEARCH_FILES = 100_000;
 
@@ -127,13 +131,15 @@ Use grep to find where text occurs; use glob to find paths by name without readi
         const resolved = resolveRuntimePath(fs, targetPath);
         const info = await statRuntimePath(fs, targetPath);
         // 单文件搜索以其所在目录为 root，输出仍是相对路径形式的 'path:line:text'。
-        const root = info.isDirectory() ? resolved : path.dirname(resolved);
+        const root =
+          info.kind === 'directory' ? resolved : path.dirname(resolved);
         const result = await searchFiles({
           fs,
+          processes: requireProcesses(ctx.agent),
           provider,
           root,
           pattern,
-          ...(info.isDirectory() ? {} : { file: resolved }),
+          ...(info.kind === 'directory' ? {} : { file: resolved }),
           ...(glob !== undefined ? { glob } : {}),
           limit,
           offset,
@@ -224,6 +230,7 @@ When more paths exist the result reports the next 'offset' so you can page witho
         const root = resolveRuntimePath(fs, targetPath);
         const files =
           (await provider.listFiles({
+            processes: requireProcesses(ctx.agent),
             root,
             ...(ctx.abortSignal === undefined
               ? {}
@@ -262,7 +269,8 @@ When more paths exist the result reports the next 'offset' so you can page witho
 }
 
 async function searchFiles(input: {
-  readonly fs: AgentFileSystem;
+  readonly fs: EnvironmentFileSystem;
+  readonly processes: ReturnType<typeof requireProcesses>;
   readonly provider: SearchProvider;
   readonly root: string;
   readonly pattern: string;
@@ -275,6 +283,7 @@ async function searchFiles(input: {
   readonly signal?: AbortSignal;
 }): Promise<SearchFilesResult> {
   const native = await input.provider.grep({
+    processes: input.processes,
     root: input.root,
     ...(input.file === undefined ? {} : { file: input.file }),
     pattern: input.pattern,
@@ -408,7 +417,7 @@ function renderSelectedSearchMatches(
 }
 
 async function hydrateProviderMatches(
-  fs: AgentFileSystem,
+  fs: EnvironmentFileSystem,
   matches: readonly SearchProviderMatch[],
 ): Promise<SearchMatch[]> {
   const contents = new Map<string, readonly string[]>();
@@ -460,10 +469,10 @@ function mergeLineRanges(
 }
 
 async function readSearchableFile(
-  fs: AgentFileSystem,
+  fs: EnvironmentFileSystem,
   filePath: string,
 ): Promise<string | undefined> {
-  const info = await stat(filePath);
+  const info = await fs.stat(filePath);
   if (info.size > 2 * 1024 * 1024) {
     return undefined;
   }
@@ -476,7 +485,7 @@ async function readSearchableFile(
 
 /** 递归遍历目录，跳过 node_modules/.git/dist，最多收集 limit 个文件。 */
 async function walk(
-  fs: AgentFileSystem,
+  fs: EnvironmentFileSystem,
   root: string,
   limit: number,
   signal?: AbortSignal,
@@ -494,12 +503,11 @@ async function walk(
         continue;
       }
       const fullPath = path.join(dir, entry);
-      const linkInfo = await lstat(fullPath);
-      if (linkInfo.isSymbolicLink()) {
+      const info = await statRuntimePath(fs, fullPath);
+      if (info.kind === 'symlink') {
         continue;
       }
-      const info = await statRuntimePath(fs, fullPath);
-      if (info.isDirectory()) {
+      if (info.kind === 'directory') {
         await visit(fullPath);
       } else {
         result.push(fullPath);
@@ -514,7 +522,7 @@ async function walk(
 }
 
 async function walkAllSearchFiles(
-  fs: AgentFileSystem,
+  fs: EnvironmentFileSystem,
   root: string,
   signal?: AbortSignal,
 ): Promise<string[]> {

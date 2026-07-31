@@ -35,10 +35,13 @@ export function createAgentFeature(
   const modelCompactors = new Map<string, ModelCompactor>();
   let closing = false;
 
-  const start = async (runInput: AgentRunRequest): Promise<AgentRun> => {
+  const start = async (
+    runInput: import('./contracts.js').AgentRunInput,
+  ): Promise<AgentRun> => {
     if (closing) throw new Error('Agent is closing.');
+    const request = agentRunRequest(runInput, input);
     const built = await buildAgent(
-      runInput,
+      request,
       input,
       modelCompactors.get(runInput.threadId),
     );
@@ -46,7 +49,7 @@ export function createAgentFeature(
       await built.close();
       throw new Error('Agent closed while a run was being built.');
     }
-    const run = startAgentRun(built, runInput);
+    const run = startAgentRun(built, request);
     activeRuns.add(run);
     const threadRuns = activeRunsByThread.get(runInput.threadId) ?? new Set();
     threadRuns.add(run);
@@ -91,10 +94,11 @@ export function createAgentFeature(
         return compactor.compact(compactInput);
       }
       if (closing) throw new Error('Agent is closing.');
-      const built = await buildAgent(compactInput.request, input);
+      const request = agentRunRequest(compactInput.request, input);
+      const built = await buildAgent(request, input);
       try {
         const result = await built.engine.compact({
-          contextMessages: compactInput.request.history,
+          contextMessages: request.history,
           messages: compactInput.messages,
           prompt: compactInput.prompt,
           signal: compactInput.signal,
@@ -150,6 +154,20 @@ export function createAgentFeature(
   };
 }
 
+function agentRunRequest(
+  input: import('./contracts.js').AgentRunInput,
+  dependencies: CreateAgentFeatureInput,
+): AgentRunRequest {
+  const { cwd, ...request } = input;
+  return {
+    ...request,
+    executionLocation: {
+      environmentRef: dependencies.runtime.defaultEnvironmentRef,
+      workingDirectory: cwd,
+    },
+  };
+}
+
 export type {
   AgentDelegationContext,
   AgentRunContextParts,
@@ -157,6 +175,7 @@ export type {
   AgentFeature,
   AgentInteraction,
   AgentRunGoal,
+  AgentRunInput,
   AgentRunSelection,
   AgentRunRequest,
   AgentResumeResult,
@@ -164,8 +183,6 @@ export type {
   AgentRunEvent,
   AgentRunResult,
   AgentRuntime,
-  AgentEnvironmentInput,
-  CreateAgentEnvironment,
   CreateAgentFeatureInput,
   CreateAgentTools,
   LoadAgentContext,

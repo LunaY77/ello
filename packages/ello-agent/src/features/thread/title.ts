@@ -14,6 +14,7 @@ import {
   loadCodingAgentConfig,
   type CodingAgentConfig,
 } from '../config/index.js';
+import type { EnvironmentHandle } from '../environment/index.js';
 import { createModelRegistry } from '../model/index.js';
 
 export interface ThreadTitleGenerator {
@@ -47,6 +48,9 @@ export interface ThreadTitleGenerator {
  */
 export function createThreadTitleGenerator(options: {
   readonly modelAdapter: ModelAdapter;
+  readonly attachEnvironment: (
+    workingDirectory: string,
+  ) => Promise<EnvironmentHandle>;
 }): ThreadTitleGenerator {
   return {
     async generate(snapshot, signal) {
@@ -65,6 +69,7 @@ export function createThreadTitleGenerator(options: {
         message: { role: 'user', content: firstUserMessage.text },
         config,
         modelAdapter: options.modelAdapter,
+        attachEnvironment: options.attachEnvironment,
         signal,
       });
     },
@@ -85,6 +90,9 @@ export async function generateThreadTitle(input: {
   readonly message: AgentMessage;
   readonly config: CodingAgentConfig;
   readonly modelAdapter: ModelAdapter;
+  readonly attachEnvironment: (
+    workingDirectory: string,
+  ) => Promise<EnvironmentHandle>;
   readonly signal?: AbortSignal;
 }): Promise<string | undefined> {
   if (input.snapshot.thread.name.trim() !== '') return undefined;
@@ -99,6 +107,7 @@ export async function generateThreadTitle(input: {
 
   const modelRegistry = createModelRegistry(input.config);
   const agentRegistry = await createAgentRegistry(input.config);
+  const environment = await input.attachEnvironment(input.config.cwd);
   let generated: string;
   try {
     generated = await runInternalAgent({
@@ -107,6 +116,7 @@ export async function generateThreadTitle(input: {
       config: input.config,
       modelRegistry,
       modelAdapter: input.modelAdapter,
+      environment,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
   } catch (error) {

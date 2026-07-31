@@ -500,7 +500,7 @@ export async function buildModelInput(run: RunState): Promise<ModelInput> {
  * 拼接 system 提示。
  *
  * 段落顺序为：内核指令 → 环境指令 → 配置注入的动态段落。
- * 环境指令通过统一的 `getInstructions(ctx)` 获取。所有非空段落以空行分隔
+ * 环境指令通过统一的 `getInstructions()` 获取。所有非空段落以空行分隔
  * 拼接，并回报段落计数。
  */
 async function buildInstructions(
@@ -510,9 +510,7 @@ async function buildInstructions(
   if (run.config.instructions) {
     sections.push(run.config.instructions);
   }
-  const environmentInstructions = await run.environment.getInstructions?.(
-    run.ctx,
-  );
+  const environmentInstructions = await run.environment.getInstructions();
   if (environmentInstructions) {
     sections.push(environmentInstructions);
   }

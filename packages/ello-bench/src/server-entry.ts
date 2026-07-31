@@ -40,7 +40,6 @@ const server = await startBenchmarkServer({
   root,
   socketPath,
   runtime: createBenchmarkAgentRuntime({
-    workspace,
     rawRoot,
     container: attachedContainer,
   }),

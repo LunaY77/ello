@@ -14,6 +14,7 @@ import {
   type AgentModelResponse,
   type EngineEvent,
 } from '../../src/features/agent/engine/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 const noopTool = defineTool({
   name: 'test_noop',
@@ -53,7 +54,7 @@ describe('model stream retry', () => {
           } as const;
         },
       },
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       executionTools: [noopTool],
       modelTools: [noopTool],
     });

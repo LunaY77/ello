@@ -32,7 +32,11 @@ import {
   AgentRunControl,
   DefaultAgentMessageQueue,
 } from '../../src/features/agent/engine/run-control.js';
-import { createLocalEnvironment } from '../../src/features/environment/index.js';
+import {
+  createLocalEnvironments,
+  LOCAL_HOST_ENVIRONMENT_REFERENCE,
+} from '../../src/features/environment/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 function defineTool<TInput, TOutput>(
   options: Omit<DefineToolOptions<TInput, TOutput>, 'discovery'> & {
@@ -53,8 +57,6 @@ const testTool = defineTool({
   input: z.object({}).strict(),
   execute: () => null,
 });
-
-const emptyTestEnvironment: CreateAgentOptions['environment'] = {};
 
 function createAgent(
   options: Omit<
@@ -78,7 +80,8 @@ function createAgent(
       protocol: 'openai',
       apiModel: 'model',
     },
-    environment: environment === undefined ? emptyTestEnvironment : environment,
+    environment:
+      environment === undefined ? createTestEnvironmentHandle() : environment,
     executionTools: executionTools ?? selected,
     modelTools: modelTools ?? selected,
   });
@@ -439,12 +442,16 @@ describe('createAgent', () => {
   it('uses local environment and returns the current run messages', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ello-agent-'));
     dirs.push(dir);
-    const environment = createLocalEnvironment({
-      cwd: dir,
-      allowedPaths: [dir],
-    });
-    await environment.fileSystem?.writeText('note.txt', 'content');
-    const entries = await environment.fileSystem?.listDir('.');
+    const environments = createLocalEnvironments();
+    const environment = await environments.attach(
+      {
+        environmentRef: LOCAL_HOST_ENVIRONMENT_REFERENCE,
+        workingDirectory: dir,
+      },
+      { isolation: 'none' },
+    );
+    await environment.fileSystem.writeText('note.txt', 'content');
+    const entries = await environment.fileSystem.listDir('.');
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: new EchoAdapter(),
@@ -455,7 +462,7 @@ describe('createAgent', () => {
           description: 'Read note file',
           input: z.object({ path: z.string() }),
           execute: ({ path }, ctx) =>
-            ctx.environment.fileSystem?.readText(path) ?? '',
+            ctx.environment.fileSystem.readText(path),
         }),
       ],
     });
@@ -467,6 +474,7 @@ describe('createAgent', () => {
       'assistant',
     ]);
     await agent.close();
+    await environments.close();
   });
 
   it('compacts the current input before the model call', async () => {
@@ -513,31 +521,23 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('runs environment lifecycle and resource instructions inside the agent loop', async () => {
+  it('uses Environment instructions and closes the attached Handle', async () => {
     const events: string[] = [];
     const requests: AgentModelRequest[] = [];
-    const environment = createLocalEnvironment({
-      cwd: process.cwd(),
-      allowedPaths: [process.cwd()],
-    });
-    environment.resources?.register('test-resource', {
-      setup: () => {
-        events.push('resource.setup');
+    const environments = createLocalEnvironments();
+    const attached = await environments.attach(
+      {
+        environmentRef: LOCAL_HOST_ENVIRONMENT_REFERENCE,
+        workingDirectory: process.cwd(),
       },
-      getContextInstructions: () => 'Resource instruction.',
-      close: () => {
-        events.push('resource.close');
-      },
-    });
-    const originalSetup = environment.setup?.bind(environment);
-    const originalClose = environment.close?.bind(environment);
-    environment.setup = async (ctx) => {
-      events.push(`setup:${ctx.runId.length > 0}`);
-      await originalSetup?.(ctx);
-    };
-    environment.close = async () => {
+      { isolation: 'none' },
+    );
+    const environment = {
+      ...attached,
+      close: async () => {
       events.push('close');
-      await originalClose?.();
+        await attached.close();
+      },
     };
     const agent = createAgent({
       model: 'test:model',
@@ -568,20 +568,24 @@ describe('createAgent', () => {
     });
 
     await agent.run('hi');
-    const shellResult = await environment.shell?.run('echo shell-ok');
+    const shellResult = await environment.processes.exec({
+      command: 'echo shell-ok',
+      maxRuntimeMs: 10_000,
+    });
     await agent.close();
 
-    expect(events[0]).toBe('setup:true');
-    expect(events).toContain('resource.setup');
     expect(events).toContain('run.started');
     expect(events).toContain('run.completed');
     expect(events).toContain('close');
-    expect(events).toContain('resource.close');
-    expect(shellResult?.stdout.trim()).toBe('shell-ok');
+    expect(Buffer.from(shellResult.stdout.data).toString('utf8').trim()).toBe(
+      'shell-ok',
+    );
     expect(requests[0]?.instructions).toContain('<environment-context>');
-    expect(requests[0]?.instructions).toContain('<file-system>');
-    expect(requests[0]?.instructions).toContain('<shell>');
-    expect(requests[0]?.instructions).toContain('Resource instruction.');
+    expect(requests[0]?.instructions).toContain('<working-directory>');
+    await expect(environment.fileSystem.listDir('.')).rejects.toThrow(
+      'Environment Handle is closed',
+    );
+    await environments.close();
   });
 
   it('drains message queues in stable modes and run-control order', () => {

@@ -18,6 +18,7 @@ import type { SessionModeState } from '../permissions/session-mode.js';
 import type { PermissionRule } from '../permissions/types.js';
 
 import { createFsTools } from './fs.js';
+import { createProcessTools } from './process.js';
 import { adaptCodingTools } from './runtime/adapter.js';
 import type { AnyCodingTool } from './runtime/coding-tool.js';
 import { ShellCommandHistory } from './runtime/command-history.js';
@@ -120,6 +121,7 @@ export function createCodingTools(
     ...createFsTools(config, decide, fileState),
     ...createSearchTools(config, decide),
     ...createShellTools(config, decide),
+    ...createProcessTools(config, decide),
     ...createWorkspaceSnapshotTools(config, decide),
     ...(options.additionalTools ?? []),
   ];

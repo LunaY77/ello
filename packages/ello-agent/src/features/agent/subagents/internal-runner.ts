@@ -5,6 +5,7 @@
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
 import type { CodingAgentConfig } from '../../config/index.js';
+import type { EnvironmentHandle } from '../../environment/index.js';
 import {
   modelInputBudgetFromRuntimeModel,
   modelSettingsFromRuntimeModel,
@@ -40,6 +41,7 @@ export async function runInternalAgent(input: {
   readonly config: CodingAgentConfig;
   readonly modelRegistry: ModelRegistry;
   readonly modelAdapter: ModelAdapter;
+  readonly environment: EnvironmentHandle;
   readonly signal?: AbortSignal;
 }): Promise<string> {
   const model = input.modelRegistry.resolveSelector(input.definition.model);
@@ -56,36 +58,37 @@ export async function runInternalAgent(input: {
       .strict(),
     execute: ({ output }) => output,
   });
-  const agent = createAgent({
-    name: `ello-${input.definition.name}`,
-    model: input.modelRegistry.resolveLanguageModel(model.name),
-    modelCall: {
-      agentName: input.definition.name,
-      modelSelector: input.definition.model,
-      configuredModel: model.name,
-      protocol: model.protocol,
-      apiModel: model.apiModel,
-    },
-    modelAdapter: input.modelAdapter,
-    environment: {},
-    modelSettings: modelSettingsFromRuntimeModel(model),
-    modelInputBudget,
-    executionTools: [complete],
-    modelTools: [complete],
-    ...(input.definition.prompt === undefined
-      ? {}
-      : { instructions: input.definition.prompt }),
-    modelInput: {
-      providerOptions: () => providerOptionsFromRuntimeModel(model),
-      prepare: (modelInput: ModelInput) =>
-        prepareModelInputForRuntimeModel(model, modelInput, {
-          promptProfile: `internal:${input.definition.name}`,
-          cwdIdentity: input.config.cwd,
-        }),
-    },
-    metadata: { internal: true, agentName: input.definition.name },
-  });
+  let agent: ReturnType<typeof createAgent> | undefined;
   try {
+    agent = createAgent({
+      name: `ello-${input.definition.name}`,
+      model: input.modelRegistry.resolveLanguageModel(model.name),
+      modelCall: {
+        agentName: input.definition.name,
+        modelSelector: input.definition.model,
+        configuredModel: model.name,
+        protocol: model.protocol,
+        apiModel: model.apiModel,
+      },
+      modelAdapter: input.modelAdapter,
+      environment: input.environment,
+      modelSettings: modelSettingsFromRuntimeModel(model),
+      modelInputBudget,
+      executionTools: [complete],
+      modelTools: [complete],
+      ...(input.definition.prompt === undefined
+        ? {}
+        : { instructions: input.definition.prompt }),
+      modelInput: {
+        providerOptions: () => providerOptionsFromRuntimeModel(model),
+        prepare: (modelInput: ModelInput) =>
+          prepareModelInputForRuntimeModel(model, modelInput, {
+            promptProfile: `internal:${input.definition.name}`,
+            cwdIdentity: input.config.cwd,
+          }),
+      },
+      metadata: { internal: true, agentName: input.definition.name },
+    });
     const result = await agent.run(input.prompt, {
       ...(input.definition.maxTurns === undefined
         ? {}
@@ -99,6 +102,7 @@ export async function runInternalAgent(input: {
     }
     return result.output;
   } finally {
-    await agent.close();
+    if (agent === undefined) await input.environment.close();
+    else await agent.close();
   }
 }

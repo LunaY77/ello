@@ -15,6 +15,7 @@ import {
   resolveMcpConfigPath,
 } from '../../src/features/mcp/index.js';
 import type { CodingToolContext } from '../../src/features/tool/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 const temporaryDirectories: string[] = [];
 const managers: McpManager[] = [];
@@ -190,7 +191,6 @@ function requiredTool(
 function toolContext(root: string): CodingToolContext {
   return {
     cwd: root,
-    allowedPaths: [root],
     sessionId: 'mcp-session',
     runId: 'mcp-run',
     callId: 'mcp-call',
@@ -198,7 +198,7 @@ function toolContext(root: string): CodingToolContext {
       runId: 'mcp-run',
       turnIndex: 0,
       toolCallId: 'mcp-call',
-      environment: {},
+      environment: createTestEnvironmentHandle(),
       metadata: {},
       signal: new AbortController().signal,
     },

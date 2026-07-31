@@ -10,7 +10,10 @@ import { parseArgs } from 'node:util';
 
 import { createApp } from './app.js';
 import type { AgentRuntime } from './features/agent/contracts.js';
-import { createRuntimeEnvironment } from './features/environment/index.js';
+import {
+  createLocalEnvironments,
+  LOCAL_HOST_ENVIRONMENT_REFERENCE,
+} from './features/environment/index.js';
 import { createTurnTracing } from './infra/telemetry/turn-tracing.js';
 import type { Capability } from './protocol/v1/index.js';
 import {
@@ -118,14 +121,9 @@ function configureAiSdkWarningLogging(): void {
 
 function createProductionAgentRuntime(): AgentRuntime {
   return {
-    createEnvironment: ({ config, permission, mode, skillReadRoots }) =>
-      createRuntimeEnvironment(
-        config,
-        () => permission.rules(),
-        () => permission.externalPaths(),
-        mode,
-        skillReadRoots,
-      ),
+    environments: createLocalEnvironments(),
+    defaultEnvironmentRef: LOCAL_HOST_ENVIRONMENT_REFERENCE,
+    environmentGrant: { isolation: 'none' },
     createTracing: ({ config, threadId }) =>
       createTurnTracing(config.observability?.langfuse, threadId),
   };

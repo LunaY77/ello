@@ -5,7 +5,7 @@
  * 其他工具使用独占锁。已有写操作排队时，后来的读操作不能插队，避免写操作一直得不到执行。
  */
 
-import type { AgentEnvironment } from './contracts.js';
+import type { EnvironmentHandle } from '../../environment/index.js';
 
 interface GateWaiter {
   readonly mode: 'shared' | 'exclusive';
@@ -18,11 +18,11 @@ interface GateWaiter {
   abortListener?: () => void;
 }
 
-const environmentGates = new WeakMap<AgentEnvironment, ToolExecutionGate>();
+const environmentGates = new WeakMap<EnvironmentHandle, ToolExecutionGate>();
 
 /** 返回当前运行环境共享的工具执行锁。 */
 export function toolExecutionGateFor(
-  environment: AgentEnvironment,
+  environment: EnvironmentHandle,
 ): ToolExecutionGate {
   const existing = environmentGates.get(environment);
   if (existing !== undefined) return existing;

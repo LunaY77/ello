@@ -5,21 +5,22 @@
  * typecheck 失败，避免产品状态渗入通用 engine。
  */
 import type { ThreadSnapshot } from '../../protocol/v1/index.js';
+import type { EnvironmentHandle } from '../environment/index.js';
 
 import type {
   AgentRunEvent,
+  AgentRunInput,
   AgentRunRequest,
   AgentRunResult,
 } from './contracts.js';
 import type {
-  AgentEnvironment,
   AgentRunResult as EngineAgentRunResult,
   AgentUsage,
   CreateAgentOptions,
 } from './engine/index.js';
 
 type EnvironmentIsRequired = CreateAgentOptions extends {
-  readonly environment: AgentEnvironment;
+  readonly environment: EnvironmentHandle;
 }
   ? true
   : false;
@@ -51,9 +52,19 @@ const request = {
     rules: () => [],
     externalPaths: () => [],
   },
+} satisfies AgentRunInput;
+
+request satisfies AgentRunInput;
+
+const locatedRequest = {
+  ...request,
+  executionLocation: {
+    environmentRef: 'local-host',
+    workingDirectory: request.cwd,
+  },
 } satisfies AgentRunRequest;
 
-request satisfies AgentRunRequest;
+locatedRequest satisfies AgentRunRequest;
 
 const productResult = {
   status: 'completed',

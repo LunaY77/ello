@@ -42,10 +42,20 @@ export async function buildAgent(
     definition,
     context,
   });
-  const tracing = dependencies.runtime.createTracing({
-    config: definition.config,
-    threadId: request.threadId,
-  });
+  const environment = await dependencies.runtime.environments.attach(
+    request.executionLocation,
+    dependencies.runtime.environmentGrant,
+  );
+  let tracing;
+  try {
+    tracing = dependencies.runtime.createTracing({
+      config: definition.config,
+      threadId: request.threadId,
+    });
+  } catch (error) {
+    await environment.close();
+    throw error;
+  }
   let engine: Agent;
   try {
     const compactor = dependencies.createCompactor({
@@ -61,12 +71,7 @@ export async function buildAgent(
       ...(definition.definition.prompt === undefined
         ? {}
         : { instructions: definition.definition.prompt }),
-      environment: dependencies.runtime.createEnvironment({
-        config: definition.config,
-        permission: request.permission,
-        mode: tools.mode,
-        skillReadRoots: context.readRoots,
-      }),
+      environment,
       executionTools: tools.executionTools,
       modelTools: tools.modelTools,
       compactor,
@@ -91,11 +96,16 @@ export async function buildAgent(
         providerOptions: model.providerOptions,
         prepare: model.prepareModelInput,
       },
-      metadata: { threadId: request.threadId, cwd: definition.config.cwd },
+      metadata: {
+        threadId: request.threadId,
+        cwd: request.executionLocation.workingDirectory,
+        environmentRef: request.executionLocation.environmentRef,
+        environmentGeneration: environment.generation,
+      },
     });
   } catch (error) {
     try {
-      await tracing.close();
+      await Promise.all([tracing.close(), environment.close()]);
     } catch (closeError) {
       throw new AggregateError(
         [error, closeError],

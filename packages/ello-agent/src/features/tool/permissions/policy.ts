@@ -38,7 +38,13 @@ import type {
 export type DecideApproval = (
   descriptor: PermissionDescriptor,
   ctx: AgentToolContext,
+  options?: DecideApprovalOptions,
 ) => AgentApprovalDecision;
+
+export interface DecideApprovalOptions {
+  /** 只判定路径是否已获 external_directory 授权，不判定工具自身权限。 */
+  readonly externalPathsOnly?: boolean;
+}
 
 /**
  * 执行 工具 `policy` 模块 定义的 `ApprovalFor` 领域操作，输入和副作用均受该边界约束。
@@ -77,7 +83,11 @@ export function makeApprovalPolicy(
   mode: () => SessionModeState,
   readRoots: () => readonly string[] = () => [],
 ): DecideApproval {
-  return (descriptor: PermissionDescriptor): AgentApprovalDecision => {
+  return (
+    descriptor: PermissionDescriptor,
+    _ctx: AgentToolContext,
+    options: DecideApprovalOptions = {},
+  ): AgentApprovalDecision => {
     assertDescriptor(descriptor);
     const currentMode = mode().mode;
     const boundaryRules = dynamicRules().filter(
@@ -86,6 +96,7 @@ export function makeApprovalPolicy(
     const externalDirs = externalPaths(
       config.cwd,
       descriptor.paths ?? [],
+      config.allowed_paths,
       descriptor.permission === 'read' || descriptor.permission === 'search'
         ? readRoots()
         : [],
@@ -94,11 +105,8 @@ export function makeApprovalPolicy(
     if (
       descriptor.patterns.some(
         (pattern) =>
-          evaluatePermission(
-            boundaryRules,
-            descriptor.permission,
-            pattern,
-          ) === 'deny',
+          evaluatePermission(boundaryRules, descriptor.permission, pattern) ===
+          'deny',
       ) ||
       externalDirs.some(
         (externalDir) =>
@@ -150,7 +158,7 @@ export function makeApprovalPolicy(
             : undefined,
         );
       }
-      if (action === 'ask') {
+      if (action === 'ask' && options.externalPathsOnly !== true) {
         needsApproval = true;
       }
     }
@@ -300,6 +308,7 @@ function derivePermission(toolName: string): string {
 function externalPaths(
   cwd: string,
   targets: readonly string[],
+  authorizedRoots: readonly string[],
   readRoots: readonly string[],
 ): string[] {
   return [
@@ -307,8 +316,17 @@ function externalPaths(
       targets.filter(
         (target) =>
           isExternalPath(cwd, target) &&
+          !authorizedRoots.some((root) =>
+            isPathInside(
+              resolveAbsolute(cwd, root),
+              resolveAbsolute(cwd, target),
+            ),
+          ) &&
           !readRoots.some((root) =>
-            isPathInside(root, resolveAbsolute(cwd, target)),
+            isPathInside(
+              resolveAbsolute(cwd, root),
+              resolveAbsolute(cwd, target),
+            ),
           ),
       ),
     ),

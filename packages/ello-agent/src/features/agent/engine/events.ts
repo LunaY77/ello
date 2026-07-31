@@ -6,7 +6,6 @@
  */
 import type {
   AgentError,
-  AgentEnvironment,
   AgentFinishReason,
   AgentRunContext,
   AgentRunResult,
@@ -681,22 +680,4 @@ async function emitSingleObserverEvent(
       event satisfies never;
       throw new Error(`Unhandled observer event: ${String(event)}`);
   }
-}
-
-/**
- * 执行 产品 Agent Agent engine 事件 模块 定义的 `closeAgentResources` 领域操作，输入和副作用均受该边界约束。
- *
- * Args:
- * - `environment`: 调用方拥有的运行上下文；本函数仅在调用生命周期内读取或调用其公开能力。
- *
- * Returns:
- * - Promise 在 产品 Agent Agent engine 事件 模块 的异步副作用完整提交后兑现，不返回业务值。
- *
- * Throws:
- * - 当 产品 Agent Agent engine 事件 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
- */
-export async function closeAgentResources(
-  environment: AgentEnvironment,
-): Promise<void> {
-  await environment.close?.();
 }

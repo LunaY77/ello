@@ -4,7 +4,6 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
-import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { z } from 'zod';
@@ -14,7 +13,11 @@ import type { CodingAgentConfig } from '../../config/index.js';
 import type { DecideApproval } from '../permissions/policy.js';
 import type { PermissionMetadata } from '../permissions/types.js';
 
-import { parseApplyPatch, prepareApplyPatch } from './apply-patch.js';
+import {
+  applyPatchPaths,
+  parseApplyPatch,
+  prepareApplyPatch,
+} from './apply-patch.js';
 import { createFileChange, summarizeFileChanges } from './file-change.js';
 import {
   createCodingToolResult,
@@ -31,8 +34,8 @@ import {
 /**
  * 文件系统工具：read / write / edit / apply_patch。
  *
- * IO 与 allowedPaths 边界检查全部委托给 `ctx.environment.fileSystem`，
- * 工具本身只负责产品化输出（行号、diff、字节数）和声明审批策略。
+ * IO 全部委托给 `ctx.environment.fileSystem`，coding scope 由工具声明的路径进入
+ * Tool Policy 判定；工具本身只负责产品化输出（行号、diff、字节数）。
  *
  * Args:
  * - `config`: 已解析的稳定配置；作为装配输入读取，函数不在原对象上写入状态。
@@ -61,7 +64,7 @@ export function createFsTools(
       }),
       description: `Read a UTF-8 text file, or list one directory, at 'filePath'.
 File output is line-numbered in a right-aligned gutter followed by two spaces; the gutter is display only, so never copy it into edit or apply_patch. 'offset' is the 1-based first line or directory entry and 'limit' the maximum number of lines or entries, default 400 and at most 2000; the result reports the returned range and total count so you can page with successive offsets. Re-reading the same unchanged file range returns a short unchanged marker instead of duplicating content already present in the thread. A directory path returns a sorted, non-recursive listing of 'name<TAB>kind<TAB>size'. A binary file returns a byte count and is attached as an artifact rather than inlined.
-A missing path, an unreadable path, or a path outside the allowed roots fails the call. Very long output is centrally reduced to a bounded head/tail preview while the complete result is retained as an artifact.
+A missing or unreadable path fails the call. Reading outside the configured coding scope requires Tool Policy approval. Very long output is centrally reduced to a bounded head/tail preview while the complete result is retained as an artifact.
 Read a file before editing it: edit and apply_patch match text literally, so they need the exact current content. Use grep to find which file contains some text, and glob to find files by name. Put independent read, grep, and glob calls directly in the same model response; the runtime schedules safe calls concurrently without a wrapper tool.`,
       discovery: { aliases: ['file', 'directory', 'cat'], risk: 'readonly' },
       input: z
@@ -100,7 +103,7 @@ Read a file before editing it: edit and apply_patch match text literally, so the
         const fs = requireFs(ctx.agent);
         const absolutePath = resolveRuntimePath(fs, targetPath);
         const info = await statRuntimePath(fs, targetPath);
-        if (info.isDirectory()) {
+        if (info.kind === 'directory') {
           const entries = await fs.listDir(targetPath);
           entries.sort((left, right) => left.localeCompare(right));
           const selectedEntries = entries.slice(offset - 1, offset - 1 + limit);
@@ -110,10 +113,7 @@ Read a file before editing it: edit and apply_patch match text literally, so the
                 fs,
                 path.join(targetPath, entry),
               );
-              const entryStat = await stat(
-                resolveRuntimePath(fs, path.join(targetPath, entry)),
-              );
-              return `${entry}\t${entryInfo.isDirectory() ? 'directory' : 'file'}\t${entryStat.size}`;
+              return `${entry}\t${entryInfo.kind}\t${entryInfo.size}`;
             }),
           );
           const nextOffset =
@@ -138,8 +138,12 @@ Read a file before editing it: edit and apply_patch match text literally, so the
             },
           });
         }
-        const sourceStat = await stat(absolutePath);
-        const cached = fileState.unchanged(absolutePath, sourceStat, {
+        const sourceStat = await fs.stat(targetPath);
+        const sourceVersion = {
+          mtimeMs: sourceStat.modifiedAtMs,
+          size: sourceStat.size,
+        };
+        const cached = fileState.unchanged(absolutePath, sourceVersion, {
           offset,
           limit,
         });
@@ -159,7 +163,7 @@ Read a file before editing it: edit and apply_patch match text literally, so the
             },
           });
         }
-        const stableRead = await readStableFile(absolutePath, sourceStat);
+        const stableRead = await readStableFile(fs, targetPath, sourceVersion);
         const buffer = stableRead.buffer;
         if (isBinary(buffer)) {
           return createCodingToolResult({
@@ -176,7 +180,7 @@ Read a file before editing it: edit and apply_patch match text literally, so the
               {
                 type: 'binary',
                 mime: 'application/octet-stream',
-                path: absolutePath,
+                content: buffer.toString('base64'),
                 name: targetPath,
                 bytes: buffer.byteLength,
               },
@@ -230,7 +234,7 @@ Read a file before editing it: edit and apply_patch match text literally, so the
       name: 'write',
       description: `Create a new file, or replace an existing file whole, with 'content' as its complete new text.
 Use this for new files. Do not use it to change a file that already exists just to alter a few lines: sending a whole file costs output proportional to its size and loses the rest of the file if your copy is stale. Use edit for one fragment and apply_patch for several fragments or several files.
-Overwriting an existing file requires 'expectedContent' to equal its current content exactly; the call fails when 'expectedContent' is missing or stale, which means re-read the file. Parent directories are created as needed. Writing outside the allowed roots fails, and the call requires approval unless the session runs in bypass or accept-edits mode.`,
+Overwriting an existing file requires 'expectedContent' to equal its current content exactly; the call fails when 'expectedContent' is missing or stale, which means re-read the file. Parent directories are created as needed. Writing outside the configured coding scope requires Tool Policy approval; the Environment itself does not claim that scope as an isolation boundary.`,
       discovery: {
         aliases: ['create file', 'overwrite file'],
         risk: 'workspace-write',
@@ -251,17 +255,17 @@ Overwriting an existing file requires 'expectedContent' to equal its current con
             .describe('Reason for writing this file'),
         })
         .strict(),
-      approval: async (input, ctx) =>
-        decide(
-          {
-            permission: 'edit',
-            patterns: [input.filePath],
-            always: [input.filePath],
-            paths: [input.filePath],
-            metadata: await writeMetadata(input, ctx.agent),
-          },
+      approval: async (input, ctx) => {
+        const descriptor = editDescriptor([input.filePath]);
+        const pathDecision = decide(descriptor, ctx.agent, {
+          externalPathsOnly: true,
+        });
+        if (pathDecision !== 'auto') return pathDecision;
+        return decide(
+          { ...descriptor, metadata: await writeMetadata(input, ctx.agent) },
           ctx.agent,
-        ),
+        );
+      },
       execute: async (
         { filePath: targetPath, content, expectedContent, reason },
         ctx,
@@ -312,17 +316,17 @@ Boundaries: use write only to create a new file or to replace a file whole; use 
           reason: z.string().optional().describe('Reason for this edit'),
         })
         .strict(),
-      approval: async (input, ctx) =>
-        decide(
-          {
-            permission: 'edit',
-            patterns: [input.filePath],
-            always: [input.filePath],
-            paths: [input.filePath],
-            metadata: await editMetadata(input, ctx.agent),
-          },
+      approval: async (input, ctx) => {
+        const descriptor = editDescriptor([input.filePath]);
+        const pathDecision = decide(descriptor, ctx.agent, {
+          externalPathsOnly: true,
+        });
+        if (pathDecision !== 'auto') return pathDecision;
+        return decide(
+          { ...descriptor, metadata: await editMetadata(input, ctx.agent) },
           ctx.agent,
-        ),
+        );
+      },
       execute: async (
         { filePath: targetPath, oldText, newText, reason },
         ctx,
@@ -383,17 +387,17 @@ Boundaries: use write to create a single new file, edit for one fragment in one 
         })
         .strict(),
       approval: async (input, ctx) => {
-        const fs = requireFs(ctx.agent);
-        const prepared = await prepareApplyPatch(
-          fs,
-          parseApplyPatch(input.patch),
-        );
+        const patch = parseApplyPatch(input.patch);
+        const paths = applyPatchPaths(patch);
+        const descriptor = editDescriptor(paths);
+        const pathDecision = decide(descriptor, ctx.agent, {
+          externalPathsOnly: true,
+        });
+        if (pathDecision !== 'auto') return pathDecision;
+        const prepared = await prepareApplyPatch(requireFs(ctx.agent), patch);
         return decide(
           {
-            permission: 'edit',
-            patterns: prepared.paths,
-            always: prepared.paths,
-            paths: prepared.paths,
+            ...descriptor,
             metadata: {
               kind: 'edit',
               path: prepared.paths.join(', '),
@@ -424,19 +428,34 @@ Boundaries: use write to create a single new file, edit for one fragment in one 
   ];
 }
 
+function editDescriptor(paths: readonly string[]) {
+  return {
+    permission: 'edit',
+    patterns: paths,
+    always: paths,
+    paths,
+    metadata: {
+      kind: 'edit' as const,
+      path: paths.join(', '),
+    },
+  };
+}
+
 interface FileVersion {
   readonly mtimeMs: number;
   readonly size: number;
 }
 
 async function readStableFile(
-  absolutePath: string,
+  fs: ReturnType<typeof requireFs>,
+  targetPath: string,
   initialVersion: FileVersion,
 ): Promise<{ readonly buffer: Buffer; readonly version: FileVersion }> {
   let before = initialVersion;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const buffer = await readFile(absolutePath);
-    const after = await stat(absolutePath);
+    const buffer = Buffer.from(await fs.readFile(targetPath));
+    const stat = await fs.stat(targetPath);
+    const after = { mtimeMs: stat.modifiedAtMs, size: stat.size };
     if (
       before.mtimeMs === after.mtimeMs &&
       before.size === after.size &&
@@ -446,7 +465,7 @@ async function readStableFile(
     }
     before = after;
   }
-  throw new Error(`File changed while it was being read: ${absolutePath}`);
+  throw new Error(`File changed while it was being read: ${targetPath}`);
 }
 
 /**

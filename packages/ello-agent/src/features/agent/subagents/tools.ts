@@ -117,7 +117,7 @@ function createDelegateTool(
       context.signal.throwIfAborted();
       const authorizedRoots = authorizedChildRoots(input);
       const cwd = resolveChildCwd(
-        input.request.cwd,
+        input.request.executionLocation.workingDirectory,
         toolInput.cwd,
         cwdPolicy(input.definition.config),
         authorizedRoots,
@@ -321,7 +321,7 @@ function authorizedChildRoots(input: {
   readonly request: AgentRunRequest;
   readonly definition: ResolvedAgentDefinition;
 }): readonly string[] {
-  const parentCwd = input.request.cwd;
+  const parentCwd = input.request.executionLocation.workingDirectory;
   const permissionRoots = input.request.permission
     .rules()
     .filter(

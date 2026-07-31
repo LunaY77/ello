@@ -6,12 +6,17 @@
  */
 import type { SessionMode } from '../../protocol/v1/index.js';
 import type { CodingAgentConfig, PermissionRule } from '../config/index.js';
+import type {
+  EnvironmentGrant,
+  EnvironmentReference,
+  Environments,
+  ExecutionLocation,
+} from '../environment/index.js';
 
 import type { ContextSourceLoadResult } from './context/source-registry.js';
 import type {
   Agent as EngineAgent,
   AgentEventRecorder,
-  AgentEnvironment,
   AgentMessage,
   AgentModel,
   AgentProviderOptions,
@@ -248,8 +253,8 @@ export interface AgentRun {
   resume(result: AgentResumeResult): void;
 }
 
-/** Thread 启动产品 Agent 所需的完整稳定快照；运行期间不得反向修改 Thread 状态。 */
-export interface AgentRunRequest {
+/** Thread 启动产品 Agent 所需的稳定输入；Environment Reference 由 Agent Application 补齐。 */
+export interface AgentRunInput {
   readonly threadId: string;
   readonly turnId: string;
   readonly cwd: string;
@@ -261,6 +266,11 @@ export interface AgentRunRequest {
   readonly goal: AgentRunGoal | null;
   readonly permission: PermissionSessionView;
   readonly delegation?: AgentDelegationContext;
+}
+
+/** Agent Application 完成 Environment 定位后的内部运行请求。 */
+export interface AgentRunRequest extends Omit<AgentRunInput, 'cwd'> {
+  readonly executionLocation: ExecutionLocation;
 }
 
 export interface PermissionSessionView {
@@ -349,7 +359,7 @@ export interface AgentFeature {
    * Throws:
    * - definition、model、tool 或 tracing 装配失败时直接拒绝，不返回部分 run。
    */
-  startRun(input: AgentRunRequest): Promise<AgentRun>;
+  startRun(input: AgentRunInput): Promise<AgentRun>;
   /**
    * 使用指定 Thread 已保留的主 Agent 模型上下文执行压缩。
    *
@@ -360,7 +370,7 @@ export interface AgentFeature {
    * - 返回主模型生成的 checkpoint 文本和该模型调用的 usage。
    */
   compact(input: {
-    readonly request: AgentRunRequest;
+    readonly request: AgentRunInput;
     readonly messages: ReadonlyArray<AgentMessage>;
     readonly prompt: string;
     readonly signal: AbortSignal;
@@ -434,46 +444,10 @@ export type CreateAgentTracing = (input: {
   readonly threadId: string;
 }) => AgentTracing;
 
-export interface AgentEnvironmentInput {
-  readonly config: CodingAgentConfig;
-  readonly permission: PermissionSessionView;
-  /**
-   * 每次 I/O 前读取当前 session mode。
-   *
-   * Args:
-   * - 无：mode 由当前 run 的工具运行时持有。
-   *
-   * Returns:
-   * - 返回与工具审批策略相同的当前 mode。
-   */
-  readonly mode: () => SessionMode;
-  /**
-   * 读取当前 run 已加载 Skill 的只读根目录。
-   *
-   * Args:
-   * - 无：根目录由当前 run 的 context 持有。
-   *
-   * Returns:
-   * - 返回当前 Skill 内容可读取的路径快照。
-   */
-  readonly skillReadRoots: () => ReadonlyArray<string>;
-}
-
-/**
- * 为指定 run 创建文件系统、shell 和资源生命周期环境。
- *
- * Args:
- * - `input`: 已解析配置、当前 permission view 和动态 Skill 只读根。
- *
- * Returns:
- * - 返回与单次 Agent run 生命周期一致的环境。
- */
-export type CreateAgentEnvironment = (
-  input: AgentEnvironmentInput,
-) => AgentEnvironment;
-
 export interface AgentRuntime {
-  readonly createEnvironment: CreateAgentEnvironment;
+  readonly environments: Environments;
+  readonly defaultEnvironmentRef: EnvironmentReference;
+  readonly environmentGrant: EnvironmentGrant;
   readonly createTracing: CreateAgentTracing;
 }
 

@@ -14,6 +14,7 @@ import type {
 import { contentAttributes } from '../../src/infra/telemetry/content-policy.js';
 import { createLangfuseEventRecorder } from '../../src/infra/telemetry/langfuse-recorder.js';
 import type { LangfuseTracingRuntime } from '../../src/infra/telemetry/langfuse-runtime.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 const occurredAt = '2026-07-19T00:00:00.000Z';
 const diagnostics = {
@@ -228,7 +229,7 @@ function runContext(): AgentRunContext<unknown> {
     agentName: 'build',
     input: 'observe',
     options: {},
-    environment: {},
+    environment: createTestEnvironmentHandle(),
     metadata: {},
     context: undefined,
     signal: new AbortController().signal,
