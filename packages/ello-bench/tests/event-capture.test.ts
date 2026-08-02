@@ -237,6 +237,30 @@ describe('event capture', () => {
     );
   });
 
+  it('maps a mounted container event path to the marker-adjacent host file', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'ello-bench-events-'));
+    directories.push(directory);
+    await writeCapture(directory, 'thr_main');
+    const eventLogPath = path.join(directory, 'engine-events-thr_main.jsonl');
+    const completePath = `${eventLogPath}.complete.json`;
+    const marker = JSON.parse(await readFile(completePath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await writeFile(
+      completePath,
+      JSON.stringify({
+        ...marker,
+        eventLogPath: '/tmp/ello-bench/raw-agent/adapter/engine-events-thr_main.jsonl',
+      }),
+      'utf8',
+    );
+
+    await expect(validateEventEvidence(directory)).resolves.toMatchObject({
+      main: { threadId: 'thr_main', eventLogPath },
+    });
+  });
+
   it('rejects captures whose thread id has an unknown prefix', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'ello-bench-events-'));
     directories.push(directory);

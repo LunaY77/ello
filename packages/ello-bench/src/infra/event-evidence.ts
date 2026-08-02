@@ -61,10 +61,16 @@ async function validateCapture(
   const complete = EventCaptureCompleteSchema.parse(
     JSON.parse(await readFile(completePath, 'utf8')) as unknown,
   );
-  const eventLogPath = path.resolve(complete.eventLogPath);
-  if (path.dirname(eventLogPath) !== path.resolve(rawRoot)) {
-    throw new Error(`Event log is outside raw root: ${eventLogPath}`);
+  const expectedName = path.basename(
+    completePath,
+    '.complete.json',
+  );
+  if (path.basename(complete.eventLogPath) !== expectedName) {
+    throw new Error(
+      `Event capture marker path does not match its log: ${complete.eventLogPath}`,
+    );
   }
+  const eventLogPath = path.join(path.resolve(rawRoot), expectedName);
   const content = await readFile(eventLogPath);
   if (sha256(content) !== complete.sha256) {
     throw new Error(`Event capture checksum mismatch: ${eventLogPath}`);
@@ -114,7 +120,7 @@ async function validateCapture(
         : `Event sequence has a gap: expected ${index + 1}, received ${sequence}.`,
     );
   }
-  return complete;
+  return { ...complete, eventLogPath };
 }
 
 function threadIdFromMarker(name: string): string {

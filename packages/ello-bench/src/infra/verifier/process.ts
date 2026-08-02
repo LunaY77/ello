@@ -136,7 +136,7 @@ export function verifierContainerSpec(
       { host: options.tests, container: '/tests', readOnly: true },
       { host: options.logs, container: '/logs' },
     ],
-    network: task.environment.allowInternet ? 'bridge' : 'none',
+    network: 'bridge',
     cpus: task.environment.cpus,
     memoryMb: task.environment.memoryMb,
     storageMb: task.environment.storageMb,

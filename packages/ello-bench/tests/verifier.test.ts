@@ -71,10 +71,10 @@ describe('verifier container contract', () => {
     ]);
   });
 
-  it('enforces task network and resource limits', () => {
+  it('keeps verifier dependency resolution online and enforces resource limits', () => {
     const spec = verifierContainerSpec(options, 'ello-bench-abc-verify');
 
-    expect(spec.network).toBe('none');
+    expect(spec.network).toBe('bridge');
     expect(spec.cpus).toBe(2);
     expect(spec.memoryMb).toBe(8192);
     expect(spec.storageMb).toBe(20480);
