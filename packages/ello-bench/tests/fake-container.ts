@@ -19,6 +19,10 @@ export class FakeContainerHandle implements ContainerHandle {
     limitBytes: Number.MAX_SAFE_INTEGER,
     intervalMs: 10_000,
   };
+  readonly executions: Array<{
+    readonly command: readonly string[];
+    readonly cwd: string;
+  }> = [];
 
   constructor(
     private readonly hostWorkspace: string,
@@ -26,6 +30,7 @@ export class FakeContainerHandle implements ContainerHandle {
   ) {}
 
   async exec(command: readonly string[], options: ContainerExecOptions) {
+    this.executions.push({ command: [...command], cwd: options.cwd });
     const executable = command[0];
     if (executable === undefined)
       throw new Error('Container command is empty.');
@@ -132,6 +137,12 @@ export class FakeContainerHandle implements ContainerHandle {
   }
 
   private mapArgument(value: string): string {
+    if (value === '/opt/ello-agent/claude-code') {
+      return process.env.ELLO_TEST_CLAUDE_EXE ?? value;
+    }
+    if (value === '/opt/ello-agent/codex') {
+      return process.env.ELLO_TEST_CODEX_EXE ?? value;
+    }
     if (value === '/app' || value.startsWith('/app/')) {
       return path.join(this.hostWorkspace, value.slice('/app'.length));
     }

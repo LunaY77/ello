@@ -41,7 +41,7 @@ describe('benchmark matrix', () => {
     expect(config.execution).not.toHaveProperty('runtime');
     expect(config.container).toEqual({
       pullPolicy: 'if-absent',
-      network: 'task',
+      network: 'bridge',
       cleanup: 'always',
     });
     expect(config.tasks).toEqual(DEEP_SWE_TASKS);

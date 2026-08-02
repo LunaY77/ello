@@ -46,6 +46,9 @@ export interface WorkspaceRuntime {
   prepare(options: {
     readonly attemptId: string;
     readonly workspace: string;
+    readonly agentStateRoot: string;
+    readonly rawAgentRoot: string;
+    readonly agent: AgentSpec;
     readonly taskFiles: ResolvedTaskFiles;
     readonly pullPolicy: PullPolicy;
   }): Promise<PreparedWorkspace>;

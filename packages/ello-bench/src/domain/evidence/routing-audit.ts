@@ -11,8 +11,6 @@ export function auditExternalTools(options: {
   readonly tools: readonly NormalizedToolCall[];
   readonly parserCoverage: 'complete' | 'incomplete';
   readonly workspace: string;
-  readonly containerName: string;
-  readonly containerWorkspace: '/app';
 }): ToolAudit {
   const violations: ToolViolation[] = [];
   let shellCalls = 0;
@@ -44,23 +42,7 @@ export function auditExternalTools(options: {
         });
         continue;
       }
-      const routing = inspectContainerShellRouting(
-        command,
-        options.containerName,
-        options.containerWorkspace,
-      );
-      if (routing === 'passed') {
-        routedShellCalls += 1;
-      } else {
-        violations.push({
-          toolCallId: tool.id,
-          kind: routing,
-          detail:
-            routing === 'host_shell'
-              ? `Shell command is outside the assigned task container: ${command}.`
-              : `Shell command targets the wrong container or working directory: ${command}.`,
-        });
-      }
+      routedShellCalls += 1;
     }
     if (
       tool.category === 'read' ||
@@ -116,34 +98,6 @@ export function auditElloTools(
     ).length,
     violations: [],
   });
-}
-
-function inspectContainerShellRouting(
-  command: string,
-  containerName: string,
-  containerWorkspace: '/app',
-): 'passed' | 'host_shell' | 'shell_workdir' {
-  const unwrapped = unwrapShell(command.trim());
-  if (!/^docker\s+exec(?:\s|$)/u.test(unwrapped)) return 'host_shell';
-  const expected = `docker exec -w ${containerWorkspace} ${containerName} bash -c `;
-  return unwrapped.startsWith(expected) ? 'passed' : 'shell_workdir';
-}
-
-function unwrapShell(command: string): string {
-  const match =
-    /^(?:\/usr\/bin\/env\s+)?(?:\/usr\/bin\/|\/bin\/)?(?:bash|zsh)\s+-lc\s+([\s\S]+)$/u.exec(
-      command,
-    );
-  if (match === null) return command;
-  const nested = match[1];
-  if (nested === undefined) return command;
-  if (
-    (nested.startsWith("'") && nested.endsWith("'")) ||
-    (nested.startsWith('"') && nested.endsWith('"'))
-  ) {
-    return nested.slice(1, -1);
-  }
-  return nested;
 }
 
 function isInsideWorkspace(workspace: string, filePath: string): boolean {

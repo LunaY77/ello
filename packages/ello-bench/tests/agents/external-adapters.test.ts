@@ -15,6 +15,7 @@ import {
   requireClaudeCodeBaseUrl,
 } from '../../src/infra/agent/claude-code/base-url.js';
 import { externalProcessEnvironment } from '../../src/infra/agent/external.js';
+import { CONTAINER_AGENT_STATE_ROOT } from '../../src/infra/agent/container-paths.js';
 import { createAgentAdapter } from '../../src/infra/agent/factory.js';
 import type {
   AgentProcessExecution,
@@ -84,15 +85,32 @@ describe('Claude Code Agent adapter', () => {
     );
     expect(invocation).not.toContain('claude-test-key');
     expect(JSON.parse(invocation)).toMatchObject({
-      controlRuntime: 'host',
+      controlRuntime: 'container',
       environment: {
-        HOME: path.join(fixture.context.agentStateRoot, 'home'),
+        HOME: `${CONTAINER_AGENT_STATE_ROOT}/home`,
         ANTHROPIC_BASE_URL: 'https://example.test/anthropic',
         ANTHROPIC_AUTH_TOKEN_ENV: 'ELLO_TEST_CLAUDE_API_KEY',
       },
       args: expect.arrayContaining(['--effort', 'max']),
       reasoningEffort: 'max',
     });
+    const executions = (fixture.context.container as FakeContainerHandle)
+      .executions;
+    expect(executions).toEqual(
+      expect.arrayContaining([
+        {
+          cwd: '/app',
+          command: ['/opt/ello-agent/claude-code', '--version'],
+        },
+        expect.objectContaining({
+          cwd: '/app',
+          command: expect.arrayContaining([
+            '/opt/ello-agent/claude-code',
+            '--print',
+          ]),
+        }),
+      ]),
+    );
     expect(
       await readFile(
         path.join(fixture.context.workspace, 'agent-output.txt'),
@@ -180,14 +198,11 @@ describe('Claude Code Agent adapter', () => {
     expect(result.normalized.evidence.usage.status).toBe('unavailable');
   });
 
-  it('fails tool audit for a host shell command', async () => {
+  it('accepts a direct shell command in the container runtime', async () => {
     const fixture = await createFixture('routing-violation');
     const result = await executeFixture(fixture);
 
-    expect(result.normalized.toolAudit.status).toBe('failed');
-    expect(result.normalized.toolAudit.violations).toEqual(
-      expect.arrayContaining([expect.objectContaining({ kind: 'host_shell' })]),
-    );
+    expect(result.normalized.toolAudit.status).toBe('passed');
   });
 
   it('fails before execution when its credential is missing', async () => {
@@ -343,10 +358,8 @@ if (mode === 'malformed') { process.stdout.write('{bad json\\n'); process.exit(1
 const args = process.argv.slice(2);
 const selectedModel = args[args.indexOf('--model') + 1];
 const selectedEffort = args[args.indexOf('--effort') + 1];
-const boundary = args[args.indexOf('--append-system-prompt') + 1];
 fs.readFileSync(0, 'utf8');
 if (selectedEffort !== 'max') process.exit(70);
-if (!boundary.includes("docker exec -w /app bench-container bash -c '<command>'")) process.exit(65);
 if (!process.env.HOME?.endsWith('/agent-state/home')) process.exit(66);
 if (!process.env.CLAUDE_CONFIG_DIR?.endsWith('/agent-state/home/.claude')) process.exit(69);
 if (process.env.ANTHROPIC_BASE_URL !== 'https://example.test/anthropic') process.exit(67);
@@ -370,7 +383,7 @@ if (mode === 'provider-error') {
 }
 const command = mode === 'routing-violation'
   ? 'git status'
-  : "docker exec -w /app bench-container bash -c 'echo claude-code > agent-output.txt'";
+  : 'echo claude-code > agent-output.txt';
 if (mode !== 'routing-violation') {
   fs.writeFileSync('agent-output.txt', 'claude-code\\n');
 }

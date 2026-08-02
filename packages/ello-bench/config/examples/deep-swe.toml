@@ -17,5 +17,5 @@ require_tool_audit = true
 
 [container]
 pull_policy = "if-absent"
-network = "task"
+network = "bridge"
 cleanup = "always"

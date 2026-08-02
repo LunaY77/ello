@@ -18,6 +18,7 @@ import type {
 } from '../../src/domain/contract/index.js';
 import { sha256, stableJson } from '../../src/domain/hash.js';
 import { createAgentAdapter } from '../../src/infra/agent/factory.js';
+import { CONTAINER_AGENT_STATE_ROOT } from '../../src/infra/agent/container-paths.js';
 import type {
   AgentProcessExecution,
   AgentRunContext,
@@ -36,7 +37,7 @@ afterEach(() => {
 });
 
 describe('Codex Agent adapter', () => {
-  it('runs an npm-installed Codex symlink on the host control plane', async () => {
+  it('runs the native Codex executable in the task container', async () => {
     const fixture = await createFixture('success', 'npm-symlink');
     const result = await executeFixture(fixture);
 
@@ -47,7 +48,7 @@ describe('Codex Agent adapter', () => {
         'utf8',
       ),
     ) as { command: string };
-    expect(invocation.command).toBe(process.env.ELLO_TEST_CODEX_EXE);
+    expect(invocation.command).toBe('/opt/ello-agent/codex');
   });
 
   it('runs Codex exec in an isolated environment and normalizes evidence', async () => {
@@ -121,9 +122,23 @@ describe('Codex Agent adapter', () => {
     );
     expect(invocation.environment.API_KEY_ENV).toBe('ELLO_TEST_CODEX_API_KEY');
     expect(invocation.environment.HOME).toBe(
-      path.join(fixture.context.agentStateRoot, 'home'),
+      `${CONTAINER_AGENT_STATE_ROOT}/home`,
     );
-    expect(invocation.controlRuntime).toBe('host');
+    expect(invocation.controlRuntime).toBe('container');
+    const executions = (fixture.context.container as FakeContainerHandle)
+      .executions;
+    expect(executions).toEqual(
+      expect.arrayContaining([
+        {
+          cwd: '/app',
+          command: ['/opt/ello-agent/codex', '--version'],
+        },
+        expect.objectContaining({
+          cwd: '/app',
+          command: expect.arrayContaining(['/opt/ello-agent/codex', 'exec']),
+        }),
+      ]),
+    );
     expect(JSON.stringify(invocation)).not.toContain('codex-test-key');
   });
 
@@ -169,16 +184,11 @@ describe('Codex Agent adapter', () => {
     expect(result.normalized.toolAudit.shellCalls).toBe(1);
   });
 
-  it('fails the tool audit for a host shell command', async () => {
+  it('accepts a direct shell command in the container runtime', async () => {
     const fixture = await createFixture('routing-violation');
     const result = await executeFixture(fixture);
 
-    expect(result.normalized.toolAudit.status).toBe('failed');
-    expect(result.normalized.toolAudit.violations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'host_shell' }),
-      ]),
-    );
+    expect(result.normalized.toolAudit.status).toBe('passed');
   });
 
   it('fails the tool audit when Codex emits a network tool', async () => {
@@ -381,7 +391,7 @@ const args = process.argv.slice(2);
 if (args[0] !== 'exec' || !args.includes('--json') || !args.includes('--strict-config') || !args.includes('--ignore-user-config') || !args.includes('--ignore-rules')) process.exit(61);
 const selectedModel = args[args.indexOf('-m') + 1];
 const prompt = fs.readFileSync(0, 'utf8');
-if (!prompt.includes("docker exec -w /app bench-container bash -c '<command>'") || selectedModel !== 'gpt-codex-test') process.exit(62);
+if (prompt !== 'Implement the fixture change.\\n' || selectedModel !== 'gpt-codex-test') process.exit(62);
 if (!process.env.HOME?.endsWith('/agent-state/home')) process.exit(66);
 if (!process.env.CODEX_HOME?.endsWith('/agent-state/codex-home')) process.exit(63);
 if (process.env.ELLO_TEST_CODEX_API_KEY !== 'codex-test-key') process.exit(64);
@@ -392,7 +402,7 @@ event({ type: 'thread.started', thread_id: 'thread-1' });
 event({ type: 'turn.started', turn_id: 'turn-1', timestamp: '2026-07-28T00:00:00.000Z' });
 const command = mode === 'routing-violation'
   ? 'git status'
-  : "docker exec -w /app bench-container bash -c 'echo codex > agent-output.txt'";
+  : 'echo codex > agent-output.txt';
 event({ type: 'item.started', timestamp: '2026-07-28T00:00:01.000Z', item: { id: 'command-1', type: 'command_execution', command, aggregated_output: '', exit_code: null, status: 'in_progress' } });
 if (mode === 'timeout') while (true) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
 if (mode !== 'routing-violation') {

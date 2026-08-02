@@ -210,7 +210,6 @@ const ExternalAgentRuntimeBase = {
   expectedVersion: z.string().min(1),
   observedVersion: z.string().min(1),
   executableSha256: z.string().regex(/^[0-9a-f]{64}$/u),
-  runtimeBoundaryInstructionSha256: z.string().regex(/^[0-9a-f]{64}$/u),
 } as const;
 
 export const ClaudeCodeAgentRuntimeSchema = z

@@ -1,49 +1,30 @@
-import { access } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import type { ProcessResult } from '../domain/contract/index.js';
+import type { ContainerHandle } from '../ports/container.js';
 
-import { runProcess } from './process.js';
-
-const repositoryRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  '..',
-  '..',
-);
+import { CONTAINER_ELLO_RUNTIME_ROOT } from './agent/container-paths.js';
 
 export async function runElloCli(options: {
+  readonly container: ContainerHandle;
   readonly endpoint: string;
-  readonly workspace: string;
-  readonly agentWorkspace: string;
+  readonly workspace: '/app';
   readonly elloHome: string;
   readonly instruction: string;
   readonly threadId?: string;
   readonly timeoutMs: number;
   readonly stdoutPath: string;
   readonly stderrPath: string;
+  readonly env: Readonly<Record<string, string>>;
 }): Promise<ProcessResult> {
-  const cliPath = path.join(
-    repositoryRoot,
-    'packages',
-    'ello-tui',
-    'dist',
-    'cli',
-    'main.js',
-  );
-  await access(cliPath);
-  const execution = await runProcess(
-    process.execPath,
+  const execution = await options.container.exec(
     [
-      cliPath,
+      `${CONTAINER_ELLO_RUNTIME_ROOT}/node`,
+      `${CONTAINER_ELLO_RUNTIME_ROOT}/packages/ello-tui/dist/cli/main.js`,
       '--remote',
       options.endpoint,
       '--json',
       '--no-tui',
       '--root',
-      options.agentWorkspace,
+      options.workspace,
       'run',
       '--mode',
       'bypass',
@@ -52,13 +33,12 @@ export async function runElloCli(options: {
     ],
     {
       cwd: options.workspace,
-      env: { ...process.env, ELLO_HOME: options.elloHome },
+      env: { ...options.env, ELLO_HOME: options.elloHome },
       timeoutMs: options.timeoutMs,
       killGraceMs: 10_000,
-      capture: false,
       stdoutPath: options.stdoutPath,
       stderrPath: options.stderrPath,
     },
   );
-  return execution.result;
+  return execution.process;
 }

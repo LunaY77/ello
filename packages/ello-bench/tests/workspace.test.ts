@@ -7,6 +7,7 @@ import {
 import { CONTAINER_HOME } from '../src/infra/container-user.js';
 import { runChecked } from '../src/infra/process.js';
 import { CONTAINER_RUNTIME_PROBE_COMMAND } from '../src/infra/workspace.js';
+import { agentContainerNetwork } from '../src/infra/workspace.js';
 import type { ContainerSpec } from '../src/ports/container.js';
 
 const PROCESS_OPTIONS = {
@@ -16,6 +17,9 @@ const PROCESS_OPTIONS = {
 } as const;
 
 describe('task container Docker arguments', () => {
+  it('always gives the agent container provider network access', () => {
+    expect(agentContainerNetwork()).toBe('bridge');
+  });
   it('renders the runtime probe as three lines', async () => {
     const [command, ...args] = CONTAINER_RUNTIME_PROBE_COMMAND;
     const home = CONTAINER_HOME;

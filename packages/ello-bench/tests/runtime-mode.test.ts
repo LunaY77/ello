@@ -7,9 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { NormalizedToolCall } from '../src/domain/contract/index.js';
 import { auditExternalTools } from '../src/domain/evidence/routing-audit.js';
 import { createContainerProcessRegistry } from '../src/infra/agent/ello/container-processes.js';
-import { createRuntimeBoundaryInstruction } from '../src/infra/agent/runtime-boundary.js';
 import { createBenchmarkAgentRuntime } from '../src/infra/runtime.js';
-import type { AgentRunContext } from '../src/ports/agent.js';
 import type {
   ContainerProcess,
   ContainerProcessExit,
@@ -19,63 +17,14 @@ import type {
 import { FakeContainerHandle } from './fake-container.js';
 
 describe('container benchmark runtime boundary', () => {
-  it('separates the provider-facing control process from task execution', () => {
-    const boundary = createRuntimeBoundaryInstruction({
-      container: { name: 'bench-container', workspace: '/app' },
-    } as AgentRunContext);
-
-    expect(boundary).toContain(
-      'Agent control process runs on the benchmark host',
-    );
-    expect(boundary).toContain(
-      "docker exec -w /app bench-container bash -c '<command>'",
-    );
-    expect(boundary).toContain(
-      'Do not run repository shell commands on the host',
-    );
-  });
-
-  it('accepts only shell calls routed to the assigned task container', () => {
+  it('accepts direct shell calls because the control process is in the container', () => {
     const direct = auditExternalTools({
       workspace: '/app',
       parserCoverage: 'complete',
       tools: [shellTool('git status')],
-      containerName: 'bench-container',
-      containerWorkspace: '/app',
-    });
-    const routed = auditExternalTools({
-      workspace: '/app',
-      parserCoverage: 'complete',
-      tools: [
-        shellTool("docker exec -w /app bench-container bash -c 'git status'"),
-      ],
-      containerName: 'bench-container',
-      containerWorkspace: '/app',
     });
 
     expect(direct).toMatchObject({
-      status: 'failed',
-      violations: [expect.objectContaining({ kind: 'host_shell' })],
-    });
-    expect(routed).toMatchObject({
-      status: 'passed',
-      shellCalls: 1,
-      routedShellCalls: 1,
-    });
-
-    const routedThroughUsrBinShell = auditExternalTools({
-      workspace: '/app',
-      parserCoverage: 'complete',
-      tools: [
-        shellTool(
-          '/usr/bin/zsh -lc "docker exec -w /app bench-container bash -c \'git status\'"',
-        ),
-      ],
-      containerName: 'bench-container',
-      containerWorkspace: '/app',
-    });
-
-    expect(routedThroughUsrBinShell).toMatchObject({
       status: 'passed',
       shellCalls: 1,
       routedShellCalls: 1,

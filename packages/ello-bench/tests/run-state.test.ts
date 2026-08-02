@@ -91,4 +91,36 @@ describe('run state', () => {
       retryReason: invalid.failure,
     });
   });
+
+  it('does not create attempt 2 when infrastructure retries are disabled', async () => {
+    const runRoot = await mkdtemp(path.join(tmpdir(), 'ello-bench-no-retry-'));
+    const config = await loadBenchmarkConfig(EXAMPLE_CONFIG_PATH);
+    const plan = createPlan(config, selectAll(config));
+    const opened = await openSuiteManifest({ runRoot, config, plan });
+    const job = plan.jobs[0];
+    if (job === undefined) throw new Error('Missing planned job.');
+    const first = await selectAttempt({
+      suitePath: opened.path,
+      suite: opened.manifest,
+      job,
+      maxInfrastructureRetries: 0,
+    });
+    if (first.run === undefined) throw new Error('Missing first attempt.');
+    const invalid = await invalidateRun(first.run, {
+      kind: 'container',
+      phase: 'prepare',
+      message: 'container failed',
+    });
+
+    const next = await selectAttempt({
+      suitePath: opened.path,
+      suite: opened.manifest,
+      job,
+      maxInfrastructureRetries: 0,
+    });
+
+    expect(invalid.attempt).toBe(1);
+    expect(next).toEqual({ skipReason: 'retry_exhausted' });
+    expect(opened.manifest.attempts[job.jobId]).toHaveLength(1);
+  });
 });

@@ -36,6 +36,10 @@ import {
 } from '../evidence.js';
 
 import { findElloProviderRecoveryTarget } from './provider-recovery.js';
+import {
+  CONTAINER_AGENT_STATE_ROOT,
+  CONTAINER_RAW_AGENT_ROOT,
+} from '../container-paths.js';
 
 const PROVIDER_RECOVERY_PROMPT = `The previous turn ended because the model provider connection failed after bounded retries. Continue the original task from the current thread and workspace. Inspect the existing progress, finish the implementation, run the relevant tests, and report the result. Do not restart from scratch.`;
 
@@ -61,12 +65,14 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
       );
       await writeBenchmarkAgentConfig({
         elloHome: context.agentStateRoot,
+        runtimeHome: CONTAINER_AGENT_STATE_ROOT,
         workspace: context.workspace,
         agentWorkspace: context.container.workspace,
         agent,
         snapshotPath: configSnapshotPath,
       });
       const invocationPath = path.join(context.rawAgentRoot, 'invocation.json');
+      const runtimeEnv = elloContainerEnvironment(agent);
       await writeJsonAtomic(invocationPath, {
         schema: 'ello.benchmark.agent-invocation.v1',
         agentId: agent.id,
@@ -81,22 +87,17 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
         configSnapshotPath,
       });
       const serverBase = {
-        workspace: context.workspace,
-        elloHome: context.agentStateRoot,
-        socketPath: path.join(
-          process.env.TMPDIR ?? '/tmp',
-          `ello-bench-${context.attemptId}.sock`,
-        ),
-        rawRoot: path.join(context.rawAgentRoot, 'adapter'),
+        container: context.container,
+        workspace: context.container.workspace,
+        elloHome: CONTAINER_AGENT_STATE_ROOT,
+        socketPath: `/tmp/ello-bench-${context.attemptId}.sock`,
+        rawRoot: `${CONTAINER_RAW_AGENT_ROOT}/adapter`,
         stdoutPath: path.join(context.rawAgentRoot, 'server.stdout.log'),
         stderrPath: path.join(context.rawAgentRoot, 'server.stderr.log'),
+        env: runtimeEnv,
       } as const;
       let server: BenchmarkServerProcess | undefined =
-        await startBenchmarkServerProcess({
-          ...serverBase,
-          containerName: context.container.name,
-          storageMb: context.taskFiles.task.environment.storageMb,
-        });
+        await startBenchmarkServerProcess(serverBase);
       return {
         async run(): Promise<AgentProcessExecution> {
           if (server === undefined) {
@@ -109,21 +110,23 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
           const stderrPath = path.join(context.rawAgentRoot, 'stderr.log');
           const startedAt = new Date().toISOString();
           const initialProcess = await runElloCli({
+            container: context.container,
             endpoint: server.endpoint,
-            workspace: context.workspace,
-            agentWorkspace: context.container.workspace,
-            elloHome: context.agentStateRoot,
+            workspace: context.container.workspace,
+            elloHome: CONTAINER_AGENT_STATE_ROOT,
             instruction: context.taskFiles.instruction,
             timeoutMs: context.taskFiles.task.agentTimeoutMs,
             stdoutPath,
             stderrPath,
+            env: runtimeEnv,
           });
           await validateJsonLines(stdoutPath);
           const recovery = await recoverProviderFailure({
             endpoint: server.endpoint,
-            workspace: context.workspace,
-            agentWorkspace: context.container.workspace,
-            elloHome: context.agentStateRoot,
+            container: context.container,
+            workspace: context.container.workspace,
+            elloHome: CONTAINER_AGENT_STATE_ROOT,
+            env: runtimeEnv,
             timeoutMs: context.taskFiles.task.agentTimeoutMs,
             rawAgentRoot: context.rawAgentRoot,
             eventRoot: path.join(context.rawAgentRoot, 'adapter'),
@@ -300,10 +303,11 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
 }
 
 async function recoverProviderFailure(options: {
+  readonly container: AgentRunContext['container'];
   readonly endpoint: string;
-  readonly workspace: string;
-  readonly agentWorkspace: string;
+  readonly workspace: '/app';
   readonly elloHome: string;
+  readonly env: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
   readonly rawAgentRoot: string;
   readonly eventRoot: string;
@@ -339,15 +343,16 @@ async function recoverProviderFailure(options: {
   ]);
   const recoveryStartedAt = new Date().toISOString();
   const recoveredProcess = await runElloCli({
+    container: options.container,
     endpoint: options.endpoint,
     workspace: options.workspace,
-    agentWorkspace: options.agentWorkspace,
     elloHome: options.elloHome,
     instruction: PROVIDER_RECOVERY_PROMPT,
     threadId: target.threadId,
     timeoutMs: remainingTimeoutMs,
     stdoutPath: options.stdoutPath,
     stderrPath: options.stderrPath,
+    env: options.env,
   });
   const recoveryCompletedAt = new Date().toISOString();
   const process = {
@@ -376,6 +381,43 @@ async function recoverProviderFailure(options: {
     },
   );
   return { process };
+}
+
+function elloContainerEnvironment(
+  agent: ElloAgentSpec,
+): Readonly<Record<string, string>> {
+  const credentials = Object.fromEntries(
+    [
+      ...new Set(Object.values(agent.models).map((model) => model.apiKeyEnv)),
+    ].map((name) => [name, requiredEnvironment(name)]),
+  );
+  const inherited = Object.fromEntries(
+    [
+      'LANG',
+      'LC_ALL',
+      'HTTP_PROXY',
+      'HTTPS_PROXY',
+      'NO_PROXY',
+      'http_proxy',
+      'https_proxy',
+      'no_proxy',
+    ].flatMap((name) => {
+      const value = process.env[name];
+      return value === undefined ? [] : [[name, value]];
+    }),
+  );
+  return { ...inherited, ...credentials };
+}
+
+function requiredEnvironment(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value === '') {
+    throw new AgentAdapterError(
+      'agent_setup',
+      `Missing required environment variable: ${name}.`,
+    );
+  }
+  return value;
 }
 
 function providerFailureMessage(

@@ -57,6 +57,9 @@ export async function runAttempt(
       return services.workspace.prepare({
         attemptId: manifest.attemptId,
         workspace: manifest.workspace,
+        agentStateRoot: manifest.agentStateRoot,
+        rawAgentRoot: paths.rawAgentRoot,
+        agent: options.agent,
         taskFiles: options.taskFiles,
         pullPolicy: options.pullPolicy,
       });
@@ -80,7 +83,8 @@ export async function runAttempt(
     });
     await services.artifacts.writeJson(paths.networkPolicy, {
       schema: 'ello.benchmark.network-policy.v1',
-      allowInternet: options.taskFiles.task.environment.allowInternet,
+      allowInternet: true,
+      taskAllowInternet: options.taskFiles.task.environment.allowInternet,
       network: preparedWorkspace.network,
       containerName: preparedWorkspace.container.name,
     });

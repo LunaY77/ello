@@ -4,28 +4,24 @@ import type { ClaudeCodeAgentSpec } from '../../../domain/contract/index.js';
 import type { AgentRunContext } from '../../../ports/agent.js';
 import { writeJsonAtomic } from '../../io.js';
 import {
-  externalProcessEnvironment,
+  containerExternalProcessEnvironment,
+  externalAgentContainerExecutable,
   inspectExternalRuntime,
   prepareClaudeHome,
   requiredEnvironment,
 } from '../external.js';
-import {
-  createRuntimeBoundaryInstruction,
-  runtimeBoundarySha256,
-} from '../runtime-boundary.js';
-
 import { requireClaudeCodeBaseUrl } from './base-url.js';
+import { CONTAINER_AGENT_STATE_ROOT } from '../container-paths.js';
 
 export interface ClaudeCodeInvocation {
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string;
-  readonly env: NodeJS.ProcessEnv;
+  readonly env: Readonly<Record<string, string>>;
   readonly input: string;
   readonly invocationPath: string;
-  readonly runtimeBoundary: string;
-  readonly runtimeBoundarySha256: string;
   readonly executableSha256: string;
+  readonly configuredExecutablePath: string;
   readonly observedVersion: string;
   readonly reasoningEffort: NonNullable<ClaudeCodeAgentSpec['reasoningEffort']>;
 }
@@ -39,13 +35,11 @@ export async function createClaudeCodeInvocation(
     throw new Error('Claude Code reasoning effort is required for execution.');
   }
   const baseUrl = requireClaudeCodeBaseUrl(agent.connection.baseUrl);
-  const runtime = await inspectExternalRuntime(agent);
-  const isolated = await prepareClaudeHome({
+  const runtime = await inspectExternalRuntime(agent, context.container);
+  await prepareClaudeHome({
     agentStateRoot: context.agentStateRoot,
   });
   const apiKey = requiredEnvironment(agent.connection.apiKeyEnv);
-  const runtimeBoundary = createRuntimeBoundaryInstruction(context);
-  const boundarySha256 = runtimeBoundarySha256(runtimeBoundary);
   const emptyMcpConfig = JSON.stringify({ mcpServers: {} });
   const tools = 'Bash,Edit,Read,Write,Glob,Grep';
   const args = [
@@ -69,14 +63,14 @@ export async function createClaudeCodeInvocation(
     '--no-chrome',
     '--tools',
     tools,
-    '--append-system-prompt',
-    runtimeBoundary,
   ] as const;
   const customHeaders = agent.connection.httpHeaders;
-  const env = externalProcessEnvironment({
-    HOME: isolated.home,
-    USERPROFILE: isolated.home,
-    CLAUDE_CONFIG_DIR: isolated.configDirectory,
+  const containerHome = `${CONTAINER_AGENT_STATE_ROOT}/home`;
+  const containerConfigDirectory = `${containerHome}/.claude`;
+  const env = containerExternalProcessEnvironment({
+    HOME: containerHome,
+    USERPROFILE: containerHome,
+    CLAUDE_CONFIG_DIR: containerConfigDirectory,
     CLAUDE_CODE_SAFE_MODE: '1',
     ANTHROPIC_BASE_URL: baseUrl,
     ANTHROPIC_AUTH_TOKEN: apiKey,
@@ -94,13 +88,13 @@ export async function createClaudeCodeInvocation(
     schema: 'ello.benchmark.agent-invocation.v1',
     agentId: agent.id,
     kind: agent.kind,
-    command: runtime.executablePath,
+    command: externalAgentContainerExecutable(agent),
     args,
-    cwd: context.workspace,
+    cwd: context.container.workspace,
     environment: {
-      HOME: isolated.home,
-      USERPROFILE: isolated.home,
-      CLAUDE_CONFIG_DIR: isolated.configDirectory,
+      HOME: containerHome,
+      USERPROFILE: containerHome,
+      CLAUDE_CONFIG_DIR: containerConfigDirectory,
       CLAUDE_CODE_SAFE_MODE: '1',
       ANTHROPIC_BASE_URL: baseUrl,
       ANTHROPIC_AUTH_TOKEN_ENV: agent.connection.apiKeyEnv,
@@ -109,24 +103,21 @@ export async function createClaudeCodeInvocation(
     reasoningEffort,
     tools: tools.split(','),
     mcpConfig: JSON.parse(emptyMcpConfig) as unknown,
-    controlRuntime: 'host',
+    controlRuntime: 'container',
     executionRuntime: 'docker',
     containerName: context.container.name,
     containerWorkspace: context.container.workspace,
     instructionSha256: context.taskFiles.task.instructionSha256,
-    runtimeBoundary,
-    runtimeBoundarySha256: boundarySha256,
   });
   return {
-    command: runtime.executablePath,
+    command: externalAgentContainerExecutable(agent),
     args,
-    cwd: context.workspace,
+    cwd: context.container.workspace,
     env,
     input: context.taskFiles.instruction,
     invocationPath,
-    runtimeBoundary,
-    runtimeBoundarySha256: boundarySha256,
     executableSha256: runtime.executableSha256,
+    configuredExecutablePath: runtime.executablePath,
     observedVersion: runtime.observedVersion,
     reasoningEffort,
   };

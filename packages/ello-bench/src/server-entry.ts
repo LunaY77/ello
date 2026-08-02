@@ -2,8 +2,7 @@
 import { mkdir } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 
-import { attachDockerContainer } from './infra/container/docker.js';
-import { createBenchmarkAgentRuntime } from './infra/runtime.js';
+import { createContainerLocalAgentRuntime } from './infra/runtime.js';
 import { startBenchmarkServer } from './infra/server.js';
 
 const { values } = parseArgs({
@@ -12,9 +11,7 @@ const { values } = parseArgs({
     root: { type: 'string' },
     socket: { type: 'string' },
     workspace: { type: 'string' },
-    container: { type: 'string' },
     'raw-root': { type: 'string' },
-    'storage-mb': { type: 'string' },
   },
   strict: true,
   allowPositionals: false,
@@ -23,25 +20,13 @@ const { values } = parseArgs({
 const root = required(values.root, '--root');
 const socketPath = required(values.socket, '--socket');
 const workspace = required(values.workspace, '--workspace');
-const container = required(values.container, '--container');
 const rawRoot = required(values['raw-root'], '--raw-root');
-const storageMb = positiveNumber(
-  required(values['storage-mb'], '--storage-mb'),
-  '--storage-mb',
-);
-const hasParentChannel = typeof process.send === 'function';
 await mkdir(rawRoot, { recursive: true });
-const attachedContainer = attachDockerContainer(
-  container,
-  workspace,
-  storageMb,
-);
 const server = await startBenchmarkServer({
   root,
   socketPath,
-  runtime: createBenchmarkAgentRuntime({
+  runtime: createContainerLocalAgentRuntime({
     rawRoot,
-    container: attachedContainer,
   }),
 });
 
@@ -71,30 +56,10 @@ await new Promise<void>((resolve) => {
   };
   process.once('SIGTERM', () => void close('SIGTERM'));
   process.once('SIGINT', () => void close('SIGINT'));
-  if (hasParentChannel) {
-    if (process.connected) {
-      process.once('disconnect', () => void close('parent-disconnect'));
-    } else {
-      void close('parent-disconnect');
-    }
-  }
 });
-try {
-  await attachedContainer.assertStorageLimit();
-} finally {
-  await attachedContainer.stopStorageMonitoring();
-}
 
 function required(value: string | undefined, option: string): string {
   if (value === undefined || value === '')
     throw new Error(`${option} is required.`);
   return value;
-}
-
-function positiveNumber(value: string, option: string): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`${option} must be a positive number.`);
-  }
-  return parsed;
 }

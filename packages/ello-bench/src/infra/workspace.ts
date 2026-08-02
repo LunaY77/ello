@@ -1,12 +1,20 @@
 import { mkdir, statfs } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+import type { AgentSpec } from '../domain/contract/index.js';
 import type { PreparedWorkspace } from '../ports/attempt.js';
-import type { PullPolicy } from '../ports/container.js';
+import type { ContainerMount, PullPolicy } from '../ports/container.js';
 import type { ResolvedTaskFiles } from '../ports/corpus.js';
 
 import { DockerContainerRuntime } from './container/docker.js';
 import { CONTAINER_HOME, hostContainerIdentity } from './container-user.js';
+import { externalAgentRuntimeMount } from './agent/external.js';
+import {
+  CONTAINER_AGENT_STATE_ROOT,
+  CONTAINER_ELLO_RUNTIME_ROOT,
+  CONTAINER_RAW_AGENT_ROOT,
+} from './agent/container-paths.js';
 import { getBenchmarkSuiteForTask } from './corpus/suite.js';
 import { extractImageWorkspace } from './docker-image.js';
 import { assertGitHead, captureBaselineTree } from './git-workspace.js';
@@ -27,6 +35,9 @@ export const CONTAINER_RUNTIME_PROBE_COMMAND = [
 export async function prepareTaskWorkspace(options: {
   readonly attemptId: string;
   readonly workspace: string;
+  readonly agentStateRoot: string;
+  readonly rawAgentRoot: string;
+  readonly agent: AgentSpec;
   readonly taskFiles: ResolvedTaskFiles;
   readonly pullPolicy: PullPolicy;
 }): Promise<PreparedWorkspace> {
@@ -64,13 +75,23 @@ export async function prepareTaskWorkspace(options: {
     })
   ).stdout;
   const baselineTree = await captureBaselineTree(workspace);
-  const network = task.environment.allowInternet ? 'bridge' : 'none';
+  const network = agentContainerNetwork();
   const user = hostContainerIdentity();
   const containerUser = `${user.uid}:${user.gid}`;
+  await Promise.all([
+    mkdir(options.agentStateRoot, { recursive: true }),
+    mkdir(options.rawAgentRoot, { recursive: true }),
+  ]);
+  const runtimeMounts = await agentRuntimeMounts(options.agent);
   const container = await runtime.start({
     image: task.environment.image,
     name: agentContainer,
     workspaceMount: { host: workspace, container: '/app' },
+    additionalMounts: [
+      { host: options.agentStateRoot, container: CONTAINER_AGENT_STATE_ROOT },
+      { host: options.rawAgentRoot, container: CONTAINER_RAW_AGENT_ROOT },
+      ...runtimeMounts,
+    ],
     network,
     cpus: task.environment.cpus,
     memoryMb: task.environment.memoryMb,
@@ -120,6 +141,69 @@ export async function prepareTaskWorkspace(options: {
     initialGitStatus,
     network,
   };
+}
+
+export function agentContainerNetwork(): 'bridge' {
+  return 'bridge';
+}
+
+async function agentRuntimeMounts(agent: AgentSpec): Promise<ContainerMount[]> {
+  if (agent.kind !== 'ello') {
+    return [await externalAgentRuntimeMount(agent)];
+  }
+  const repositoryRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+    '..',
+    '..',
+    '..',
+  );
+  const nodeExecutable = await import('node:fs/promises').then(({ realpath }) =>
+    realpath(process.execPath),
+  );
+  return [
+    {
+      host: nodeExecutable,
+      container: `${CONTAINER_ELLO_RUNTIME_ROOT}/node`,
+      readOnly: true,
+    },
+    {
+      host: path.join(repositoryRoot, 'node_modules'),
+      container: `${CONTAINER_ELLO_RUNTIME_ROOT}/node_modules`,
+      readOnly: true,
+    },
+    {
+      host: path.join(repositoryRoot, 'packages', 'ello-bench', 'dist'),
+      container: `${CONTAINER_ELLO_RUNTIME_ROOT}/packages/ello-bench/dist`,
+      readOnly: true,
+    },
+    {
+      host: path.join(repositoryRoot, 'packages', 'ello-bench', 'node_modules'),
+      container: `${CONTAINER_ELLO_RUNTIME_ROOT}/packages/ello-bench/node_modules`,
+      readOnly: true,
+    },
+    ...['ello-agent', 'ello-tui'].flatMap((packageName) => {
+      const hostPackage = path.join(repositoryRoot, 'packages', packageName);
+      const containerPackage = `${CONTAINER_ELLO_RUNTIME_ROOT}/packages/${packageName}`;
+      return [
+        {
+          host: path.join(hostPackage, 'dist'),
+          container: `${containerPackage}/dist`,
+          readOnly: true,
+        },
+        {
+          host: path.join(hostPackage, 'node_modules'),
+          container: `${containerPackage}/node_modules`,
+          readOnly: true,
+        },
+        {
+          host: path.join(hostPackage, 'package.json'),
+          container: `${containerPackage}/package.json`,
+          readOnly: true,
+        },
+      ];
+    }),
+  ];
 }
 
 function containerName(attemptId: string, kind: 'seed' | 'agent'): string {

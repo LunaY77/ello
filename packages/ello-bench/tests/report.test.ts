@@ -853,7 +853,6 @@ function claudeRuntime() {
     expectedVersion: agent.binary.expectedVersion,
     observedVersion: agent.binary.expectedVersion,
     executableSha256: agent.binary.sha256,
-    runtimeBoundaryInstructionSha256: '4'.repeat(64),
     baseUrl: agent.connection.baseUrl,
     apiKeyEnv: agent.connection.apiKeyEnv,
   };

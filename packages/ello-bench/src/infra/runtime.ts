@@ -6,6 +6,10 @@
 import path from 'node:path';
 
 import type { AgentRuntime } from '@ello/agent/runtime';
+import {
+  createLocalEnvironments,
+  LOCAL_HOST_ENVIRONMENT_REFERENCE,
+} from '@ello/agent/runtime';
 
 import type { ContainerHandle } from '../ports/container.js';
 
@@ -29,6 +33,39 @@ export function createBenchmarkAgentRuntime(
       container: options.container,
     }),
     defaultEnvironmentRef: options.container.name,
+    environmentGrant: { isolation: 'none' },
+    createTracing: ({ threadId }) => {
+      const existing = captures.get(threadId);
+      if (existing !== undefined) {
+        return {
+          eventRecorder: existing.recorder,
+          close: () => existing.close(),
+        };
+      }
+      const capture = createEventCaptureRecorder(
+        path.join(options.rawRoot, `engine-events-${threadId}.jsonl`),
+      );
+      captures.set(threadId, capture);
+      return {
+        eventRecorder: capture.recorder,
+        close: () => capture.close(),
+      };
+    },
+  };
+}
+
+export function createContainerLocalAgentRuntime(options: {
+  readonly rawRoot: string;
+}): AgentRuntime {
+  const captures = new Map<
+    string,
+    ReturnType<typeof createEventCaptureRecorder>
+  >();
+  return {
+    environments: createLocalEnvironments({
+      environmentRef: LOCAL_HOST_ENVIRONMENT_REFERENCE,
+    }),
+    defaultEnvironmentRef: LOCAL_HOST_ENVIRONMENT_REFERENCE,
     environmentGrant: { isolation: 'none' },
     createTracing: ({ threadId }) => {
       const existing = captures.get(threadId);

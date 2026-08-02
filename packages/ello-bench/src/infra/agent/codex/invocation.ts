@@ -4,16 +4,13 @@ import type { CodexAgentSpec } from '../../../domain/contract/index.js';
 import type { AgentRunContext } from '../../../ports/agent.js';
 import { writeJsonAtomic } from '../../io.js';
 import {
-  externalProcessEnvironment,
+  containerExternalProcessEnvironment,
+  externalAgentContainerExecutable,
   inspectExternalRuntime,
   prepareCodexHome,
   requiredEnvironment,
 } from '../external.js';
-import {
-  composeExternalAgentPrompt,
-  createRuntimeBoundaryInstruction,
-  runtimeBoundarySha256,
-} from '../runtime-boundary.js';
+import { CONTAINER_AGENT_STATE_ROOT } from '../container-paths.js';
 
 const BENCHMARK_PROVIDER_ID = 'ello_benchmark';
 
@@ -21,11 +18,11 @@ export interface CodexInvocation {
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string;
-  readonly env: NodeJS.ProcessEnv;
+  readonly env: Readonly<Record<string, string>>;
   readonly input: string;
   readonly invocationPath: string;
-  readonly runtimeBoundarySha256: string;
   readonly executableSha256: string;
+  readonly configuredExecutablePath: string;
   readonly observedVersion: string;
 }
 
@@ -33,13 +30,11 @@ export async function createCodexInvocation(
   agent: CodexAgentSpec,
   context: AgentRunContext,
 ): Promise<CodexInvocation> {
-  const runtime = await inspectExternalRuntime(agent);
-  const isolated = await prepareCodexHome({
+  const runtime = await inspectExternalRuntime(agent, context.container);
+  await prepareCodexHome({
     agentStateRoot: context.agentStateRoot,
   });
   const apiKey = requiredEnvironment(agent.connection.apiKeyEnv);
-  const runtimeBoundary = createRuntimeBoundaryInstruction(context);
-  const boundarySha256 = runtimeBoundarySha256(runtimeBoundary);
   const provider = codexProviderOverride(agent);
   const args = [
     'exec',
@@ -51,7 +46,7 @@ export async function createCodexInvocation(
     '--ignore-user-config',
     '--ignore-rules',
     '-C',
-    context.workspace,
+    context.container.workspace,
     '-m',
     agent.model,
     '--dangerously-bypass-approvals-and-sandbox',
@@ -67,11 +62,13 @@ export async function createCodexInvocation(
     `model_providers.${BENCHMARK_PROVIDER_ID}=${provider}`,
     '-',
   ] as const;
-  const env = externalProcessEnvironment({
+  const containerHome = `${CONTAINER_AGENT_STATE_ROOT}/home`;
+  const containerCodexHome = `${CONTAINER_AGENT_STATE_ROOT}/codex-home`;
+  const env = containerExternalProcessEnvironment({
     ...(agent.environment ?? {}),
-    HOME: isolated.home,
-    USERPROFILE: isolated.home,
-    CODEX_HOME: isolated.codexHome,
+    HOME: containerHome,
+    USERPROFILE: containerHome,
+    CODEX_HOME: containerCodexHome,
     [agent.connection.apiKeyEnv]: apiKey,
   });
   const invocationPath = path.join(context.rawAgentRoot, 'invocation.json');
@@ -79,13 +76,13 @@ export async function createCodexInvocation(
     schema: 'ello.benchmark.agent-invocation.v1',
     agentId: agent.id,
     kind: agent.kind,
-    command: runtime.executablePath,
+    command: externalAgentContainerExecutable(agent),
     args,
-    cwd: context.workspace,
+    cwd: context.container.workspace,
     environment: {
-      HOME: isolated.home,
-      USERPROFILE: isolated.home,
-      CODEX_HOME: isolated.codexHome,
+      HOME: containerHome,
+      USERPROFILE: containerHome,
+      CODEX_HOME: containerCodexHome,
       API_KEY_ENV: agent.connection.apiKeyEnv,
     },
     model: agent.model,
@@ -99,26 +96,21 @@ export async function createCodexInvocation(
     },
     mcpServers: {},
     webSearch: 'disabled',
-    controlRuntime: 'host',
+    controlRuntime: 'container',
     executionRuntime: 'docker',
     containerName: context.container.name,
     containerWorkspace: context.container.workspace,
     instructionSha256: context.taskFiles.task.instructionSha256,
-    runtimeBoundary,
-    runtimeBoundarySha256: boundarySha256,
   });
   return {
-    command: runtime.executablePath,
+    command: externalAgentContainerExecutable(agent),
     args,
-    cwd: context.workspace,
+    cwd: context.container.workspace,
     env,
-    input: composeExternalAgentPrompt({
-      boundary: runtimeBoundary,
-      instruction: context.taskFiles.instruction,
-    }),
+    input: context.taskFiles.instruction,
     invocationPath,
-    runtimeBoundarySha256: boundarySha256,
     executableSha256: runtime.executableSha256,
+    configuredExecutablePath: runtime.executablePath,
     observedVersion: runtime.observedVersion,
   };
 }

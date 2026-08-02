@@ -89,7 +89,7 @@ export type BenchmarkReportConfig = z.infer<typeof BenchmarkReportConfigSchema>;
 export const BenchmarkContainerConfigSchema = z
   .object({
     pullPolicy: z.enum(['if-absent', 'always', 'never']),
-    network: z.literal('task'),
+    network: z.literal('bridge'),
     cleanup: z.enum(['always', 'on-success', 'never']),
   })
   .strict();

@@ -15,12 +15,14 @@ export interface BenchmarkConfigFiles {
 
 export async function writeBenchmarkAgentConfig(options: {
   readonly elloHome: string;
+  readonly runtimeHome?: string;
   readonly workspace: string;
   readonly agentWorkspace?: string;
   readonly agent: ElloAgentSpec;
   readonly snapshotPath: string;
 }): Promise<BenchmarkConfigFiles> {
   const elloHome = path.resolve(options.elloHome);
+  const runtimeHome = options.runtimeHome ?? elloHome;
   const workspace = path.resolve(options.workspace);
   const agentWorkspace = options.agentWorkspace ?? workspace;
   const projectStateRoot = path.join(workspace, '.ello');
@@ -56,7 +58,7 @@ export async function writeBenchmarkAgentConfig(options: {
     auxiliary_model: options.agent.auxiliaryModel,
     cwd: agentWorkspace,
     allowed_paths: [agentWorkspace],
-    session_dir: path.join(elloHome, 'sessions'),
+    session_dir: path.join(runtimeHome, 'sessions'),
     initial_mode: 'bypass',
     bypass_enabled: true,
     title_generation: false,
@@ -79,7 +81,7 @@ export async function writeBenchmarkAgentConfig(options: {
       },
       memory: {
         enabled: false,
-        private_dir: path.join(elloHome, 'memory', 'private'),
+        private_dir: path.join(runtimeHome, 'memory', 'private'),
         team_dir: path.posix.join(agentWorkspace, '.ello', 'memory', 'team'),
         extraction: { enabled: false, recent_messages: 40, max_attempts: 2 },
       },

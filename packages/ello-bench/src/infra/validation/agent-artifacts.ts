@@ -121,8 +121,6 @@ export async function validateAgentArtifacts(
           tools: recomputed.tools,
           parserCoverage: evidence.parserCoverage,
           workspace: run.workspace,
-          containerName: required(run.containerName, 'containerName', run),
-          containerWorkspace: '/app',
         });
         break;
       }
@@ -136,8 +134,6 @@ export async function validateAgentArtifacts(
         tools: recomputed.tools,
         parserCoverage: recomputed.evidence.parserCoverage,
         workspace: run.workspace,
-        containerName: required(run.containerName, 'containerName', run),
-        containerWorkspace: '/app',
       });
       break;
     case 'codex':
@@ -151,8 +147,6 @@ export async function validateAgentArtifacts(
         tools: recomputed.tools,
         parserCoverage: recomputed.evidence.parserCoverage,
         workspace: run.workspace,
-        containerName: required(run.containerName, 'containerName', run),
-        containerWorkspace: '/app',
       });
       break;
   }

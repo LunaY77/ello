@@ -1,216 +1,164 @@
-import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
-import { access, mkdir } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import type { Readable } from 'node:stream';
-import { fileURLToPath } from 'node:url';
 
-const packageRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-);
-type ServerChild = ChildProcess & {
-  readonly stdout: Readable;
-  readonly stderr: Readable;
-};
+import type { ContainerHandle, ContainerProcess } from '../ports/container.js';
+
+import { CONTAINER_ELLO_RUNTIME_ROOT } from './agent/container-paths.js';
 
 export interface BenchmarkServerProcess {
   readonly endpoint: string;
-  readonly pid: number;
   close(): Promise<void>;
 }
 
 export interface BenchmarkServerProcessOptions {
-  readonly workspace: string;
+  readonly container: ContainerHandle;
+  readonly workspace: '/app';
   readonly elloHome: string;
   readonly socketPath: string;
   readonly rawRoot: string;
   readonly stdoutPath: string;
   readonly stderrPath: string;
-  readonly containerName: string;
-  readonly storageMb: number;
+  readonly env: Readonly<Record<string, string>>;
 }
 
 export async function startBenchmarkServerProcess(
   options: BenchmarkServerProcessOptions,
 ): Promise<BenchmarkServerProcess> {
-  const entry = path.join(packageRoot, 'dist', 'server-entry.js');
-  await access(entry);
   await Promise.all([
     mkdir(path.dirname(options.stdoutPath), { recursive: true }),
     mkdir(path.dirname(options.stderrPath), { recursive: true }),
   ]);
-  const spawned = spawn(
-    process.execPath,
+  const stdout = createWriteStream(options.stdoutPath, { flags: 'w' });
+  const stderr = createWriteStream(options.stderrPath, { flags: 'w' });
+  let parseReady!: (chunk: Uint8Array) => void;
+  const ready = new Promise<string>((resolve, reject) => {
+    let buffer = '';
+    parseReady = (chunk) => {
+      buffer += Buffer.from(chunk).toString('utf8');
+      for (;;) {
+        const newline = buffer.indexOf('\n');
+        if (newline < 0) return;
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        try {
+          const parsed = JSON.parse(line) as Record<string, unknown>;
+          if (
+            parsed.event === 'benchmark-server.ready' &&
+            typeof parsed.endpoint === 'string'
+          ) {
+            resolve(parsed.endpoint);
+            return;
+          }
+        } catch (error) {
+          reject(
+            new Error('Benchmark server emitted invalid readiness JSON.', {
+              cause: error,
+            }),
+          );
+          return;
+        }
+      }
+    };
+  });
+  const process = await options.container.spawn(
     [
-      entry,
+      `${CONTAINER_ELLO_RUNTIME_ROOT}/node`,
+      `${CONTAINER_ELLO_RUNTIME_ROOT}/packages/ello-bench/dist/server-entry.js`,
       '--root',
       options.elloHome,
       '--socket',
       options.socketPath,
       '--workspace',
       options.workspace,
-      '--container',
-      options.containerName,
       '--raw-root',
       options.rawRoot,
-      '--storage-mb',
-      String(options.storageMb),
     ],
     {
       cwd: options.workspace,
-      env: { ...process.env, ELLO_HOME: options.elloHome },
-      detached: process.platform !== 'win32',
-      // IPC channel closes with the benchmark parent, allowing server-entry to
-      // release its listener even when the parent is interrupted or killed.
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'] as const,
-      windowsHide: true,
+      env: { ...options.env, ELLO_HOME: options.elloHome },
+      onStdout: (chunk) => {
+        stdout.write(chunk);
+        parseReady(chunk);
+      },
+      onStderr: (chunk) => stderr.write(chunk),
     },
   );
-  if (spawned.stdout === null || spawned.stderr === null) {
-    throw new Error('Benchmark server did not create output pipes.');
+  process.exit.then(
+    (exit) => {
+      if (exit.exitCode !== 0) {
+        stderr.write(
+          `Benchmark server exited: code=${String(exit.exitCode)} signal=${String(exit.signal)}\n`,
+        );
+      }
+    },
+    (error: unknown) => stderr.write(`${String(error)}\n`),
+  );
+  let endpoint: string;
+  try {
+    endpoint = await withTimeout(
+      Promise.race([
+        ready,
+        process.exit.then((exit) => {
+          throw new Error(
+            `Benchmark server exited before readiness: code=${String(exit.exitCode)} signal=${String(exit.signal)}.`,
+          );
+        }),
+      ]),
+      30_000,
+      'Benchmark server readiness timed out.',
+    );
+  } catch (error) {
+    await process.signal('SIGKILL');
+    stdout.end();
+    stderr.end();
+    throw error;
   }
-  const child = spawned as ServerChild;
-  if (child.pid === undefined)
-    throw new Error('Benchmark server has no process id.');
-  const stdout = createWriteStream(options.stdoutPath, { flags: 'w' });
-  const stderr = createWriteStream(options.stderrPath, { flags: 'w' });
-  child.stdout.pipe(stdout);
-  child.stderr.pipe(stderr);
-  const endpoint = await waitForReady(child, 30_000);
   return {
     endpoint,
-    pid: child.pid,
-    close: () => closeServerProcess(child),
+    async close() {
+      await closeContainerProcess(process);
+      stdout.end();
+      stderr.end();
+    },
   };
 }
 
-async function waitForReady(
-  child: ServerChild,
-  timeoutMs: number,
-): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    let buffer = '';
-    let settled = false;
-    const settle = (result: { endpoint?: string; error?: Error }): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      child.stdout.off('data', onData);
-      child.off('exit', onExit);
-      if (result.error !== undefined) reject(result.error);
-      else if (result.endpoint !== undefined) resolve(result.endpoint);
-      else
-        reject(new Error('Benchmark server readiness produced no endpoint.'));
-    };
-    const onData = (chunk: Buffer): void => {
-      buffer += chunk.toString('utf8');
-      for (;;) {
-        const newline = buffer.indexOf('\n');
-        if (newline < 0) return;
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(line);
-        } catch (error) {
-          terminate(child.pid, 'SIGKILL');
-          settle({
-            error: new Error(
-              'Benchmark server emitted invalid JSON before readiness.',
-              { cause: error },
-            ),
-          });
-          return;
-        }
-        if (
-          typeof parsed === 'object' &&
-          parsed !== null &&
-          'event' in parsed &&
-          parsed.event === 'benchmark-server.ready' &&
-          'endpoint' in parsed &&
-          typeof parsed.endpoint === 'string'
-        ) {
-          settle({ endpoint: parsed.endpoint });
-          return;
-        }
-      }
-    };
-    const onExit = (
-      code: number | null,
-      signal: NodeJS.Signals | null,
-    ): void => {
-      settle({
-        error: new Error(
-          `Benchmark server exited before readiness: code=${String(code)} signal=${String(signal)}.`,
-        ),
-      });
-    };
-    const timeout = setTimeout(() => {
-      terminate(child.pid, 'SIGKILL');
-      settle({ error: new Error('Benchmark server readiness timed out.') });
-    }, timeoutMs);
-    timeout.unref();
-    child.stdout.on('data', onData);
-    child.once('exit', onExit);
-  });
-}
-
-async function closeServerProcess(child: ServerChild): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    if (child.exitCode !== 0) {
-      throw new Error(
-        `Benchmark server exited with code ${String(child.exitCode)}.`,
-      );
-    }
-    return;
-  }
-  terminate(child.pid, 'SIGTERM');
-  const completed = await waitForExit(child, 10_000);
-  if (!completed) {
-    terminate(child.pid, 'SIGKILL');
-    await waitForExit(child, 10_000);
-  }
-  if (child.exitCode !== 0) {
+async function closeContainerProcess(process: ContainerProcess): Promise<void> {
+  const settled = await Promise.race([
+    process.exit.then(() => true),
+    delay(0).then(() => false),
+  ]);
+  if (!settled) await process.signal('SIGTERM');
+  const graceful = await Promise.race([
+    process.exit.then(() => true),
+    delay(10_000).then(() => false),
+  ]);
+  if (!graceful) await process.signal('SIGKILL');
+  const exit = await process.exit;
+  if (exit.exitCode !== 0 && exit.signal !== 'SIGTERM') {
     throw new Error(
-      `Benchmark server shutdown failed: code=${String(child.exitCode)} signal=${String(child.signalCode)}.`,
+      `Benchmark server shutdown failed: code=${String(exit.exitCode)} signal=${String(exit.signal)}.`,
     );
   }
 }
 
-async function waitForExit(
-  child: ServerChild,
+async function withTimeout<T>(
+  operation: Promise<T>,
   timeoutMs: number,
-): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null) return true;
-  return new Promise<boolean>((resolve) => {
-    const timeout = setTimeout(() => {
-      child.off('exit', onExit);
-      resolve(false);
-    }, timeoutMs);
-    timeout.unref();
-    const onExit = (): void => {
-      clearTimeout(timeout);
-      resolve(true);
-    };
-    child.once('exit', onExit);
-  });
+  message: string,
+): Promise<T> {
+  return await Promise.race([
+    operation,
+    delay(timeoutMs).then(() => {
+      throw new Error(message);
+    }),
+  ]);
 }
 
-function terminate(pid: number | undefined, signal: NodeJS.Signals): void {
-  if (pid === undefined) return;
-  try {
-    process.kill(process.platform === 'win32' ? pid : -pid, signal);
-  } catch (error) {
-    if (
-      !(
-        error instanceof Error &&
-        'code' in error &&
-        (error as NodeJS.ErrnoException).code === 'ESRCH'
-      )
-    ) {
-      throw error;
-    }
-  }
+function delay(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(resolve, timeoutMs);
+    timeout.unref();
+  });
 }

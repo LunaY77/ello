@@ -148,7 +148,7 @@ const BenchmarkDocumentSchema = z
     container: z
       .object({
         pull_policy: z.enum(['if-absent', 'always', 'never']),
-        network: z.literal('task'),
+        network: z.literal('bridge'),
         cleanup: z.enum(['always', 'on-success', 'never']),
       })
       .strict(),
