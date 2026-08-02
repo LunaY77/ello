@@ -18,6 +18,12 @@ const SHORT_PROCESS = {
   maxOutputBytes: 128 * 1024 * 1024,
 } as const;
 
+export const CONTAINER_RUNTIME_PROBE_COMMAND = [
+  'sh',
+  '-c',
+  String.raw`printf '%s\n' "$(pwd)" "$(id -u):$(id -g)" "$HOME"`,
+] as const;
+
 export async function prepareTaskWorkspace(options: {
   readonly attemptId: string;
   readonly workspace: string;
@@ -82,10 +88,10 @@ export async function prepareTaskWorkspace(options: {
       timeoutMs: 30_000,
     });
     requireContainerSuccess(home, 'prepare HOME');
-    const probe = await container.exec(
-      ['sh', '-c', 'printf %s\\n "$(pwd)" "$(id -u):$(id -g)" "$HOME"'],
-      { cwd: container.workspace, timeoutMs: 30_000 },
-    );
+    const probe = await container.exec(CONTAINER_RUNTIME_PROBE_COMMAND, {
+      cwd: container.workspace,
+      timeoutMs: 30_000,
+    });
     requireContainerSuccess(probe, 'probe runtime');
     const [containerCwd, containerId, containerHome] = (
       probe.stdout ?? ''

@@ -1,9 +1,34 @@
 import { describe, expect, it } from 'vitest';
 
 import { dockerRunArgs } from '../src/infra/container/docker.js';
+import { runChecked } from '../src/infra/process.js';
+import { CONTAINER_RUNTIME_PROBE_COMMAND } from '../src/infra/workspace.js';
 import type { ContainerSpec } from '../src/ports/container.js';
 
+const PROCESS_OPTIONS = {
+  timeoutMs: 30_000,
+  killGraceMs: 1_000,
+  maxOutputBytes: 1024 * 1024,
+} as const;
+
 describe('task container Docker arguments', () => {
+  it('renders the runtime probe as three lines', async () => {
+    const [command, ...args] = CONTAINER_RUNTIME_PROBE_COMMAND;
+    const home = '/tmp/ello-bench-home';
+    const probe = await runChecked(command, args, {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: home },
+      ...PROCESS_OPTIONS,
+    });
+
+    expect(probe.stdout.split('\n')).toEqual([
+      process.cwd(),
+      `${process.getuid?.()}:${process.getgid?.()}`,
+      home,
+      '',
+    ]);
+  });
+
   it('enforces the task network, resource, user, and workspace contract', () => {
     const args = dockerRunArgs(containerSpec());
 
