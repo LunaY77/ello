@@ -5,6 +5,7 @@ id = "claude-code"
 display_name = "Claude Code"
 kind = "claude-code"
 model = "your-model-id"
+reasoning_effort = "max"
 
 [agent.binary]
 path_env = "ELLO_BENCH_CLAUDE_EXE"

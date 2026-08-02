@@ -27,12 +27,17 @@ export interface ClaudeCodeInvocation {
   readonly runtimeBoundarySha256: string;
   readonly executableSha256: string;
   readonly observedVersion: string;
+  readonly reasoningEffort: NonNullable<ClaudeCodeAgentSpec['reasoningEffort']>;
 }
 
 export async function createClaudeCodeInvocation(
   agent: ClaudeCodeAgentSpec,
   context: AgentRunContext,
 ): Promise<ClaudeCodeInvocation> {
+  const reasoningEffort = agent.reasoningEffort;
+  if (reasoningEffort === undefined) {
+    throw new Error('Claude Code reasoning effort is required for execution.');
+  }
   const baseUrl = requireClaudeCodeBaseUrl(agent.connection.baseUrl);
   const runtime = await inspectExternalRuntime(agent);
   const isolated = await prepareClaudeHome({
@@ -47,6 +52,8 @@ export async function createClaudeCodeInvocation(
     '--print',
     '--model',
     agent.model,
+    '--effort',
+    reasoningEffort,
     '--output-format',
     'stream-json',
     '--verbose',
@@ -99,6 +106,7 @@ export async function createClaudeCodeInvocation(
       ANTHROPIC_AUTH_TOKEN_ENV: agent.connection.apiKeyEnv,
     },
     model: agent.model,
+    reasoningEffort,
     tools: tools.split(','),
     mcpConfig: JSON.parse(emptyMcpConfig) as unknown,
     controlRuntime: 'host',
@@ -120,5 +128,6 @@ export async function createClaudeCodeInvocation(
     runtimeBoundarySha256: boundarySha256,
     executableSha256: runtime.executableSha256,
     observedVersion: runtime.observedVersion,
+    reasoningEffort,
   };
 }

@@ -30,9 +30,12 @@ const AgentResourcesSchema = z
     rounds: DistributionSchema,
     toolCalls: DistributionSchema,
     inputTokens: DistributionSchema,
+    nonCachedInputTokens: DistributionSchema.optional(),
     outputTokens: DistributionSchema,
     cacheReadTokens: DistributionSchema,
     cacheWriteTokens: DistributionSchema,
+    cacheHitRate: DistributionSchema.optional(),
+    reasoningTokens: DistributionSchema.optional(),
     phaseElapsedMs: z.record(z.string().min(1), DistributionSchema),
     threadUsage: z
       .object({

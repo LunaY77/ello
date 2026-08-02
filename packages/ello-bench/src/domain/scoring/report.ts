@@ -15,9 +15,12 @@ export interface AttemptMetrics {
   readonly rounds: number;
   readonly toolCalls: number;
   readonly inputTokens: number | undefined;
+  readonly nonCachedInputTokens: number | undefined;
   readonly outputTokens: number | undefined;
   readonly cacheReadTokens: number | undefined;
   readonly cacheWriteTokens: number | undefined;
+  readonly cacheHitRate: number | undefined;
+  readonly reasoningTokens: number | undefined;
   readonly usageComplete: boolean;
   readonly toolAuditPassed: boolean;
   readonly phaseElapsedMs: Readonly<Record<string, number>>;
@@ -191,6 +194,11 @@ function createAgentReport(
       rounds: metricDistribution(measured, metrics, 'rounds'),
       toolCalls: metricDistribution(measured, metrics, 'toolCalls'),
       inputTokens: metricDistribution(measured, metrics, 'inputTokens'),
+      nonCachedInputTokens: metricDistribution(
+        measured,
+        metrics,
+        'nonCachedInputTokens',
+      ),
       outputTokens: metricDistribution(measured, metrics, 'outputTokens'),
       cacheReadTokens: metricDistribution(measured, metrics, 'cacheReadTokens'),
       cacheWriteTokens: metricDistribution(
@@ -198,6 +206,8 @@ function createAgentReport(
         metrics,
         'cacheWriteTokens',
       ),
+      cacheHitRate: metricDistribution(measured, metrics, 'cacheHitRate'),
+      reasoningTokens: metricDistribution(measured, metrics, 'reasoningTokens'),
       phaseElapsedMs: Object.fromEntries(
         [...phaseNames]
           .sort((left, right) => left.localeCompare(right))

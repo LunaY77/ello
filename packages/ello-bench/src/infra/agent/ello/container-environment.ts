@@ -18,6 +18,8 @@ import {
 } from './container-processes.js';
 
 const CONTAINER_GENERATION = 1;
+const CONTAINER_MISSING_EXIT_CODE = 44;
+const CONTAINER_NOT_DIRECTORY_EXIT_CODE = 45;
 const FILE_OUTPUT_LIMIT_BYTES = 128 * 1024 * 1024;
 
 export function createContainerEnvironments(options: {
@@ -141,7 +143,7 @@ function createContainerFileSystem(
             'elif [ -f "$target" ]; then kind=file',
             'elif [ -d "$target" ]; then kind=directory',
             'elif [ -e "$target" ]; then kind=other',
-            'else exit 44',
+            `else exit ${CONTAINER_MISSING_EXIT_CODE}`,
             'fi',
             'printf "%s\\n" "$kind"',
             'stat --printf "%s\\n%Y\\n%y\\n" -- "$target"',
@@ -161,7 +163,17 @@ function createContainerFileSystem(
     async readFile(targetPath) {
       const resolved = resolvePath(targetPath);
       const result = await container.exec(
-        ['sh', '-c', 'base64 < "$1" | tr -d "\\n"', 'ello-bench-read', resolved],
+        [
+          'sh',
+          '-c',
+          [
+            'target=$1',
+            `if [ ! -e "$target" ]; then exit ${CONTAINER_MISSING_EXIT_CODE}; fi`,
+            'base64 < "$target" | tr -d "\\n"',
+          ].join('; '),
+          'ello-bench-read',
+          resolved,
+        ],
         {
           cwd: workingDirectory,
           timeoutMs: 30_000,
@@ -173,11 +185,24 @@ function createContainerFileSystem(
     },
     async readText(targetPath) {
       const resolved = resolvePath(targetPath);
-      const result = await container.exec(['cat', '--', resolved], {
-        cwd: workingDirectory,
-        timeoutMs: 30_000,
-        maxOutputBytes: FILE_OUTPUT_LIMIT_BYTES,
-      });
+      const result = await container.exec(
+        [
+          'sh',
+          '-c',
+          [
+            'target=$1',
+            `if [ ! -e "$target" ]; then exit ${CONTAINER_MISSING_EXIT_CODE}; fi`,
+            'cat -- "$target"',
+          ].join('; '),
+          'ello-bench-read',
+          resolved,
+        ],
+        {
+          cwd: workingDirectory,
+          timeoutMs: 30_000,
+          maxOutputBytes: FILE_OUTPUT_LIMIT_BYTES,
+        },
+      );
       requireSuccess(result, `read ${resolved}`);
       return result.stdout ?? '';
     },
@@ -201,14 +226,16 @@ function createContainerFileSystem(
       const resolved = resolvePath(targetPath);
       const result = await container.exec(
         [
-          'find',
+          'sh',
+          '-c',
+          [
+            'target=$1',
+            `if [ ! -e "$target" ]; then exit ${CONTAINER_MISSING_EXIT_CODE}; fi`,
+            `if [ ! -d "$target" ]; then exit ${CONTAINER_NOT_DIRECTORY_EXIT_CODE}; fi`,
+            'find "$target" -mindepth 1 -maxdepth 1 -printf "%f\\0"',
+          ].join('; '),
+          'ello-bench-list',
           resolved,
-          '-mindepth',
-          '1',
-          '-maxdepth',
-          '1',
-          '-printf',
-          '%f\\0',
         ],
         {
           cwd: workingDirectory,
@@ -228,7 +255,7 @@ function createContainerFileSystem(
         [
           'sh',
           '-c',
-          'if [ -d "$1" ] && [ ! -L "$1" ]; then rmdir -- "$1"; else rm -- "$1"; fi',
+          `if [ ! -e "$1" ] && [ ! -L "$1" ]; then exit ${CONTAINER_MISSING_EXIT_CODE}; elif [ -d "$1" ] && [ ! -L "$1" ]; then rmdir -- "$1"; else rm -- "$1"; fi`,
           'ello-bench-remove',
           resolved,
         ],
@@ -263,7 +290,10 @@ async function writeContainerFile(
   requireSuccess(result, `write ${targetPath}`);
 }
 
-function parseFileStat(output: string, targetPath: string): EnvironmentFileStat {
+function parseFileStat(
+  output: string,
+  targetPath: string,
+): EnvironmentFileStat {
   const [kind, sizeValue, modifiedValue, modifiedText] = output
     .trimEnd()
     .split('\n');
@@ -273,7 +303,9 @@ function parseFileStat(output: string, targetPath: string): EnvironmentFileStat 
     kind !== 'symlink' &&
     kind !== 'other'
   ) {
-    throw new Error(`Container stat returned an invalid kind for ${targetPath}.`);
+    throw new Error(
+      `Container stat returned an invalid kind for ${targetPath}.`,
+    );
   }
   const size = Number(sizeValue);
   const modifiedSeconds = Number(modifiedValue);
@@ -285,7 +317,9 @@ function parseFileStat(output: string, targetPath: string): EnvironmentFileStat 
     !Number.isSafeInteger(modifiedSeconds) ||
     !Number.isSafeInteger(modifiedMilliseconds)
   ) {
-    throw new Error(`Container stat returned invalid metadata for ${targetPath}.`);
+    throw new Error(
+      `Container stat returned invalid metadata for ${targetPath}.`,
+    );
   }
   return {
     kind,
@@ -299,8 +333,13 @@ function requireSuccess(
   operation: string,
 ): void {
   if (result.process.exitCode !== 0 || result.process.timedOut) {
-    throw new Error(
-      `Container ${operation} failed: ${result.stderr ?? `exit ${String(result.process.exitCode)}`}`,
-    );
+    const message = `Container ${operation} failed: ${result.stderr || `exit ${String(result.process.exitCode)}`}`;
+    if (result.process.exitCode === CONTAINER_MISSING_EXIT_CODE) {
+      throw Object.assign(new Error(message), { code: 'ENOENT' });
+    }
+    if (result.process.exitCode === CONTAINER_NOT_DIRECTORY_EXIT_CODE) {
+      throw Object.assign(new Error(message), { code: 'ENOTDIR' });
+    }
+    throw new Error(message);
   }
 }

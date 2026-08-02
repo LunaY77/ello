@@ -8,6 +8,7 @@ import { z } from 'zod';
 import {
   AgentSpecSchema,
   BenchmarkSuiteIdSchema,
+  ModelReasoningEffortSchema,
   ReasoningEffortSchema,
   validateBenchmarkConfig,
   validateBenchmarkDefinition,
@@ -37,7 +38,7 @@ const ModelCommon = {
   http_headers: HeaderSchema.optional(),
   context_window: z.number().int().positive(),
   max_output_tokens: z.number().int().positive(),
-  reasoning_effort: ReasoningEffortSchema,
+  reasoning_effort: ModelReasoningEffortSchema,
 } as const;
 const RawModelSchema = z.discriminatedUnion('protocol', [
   z
@@ -95,6 +96,7 @@ const RawAgentSchema = z.discriminatedUnion('kind', [
       display_name: z.string().min(1),
       kind: z.literal('claude-code'),
       model: z.string().min(1),
+      reasoning_effort: ModelReasoningEffortSchema,
       binary: RawBinarySchema,
       connection: RawConnectionSchema,
       environment: z.record(z.string(), z.string()).optional(),
@@ -261,7 +263,7 @@ function mapAgent(raw: z.infer<typeof RawAgentSchema>): AgentSpec {
     displayName: raw.display_name,
     kind: raw.kind,
     model: raw.model,
-    ...(raw.kind === 'codex' ? { reasoningEffort: raw.reasoning_effort } : {}),
+    reasoningEffort: raw.reasoning_effort,
     binary: {
       pathEnv: raw.binary.path_env,
       expectedVersion: raw.binary.expected_version,

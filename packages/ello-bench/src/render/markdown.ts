@@ -48,11 +48,11 @@ export function renderMarkdown(
     '',
     '## Resources (median)',
     '',
-    '| agent | elapsed | rounds | tools | input | main input | subagent input | output |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    '| agent | elapsed | rounds | tools | input | non-cache input | cache read | cache write | cache hit rate | output | reasoning | main input | subagent input |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
     ...report.agents.map((agent) => {
       const threads = agent.resources.threadUsage;
-      return `| ${escapeCell(agent.agentId)} | ${seconds(agent.resources.elapsedMs.median)} | ${count(agent.resources.rounds.median)} | ${count(agent.resources.toolCalls.median)} | ${count(agent.resources.inputTokens.median)} | ${count(threads?.mainInputTokens.median ?? null)} | ${count(threads?.subagentInputTokens.median ?? null)} | ${count(agent.resources.outputTokens.median)} |`;
+      return `| ${escapeCell(agent.agentId)} | ${seconds(agent.resources.elapsedMs.median)} | ${count(agent.resources.rounds.median)} | ${count(agent.resources.toolCalls.median)} | ${count(agent.resources.inputTokens.median)} | ${count(agent.resources.nonCachedInputTokens?.median ?? null)} | ${count(agent.resources.cacheReadTokens.median)} | ${count(agent.resources.cacheWriteTokens.median)} | ${percent(agent.resources.cacheHitRate?.median ?? null)} | ${count(agent.resources.outputTokens.median)} | ${count(agent.resources.reasoningTokens?.median ?? null)} | ${count(threads?.mainInputTokens.median ?? null)} | ${count(threads?.subagentInputTokens.median ?? null)} |`;
     }),
     '',
     '## Comparisons',

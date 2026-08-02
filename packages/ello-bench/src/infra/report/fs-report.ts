@@ -164,42 +164,77 @@ async function loadMetrics(
       phasePath,
       PhaseTimingsArtifactSchema,
     );
-    const inputTokens = await normalizedInputTokens(evidence);
+    const normalizedUsage = await reportUsage(evidence);
+    const inputTokens = normalizedUsage?.inputTokens;
+    const outputTokens = normalizedUsage?.outputTokens;
+    const cacheReadTokens = normalizedUsage?.cacheReadTokens;
+    const cacheWriteTokens = normalizedUsage?.cacheWriteTokens;
     const mainUsage = evidence.threadUsage?.main ?? evidence.usage;
     const subagentUsage =
       evidence.threadUsage?.subagents ?? zeroCompleteUsage();
     const combinedUsage = evidence.threadUsage?.combined ?? evidence.usage;
     metrics.set(attempt.attemptId, {
       elapsedMs: requiredClient(attempt).durationMs,
-      rounds: rounds.length,
+      rounds: normalizedUsage?.roundCount ?? rounds.length,
       toolCalls: evidence.tools.total,
       inputTokens,
-      outputTokens: usageValue(evidence.usage, 'outputTokens'),
-      cacheReadTokens:
+      nonCachedInputTokens: subtractCacheReadTokens(
+        inputTokens,
+        cacheReadTokens,
+      ),
+      outputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      cacheHitRate:
+        inputTokens === undefined ||
+        inputTokens === 0 ||
+        cacheReadTokens === undefined
+          ? undefined
+          : cacheReadTokens / inputTokens,
+      reasoningTokens:
         evidence.usage.status === 'complete'
-          ? (evidence.usage.cacheReadTokens ?? undefined)
-          : undefined,
-      cacheWriteTokens:
-        evidence.usage.status === 'complete'
-          ? (evidence.usage.cacheWriteTokens ?? undefined)
+          ? (evidence.usage.reasoningTokens ?? undefined)
           : undefined,
       usageComplete: evidence.usage.status === 'complete',
       toolAuditPassed: audit.status === 'passed',
       phaseElapsedMs: Object.fromEntries(
         phaseTimings.phases.map((timing) => [timing.phase, timing.durationMs]),
       ),
-      mainInputTokens: usageValue(mainUsage, 'inputTokens'),
+      mainInputTokens:
+        evidence.threadUsage === undefined
+          ? inputTokens
+          : usageValue(mainUsage, 'inputTokens'),
       subagentInputTokens: usageValue(subagentUsage, 'inputTokens'),
       combinedInputTokens: inputTokens,
-      mainOutputTokens: usageValue(mainUsage, 'outputTokens'),
+      mainOutputTokens:
+        evidence.threadUsage === undefined
+          ? outputTokens
+          : usageValue(mainUsage, 'outputTokens'),
       subagentOutputTokens: usageValue(subagentUsage, 'outputTokens'),
-      combinedOutputTokens: usageValue(combinedUsage, 'outputTokens'),
+      combinedOutputTokens:
+        evidence.threadUsage === undefined
+          ? outputTokens
+          : usageValue(combinedUsage, 'outputTokens'),
       mainToolCalls: usageValue(mainUsage, 'toolCalls'),
       subagentToolCalls: usageValue(subagentUsage, 'toolCalls'),
       combinedToolCalls: usageValue(combinedUsage, 'toolCalls'),
     });
   }
   return metrics;
+}
+
+function subtractCacheReadTokens(
+  inputTokens: number | undefined,
+  cacheReadTokens: number | undefined,
+): number | undefined {
+  if (inputTokens === undefined || cacheReadTokens === undefined) {
+    return undefined;
+  }
+  const nonCachedInputTokens = inputTokens - cacheReadTokens;
+  if (nonCachedInputTokens < 0) {
+    throw new Error('Cache tokens exceed total input tokens.');
+  }
+  return nonCachedInputTokens;
 }
 
 function usageValue(
@@ -222,34 +257,35 @@ function zeroCompleteUsage(): CompleteUsageEvidence {
   };
 }
 
-/**
- * Normalizes pre-fix Claude Code evidence while preserving current evidence.
- *
- * Early adapters persisted Anthropic's non-cache `input_tokens` directly. The
- * raw stream identifies that representation exactly; current totals pass
- * through unchanged.
- */
-async function normalizedInputTokens(
-  evidence: NormalizedAgentEvidence,
-): Promise<number | undefined> {
+async function reportUsage(evidence: NormalizedAgentEvidence): Promise<
+  | {
+      readonly inputTokens: number;
+      readonly outputTokens: number;
+      readonly cacheReadTokens: number | undefined;
+      readonly cacheWriteTokens: number | undefined;
+      readonly roundCount?: number;
+    }
+  | undefined
+> {
   if (evidence.usage.status !== 'complete') return undefined;
-  if (evidence.kind !== 'claude-code') return evidence.usage.inputTokens;
-  const raw = await claudeRawInputTokens(evidence.rawSource.path);
-  if (
-    raw === null ||
-    raw.nonCached !== evidence.usage.inputTokens ||
-    raw.cacheRead !== (evidence.usage.cacheReadTokens ?? 0) ||
-    raw.cacheWrite !== (evidence.usage.cacheWriteTokens ?? 0)
-  ) {
-    return evidence.usage.inputTokens;
+  if (evidence.kind === 'claude-code') {
+    const raw = await claudeTerminalUsage(evidence.rawSource.path);
+    if (raw !== null) return raw;
   }
-  return raw.nonCached + raw.cacheRead + raw.cacheWrite;
+  return {
+    inputTokens: evidence.usage.inputTokens,
+    outputTokens: evidence.usage.outputTokens,
+    cacheReadTokens: evidence.usage.cacheReadTokens ?? undefined,
+    cacheWriteTokens: evidence.usage.cacheWriteTokens ?? undefined,
+  };
 }
 
-async function claudeRawInputTokens(sourcePath: string): Promise<{
-  nonCached: number;
-  cacheRead: number;
-  cacheWrite: number;
+async function claudeTerminalUsage(sourcePath: string): Promise<{
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  roundCount: number;
 } | null> {
   let content: string;
   try {
@@ -257,10 +293,8 @@ async function claudeRawInputTokens(sourcePath: string): Promise<{
   } catch {
     return null;
   }
-  let nonCached = 0;
-  let cacheRead = 0;
-  let cacheWrite = 0;
-  let assistantEvents = 0;
+  const assistantMessageIds = new Set<string>();
+  let terminalUsage: Record<string, unknown> | undefined;
   for (const line of content.split('\n')) {
     if (!line) continue;
     let record: unknown;
@@ -269,29 +303,41 @@ async function claudeRawInputTokens(sourcePath: string): Promise<{
     } catch {
       return null;
     }
-    if (
-      typeof record !== 'object' ||
-      record === null ||
-      (record as { type?: unknown }).type !== 'assistant'
-    ) {
-      continue;
+    if (typeof record !== 'object' || record === null) return null;
+    const item = record as Record<string, unknown>;
+    if (item.type === 'assistant' && item.error === undefined) {
+      const message = item.message;
+      if (typeof message !== 'object' || message === null) return null;
+      const messageId = (message as Record<string, unknown>).id;
+      if (typeof messageId !== 'string' || messageId === '') return null;
+      assistantMessageIds.add(messageId);
     }
-    const usage = (record as { message?: { usage?: unknown } }).message?.usage;
-    if (typeof usage !== 'object' || usage === null) return null;
-    const values = usage as Record<string, unknown>;
-    if (
-      !isNonnegativeInteger(values.input_tokens) ||
-      !isOptionalNonnegativeInteger(values.cache_read_input_tokens) ||
-      !isOptionalNonnegativeInteger(values.cache_creation_input_tokens)
-    ) {
-      return null;
+    if (item.type === 'result') {
+      if (terminalUsage !== undefined) return null;
+      if (typeof item.usage !== 'object' || item.usage === null) return null;
+      terminalUsage = item.usage as Record<string, unknown>;
     }
-    nonCached += values.input_tokens;
-    cacheRead += values.cache_read_input_tokens ?? 0;
-    cacheWrite += values.cache_creation_input_tokens ?? 0;
-    assistantEvents += 1;
   }
-  return assistantEvents === 0 ? null : { nonCached, cacheRead, cacheWrite };
+  if (
+    terminalUsage === undefined ||
+    assistantMessageIds.size === 0 ||
+    !isNonnegativeInteger(terminalUsage.input_tokens) ||
+    !isNonnegativeInteger(terminalUsage.output_tokens) ||
+    !isOptionalNonnegativeInteger(terminalUsage.cache_read_input_tokens) ||
+    !isOptionalNonnegativeInteger(terminalUsage.cache_creation_input_tokens)
+  ) {
+    return null;
+  }
+  const cacheReadTokens = terminalUsage.cache_read_input_tokens ?? 0;
+  const cacheWriteTokens = terminalUsage.cache_creation_input_tokens ?? 0;
+  return {
+    inputTokens:
+      terminalUsage.input_tokens + cacheReadTokens + cacheWriteTokens,
+    outputTokens: terminalUsage.output_tokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    roundCount: assistantMessageIds.size,
+  };
 }
 
 function isNonnegativeInteger(value: unknown): value is number {

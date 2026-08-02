@@ -60,26 +60,46 @@ export function renderCharts(
     note: 'median normalized rounds',
     color: '#4472a8',
   }));
-  const tokens = report.agents.flatMap((agent) => {
-    const usage = agent.resources.threadUsage;
-    return [
-      {
-        label: `${agent.agentId} main`,
-        value:
-          usage?.mainInputTokens.median ??
-          agent.resources.inputTokens.median ??
-          0,
-        note: 'median input tokens',
-        color: '#2166ac',
-      },
-      {
-        label: `${agent.agentId} subagents`,
-        value: usage?.subagentInputTokens.median ?? 0,
-        note: 'median input tokens',
-        color: '#b2182b',
-      },
-    ];
-  });
+  const tokens = report.agents.flatMap(
+    (agent) =>
+      [
+        {
+          label: `${agent.agentId} non-cache input`,
+          value: agent.resources.nonCachedInputTokens?.median ?? 0,
+          note: 'median tokens',
+          color: '#2166ac',
+        },
+        {
+          label: `${agent.agentId} cache read`,
+          value: agent.resources.cacheReadTokens.median ?? 0,
+          note: 'median tokens',
+          color: '#167c5a',
+        },
+        {
+          label: `${agent.agentId} cache write`,
+          value: agent.resources.cacheWriteTokens.median ?? 0,
+          note: 'median tokens',
+          color: '#8d5b26',
+        },
+        {
+          label: `${agent.agentId} output`,
+          value: agent.resources.outputTokens.median ?? 0,
+          note: 'median tokens',
+          color: '#b2182b',
+        },
+        ...(agent.resources.reasoningTokens?.median === null ||
+        agent.resources.reasoningTokens?.median === undefined
+          ? []
+          : [
+              {
+                label: `${agent.agentId} reasoning`,
+                value: agent.resources.reasoningTokens.median,
+                note: 'median tokens',
+                color: '#6a4c93',
+              },
+            ]),
+      ] satisfies BarDatum[],
+  );
   const tools = report.agents.map((agent) => ({
     label: agent.agentId,
     value: agent.resources.toolCalls.median ?? 0,
@@ -101,7 +121,7 @@ export function renderCharts(
     'resource-tradeoff.svg': barChart('Median elapsed time', elapsed, false),
     'round-timeline.svg': barChart('Median model rounds', rounds, false),
     'token-breakdown.svg': barChart(
-      'Main and subagent input tokens',
+      'Median token accounting by agent',
       tokens,
       false,
     ),

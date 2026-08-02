@@ -91,7 +91,7 @@ export function providerOptionsFromRuntimeModel(
   if (model.protocol === 'anthropic' && isDeepSeekModel(model)) {
     return {
       anthropic: {
-        thinking: { type: 'enabled', budgetTokens: 1_024 },
+        thinking: { type: 'adaptive' },
         effort: model.reasoningEffort,
       },
     };

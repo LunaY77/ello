@@ -11,6 +11,14 @@ export const ReasoningEffortSchema = z.enum([
   'xhigh',
 ]);
 
+export const ModelReasoningEffortSchema = z.enum([
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+]);
+
 const HttpHeaderNameSchema = z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u);
 const HttpHeaderValueSchema = z
   .string()
@@ -25,7 +33,7 @@ const BenchmarkModelFields = {
   httpHeaders: HttpHeadersSchema.optional(),
   contextWindow: z.number().int().positive(),
   maxOutputTokens: z.number().int().positive(),
-  reasoningEffort: ReasoningEffortSchema,
+  reasoningEffort: ModelReasoningEffortSchema,
 };
 
 const AnthropicAuthSchemeSchema = z.enum(['api-key', 'bearer']);
@@ -136,6 +144,9 @@ export const ClaudeCodeAgentSpecSchema = z
     ...AgentSpecBase,
     kind: z.literal('claude-code'),
     model: z.string().min(1),
+    // v1 run artifacts predate explicit Claude effort provenance. New TOML
+    // configs still require this field at the raw-config boundary.
+    reasoningEffort: ModelReasoningEffortSchema.optional(),
     binary: AgentBinarySchema,
     connection: z
       .object({
@@ -177,7 +188,7 @@ const AgentRuntimeBase = {
   agentId: AgentIdSchema,
   displayName: z.string().min(1),
   agentConfigHash: z.string().regex(/^[0-9a-f]{64}$/u),
-  adapterContractVersion: z.literal('1'),
+  adapterContractVersion: z.enum(['1', '2']),
   expectedModel: z.string().min(1),
   observedModel: z.string().min(1),
   configSha256: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -186,6 +197,7 @@ const AgentRuntimeBase = {
 export const ElloAgentRuntimeSchema = z
   .object({
     ...AgentRuntimeBase,
+    adapterContractVersion: z.literal('1'),
     kind: z.literal('ello'),
     primaryModel: z.string().min(1),
     auxiliaryModel: z.string().min(1),
@@ -205,6 +217,7 @@ export const ClaudeCodeAgentRuntimeSchema = z
   .object({
     ...ExternalAgentRuntimeBase,
     kind: z.literal('claude-code'),
+    reasoningEffort: ModelReasoningEffortSchema.optional(),
     baseUrl: z.string().url(),
     apiKeyEnv: z.string().regex(/^[A-Z][A-Z0-9_]*$/u),
   })
@@ -213,6 +226,7 @@ export const ClaudeCodeAgentRuntimeSchema = z
 export const CodexAgentRuntimeSchema = z
   .object({
     ...ExternalAgentRuntimeBase,
+    adapterContractVersion: z.literal('1'),
     kind: z.literal('codex'),
     reasoningEffort: ReasoningEffortSchema,
     baseUrl: z.string().url(),

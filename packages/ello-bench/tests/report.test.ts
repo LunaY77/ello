@@ -293,6 +293,15 @@ describe('suite report', () => {
       median: 1,
       p95: 1,
     });
+    expect(report.agents[0]?.resources).toMatchObject({
+      inputTokens: { median: 10 },
+      nonCachedInputTokens: { median: 10 },
+      cacheReadTokens: { median: 0 },
+      cacheWriteTokens: { median: 0 },
+      cacheHitRate: { median: 0 },
+      outputTokens: { median: 4 },
+      reasoningTokens: { median: 0 },
+    });
     expect(report.agents[0]?.resources.phaseElapsedMs['agent-running']).toEqual(
       {
         count: 1,
@@ -305,6 +314,192 @@ describe('suite report', () => {
       rightAgentId: 'claude-code',
       matchedRuns: 0,
       excludedPairs: 2,
+    });
+  });
+
+  it('rebuilds Claude usage from terminal totals and unique message ids', async () => {
+    const runRoot = await mkdtemp(
+      path.join(tmpdir(), 'ello-bench-claude-report-'),
+    );
+    const rawPath = path.join(runRoot, 'stdout.jsonl');
+    const roundsPath = path.join(runRoot, 'rounds.jsonl');
+    const phaseTimingsPath = path.join(runRoot, 'phase-timings.json');
+    const firstUsage = {
+      input_tokens: 10,
+      output_tokens: 0,
+      cache_creation_input_tokens: 1,
+      cache_read_input_tokens: 2,
+    };
+    const secondUsage = {
+      input_tokens: 20,
+      output_tokens: 0,
+      cache_creation_input_tokens: 3,
+      cache_read_input_tokens: 5,
+    };
+    const rawContent = [
+      claudeAssistantRecord('msg-1', firstUsage, 'thinking'),
+      claudeAssistantRecord('msg-1', firstUsage, 'text'),
+      claudeAssistantRecord('msg-2', secondUsage, 'text'),
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        session_id: 'session-1',
+        usage: {
+          input_tokens: 30,
+          output_tokens: 11,
+          cache_creation_input_tokens: 4,
+          cache_read_input_tokens: 7,
+        },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n')
+      .concat('\n');
+    const duplicateRounds = [
+      externalRound(1, 'msg-1', 13, 2, 1),
+      externalRound(2, 'msg-1', 13, 2, 1),
+      externalRound(3, 'msg-2', 28, 5, 3),
+    ];
+    const roundsContent = duplicateRounds
+      .map((round) => JSON.stringify(round))
+      .join('\n')
+      .concat('\n');
+    await Promise.all([
+      writeFile(rawPath, rawContent, 'utf8'),
+      writeFile(roundsPath, roundsContent, 'utf8'),
+      writeJsonAtomic(phaseTimingsPath, {
+        schema: 'ello.benchmark.phase-timings.v1',
+        phases: [
+          {
+            phase: 'agent-running',
+            startedAt: '2026-07-23T00:00:00.000Z',
+            completedAt: '2026-07-23T00:00:02.000Z',
+            durationMs: 2000,
+            status: 'completed',
+          },
+        ],
+      }),
+    ]);
+    const evidencePath = path.join(runRoot, 'agent-evidence.json');
+    await writeJsonAtomic(evidencePath, {
+      schema: 'ello.benchmark.agent-evidence.v1',
+      agentId: 'claude-code',
+      kind: 'claude-code',
+      observedModel: 'claude-opus-4-6[1m]',
+      terminalStatus: 'completed',
+      providerFailure: false,
+      parserCoverage: 'complete',
+      terminalStopReason: 'end_turn',
+      unknownFields: [],
+      rawSource: fileEvidence(rawPath, rawContent),
+      rounds: fileEvidence(roundsPath, roundsContent),
+      roundCount: 3,
+      // This deliberately preserves the old fragment-level overcount. Report
+      // generation must prefer the terminal totals in the raw Claude stream.
+      usage: {
+        status: 'complete',
+        requests: 3,
+        inputTokens: 54,
+        outputTokens: 0,
+        cacheReadTokens: 9,
+        cacheWriteTokens: 5,
+        reasoningTokens: null,
+        toolCalls: 0,
+      },
+      tools: zeroToolSummary(),
+    });
+    const toolAuditPath = path.join(runRoot, 'tool-audit.json');
+    await writeJsonAtomic(toolAuditPath, {
+      schema: 'ello.benchmark.tool-audit.v1',
+      status: 'passed',
+      parserCoverage: 'complete',
+      observedToolCalls: 0,
+      shellCalls: 0,
+      routedShellCalls: 0,
+      fileCalls: 0,
+      violations: [],
+    });
+    const verifierProcess = {
+      path: path.join(runRoot, 'verifier-process.json'),
+      sha256: '2'.repeat(64),
+    };
+    const completed = RunManifestSchema.parse({
+      ...baseRun(
+        runRoot,
+        'cccccccccccccccccccccccc',
+        '3333333333333333',
+        'task-a',
+        'claude-code',
+      ),
+      status: 'completed',
+      phase: 'completed',
+      startedAt: '2026-07-23T00:00:00.000Z',
+      completedAt: '2026-07-23T00:00:02.000Z',
+      task: resolvedTask('task-a'),
+      imageId: 'sha256:image',
+      containerName: 'ello-bench-agent',
+      baselineTree: 'b'.repeat(40),
+      client: processResult(2000),
+      agentRuntime: claudeRuntime(),
+      agentProcess: {
+        path: path.join(runRoot, 'agent-process.json'),
+        sha256: '3'.repeat(64),
+      },
+      agentEvidence: {
+        path: evidencePath,
+        sha256: sha256(await readFile(evidencePath)),
+      },
+      toolAudit: {
+        path: toolAuditPath,
+        sha256: sha256(await readFile(toolAuditPath)),
+      },
+      patch: {
+        path: path.join(runRoot, 'model.patch'),
+        sha256: 'a'.repeat(64),
+        bytes: 0,
+        changedFiles: [],
+        baselineTree: 'b'.repeat(40),
+      },
+      verifierProcess,
+      phaseTimingsPath,
+      harness: harnessReport(runRoot, verifierProcess, 1),
+      outcome: 'passed',
+    });
+    const attemptPath = path.join(runRoot, 'run-completed.json');
+    await writeJsonAtomic(attemptPath, completed);
+    await writeJsonAtomic(
+      path.join(runRoot, 'suite-manifest.json'),
+      SuiteManifestSchema.parse({
+        schema: 'ello.benchmark.suite-manifest.v3',
+        suite: getBenchmarkSuite('swe-bench-pro-calibration').metadata,
+        report: reportConfig(),
+        configHash: 'c'.repeat(64),
+        planHash: '7'.repeat(64),
+        agents: [claudeCodeAgent()],
+        selection: {
+          taskIds: ['task-a'],
+          agentIds: ['claude-code'],
+        },
+        runRoot,
+        createdAt: '2026-07-23T00:00:00.000Z',
+        updatedAt: '2026-07-23T00:00:02.000Z',
+        jobs: [completed.job],
+        attempts: { [completed.job.jobId]: [attemptPath] },
+      }),
+    );
+
+    const report = await generateSuiteReport(runRoot);
+
+    expect(report.agents[0]?.resources).toMatchObject({
+      rounds: { median: 2 },
+      inputTokens: { median: 41 },
+      nonCachedInputTokens: { median: 34 },
+      cacheReadTokens: { median: 7 },
+      cacheWriteTokens: { median: 4 },
+      cacheHitRate: { median: 7 / 41 },
+      outputTokens: { median: 11 },
+      reasoningTokens: { count: 0, median: null, p95: null },
     });
   });
 });
@@ -629,6 +824,7 @@ function claudeCodeAgent() {
     displayName: 'Claude Code',
     kind: 'claude-code' as const,
     model: 'claude-opus-4-6[1m]',
+    reasoningEffort: 'max' as const,
     binary: {
       pathEnv: 'ELLO_BENCH_CLAUDE_EXE',
       expectedVersion: '2.1.217',
@@ -638,6 +834,101 @@ function claudeCodeAgent() {
       baseUrl: 'https://api.anthropic.com',
       apiKeyEnv: 'ANTHROPIC_AUTH_TOKEN',
     },
+  };
+}
+
+function claudeRuntime() {
+  const agent = claudeCodeAgent();
+  return {
+    schema: 'ello.benchmark.agent-runtime.v1' as const,
+    agentId: agent.id,
+    displayName: agent.displayName,
+    agentConfigHash: sha256(stableJson(agent)),
+    adapterContractVersion: '1' as const,
+    expectedModel: agent.model,
+    observedModel: agent.model,
+    configSha256: sha256(stableJson(agent)),
+    kind: 'claude-code' as const,
+    executablePath: '/tmp/claude',
+    expectedVersion: agent.binary.expectedVersion,
+    observedVersion: agent.binary.expectedVersion,
+    executableSha256: agent.binary.sha256,
+    runtimeBoundaryInstructionSha256: '4'.repeat(64),
+    baseUrl: agent.connection.baseUrl,
+    apiKeyEnv: agent.connection.apiKeyEnv,
+  };
+}
+
+function claudeAssistantRecord(
+  messageId: string,
+  usage: Record<string, number>,
+  contentType: 'thinking' | 'text',
+) {
+  return {
+    type: 'assistant',
+    message: {
+      id: messageId,
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-opus-4-6[1m]',
+      content: [{ type: contentType }],
+      usage,
+    },
+    session_id: 'session-1',
+  };
+}
+
+function externalRound(
+  round: number,
+  requestId: string,
+  inputTokens: number,
+  cacheReadTokens: number,
+  cacheWriteTokens: number,
+) {
+  return {
+    schema: 'ello.benchmark.round.v2',
+    round,
+    requestId,
+    provider: 'anthropic',
+    model: 'claude-opus-4-6[1m]',
+    startedAt: null,
+    firstTokenAt: null,
+    completedAt: null,
+    status: 'completed',
+    usage: {
+      status: 'complete',
+      requests: 1,
+      inputTokens,
+      outputTokens: 0,
+      cacheReadTokens,
+      cacheWriteTokens,
+      reasoningTokens: null,
+      toolCalls: 0,
+    },
+    toolCalls: [],
+    durationMs: null,
+    firstTokenLatencyMs: null,
+  };
+}
+
+function fileEvidence(filePath: string, content: string) {
+  return {
+    path: filePath,
+    sha256: sha256(content),
+    bytes: Buffer.byteLength(content),
+  };
+}
+
+function zeroToolSummary() {
+  return {
+    total: 0,
+    failed: 0,
+    read: 0,
+    search: 0,
+    edit: 0,
+    shell: 0,
+    other: 0,
+    timeToFirstMutationMs: null,
   };
 }
 

@@ -24,11 +24,15 @@ describe('container benchmark runtime boundary', () => {
       container: { name: 'bench-container', workspace: '/app' },
     } as AgentRunContext);
 
-    expect(boundary).toContain('Agent control process runs on the benchmark host');
+    expect(boundary).toContain(
+      'Agent control process runs on the benchmark host',
+    );
     expect(boundary).toContain(
       "docker exec -w /app bench-container bash -c '<command>'",
     );
-    expect(boundary).toContain('Do not run repository shell commands on the host');
+    expect(boundary).toContain(
+      'Do not run repository shell commands on the host',
+    );
   });
 
   it('accepts only shell calls routed to the assigned task container', () => {
@@ -43,9 +47,7 @@ describe('container benchmark runtime boundary', () => {
       workspace: '/app',
       parserCoverage: 'complete',
       tools: [
-        shellTool(
-          "docker exec -w /app bench-container bash -c 'git status'",
-        ),
+        shellTool("docker exec -w /app bench-container bash -c 'git status'"),
       ],
       containerName: 'bench-container',
       containerWorkspace: '/app',
@@ -144,6 +146,54 @@ describe('container benchmark runtime boundary', () => {
       expect(() => environment.fileSystem.resolvePath('.')).toThrow(
         'Environment Handle is closed',
       );
+    } finally {
+      await runtime.environments.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves ENOENT when Container Environment reads a missing file', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-container-missing-'));
+    const workspace = path.join(root, 'workspace');
+    const rawRoot = path.join(root, 'raw');
+    await mkdir(workspace, { recursive: true });
+    const runtime = createBenchmarkAgentRuntime({
+      rawRoot,
+      container: new FakeContainerHandle(
+        workspace,
+        path.join(root, 'container'),
+      ),
+    });
+    try {
+      const environment = await runtime.environments.attach(
+        {
+          environmentRef: runtime.defaultEnvironmentRef,
+          workingDirectory: '/app',
+        },
+        runtime.environmentGrant,
+      );
+
+      await expect(
+        environment.fileSystem.readText('missing.txt'),
+      ).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await expect(
+        environment.fileSystem.readFile('missing.bin'),
+      ).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await expect(
+        environment.fileSystem.listDir('missing-dir'),
+      ).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await environment.fileSystem.writeText('file.txt', 'content\n');
+      await expect(
+        environment.fileSystem.listDir('file.txt'),
+      ).rejects.toMatchObject({
+        code: 'ENOTDIR',
+      });
     } finally {
       await runtime.environments.close();
       await rm(root, { recursive: true, force: true });

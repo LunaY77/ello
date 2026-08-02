@@ -102,7 +102,7 @@ export function createClaudeCodeAdapter(
             agentId: agent.id,
             displayName: agent.displayName,
             agentConfigHash: context.agentConfigHash,
-            adapterContractVersion: '1',
+            adapterContractVersion: '2',
             expectedModel: agent.model,
             observedModel: normalized.evidence.observedModel,
             configSha256: sha256(stableJson(agent)),
@@ -112,6 +112,7 @@ export function createClaudeCodeAdapter(
             observedVersion: invocation.observedVersion,
             executableSha256: invocation.executableSha256,
             runtimeBoundaryInstructionSha256: invocation.runtimeBoundarySha256,
+            reasoningEffort: invocation.reasoningEffort,
             baseUrl: agent.connection.baseUrl,
             apiKeyEnv: agent.connection.apiKeyEnv,
           });

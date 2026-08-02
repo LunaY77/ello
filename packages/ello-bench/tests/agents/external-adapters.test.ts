@@ -72,6 +72,12 @@ describe('Claude Code Agent adapter', () => {
       reasoningTokens: null,
       toolCalls: 1,
     });
+    expect(result.normalized.evidence.roundCount).toBe(2);
+    expect(result.normalized.runtime).toMatchObject({
+      kind: 'claude-code',
+      adapterContractVersion: '2',
+      reasoningEffort: 'max',
+    });
     const invocation = await readFile(
       path.join(fixture.context.rawAgentRoot, 'invocation.json'),
       'utf8',
@@ -84,6 +90,8 @@ describe('Claude Code Agent adapter', () => {
         ANTHROPIC_BASE_URL: 'https://example.test/anthropic',
         ANTHROPIC_AUTH_TOKEN_ENV: 'ELLO_TEST_CLAUDE_API_KEY',
       },
+      args: expect.arrayContaining(['--effort', 'max']),
+      reasoningEffort: 'max',
     });
     expect(
       await readFile(
@@ -111,6 +119,22 @@ describe('Claude Code Agent adapter', () => {
     for (const round of rounds) {
       expect(round).not.toHaveProperty('finishReason');
     }
+  });
+
+  it('treats omitted cache fields as zero without losing later cache usage', async () => {
+    const fixture = await createFixture('missing-cache-fields');
+    const result = await executeFixture(fixture);
+
+    expect(result.normalized.evidence.usage).toEqual({
+      status: 'complete',
+      requests: 2,
+      inputTokens: 23,
+      outputTokens: 6,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      reasoningTokens: null,
+      toolCalls: 1,
+    });
   });
 
   it('preserves valid evidence for a nonzero Agent exit', async () => {
@@ -162,9 +186,7 @@ describe('Claude Code Agent adapter', () => {
 
     expect(result.normalized.toolAudit.status).toBe('failed');
     expect(result.normalized.toolAudit.violations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'host_shell' }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ kind: 'host_shell' })]),
     );
   });
 
@@ -232,7 +254,8 @@ type FixtureMode =
   | 'reordered-tools'
   | 'tool-mismatch'
   | 'upstream-drift'
-  | 'tool-progress';
+  | 'tool-progress'
+  | 'missing-cache-fields';
 
 async function createFixture(
   mode: FixtureMode,
@@ -261,6 +284,7 @@ async function createFixture(
     displayName: 'Claude Code test',
     kind: 'claude-code',
     model: 'claude-opus-4-6[1m]',
+    reasoningEffort: 'max',
     binary: {
       pathEnv: 'ELLO_TEST_CLAUDE_EXE',
       expectedVersion: '2.1.217',
@@ -318,8 +342,10 @@ if (process.argv.includes('--version')) { process.stdout.write('2.1.217 (Claude 
 if (mode === 'malformed') { process.stdout.write('{bad json\\n'); process.exit(1); }
 const args = process.argv.slice(2);
 const selectedModel = args[args.indexOf('--model') + 1];
+const selectedEffort = args[args.indexOf('--effort') + 1];
 const boundary = args[args.indexOf('--append-system-prompt') + 1];
 fs.readFileSync(0, 'utf8');
+if (selectedEffort !== 'max') process.exit(70);
 if (!boundary.includes("docker exec -w /app bench-container bash -c '<command>'")) process.exit(65);
 if (!process.env.HOME?.endsWith('/agent-state/home')) process.exit(66);
 if (!process.env.CLAUDE_CONFIG_DIR?.endsWith('/agent-state/home/.claude')) process.exit(69);
@@ -334,8 +360,8 @@ const system = { type: 'system', subtype: 'init', cwd: process.cwd(), session_id
 process.stdout.write(JSON.stringify(system) + '\\n');
 if (mode === 'timeout') while (true) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
 const usage = mode === 'upstream-drift'
-  ? { input_tokens: 10, output_tokens: 3, cache_creation_input_tokens: 1, cache_read_input_tokens: 2, future_usage_field: 'added upstream' }
-  : { input_tokens: 10, output_tokens: 3, cache_creation_input_tokens: 1, cache_read_input_tokens: 2 };
+  ? { input_tokens: 10, output_tokens: 0, cache_creation_input_tokens: 1, cache_read_input_tokens: 2, future_usage_field: 'added upstream' }
+  : { input_tokens: 10, output_tokens: 0, cache_creation_input_tokens: 1, cache_read_input_tokens: 2 };
 if (mode === 'provider-error') {
   const result = "There's an issue with the selected model (" + selectedModel + ').';
   process.stdout.write(JSON.stringify({ type: 'assistant', message: { model: '<synthetic>', id: 'msg-provider-error', type: 'message', role: 'assistant', content: [{ type: 'text', text: result }], stop_reason: 'stop_sequence', stop_sequence: '', stop_details: null, usage }, session_id: 'session-1', error: 'model_not_found' }) + '\\n');
@@ -348,7 +374,16 @@ const command = mode === 'routing-violation'
 if (mode !== 'routing-violation') {
   fs.writeFileSync('agent-output.txt', 'claude-code\\n');
 }
-process.stdout.write(JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-test', id: 'msg-1', type: 'message', role: 'assistant', content: [{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command } }], stop_reason: null, usage }, session_id: 'session-1' }) + '\\n');
+const firstUsage = mode === 'missing-cache-fields'
+  ? { input_tokens: 10, output_tokens: 0 }
+  : usage;
+for (const content of [
+  [{ type: 'thinking', thinking: 'inspect', signature: 'sig-1' }],
+  [{ type: 'text', text: 'running' }],
+  [{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command } }],
+]) {
+  process.stdout.write(JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-test', id: 'msg-1', type: 'message', role: 'assistant', content, stop_reason: null, usage: firstUsage }, session_id: 'session-1' }) + '\\n');
+}
 process.stdout.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'ok', is_error: false }] }, session_id: 'session-1' }) + '\\n');
 if (mode === 'tool-progress') process.stdout.write(JSON.stringify({ type: 'tool_progress', tool_use_id: 'tool-1-heartbeat-0', tool_name: 'Bash', parent_tool_use_id: 'tool-1', elapsed_time_seconds: 30, heartbeat: true, session_id: 'session-1', uuid: 'progress-1' }) + '\\n');
 const secondContent = mode === 'upstream-drift'
@@ -358,7 +393,14 @@ const secondMessage = mode === 'upstream-drift'
   ? { model: 'claude-opus-test', id: 'msg-2', type: 'message', role: 'assistant', content: secondContent, stop_reason: null, usage, future_field: 'added upstream' }
   : { model: 'claude-opus-test', id: 'msg-2', type: 'message', role: 'assistant', content: secondContent, stop_reason: null, usage };
 process.stdout.write(JSON.stringify({ type: 'assistant', message: secondMessage, session_id: 'session-1' }) + '\\n');
-process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, duration_ms: 2, num_turns: 2, result: 'done', session_id: 'session-1', usage, stop_reason: 'end_turn', terminal_reason: 'completed' }) + '\\n');
+const terminalUsage = {
+  input_tokens: firstUsage.input_tokens + usage.input_tokens,
+  output_tokens: 6,
+  cache_creation_input_tokens: (firstUsage.cache_creation_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0),
+  cache_read_input_tokens: (firstUsage.cache_read_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0),
+  ...(mode === 'upstream-drift' ? { future_usage_field: 'added upstream' } : {}),
+};
+process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, duration_ms: 2, num_turns: 2, result: 'done', session_id: 'session-1', usage: terminalUsage, stop_reason: 'end_turn', terminal_reason: 'completed' }) + '\\n');
 process.exit(mode === 'nonzero' ? 7 : 0);
 `;
 }

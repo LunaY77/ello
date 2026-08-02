@@ -58,7 +58,16 @@ describe('TypeScript report renderer', () => {
     const markdown = renderMarkdown(report, '/runs/example', 'fixture');
     expect(markdown).toContain('| ello | 3 | 2 | 66.7% |');
     expect(markdown).toContain('subagent input');
+    expect(markdown).toContain('non-cache input');
+    expect(markdown).toContain('cache hit rate');
+    expect(markdown).toContain('8.3%');
+    expect(markdown).toContain('reasoning');
     expect(markdown).toContain('`charts/token-breakdown.svg`');
+    expect(first['token-breakdown.svg']).toContain('ello non-cache input');
+    expect(first['token-breakdown.svg']).toContain('ello cache read');
+    expect(first['token-breakdown.svg']).toContain('ello cache write');
+    expect(first['token-breakdown.svg']).toContain('ello output');
+    expect(first['token-breakdown.svg']).toContain('ello reasoning');
   });
 });
 
@@ -137,9 +146,12 @@ function reportFixture() {
           elapsedMs: summary(10_000),
           rounds: summary(4),
           inputTokens: summary(1200),
+          nonCachedInputTokens: summary(1100),
           outputTokens: summary(200),
           cacheReadTokens: summary(100),
           cacheWriteTokens: summary(20),
+          cacheHitRate: summary(1 / 12),
+          reasoningTokens: summary(40),
           toolCalls: summary(8),
           threadUsage: {
             mainInputTokens: summary(900),

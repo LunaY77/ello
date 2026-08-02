@@ -143,7 +143,7 @@ describe('provider cache transforms', () => {
       }),
     ).toEqual({
       anthropic: {
-        thinking: { type: 'enabled', budgetTokens: 1_024 },
+        thinking: { type: 'adaptive' },
         effort: 'high',
       },
     });

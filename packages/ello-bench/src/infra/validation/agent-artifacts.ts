@@ -105,6 +105,27 @@ export async function validateAgentArtifacts(
       break;
     }
     case 'claude-code':
+      if (
+        runtime.kind === 'claude-code' &&
+        runtime.adapterContractVersion === '1'
+      ) {
+        // Contract v1 counted Claude stream fragments as rounds. Its stored
+        // evidence remains immutable and self-consistent; v2 reparsing is used
+        // only for v2 artifacts and report-time resource correction.
+        recomputed = {
+          evidence,
+          rounds,
+          tools: rounds.flatMap((round) => round.toolCalls),
+        };
+        expectedAudit = auditExternalTools({
+          tools: recomputed.tools,
+          parserCoverage: evidence.parserCoverage,
+          workspace: run.workspace,
+          containerName: required(run.containerName, 'containerName', run),
+          containerWorkspace: '/app',
+        });
+        break;
+      }
       recomputed = await parseClaudeCodeEvidence({
         agent,
         execution,
@@ -315,7 +336,10 @@ function validateAgentRuntime(
         runtime.expectedVersion !== agent.binary.expectedVersion ||
         runtime.executableSha256 !== agent.binary.sha256 ||
         runtime.baseUrl !== agent.connection.baseUrl ||
-        runtime.apiKeyEnv !== agent.connection.apiKeyEnv
+        runtime.apiKeyEnv !== agent.connection.apiKeyEnv ||
+        (runtime.adapterContractVersion === '2' &&
+          (agent.reasoningEffort === undefined ||
+            runtime.reasoningEffort !== agent.reasoningEffort))
       ) {
         throw new Error(`Claude runtime provenance mismatch: ${run.attemptId}`);
       }

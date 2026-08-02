@@ -560,6 +560,56 @@ describe('文件写入审批边界', () => {
   );
 });
 
+describe('文件写入执行契约', () => {
+  it('在 Environment 报告 ENOENT 时创建新文件', async () => {
+    const root = await temporaryDirectory('ello-write-missing-');
+    const writeText = vi.fn(async (targetPath: string, content: string) => {
+      await mkdir(path.dirname(path.resolve(root, targetPath)), {
+        recursive: true,
+      });
+      await writeFile(path.resolve(root, targetPath), content, 'utf8');
+    });
+    const environment = createTestEnvironmentHandle(root);
+    const fileSystem = {
+      ...environment.fileSystem,
+      readText: vi.fn(() =>
+        Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+      ),
+      writeText,
+    };
+    const tool = createFsTools({} as CodingAgentConfig, () => 'auto').find(
+      (candidate) => candidate.name === 'write',
+    );
+    if (tool === undefined) throw new Error('write tool missing');
+
+    await expect(
+      tool.execute(
+        { filePath: 'nested/new.txt', content: 'created\n' },
+        {
+          cwd: root,
+          sessionId: 'session',
+          runId: 'run',
+          callId: 'call',
+          agent: {
+            runId: 'run',
+            turnIndex: 0,
+            toolCallId: 'call',
+            environment: { ...environment, fileSystem },
+            metadata: {},
+            signal: new AbortController().signal,
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      metadata: { before: null, after: 'created\n' },
+    });
+    expect(writeText).toHaveBeenCalledWith('nested/new.txt', 'created\n');
+    await expect(
+      readFile(path.join(root, 'nested/new.txt'), 'utf8'),
+    ).resolves.toBe('created\n');
+  });
+});
+
 describe('Meta Tool 路由契约', () => {
   const tools = [
     targetTool('read', 'Read a file or directory.', 'cat file'),

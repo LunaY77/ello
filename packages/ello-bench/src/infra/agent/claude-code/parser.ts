@@ -5,6 +5,7 @@ import {
   RoundSchema,
   type BenchmarkRound,
   type ClaudeCodeAgentSpec,
+  type CompleteUsageEvidence,
   type NormalizedAgentEvidence,
   type NormalizedToolCall,
 } from '../../../domain/contract/index.js';
@@ -72,6 +73,7 @@ export async function parseClaudeCodeEvidence(options: {
   const rounds: BenchmarkRound[] = [];
   const tools: NormalizedToolCall[] = [];
   const observedModels = new Set<string>();
+  const assistantMessages = new Map<string, ParsedClaudeAssistant>();
   for (const record of records) {
     switch (record.type) {
       case 'system':
@@ -84,36 +86,12 @@ export async function parseClaudeCodeEvidence(options: {
           options.execution.process.timedOut,
         );
         if (parsed.providerErrorCode !== null) break;
-        observedModels.add(parsed.model);
-        tools.push(...parsed.tools);
-        rounds.push(
-          RoundSchema.parse({
-            schema: 'ello.benchmark.round.v2',
-            round: rounds.length + 1,
-            requestId: parsed.messageId,
-            provider: 'anthropic',
-            model: parsed.model,
-            startedAt: null,
-            firstTokenAt: null,
-            completedAt: null,
-            status: 'completed',
-            ...(parsed.stopReason === null
-              ? {}
-              : { finishReason: parsed.stopReason }),
-            usage: {
-              status: 'complete',
-              requests: 1,
-              inputTokens: parsed.usage.inputTokens,
-              outputTokens: parsed.usage.outputTokens,
-              cacheReadTokens: parsed.usage.cacheReadTokens,
-              cacheWriteTokens: parsed.usage.cacheWriteTokens,
-              reasoningTokens: null,
-              toolCalls: parsed.tools.length,
-            },
-            toolCalls: parsed.tools,
-            durationMs: null,
-            firstTokenLatencyMs: null,
-          }),
+        const previous = assistantMessages.get(parsed.messageId);
+        assistantMessages.set(
+          parsed.messageId,
+          previous === undefined
+            ? parsed
+            : mergeAssistantMessage(previous, parsed),
         );
         break;
       }
@@ -133,6 +111,39 @@ export async function parseClaudeCodeEvidence(options: {
           `Unsupported Claude Code stream event: ${String(record.type)}.`,
         );
     }
+  }
+  for (const parsed of assistantMessages.values()) {
+    observedModels.add(parsed.model);
+    tools.push(...parsed.tools);
+    rounds.push(
+      RoundSchema.parse({
+        schema: 'ello.benchmark.round.v2',
+        round: rounds.length + 1,
+        requestId: parsed.messageId,
+        provider: 'anthropic',
+        model: parsed.model,
+        startedAt: null,
+        firstTokenAt: null,
+        completedAt: null,
+        status: 'completed',
+        ...(parsed.stopReason === null
+          ? {}
+          : { finishReason: parsed.stopReason }),
+        usage: {
+          status: 'complete',
+          requests: 1,
+          inputTokens: parsed.usage.inputTokens,
+          outputTokens: parsed.usage.outputTokens,
+          cacheReadTokens: parsed.usage.cacheReadTokens,
+          cacheWriteTokens: parsed.usage.cacheWriteTokens,
+          reasoningTokens: null,
+          toolCalls: parsed.tools.length,
+        },
+        toolCalls: parsed.tools,
+        durationMs: null,
+        firstTokenLatencyMs: null,
+      }),
+    );
   }
   if (observedModels.size > 1) {
     throw new AgentAdapterError(
@@ -182,14 +193,18 @@ export async function parseClaudeCodeEvidence(options: {
       'Claude Code stdout contains no model round.',
     );
   }
-  if (options.persistRounds !== false) {
-    await writeJsonLines(options.roundsPath, rounds);
-  }
   const terminalStatus = options.execution.process.timedOut
     ? 'timed_out'
     : providerFailure
       ? 'failed'
       : 'completed';
+  const usage =
+    terminalStatus === 'completed' && terminal !== undefined
+      ? reconcileTerminalUsage(rounds, terminal.usage)
+      : aggregateUsage(rounds);
+  if (options.persistRounds !== false) {
+    await writeJsonLines(options.roundsPath, rounds);
+  }
   const evidence = NormalizedAgentEvidenceSchema.parse({
     schema: 'ello.benchmark.agent-evidence.v1',
     agentId: options.agent.id,
@@ -203,7 +218,7 @@ export async function parseClaudeCodeEvidence(options: {
     rawSource: await fileEvidence(options.execution.stdoutPath),
     rounds: await fileEvidence(options.roundsPath),
     roundCount: rounds.length,
-    usage: aggregateUsage(rounds),
+    usage,
     tools: summarizeTools(rounds),
   });
   return { evidence, rounds, tools, providerFailureMessage };
@@ -337,19 +352,21 @@ function parseSystemEvent(
   };
 }
 
-function parseAssistantEvent(
-  drift: WireFormatDrift,
-  event: Record<string, unknown>,
-  toolResults: ReadonlyMap<string, { readonly failed: boolean }>,
-  timedOut: boolean,
-): {
+interface ParsedClaudeAssistant {
   readonly model: string;
   readonly messageId: string;
   readonly stopReason: string | null;
   readonly usage: ClaudeUsage;
   readonly tools: readonly NormalizedToolCall[];
   readonly providerErrorCode: string | null;
-} {
+}
+
+function parseAssistantEvent(
+  drift: WireFormatDrift,
+  event: Record<string, unknown>,
+  toolResults: ReadonlyMap<string, { readonly failed: boolean }>,
+  timedOut: boolean,
+): ParsedClaudeAssistant {
   assertKeys(
     drift,
     event,
@@ -543,6 +560,7 @@ function parseResultEvent(
 ): {
   readonly providerFailure: boolean;
   readonly stopReason: string | null;
+  readonly usage: ClaudeUsage;
 } {
   assertKeys(
     drift,
@@ -581,7 +599,7 @@ function parseResultEvent(
       'usage',
     ],
   );
-  parseClaudeUsage(drift, event.usage);
+  const usage = parseClaudeUsage(drift, event.usage);
   if (typeof event.is_error !== 'boolean') {
     throw new AgentAdapterError(
       'agent_evidence',
@@ -597,6 +615,7 @@ function parseResultEvent(
   return {
     providerFailure: event.is_error,
     stopReason: optionalString(event.stop_reason, 'Claude result stop reason'),
+    usage,
   };
 }
 
@@ -765,8 +784,8 @@ function normalizeClaudeTool(
 interface ClaudeUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
-  readonly cacheWriteTokens: number | null;
-  readonly cacheReadTokens: number | null;
+  readonly cacheWriteTokens: number;
+  readonly cacheReadTokens: number;
 }
 
 function parseClaudeUsage(drift: WireFormatDrift, value: unknown): ClaudeUsage {
@@ -817,21 +836,128 @@ function parseClaudeUsage(drift: WireFormatDrift, value: unknown): ClaudeUsage {
   // components.  The benchmark's inputTokens is a total, so make the
   // components additive before persisting normalized evidence.
   return {
-    inputTokens:
-      nonCachedInputTokens + (cacheWriteTokens ?? 0) + (cacheReadTokens ?? 0),
+    inputTokens: nonCachedInputTokens + cacheWriteTokens + cacheReadTokens,
     outputTokens,
     cacheWriteTokens,
     cacheReadTokens,
   };
 }
 
-function optionalNonnegativeInteger(
-  value: unknown,
-  label: string,
-): number | null {
+function optionalNonnegativeInteger(value: unknown, label: string): number {
   return value === undefined || value === null
-    ? null
+    ? 0
     : requiredNonnegativeInteger(value, label);
+}
+
+function mergeAssistantMessage(
+  previous: ParsedClaudeAssistant,
+  current: ParsedClaudeAssistant,
+): ParsedClaudeAssistant {
+  if (
+    previous.model !== current.model ||
+    previous.providerErrorCode !== current.providerErrorCode ||
+    !sameUsage(previous.usage, current.usage)
+  ) {
+    throw new AgentAdapterError(
+      'agent_evidence',
+      `Claude assistant message fragments disagree: ${current.messageId}.`,
+    );
+  }
+  if (
+    previous.stopReason !== null &&
+    current.stopReason !== null &&
+    previous.stopReason !== current.stopReason
+  ) {
+    throw new AgentAdapterError(
+      'agent_evidence',
+      `Claude assistant message stop reasons disagree: ${current.messageId}.`,
+    );
+  }
+  const tools = new Map(previous.tools.map((tool) => [tool.id, tool]));
+  for (const tool of current.tools) {
+    const existing = tools.get(tool.id);
+    if (
+      existing !== undefined &&
+      JSON.stringify(existing) !== JSON.stringify(tool)
+    ) {
+      throw new AgentAdapterError(
+        'agent_evidence',
+        `Claude tool fragments disagree: ${tool.id}.`,
+      );
+    }
+    tools.set(tool.id, tool);
+  }
+  return {
+    ...previous,
+    stopReason: previous.stopReason ?? current.stopReason,
+    tools: [...tools.values()],
+  };
+}
+
+function sameUsage(left: ClaudeUsage, right: ClaudeUsage): boolean {
+  return (
+    left.inputTokens === right.inputTokens &&
+    left.outputTokens === right.outputTokens &&
+    left.cacheReadTokens === right.cacheReadTokens &&
+    left.cacheWriteTokens === right.cacheWriteTokens
+  );
+}
+
+function reconcileTerminalUsage(
+  rounds: BenchmarkRound[],
+  terminal: ClaudeUsage,
+): CompleteUsageEvidence {
+  const roundUsage = aggregateUsage(rounds);
+  if (roundUsage.status !== 'complete') {
+    throw new AgentAdapterError(
+      'agent_evidence',
+      'Claude completed run contains unavailable round usage.',
+    );
+  }
+  if (
+    terminal.inputTokens !== roundUsage.inputTokens ||
+    terminal.cacheReadTokens !== roundUsage.cacheReadTokens ||
+    terminal.cacheWriteTokens !== roundUsage.cacheWriteTokens
+  ) {
+    throw new AgentAdapterError(
+      'agent_evidence',
+      'Claude terminal input usage does not match unique assistant messages.',
+    );
+  }
+  const missingOutputTokens = terminal.outputTokens - roundUsage.outputTokens;
+  if (missingOutputTokens < 0) {
+    throw new AgentAdapterError(
+      'agent_evidence',
+      'Claude terminal output usage is lower than unique assistant messages.',
+    );
+  }
+  if (missingOutputTokens > 0) {
+    const index = rounds.findLastIndex(
+      (round) => round.usage.status === 'complete',
+    );
+    const round = rounds[index];
+    if (round === undefined || round.usage.status !== 'complete') {
+      throw new AgentAdapterError(
+        'agent_evidence',
+        'Claude terminal output usage has no completed round.',
+      );
+    }
+    rounds[index] = RoundSchema.parse({
+      ...round,
+      usage: {
+        ...round.usage,
+        outputTokens: round.usage.outputTokens + missingOutputTokens,
+      },
+    });
+  }
+  const reconciled = aggregateUsage(rounds);
+  if (reconciled.status !== 'complete') {
+    throw new AgentAdapterError(
+      'agent_evidence',
+      'Claude reconciled usage is unavailable.',
+    );
+  }
+  return reconciled;
 }
 
 function assertKeys(

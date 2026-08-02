@@ -48,6 +48,7 @@ describe('benchmark matrix', () => {
     expect(config.agents).toContainEqual(
       expect.objectContaining({
         id: 'claude-code',
+        reasoningEffort: 'max',
         connection: expect.objectContaining({
           apiKeyEnv: 'ELLO_BENCH_API_KEY',
         }),
