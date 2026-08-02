@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { dockerRunArgs } from '../src/infra/container/docker.js';
+import {
+  dockerContainerUserInitArgs,
+  dockerRunArgs,
+} from '../src/infra/container/docker.js';
 import { runChecked } from '../src/infra/process.js';
 import { CONTAINER_RUNTIME_PROBE_COMMAND } from '../src/infra/workspace.js';
 import type { ContainerSpec } from '../src/ports/container.js';
@@ -55,6 +58,28 @@ describe('task container Docker arguments', () => {
       'example.invalid/swe-bench:task',
       'sleep infinity',
     ]);
+  });
+
+  it('initializes image-owned toolchains without changing task uid', () => {
+    const args = dockerContainerUserInitArgs(
+      'ello-bench-job-agent',
+      '1000:1000',
+      '/tmp/ello-bench-home',
+    );
+
+    expect(args.slice(0, 6)).toEqual([
+      'exec',
+      '--user',
+      '0:0',
+      '--workdir',
+      '/',
+      'ello-bench-job-agent',
+    ]);
+    expect(args.at(-4)).toContain('chmod o+x /root');
+    expect(args.at(-4)).toContain('ln -s /root/.rustup');
+    expect(args.at(-4)).toContain('ln -s "/root/.cargo/$name"');
+    expect(args.at(-2)).toBe('/tmp/ello-bench-home');
+    expect(args.at(-1)).toBe('1000:1000');
   });
 
   it('maps internet-enabled tasks to the bridge network', () => {

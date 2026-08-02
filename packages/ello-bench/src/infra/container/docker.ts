@@ -135,6 +135,11 @@ export class DockerContainerRuntime implements ContainerRuntime {
       spec.storageMb * 1024 * 1024,
     );
     try {
+      await initializeDockerContainer(
+        spec.name,
+        `${spec.user.uid}:${spec.user.gid}`,
+        spec.env.HOME,
+      );
       await handle.start();
       return handle;
     } catch (error) {
@@ -142,6 +147,70 @@ export class DockerContainerRuntime implements ContainerRuntime {
       throw error;
     }
   }
+}
+
+// Benchmark images are built for root, while task commands use the host uid so
+// bind-mounted Git workspaces remain writable outside Docker.
+const CONTAINER_USER_INIT_SCRIPT = String.raw`
+home=$1
+owner=$2
+if [ -z "$home" ]; then
+  exit 0
+fi
+mkdir -p -- "$home"
+chown "$owner" "$home"
+if [ -d /root ]; then
+  chmod o+x /root
+fi
+if [ -d /root/.rustup ] && [ ! -e "$home/.rustup" ] && [ ! -L "$home/.rustup" ]; then
+  ln -s /root/.rustup "$home/.rustup"
+fi
+if [ -d /root/.cargo ]; then
+  mkdir -p -- "$home/.cargo"
+  chown "$owner" "$home/.cargo"
+  for name in registry git; do
+    if [ -e "/root/.cargo/$name" ] && [ ! -e "$home/.cargo/$name" ] && [ ! -L "$home/.cargo/$name" ]; then
+      ln -s "/root/.cargo/$name" "$home/.cargo/$name"
+    fi
+  done
+fi
+`.trim();
+
+export function dockerContainerUserInitArgs(
+  containerName: string,
+  containerUser: string,
+  home: string | undefined,
+): string[] {
+  return [
+    'exec',
+    '--user',
+    '0:0',
+    '--workdir',
+    '/',
+    containerName,
+    '/bin/sh',
+    '-c',
+    CONTAINER_USER_INIT_SCRIPT,
+    'ello-bench-container-init',
+    home ?? '',
+    containerUser,
+  ];
+}
+
+export async function initializeDockerContainer(
+  containerName: string,
+  containerUser: string,
+  home: string | undefined,
+): Promise<void> {
+  await runChecked(
+    'docker',
+    dockerContainerUserInitArgs(containerName, containerUser, home),
+    {
+      cwd: process.cwd(),
+      ...DOCKER_TIMEOUT,
+      maxOutputBytes: 16 * 1024 * 1024,
+    },
+  );
 }
 
 export class DockerContainerHandle implements ContainerHandle {

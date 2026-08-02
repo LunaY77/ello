@@ -105,7 +105,7 @@ const DEEP_SWE: BenchmarkSuiteAdapter = {
   verifierContainer: {
     command: [
       '/bin/bash',
-      '-lc',
+      '-c',
       `mkdir -p ${CONTAINER_HOME} && exec /bin/bash /tests/test.sh`,
     ],
   },

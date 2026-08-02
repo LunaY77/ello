@@ -8,12 +8,15 @@ import {
   type ResolvedTask,
 } from '../../domain/contract/index.js';
 import { sha256 } from '../../domain/hash.js';
-import { dockerContainerWritableBytes } from '../container/docker.js';
+import {
+  dockerContainerWritableBytes,
+  initializeDockerContainer,
+} from '../container/docker.js';
 import { CONTAINER_HOME, hostContainerUser } from '../container-user.js';
 import { getBenchmarkSuiteForTask } from '../corpus/suite.js';
 import { removeContainer } from '../docker-image.js';
 import { errorMessage, writeJsonAtomic } from '../io.js';
-import { runProcess } from '../process.js';
+import { runChecked, runProcess } from '../process.js';
 import {
   STORAGE_WATCHDOG_INTERVAL_MS,
   WorkspaceStorageWatchdog,
@@ -58,9 +61,25 @@ export async function executeVerifierProcess(options: {
   );
   await storage.start();
   try {
+    const containerUser = hostContainerUser();
+    await runChecked(
+      'docker',
+      verifierDockerArgs(options, verifierName, containerUser),
+      {
+        cwd: options.harnessRoot,
+        timeoutMs: 120_000,
+        killGraceMs: 10_000,
+        maxOutputBytes: 16 * 1024 * 1024,
+      },
+    );
+    await initializeDockerContainer(
+      verifierName,
+      containerUser,
+      CONTAINER_HOME,
+    );
     execution = await runProcess(
       'docker',
-      verifierDockerArgs(options, verifierName, hostContainerUser()),
+      verifierExecArgs(options, verifierName, containerUser),
       {
         cwd: options.harnessRoot,
         timeoutMs: options.task.verifierTimeoutMs,
@@ -142,16 +161,17 @@ export function verifierDockerArgs(
   containerUser: string,
 ): string[] {
   const task = options.task;
-  const suite = getBenchmarkSuiteForTask(task.benchmark);
   const args = [
     'run',
-    '--rm',
+    '-d',
+    '--init',
     '--name',
     verifierName,
     '--user',
     containerUser,
-    // 镜像默认 HOME=/root 对非 root 用户不可写，test.sh 的
-    // `git config --global --add safe.directory` 会静默失败。
+    '--workdir',
+    '/app',
+    // 任务进程仍以宿主 uid 运行；启动后再由 root 初始化镜像工具链路径。
     '--env',
     `HOME=${CONTAINER_HOME}`,
     '--network',
@@ -166,12 +186,36 @@ export function verifierDockerArgs(
     `type=bind,source=${options.tests},target=/tests,readonly`,
     '--mount',
     `type=bind,source=${options.logs},target=/logs`,
+    '--entrypoint',
+    '/bin/sh',
+    task.environment.image,
+    '-c',
+    'sleep infinity',
   ];
-  if (suite.verifierContainer.entrypoint !== undefined) {
-    args.push('--entrypoint', suite.verifierContainer.entrypoint);
-  }
-  args.push(task.environment.image, ...suite.verifierContainer.command);
   return args;
+}
+
+export function verifierExecArgs(
+  options: {
+    readonly task: ResolvedTask;
+  },
+  verifierName: string,
+  containerUser: string,
+): string[] {
+  const suite = getBenchmarkSuiteForTask(options.task.benchmark);
+  const command =
+    suite.verifierContainer.entrypoint === undefined
+      ? [...suite.verifierContainer.command]
+      : [suite.verifierContainer.entrypoint, ...suite.verifierContainer.command];
+  return [
+    'exec',
+    '--user',
+    containerUser,
+    '--workdir',
+    '/app',
+    verifierName,
+    ...command,
+  ];
 }
 
 async function writeProcessEvidence(options: {

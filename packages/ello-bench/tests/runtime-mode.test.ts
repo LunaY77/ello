@@ -123,6 +123,29 @@ describe('container benchmark runtime boundary', () => {
     }
   });
 
+  it('preserves the task image PATH for Ello shell commands', async () => {
+    const container = new FakeContainerHandle('/tmp', '/tmp');
+    const registry = createContainerProcessRegistry(
+      container,
+      container.name,
+      1,
+    );
+    const processes = registry.createHandle('owner', '/app', () => undefined);
+    try {
+      const result = await processes.exec({
+        command: 'printf "%s" "$PATH"',
+        env: { PATH: '/root/.cargo/bin:/usr/bin' },
+        maxRuntimeMs: 10_000,
+      });
+
+      expect(Buffer.from(result.stdout.data).toString('utf8')).toBe(
+        '/root/.cargo/bin:/usr/bin',
+      );
+    } finally {
+      await registry.close();
+    }
+  });
+
   it('manages bounded background process output and stdin in the container', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ello-container-process-'));
     const workspace = path.join(root, 'workspace');

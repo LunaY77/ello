@@ -1,4 +1,11 @@
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -29,6 +36,20 @@ afterEach(() => {
 });
 
 describe('Codex Agent adapter', () => {
+  it('runs an npm-installed Codex symlink through its native package layout', async () => {
+    const fixture = await createFixture('success', 'npm-symlink');
+    const result = await executeFixture(fixture);
+
+    expect(result.execution.process.exitCode).toBe(0);
+    const invocation = JSON.parse(
+      await readFile(
+        path.join(fixture.context.rawAgentRoot, 'invocation.json'),
+        'utf8',
+      ),
+    ) as { command: string };
+    expect(invocation.command).toMatch(/\/codex-runtime\/bin\/codex$/u);
+  });
+
   it('runs Codex exec in an isolated environment and normalizes evidence', async () => {
     const fixture = await createFixture('success');
     const result = await executeFixture(fixture);
@@ -200,6 +221,7 @@ type FixtureMode =
 
 async function createFixture(
   mode: FixtureMode,
+  installation: 'standalone' | 'npm-symlink' = 'standalone',
 ): Promise<{ readonly agent: AgentSpec; readonly context: AgentRunContext }> {
   const root = await mkdtemp(path.join(tmpdir(), 'ello-bench-codex-'));
   const workspace = path.join(root, 'workspace');
@@ -215,8 +237,13 @@ async function createFixture(
     mkdir(binRoot, { recursive: true }),
   ]);
   await writeFile(path.join(workspace, 'README.md'), 'fixture\n', 'utf8');
-  const executablePath = path.join(binRoot, 'codex');
-  await writeExecutable(executablePath, codexExecutableSource(mode));
+  const executablePath =
+    installation === 'npm-symlink'
+      ? await writeNpmCodexInstallation(root, mode)
+      : path.join(binRoot, 'codex');
+  if (installation === 'standalone') {
+    await writeExecutable(executablePath, codexExecutableSource(mode));
+  }
   const binarySha256 = sha256(await readFile(executablePath));
   setEnvironment('ELLO_TEST_CODEX_EXE', executablePath);
   setEnvironment('ELLO_TEST_CODEX_API_KEY', 'codex-test-key');
@@ -258,6 +285,67 @@ async function createFixture(
     },
   };
   return { agent, context };
+}
+
+async function writeNpmCodexInstallation(
+  root: string,
+  mode: FixtureMode,
+): Promise<string> {
+  const packageRoot = path.join(
+    root,
+    'lib',
+    'node_modules',
+    '@openai',
+    'codex',
+  );
+  const launcherPath = path.join(packageRoot, 'bin', 'codex.js');
+  const platformRoot = path.join(
+    packageRoot,
+    'node_modules',
+    '@openai',
+    'codex-linux-x64',
+  );
+  const layoutRoot = path.join(
+    platformRoot,
+    'vendor',
+    'x86_64-unknown-linux-musl',
+  );
+  const nativeExecutable = path.join(layoutRoot, 'bin', 'codex');
+  const executablePath = path.join(root, 'bin', 'codex');
+  await Promise.all([
+    mkdir(path.dirname(launcherPath), { recursive: true }),
+    mkdir(path.dirname(nativeExecutable), { recursive: true }),
+  ]);
+  await Promise.all([
+    writeExecutable(launcherPath, codexLauncherSource()),
+    writeExecutable(nativeExecutable, codexExecutableSource(mode)),
+    writeFile(
+      path.join(packageRoot, 'package.json'),
+      JSON.stringify({ name: '@openai/codex', type: 'module' }),
+      'utf8',
+    ),
+    writeFile(
+      path.join(platformRoot, 'package.json'),
+      JSON.stringify({ name: '@openai/codex' }),
+      'utf8',
+    ),
+    writeFile(
+      path.join(layoutRoot, 'codex-package.json'),
+      JSON.stringify({
+        layoutVersion: 1,
+        version: '0.145.0',
+        target: 'x86_64-unknown-linux-musl',
+        variant: 'codex',
+        entrypoint: 'bin/codex',
+      }),
+      'utf8',
+    ),
+  ]);
+  await symlink(
+    '../lib/node_modules/@openai/codex/bin/codex.js',
+    executablePath,
+  );
+  return executablePath;
 }
 
 async function executeFixture(fixture: {
@@ -316,6 +404,13 @@ const terminal = { type: 'turn.completed', turn_id: 'turn-1', timestamp: '2026-0
 if (mode === 'upstream-drift') terminal.future_event_field = true;
 event(terminal);
 process.exit(mode === 'nonzero' ? 7 : 0);
+`;
+}
+
+function codexLauncherSource(): string {
+  return `#!/usr/bin/env node
+if (process.argv.includes('--version')) { process.stdout.write('codex-cli 0.145.0\\n'); process.exit(0); }
+process.exit(70);
 `;
 }
 

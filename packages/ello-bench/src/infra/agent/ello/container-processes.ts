@@ -175,7 +175,7 @@ class DefaultContainerProcessRegistry implements ContainerProcessRegistry {
     );
     const command =
       request.args === undefined
-        ? [DEFAULT_SHELL, '-lc', `set -o pipefail; ${request.command}`]
+        ? [DEFAULT_SHELL, '-c', `set -o pipefail; ${request.command}`]
         : [request.command, ...request.args];
     const stdout = new BoundedOutput(outputLimit);
     const stderr = new BoundedOutput(outputLimit);

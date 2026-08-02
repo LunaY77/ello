@@ -6,7 +6,6 @@ import { writeJsonAtomic } from '../../io.js';
 import {
   externalProcessEnvironment,
   inspectExternalRuntime,
-  installExternalExecutable,
   prepareContainerAgentHome,
   requiredEnvironment,
 } from '../external.js';
@@ -15,6 +14,8 @@ import {
   createRuntimeBoundaryInstruction,
   runtimeBoundarySha256,
 } from '../runtime-boundary.js';
+
+import { installCodexExecutable } from './runtime.js';
 
 const BENCHMARK_PROVIDER_ID = 'ello_benchmark';
 
@@ -35,7 +36,11 @@ export async function createCodexInvocation(
   context: AgentRunContext,
 ): Promise<CodexInvocation> {
   const runtime = await inspectExternalRuntime(agent);
-  const executable = await installExternalExecutable(context, runtime, 'codex');
+  const executable = await installCodexExecutable(
+    context,
+    runtime,
+    agent.binary.expectedVersion,
+  );
   const isolated = await prepareContainerAgentHome(context, 'codex');
   const apiKey = requiredEnvironment(agent.connection.apiKeyEnv);
   const runtimeBoundary = createRuntimeBoundaryInstruction(context);

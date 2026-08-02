@@ -115,7 +115,7 @@ export class FakeContainerHandle implements ContainerHandle {
   async copyIn(hostPath: string, containerPath: string): Promise<void> {
     const target = this.mapPath(containerPath);
     await mkdir(path.dirname(target), { recursive: true });
-    await cp(hostPath, target);
+    await cp(hostPath, target, { recursive: true });
   }
 
   async copyOut(containerPath: string, hostPath: string): Promise<void> {
