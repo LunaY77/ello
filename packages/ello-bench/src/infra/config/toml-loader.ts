@@ -76,9 +76,7 @@ const RawConnectionSchema = z
     http_headers: HeaderSchema.optional(),
   })
   .strict();
-const RawFeaturesSchema = z
-  .object({ subagents: z.boolean(), ptc: z.boolean() })
-  .strict();
+const RawFeaturesSchema = z.object({ subagents: z.boolean() }).strict();
 const RawAgentSchema = z.discriminatedUnion('kind', [
   z
     .object({

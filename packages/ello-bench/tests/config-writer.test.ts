@@ -57,7 +57,7 @@ describe('benchmark Agent config', () => {
       workspace,
       agent: ElloAgentSpecSchema.parse({
         ...agentFixture(),
-        features: { subagents: false, ptc: false },
+        features: { subagents: false },
       }),
       snapshotPath: path.join(root, 'snapshot.json'),
     });
@@ -71,6 +71,15 @@ describe('benchmark Agent config', () => {
       cwd_policy: 'allowed_paths',
     });
     expect(config.agent).toBeUndefined();
+  });
+
+  it('rejects the removed ptc feature configuration', () => {
+    expect(() =>
+      ElloAgentSpecSchema.parse({
+        ...agentFixture(),
+        features: { subagents: true, ptc: false },
+      }),
+    ).toThrow();
   });
 
   it('rejects project state that could override the isolated config', async () => {

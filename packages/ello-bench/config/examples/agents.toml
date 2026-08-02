@@ -29,7 +29,6 @@ reasoning_effort = "medium"
 
 [agent.features]
 subagents = true
-ptc = false
 
 [[agent]]
 id = "claude-code"

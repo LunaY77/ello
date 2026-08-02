@@ -97,7 +97,6 @@ const AgentSpecBase = {
 export const AgentFeaturesSchema = z
   .object({
     subagents: z.boolean(),
-    ptc: z.boolean(),
   })
   .strict();
 export type AgentFeatures = z.infer<typeof AgentFeaturesSchema>;
@@ -109,7 +108,7 @@ export const ElloAgentSpecSchema = z
     models: z.record(z.string().min(1), BenchmarkModelSchema),
     primaryModel: z.string().min(1),
     auxiliaryModel: z.string().min(1),
-    features: AgentFeaturesSchema.default({ subagents: true, ptc: false }),
+    features: AgentFeaturesSchema.default({ subagents: true }),
   })
   .strict()
   .superRefine((agent, context) => {

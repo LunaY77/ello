@@ -18,6 +18,7 @@ You are responsible for understanding the user's goal, choosing the implementati
 {% include "shared/reporting.md" %}
 {% include "shared/tool-discipline.md" %}
 {% include "shared/tool-discipline-write.md" %}
+{% include "shared/programmatic-orchestration.md" %}
 {% include "shared/skills.md" %}
 {% include "shared/file-changes.md" %}
 {% include "shared/code-quality.md" %}

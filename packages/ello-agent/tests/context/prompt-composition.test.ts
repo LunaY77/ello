@@ -26,9 +26,18 @@ describe('prompt composition', () => {
       '# File Changes',
       '# Code Quality',
       '# Safety',
+      '# Programmatic Orchestration',
+      'PTC is not a separate tool or DSL.',
+      'Use one program when later steps depend on earlier results',
+      'Keep independent lookups as separate calls in the same model response',
+      'Use `write` followed by `bash` for a multi-line, reusable, or debuggable script.',
     ]) {
       expect(prompt).toContain(marker);
     }
+    expect(prompt).not.toContain('run_program');
+    expect(prompt).toContain(
+      'Do not invent an SDK, DSL, or hidden Agent tool API.',
+    );
     expect(prompt).toContain('# Primary Agent Role');
     expect(prompt).not.toContain('{%');
     expect(prompt).not.toContain('{{');
