@@ -14,7 +14,7 @@ import {
   claudeCodeBaseUrlIssue,
   requireClaudeCodeBaseUrl,
 } from '../../src/infra/agent/claude-code/base-url.js';
-import { containerProcessEnvironment } from '../../src/infra/agent/external.js';
+import { externalProcessEnvironment } from '../../src/infra/agent/external.js';
 import { createAgentAdapter } from '../../src/infra/agent/factory.js';
 import type {
   AgentProcessExecution,
@@ -34,11 +34,12 @@ afterEach(() => {
 });
 
 describe('Claude Code Agent adapter', () => {
-  it('does not replace the task image PATH with the host PATH', () => {
+  it('inherits the host control-plane PATH', () => {
     setEnvironment('PATH', '/host-only/bin');
 
-    expect(containerProcessEnvironment({ HOME: '/root' })).toEqual({
-      HOME: '/root',
+    expect(externalProcessEnvironment({ HOME: '/isolated' })).toMatchObject({
+      HOME: '/isolated',
+      PATH: '/host-only/bin',
     });
   });
 
@@ -77,8 +78,9 @@ describe('Claude Code Agent adapter', () => {
     );
     expect(invocation).not.toContain('claude-test-key');
     expect(JSON.parse(invocation)).toMatchObject({
+      controlRuntime: 'host',
       environment: {
-        HOME: '/root',
+        HOME: path.join(fixture.context.agentStateRoot, 'home'),
         ANTHROPIC_BASE_URL: 'https://example.test/anthropic',
         ANTHROPIC_AUTH_TOKEN_ENV: 'ELLO_TEST_CLAUDE_API_KEY',
       },
@@ -154,14 +156,14 @@ describe('Claude Code Agent adapter', () => {
     expect(result.normalized.evidence.usage.status).toBe('unavailable');
   });
 
-  it('fails tool audit for a nested Docker command', async () => {
+  it('fails tool audit for a host shell command', async () => {
     const fixture = await createFixture('routing-violation');
     const result = await executeFixture(fixture);
 
     expect(result.normalized.toolAudit.status).toBe('failed');
     expect(result.normalized.toolAudit.violations).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: 'docker_shell' }),
+        expect.objectContaining({ kind: 'host_shell' }),
       ]),
     );
   });
@@ -318,8 +320,9 @@ const args = process.argv.slice(2);
 const selectedModel = args[args.indexOf('--model') + 1];
 const boundary = args[args.indexOf('--append-system-prompt') + 1];
 fs.readFileSync(0, 'utf8');
-if (!boundary.includes('Run repository commands directly; do not invoke Docker')) process.exit(65);
-if (process.env.HOME !== '/root') process.exit(66);
+if (!boundary.includes("docker exec -w /app bench-container bash -c '<command>'")) process.exit(65);
+if (!process.env.HOME?.endsWith('/agent-state/home')) process.exit(66);
+if (!process.env.CLAUDE_CONFIG_DIR?.endsWith('/agent-state/home/.claude')) process.exit(69);
 if (process.env.ANTHROPIC_BASE_URL !== 'https://example.test/anthropic') process.exit(67);
 if (process.env.ANTHROPIC_AUTH_TOKEN !== 'claude-test-key') process.exit(68);
 const tools = mode === 'reordered-tools'
@@ -339,7 +342,9 @@ if (mode === 'provider-error') {
   process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, duration_ms: 1, num_turns: 1, result, session_id: 'session-1', usage, api_error_status: 404, terminal_reason: 'api_error' }) + '\\n');
   process.exit(7);
 }
-const command = mode === 'routing-violation' ? 'docker exec forbidden true' : 'echo claude-code > agent-output.txt';
+const command = mode === 'routing-violation'
+  ? 'git status'
+  : "docker exec -w /app bench-container bash -c 'echo claude-code > agent-output.txt'";
 if (mode !== 'routing-violation') {
   fs.writeFileSync('agent-output.txt', 'claude-code\\n');
 }

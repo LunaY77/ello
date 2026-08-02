@@ -14,13 +14,13 @@ import {
   type PreparedAgent,
 } from '../../../ports/agent.js';
 import { writeJsonAtomic } from '../../io.js';
+import { runProcess } from '../../process.js';
 import { AgentAdapterError } from '../error.js';
 import {
   validateJsonLines,
   writeAgentProcessArtifact,
   writeNormalizedEvidence,
 } from '../evidence.js';
-import { concreteEnvironment } from '../external.js';
 
 import { createCodexInvocation } from './invocation.js';
 import { parseCodexEvidence } from './parser.js';
@@ -44,14 +44,16 @@ export function createCodexAdapter(agent: CodexAgentSpec): AgentAdapter {
           const stdoutPath = path.join(context.rawAgentRoot, 'stdout.jsonl');
           const stderrPath = path.join(context.rawAgentRoot, 'stderr.log');
           const startedAt = new Date().toISOString();
-          const execution = await context.container.exec(
-            [invocation.command, ...invocation.args],
+          const execution = await runProcess(
+            invocation.command,
+            invocation.args,
             {
               cwd: invocation.cwd,
-              env: concreteEnvironment(invocation.env),
+              env: invocation.env,
               input: invocation.input,
               timeoutMs: context.taskFiles.task.agentTimeoutMs,
               killGraceMs: 5_000,
+              capture: false,
               stdoutPath,
               stderrPath,
             },
@@ -61,7 +63,7 @@ export function createCodexAdapter(agent: CodexAgentSpec): AgentAdapter {
           const processArtifact = await writeAgentProcessArtifact({
             rawAgentRoot: context.rawAgentRoot,
             execution: {
-              process: execution.process,
+              process: execution.result,
               startedAt,
               completedAt,
               stdoutPath,
@@ -70,7 +72,7 @@ export function createCodexAdapter(agent: CodexAgentSpec): AgentAdapter {
             invocationPath: invocation.invocationPath,
           });
           return {
-            process: execution.process,
+            process: execution.result,
             startedAt,
             completedAt,
             artifact: processArtifact.reference,
@@ -90,6 +92,8 @@ export function createCodexAdapter(agent: CodexAgentSpec): AgentAdapter {
             tools: normalized.tools,
             parserCoverage: normalized.evidence.parserCoverage,
             workspace: context.workspace,
+            containerName: context.container.name,
+            containerWorkspace: context.container.workspace,
           });
           const runtime = AgentRuntimeProvenanceSchema.parse({
             schema: 'ello.benchmark.agent-runtime.v1',

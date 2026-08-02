@@ -4,10 +4,9 @@ import type { ClaudeCodeAgentSpec } from '../../../domain/contract/index.js';
 import type { AgentRunContext } from '../../../ports/agent.js';
 import { writeJsonAtomic } from '../../io.js';
 import {
-  containerProcessEnvironment,
+  externalProcessEnvironment,
   inspectExternalRuntime,
-  installExternalExecutable,
-  prepareContainerAgentHome,
+  prepareClaudeHome,
   requiredEnvironment,
 } from '../external.js';
 import {
@@ -36,12 +35,9 @@ export async function createClaudeCodeInvocation(
 ): Promise<ClaudeCodeInvocation> {
   const baseUrl = requireClaudeCodeBaseUrl(agent.connection.baseUrl);
   const runtime = await inspectExternalRuntime(agent);
-  const executable = await installExternalExecutable(
-    context,
-    runtime,
-    'claude',
-  );
-  const isolated = await prepareContainerAgentHome(context, 'claude');
+  const isolated = await prepareClaudeHome({
+    agentStateRoot: context.agentStateRoot,
+  });
   const apiKey = requiredEnvironment(agent.connection.apiKeyEnv);
   const runtimeBoundary = createRuntimeBoundaryInstruction(context);
   const boundarySha256 = runtimeBoundarySha256(runtimeBoundary);
@@ -70,7 +66,7 @@ export async function createClaudeCodeInvocation(
     runtimeBoundary,
   ] as const;
   const customHeaders = agent.connection.httpHeaders;
-  const env = containerProcessEnvironment({
+  const env = externalProcessEnvironment({
     HOME: isolated.home,
     USERPROFILE: isolated.home,
     CLAUDE_CONFIG_DIR: isolated.configDirectory,
@@ -91,9 +87,9 @@ export async function createClaudeCodeInvocation(
     schema: 'ello.benchmark.agent-invocation.v1',
     agentId: agent.id,
     kind: agent.kind,
-    command: executable,
+    command: runtime.executablePath,
     args,
-    cwd: context.container.workspace,
+    cwd: context.workspace,
     environment: {
       HOME: isolated.home,
       USERPROFILE: isolated.home,
@@ -105,6 +101,7 @@ export async function createClaudeCodeInvocation(
     model: agent.model,
     tools: tools.split(','),
     mcpConfig: JSON.parse(emptyMcpConfig) as unknown,
+    controlRuntime: 'host',
     executionRuntime: 'docker',
     containerName: context.container.name,
     containerWorkspace: context.container.workspace,
@@ -113,9 +110,9 @@ export async function createClaudeCodeInvocation(
     runtimeBoundarySha256: boundarySha256,
   });
   return {
-    command: executable,
+    command: runtime.executablePath,
     args,
-    cwd: context.container.workspace,
+    cwd: context.workspace,
     env,
     input: context.taskFiles.instruction,
     invocationPath,

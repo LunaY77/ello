@@ -11,6 +11,8 @@ export function auditExternalTools(options: {
   readonly tools: readonly NormalizedToolCall[];
   readonly parserCoverage: 'complete' | 'incomplete';
   readonly workspace: string;
+  readonly containerName: string;
+  readonly containerWorkspace: '/app';
 }): ToolAudit {
   const violations: ToolViolation[] = [];
   let shellCalls = 0;
@@ -42,14 +44,21 @@ export function auditExternalTools(options: {
         });
         continue;
       }
-      const routing = inspectContainerShellRouting(command);
+      const routing = inspectContainerShellRouting(
+        command,
+        options.containerName,
+        options.containerWorkspace,
+      );
       if (routing === 'passed') {
         routedShellCalls += 1;
       } else {
         violations.push({
           toolCallId: tool.id,
           kind: routing,
-          detail: `Nested container commands are forbidden: ${command}.`,
+          detail:
+            routing === 'host_shell'
+              ? `Shell command is outside the assigned task container: ${command}.`
+              : `Shell command targets the wrong container or working directory: ${command}.`,
         });
       }
     }
@@ -111,13 +120,13 @@ export function auditElloTools(
 
 function inspectContainerShellRouting(
   command: string,
-): 'passed' | 'docker_shell' {
+  containerName: string,
+  containerWorkspace: '/app',
+): 'passed' | 'host_shell' | 'shell_workdir' {
   const unwrapped = unwrapShell(command.trim());
-  return /(?:^|[\s;&|])(?:[^\s;&|]*\/)?docker(?:-compose)?(?:\s|$)/u.test(
-    unwrapped,
-  )
-    ? 'docker_shell'
-    : 'passed';
+  if (!/^docker\s+exec(?:\s|$)/u.test(unwrapped)) return 'host_shell';
+  const expected = `docker exec -w ${containerWorkspace} ${containerName} bash -c `;
+  return unwrapped.startsWith(expected) ? 'passed' : 'shell_workdir';
 }
 
 function unwrapShell(command: string): string {

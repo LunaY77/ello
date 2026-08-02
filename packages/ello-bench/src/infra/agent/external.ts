@@ -3,8 +3,6 @@ import path from 'node:path';
 
 import type { AgentSpec } from '../../domain/contract/index.js';
 import { sha256 } from '../../domain/hash.js';
-import type { AgentRunContext } from '../../ports/agent.js';
-import { CONTAINER_HOME } from '../container-user.js';
 import { runProcess } from '../process.js';
 
 import { AgentAdapterError } from './error.js';
@@ -15,70 +13,6 @@ export interface ExternalRuntimeInspection {
   readonly executablePath: string;
   readonly executableSha256: string;
   readonly observedVersion: string;
-}
-
-export async function installExternalExecutable(
-  context: AgentRunContext,
-  runtime: ExternalRuntimeInspection,
-  name: string,
-): Promise<string> {
-  const directory = '/tmp/ello-bench/bin';
-  const target = `${directory}/${name}`;
-  const prepared = await context.container.exec(['mkdir', '-p', directory], {
-    cwd: context.container.workspace,
-    timeoutMs: 30_000,
-  });
-  if (prepared.process.exitCode !== 0 || prepared.process.timedOut) {
-    throw new AgentAdapterError(
-      'agent_setup',
-      `Cannot create Agent binary directory in container: ${prepared.stderr ?? ''}`,
-    );
-  }
-  await context.container.copyIn(runtime.executablePath, target);
-  const executable = await context.container.exec(['chmod', '0500', target], {
-    cwd: context.container.workspace,
-    timeoutMs: 30_000,
-  });
-  if (executable.process.exitCode !== 0 || executable.process.timedOut) {
-    throw new AgentAdapterError(
-      'agent_setup',
-      `Cannot make Agent binary executable in container: ${executable.stderr ?? ''}`,
-    );
-  }
-  return target;
-}
-
-export function concreteEnvironment(
-  environment: NodeJS.ProcessEnv,
-): Readonly<Record<string, string>> {
-  return Object.fromEntries(
-    Object.entries(environment).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
-}
-
-export async function prepareContainerAgentHome(
-  context: AgentRunContext,
-  kind: 'claude' | 'codex',
-): Promise<{
-  readonly home: string;
-  readonly configDirectory: string;
-}> {
-  const root = `/tmp/ello-bench/${context.attemptId}/${kind}`;
-  const configDirectory =
-    kind === 'codex' ? `${root}/codex-home` : `${root}/claude-home`;
-  const prepared = await context.container.exec(
-    ['mkdir', '-p', configDirectory],
-    { cwd: context.container.workspace, timeoutMs: 30_000 },
-  );
-  if (prepared.process.exitCode !== 0 || prepared.process.timedOut) {
-    throw new AgentAdapterError(
-      'agent_setup',
-      `Cannot prepare Agent home in container: ${prepared.stderr ?? ''}`,
-    );
-  }
-  return { home: CONTAINER_HOME, configDirectory };
 }
 
 export async function inspectExternalRuntime(
@@ -108,7 +42,7 @@ export async function inspectExternalRuntime(
   }
   const versionExecution = await runProcess(executablePath, ['--version'], {
     cwd: process.cwd(),
-    env: hostProcessEnvironment({}),
+    env: externalProcessEnvironment({}),
     timeoutMs: 15_000,
     killGraceMs: 2_000,
     capture: true,
@@ -161,13 +95,7 @@ export async function prepareCodexHome(options: {
   return { home, codexHome };
 }
 
-export function containerProcessEnvironment(
-  overrides: Readonly<Record<string, string>>,
-): NodeJS.ProcessEnv {
-  return { ...overrides };
-}
-
-function hostProcessEnvironment(
+export function externalProcessEnvironment(
   overrides: Readonly<Record<string, string>>,
 ): NodeJS.ProcessEnv {
   const names = [

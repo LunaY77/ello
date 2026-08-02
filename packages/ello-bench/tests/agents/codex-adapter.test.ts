@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 describe('Codex Agent adapter', () => {
-  it('runs an npm-installed Codex symlink through its native package layout', async () => {
+  it('runs an npm-installed Codex symlink on the host control plane', async () => {
     const fixture = await createFixture('success', 'npm-symlink');
     const result = await executeFixture(fixture);
 
@@ -47,7 +47,7 @@ describe('Codex Agent adapter', () => {
         'utf8',
       ),
     ) as { command: string };
-    expect(invocation.command).toMatch(/\/codex-runtime\/bin\/codex$/u);
+    expect(invocation.command).toBe(process.env.ELLO_TEST_CODEX_EXE);
   });
 
   it('runs Codex exec in an isolated environment and normalizes evidence', async () => {
@@ -101,7 +101,11 @@ describe('Codex Agent adapter', () => {
         path.join(fixture.context.rawAgentRoot, 'invocation.json'),
         'utf8',
       ),
-    ) as { args: string[]; environment: Record<string, string> };
+    ) as {
+      args: string[];
+      controlRuntime: string;
+      environment: Record<string, string>;
+    };
     expect(invocation.args).toEqual(
       expect.arrayContaining([
         'exec',
@@ -116,7 +120,10 @@ describe('Codex Agent adapter', () => {
       'model_providers.ello_benchmark=',
     );
     expect(invocation.environment.API_KEY_ENV).toBe('ELLO_TEST_CODEX_API_KEY');
-    expect(invocation.environment.HOME).toBe('/root');
+    expect(invocation.environment.HOME).toBe(
+      path.join(fixture.context.agentStateRoot, 'home'),
+    );
+    expect(invocation.controlRuntime).toBe('host');
     expect(JSON.stringify(invocation)).not.toContain('codex-test-key');
   });
 
@@ -162,14 +169,14 @@ describe('Codex Agent adapter', () => {
     expect(result.normalized.toolAudit.shellCalls).toBe(1);
   });
 
-  it('fails the tool audit for a nested Docker command', async () => {
+  it('fails the tool audit for a host shell command', async () => {
     const fixture = await createFixture('routing-violation');
     const result = await executeFixture(fixture);
 
     expect(result.normalized.toolAudit.status).toBe('failed');
     expect(result.normalized.toolAudit.violations).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: 'docker_shell' }),
+        expect.objectContaining({ kind: 'host_shell' }),
       ]),
     );
   });
@@ -318,11 +325,11 @@ async function writeNpmCodexInstallation(
     mkdir(path.dirname(nativeExecutable), { recursive: true }),
   ]);
   await Promise.all([
-    writeExecutable(launcherPath, codexLauncherSource()),
+    writeExecutable(launcherPath, codexExecutableSource(mode)),
     writeExecutable(nativeExecutable, codexExecutableSource(mode)),
     writeFile(
       path.join(packageRoot, 'package.json'),
-      JSON.stringify({ name: '@openai/codex', type: 'module' }),
+      JSON.stringify({ name: '@openai/codex' }),
       'utf8',
     ),
     writeFile(
@@ -374,16 +381,18 @@ const args = process.argv.slice(2);
 if (args[0] !== 'exec' || !args.includes('--json') || !args.includes('--strict-config') || !args.includes('--ignore-user-config') || !args.includes('--ignore-rules')) process.exit(61);
 const selectedModel = args[args.indexOf('-m') + 1];
 const prompt = fs.readFileSync(0, 'utf8');
-if (!prompt.includes('Run repository commands directly; do not invoke Docker') || selectedModel !== 'gpt-codex-test') process.exit(62);
-if (process.env.HOME !== '/root') process.exit(66);
-if (!process.env.CODEX_HOME?.endsWith('/codex/codex-home')) process.exit(63);
+if (!prompt.includes("docker exec -w /app bench-container bash -c '<command>'") || selectedModel !== 'gpt-codex-test') process.exit(62);
+if (!process.env.HOME?.endsWith('/agent-state/home')) process.exit(66);
+if (!process.env.CODEX_HOME?.endsWith('/agent-state/codex-home')) process.exit(63);
 if (process.env.ELLO_TEST_CODEX_API_KEY !== 'codex-test-key') process.exit(64);
 if (!args.some((value) => value.includes('base_url=\\"https://example.test/openai/v1\\"'))) process.exit(65);
 if (mode === 'malformed') { process.stdout.write('{bad json\\n'); process.exit(1); }
 const event = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
 event({ type: 'thread.started', thread_id: 'thread-1' });
 event({ type: 'turn.started', turn_id: 'turn-1', timestamp: '2026-07-28T00:00:00.000Z' });
-const command = mode === 'routing-violation' ? 'docker exec forbidden true' : 'echo codex > agent-output.txt';
+const command = mode === 'routing-violation'
+  ? 'git status'
+  : "docker exec -w /app bench-container bash -c 'echo codex > agent-output.txt'";
 event({ type: 'item.started', timestamp: '2026-07-28T00:00:01.000Z', item: { id: 'command-1', type: 'command_execution', command, aggregated_output: '', exit_code: null, status: 'in_progress' } });
 if (mode === 'timeout') while (true) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
 if (mode !== 'routing-violation') {
@@ -406,13 +415,6 @@ const terminal = { type: 'turn.completed', turn_id: 'turn-1', timestamp: '2026-0
 if (mode === 'upstream-drift') terminal.future_event_field = true;
 event(terminal);
 process.exit(mode === 'nonzero' ? 7 : 0);
-`;
-}
-
-function codexLauncherSource(): string {
-  return `#!/usr/bin/env node
-if (process.argv.includes('--version')) { process.stdout.write('codex-cli 0.145.0\\n'); process.exit(0); }
-process.exit(70);
 `;
 }
 

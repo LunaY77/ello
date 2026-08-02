@@ -1,20 +1,42 @@
+import path from 'node:path';
+
 import { sha256 } from '../../domain/hash.js';
 import type { AgentRunContext } from '../../ports/agent.js';
 
-export const RUNTIME_BOUNDARY_VERSION = '1';
+export const RUNTIME_BOUNDARY_VERSION = '2';
 
 export function createRuntimeBoundaryInstruction(
   options: AgentRunContext,
 ): string {
+  const commandPrefix = dockerCommandPrefix(options);
   return [
     `Benchmark runtime boundary version ${RUNTIME_BOUNDARY_VERSION}.`,
-    'The Agent process and repository are inside the assigned task container.',
+    'The Agent control process runs on the benchmark host to reach the configured model provider.',
+    'Repository files are in the current host workspace, which is mounted into the assigned task container.',
     'Do not inspect benchmark tests, verifier inputs, reference solutions, or task corpus source files.',
     'Do not use web search, HTTP fetch, browser, MCP, or any network tool.',
-    'File and shell tools may access only the current workspace.',
-    `The repository working directory is ${options.container.workspace}.`,
-    'Run repository commands directly; do not invoke Docker or another container.',
+    'Host file tools may read and edit only paths inside the current workspace.',
+    'Every repository shell command, including reads, searches, Git commands, and tests, must run in the assigned task container.',
+    `Use exactly this shell command prefix: ${commandPrefix}`,
+    `The repository working directory inside the container is ${options.container.workspace}.`,
+    'Do not run repository shell commands on the host.',
   ].join('\n');
+}
+
+export function dockerCommandPrefix(options: {
+  readonly container: Pick<AgentRunContext['container'], 'name' | 'workspace'>;
+}): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/u.test(options.container.name)) {
+    throw new Error(
+      `Invalid benchmark container name: ${options.container.name}.`,
+    );
+  }
+  if (path.posix.normalize(options.container.workspace) !== '/app') {
+    throw new Error(
+      `External Agent container workspace must be /app: ${options.container.workspace}.`,
+    );
+  }
+  return `docker exec -w /app ${options.container.name} bash -c '<command>'`;
 }
 
 export function composeExternalAgentPrompt(options: {

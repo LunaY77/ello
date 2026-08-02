@@ -4,9 +4,9 @@ import type { CodexAgentSpec } from '../../../domain/contract/index.js';
 import type { AgentRunContext } from '../../../ports/agent.js';
 import { writeJsonAtomic } from '../../io.js';
 import {
-  containerProcessEnvironment,
+  externalProcessEnvironment,
   inspectExternalRuntime,
-  prepareContainerAgentHome,
+  prepareCodexHome,
   requiredEnvironment,
 } from '../external.js';
 import {
@@ -14,8 +14,6 @@ import {
   createRuntimeBoundaryInstruction,
   runtimeBoundarySha256,
 } from '../runtime-boundary.js';
-
-import { installCodexExecutable } from './runtime.js';
 
 const BENCHMARK_PROVIDER_ID = 'ello_benchmark';
 
@@ -36,12 +34,9 @@ export async function createCodexInvocation(
   context: AgentRunContext,
 ): Promise<CodexInvocation> {
   const runtime = await inspectExternalRuntime(agent);
-  const executable = await installCodexExecutable(
-    context,
-    runtime,
-    agent.binary.expectedVersion,
-  );
-  const isolated = await prepareContainerAgentHome(context, 'codex');
+  const isolated = await prepareCodexHome({
+    agentStateRoot: context.agentStateRoot,
+  });
   const apiKey = requiredEnvironment(agent.connection.apiKeyEnv);
   const runtimeBoundary = createRuntimeBoundaryInstruction(context);
   const boundarySha256 = runtimeBoundarySha256(runtimeBoundary);
@@ -56,7 +51,7 @@ export async function createCodexInvocation(
     '--ignore-user-config',
     '--ignore-rules',
     '-C',
-    context.container.workspace,
+    context.workspace,
     '-m',
     agent.model,
     '--dangerously-bypass-approvals-and-sandbox',
@@ -72,11 +67,11 @@ export async function createCodexInvocation(
     `model_providers.${BENCHMARK_PROVIDER_ID}=${provider}`,
     '-',
   ] as const;
-  const env = containerProcessEnvironment({
+  const env = externalProcessEnvironment({
     ...(agent.environment ?? {}),
     HOME: isolated.home,
     USERPROFILE: isolated.home,
-    CODEX_HOME: isolated.configDirectory,
+    CODEX_HOME: isolated.codexHome,
     [agent.connection.apiKeyEnv]: apiKey,
   });
   const invocationPath = path.join(context.rawAgentRoot, 'invocation.json');
@@ -84,13 +79,13 @@ export async function createCodexInvocation(
     schema: 'ello.benchmark.agent-invocation.v1',
     agentId: agent.id,
     kind: agent.kind,
-    command: executable,
+    command: runtime.executablePath,
     args,
-    cwd: context.container.workspace,
+    cwd: context.workspace,
     environment: {
       HOME: isolated.home,
       USERPROFILE: isolated.home,
-      CODEX_HOME: isolated.configDirectory,
+      CODEX_HOME: isolated.codexHome,
       API_KEY_ENV: agent.connection.apiKeyEnv,
     },
     model: agent.model,
@@ -104,6 +99,7 @@ export async function createCodexInvocation(
     },
     mcpServers: {},
     webSearch: 'disabled',
+    controlRuntime: 'host',
     executionRuntime: 'docker',
     containerName: context.container.name,
     containerWorkspace: context.container.workspace,
@@ -112,9 +108,9 @@ export async function createCodexInvocation(
     runtimeBoundarySha256: boundarySha256,
   });
   return {
-    command: executable,
+    command: runtime.executablePath,
     args,
-    cwd: context.container.workspace,
+    cwd: context.workspace,
     env,
     input: composeExternalAgentPrompt({
       boundary: runtimeBoundary,

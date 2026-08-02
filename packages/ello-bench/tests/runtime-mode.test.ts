@@ -19,37 +19,46 @@ import type {
 import { FakeContainerHandle } from './fake-container.js';
 
 describe('container benchmark runtime boundary', () => {
-  it('instructs external Agents to stay inside the assigned container', () => {
+  it('separates the provider-facing control process from task execution', () => {
     const boundary = createRuntimeBoundaryInstruction({
-      container: { workspace: '/app' },
+      container: { name: 'bench-container', workspace: '/app' },
     } as AgentRunContext);
 
-    expect(boundary).toContain('inside the assigned task container');
-    expect(boundary).toContain('working directory is /app');
-    expect(boundary).toContain('do not invoke Docker');
-    expect(boundary).not.toContain('host workspace');
+    expect(boundary).toContain('Agent control process runs on the benchmark host');
+    expect(boundary).toContain(
+      "docker exec -w /app bench-container bash -c '<command>'",
+    );
+    expect(boundary).toContain('Do not run repository shell commands on the host');
   });
 
-  it('accepts direct container shell calls and rejects nested Docker calls', () => {
+  it('accepts only shell calls routed to the assigned task container', () => {
     const direct = auditExternalTools({
       workspace: '/app',
       parserCoverage: 'complete',
       tools: [shellTool('git status')],
+      containerName: 'bench-container',
+      containerWorkspace: '/app',
     });
-    const docker = auditExternalTools({
+    const routed = auditExternalTools({
       workspace: '/app',
       parserCoverage: 'complete',
-      tools: [shellTool('docker exec task bash -c "git status"')],
+      tools: [
+        shellTool(
+          "docker exec -w /app bench-container bash -c 'git status'",
+        ),
+      ],
+      containerName: 'bench-container',
+      containerWorkspace: '/app',
     });
 
     expect(direct).toMatchObject({
+      status: 'failed',
+      violations: [expect.objectContaining({ kind: 'host_shell' })],
+    });
+    expect(routed).toMatchObject({
       status: 'passed',
       shellCalls: 1,
       routedShellCalls: 1,
-    });
-    expect(docker).toMatchObject({
-      status: 'failed',
-      violations: [expect.objectContaining({ kind: 'docker_shell' })],
     });
   });
 
