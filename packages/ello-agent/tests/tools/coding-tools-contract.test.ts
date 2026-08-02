@@ -50,6 +50,7 @@ import {
   createMetaToolRuntime,
   createToolSearchTool,
 } from '../../src/features/tool/internal/meta-tools.js';
+import { createProductionToolRuntime } from '../../src/features/tool/internal/production.js';
 import type { CodingToolContext } from '../../src/features/tool/internal/runtime/coding-tool.js';
 import { SessionFileState } from '../../src/features/tool/internal/runtime/file-state.js';
 import { createToolSearchIndex } from '../../src/features/tool/internal/search-index.js';
@@ -59,6 +60,7 @@ import { createShellTools } from '../../src/features/tool/internal/shell.js';
 import { createWorkspaceSnapshotTools } from '../../src/features/tool/internal/workspace-snapshot.js';
 import { makeApprovalPolicy } from '../../src/features/tool/permissions/policy.js';
 import { createTestEnvironmentHandle } from '../support/environment.js';
+import { createTestStores } from '../support/stores.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -75,6 +77,55 @@ async function temporaryDirectory(prefix: string): Promise<string> {
   temporaryDirectories.push(directory);
   return directory;
 }
+
+describe('Environment 进程能力边界', () => {
+  it('保留内部进程 interface，但不注册模型可见 process 工具', async () => {
+    const root = await temporaryDirectory('ello-process-boundary-');
+    const environment = createTestEnvironmentHandle(root);
+    expect(typeof environment.processes.exec).toBe('function');
+    expect(typeof environment.processes.spawn).toBe('function');
+
+    const config = CodingAgentConfigSchema.parse({
+      cwd: root,
+      session_dir: path.join(root, '.ello', 'sessions'),
+      initial_mode: 'ask-before-changes',
+      models: {
+        test: {
+          protocol: 'openai',
+          endpoint: 'responses',
+          api_model: 'test-model',
+          base_url: 'https://api.example.test/v1',
+          api_key_env: 'TEST_API_KEY',
+          context_window: 128_000,
+          max_output_tokens: 16_000,
+        },
+      },
+      primary_model: 'test',
+      auxiliary_model: 'test',
+    });
+    const stores = createTestStores({ databasePath: ':memory:' });
+    try {
+      const runtime = createProductionToolRuntime({
+        config,
+        taskBoards: stores.taskBoards,
+        taskBoardScope: { type: 'session', sessionId: 'process-boundary' },
+        mode: () => ({
+          mode: 'ask-before-changes',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-08-01T00:00:00.000Z',
+        }),
+      });
+      const toolNames = runtime.tools.map((tool) => tool.name);
+
+      expect(toolNames).toContain('bash');
+      expect(toolNames).toContain('test');
+      expect(toolNames).not.toContain('process');
+    } finally {
+      stores.close();
+    }
+  });
+});
 
 describe('Apply Patch 契约', () => {
   it('解析新增、删除、更新和移动操作', () => {

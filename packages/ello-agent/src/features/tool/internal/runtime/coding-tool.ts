@@ -20,7 +20,6 @@ export type ToolMetadataKind =
   | 'search'
   | 'edit'
   | 'shell'
-  | 'process'
   | 'network'
   | 'task'
   | 'workspace'
