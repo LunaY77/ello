@@ -60,6 +60,24 @@ describe('container benchmark runtime boundary', () => {
       shellCalls: 1,
       routedShellCalls: 1,
     });
+
+    const routedThroughUsrBinShell = auditExternalTools({
+      workspace: '/app',
+      parserCoverage: 'complete',
+      tools: [
+        shellTool(
+          '/usr/bin/zsh -lc "docker exec -w /app bench-container bash -c \'git status\'"',
+        ),
+      ],
+      containerName: 'bench-container',
+      containerWorkspace: '/app',
+    });
+
+    expect(routedThroughUsrBinShell).toMatchObject({
+      status: 'passed',
+      shellCalls: 1,
+      routedShellCalls: 1,
+    });
   });
 
   it('routes Ello shell and filesystem operations through ContainerHandle', async () => {

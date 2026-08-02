@@ -131,7 +131,7 @@ function inspectContainerShellRouting(
 
 function unwrapShell(command: string): string {
   const match =
-    /^(?:\/usr\/bin\/env\s+)?(?:\/bin\/)?(?:bash|zsh)\s+-lc\s+([\s\S]+)$/u.exec(
+    /^(?:\/usr\/bin\/env\s+)?(?:\/usr\/bin\/|\/bin\/)?(?:bash|zsh)\s+-lc\s+([\s\S]+)$/u.exec(
       command,
     );
   if (match === null) return command;
