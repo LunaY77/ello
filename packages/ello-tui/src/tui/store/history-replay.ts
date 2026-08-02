@@ -23,14 +23,20 @@ export function snapshotToHistoryEntries(
       id: `thread-header-${snapshot.thread.id}`,
       threadId: snapshot.thread.id,
       cwd: snapshot.thread.cwd,
-      profile: snapshot.settings.profile,
-      model: snapshot.settings.model,
+      agent: snapshot.settings.agent,
       mode: snapshot.settings.mode,
       ...(serverVersion === undefined ? {} : { version: serverVersion }),
     },
   ];
   for (const turn of snapshot.turns) {
+    const completedAfterTurn = turn.items.filter(
+      (item) =>
+        item.type === 'contextCompaction' &&
+        turn.completedAt !== undefined &&
+        Date.parse(item.createdAt) > Date.parse(turn.completedAt),
+    );
     for (const item of turn.items) {
+      if (completedAfterTurn.includes(item)) continue;
       if ('status' in item && item.status === 'inProgress') continue;
       const entry = itemToHistoryEntry(item);
       if (entry !== undefined) entries.push(entry);
@@ -42,12 +48,23 @@ export function snapshotToHistoryEntries(
         text: workedLabel(turn),
       });
     }
+    for (const item of completedAfterTurn) {
+      const entry = itemToHistoryEntry(item);
+      if (entry !== undefined) entries.push(entry);
+    }
   }
   return entries;
 }
 
 export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
   if (isToolItem(item)) {
+    if (
+      item.type === 'toolCall' &&
+      item.toolName === 'delegate_to_subagent' &&
+      item.status === 'completed'
+    ) {
+      return undefined;
+    }
     return { kind: 'tool', id: item.id, tool: itemToToolView(item) };
   }
   switch (item.type) {
@@ -66,7 +83,7 @@ export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
     case 'reasoning':
       return item.summary.trim() === ''
         ? undefined
-        : { kind: 'system', id: item.id, text: `reasoning: ${item.summary}` };
+        : { kind: 'reasoning', id: item.id, text: item.summary };
     case 'plan':
       return {
         kind: 'assistant',
@@ -78,9 +95,19 @@ export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
       return { kind: 'subagent', id: item.id, run: itemToSubagentView(item) };
     case 'contextCompaction':
       return {
-        kind: 'system',
+        kind: 'compaction',
         id: item.id,
-        text: `context compacted: ${item.summary}`,
+        summary: item.summary,
+        tokensBefore: item.tokensBefore,
+        ...(item.beforeMessageCount === undefined
+          ? {}
+          : { beforeMessageCount: item.beforeMessageCount }),
+        ...(item.afterMessageCount === undefined
+          ? {}
+          : { afterMessageCount: item.afterMessageCount }),
+        ...(item.keptMessageCount === undefined
+          ? {}
+          : { keptMessageCount: item.keptMessageCount }),
       };
     case 'notice':
       return { kind: 'system', id: item.id, text: item.message };
@@ -163,7 +190,9 @@ export function itemToToolView(item: ToolThreadItem): ToolCallView {
       ? {
           error: {
             message:
-              item.status === 'declined' ? 'Permission denied.' : item.headline,
+              item.status === 'declined'
+                ? 'Permission denied.'
+                : (item.error ?? item.headline),
           },
         }
       : {}),

@@ -10,7 +10,7 @@ import type {
   CreateAgentFeatureInput,
 } from './contracts.js';
 import { createAgent, type Agent } from './engine/index.js';
-import { createRuntimeEnvironment } from './environment.js';
+import type { ModelCompactor } from './engine/index.js';
 
 /**
  * 为一次 Thread turn 装配产品 Agent。
@@ -28,6 +28,7 @@ import { createRuntimeEnvironment } from './environment.js';
 export async function buildAgent(
   request: AgentRunRequest,
   dependencies: CreateAgentFeatureInput,
+  modelCompactor?: ModelCompactor,
 ): Promise<BuiltAgent> {
   const definition = await dependencies.resolveDefinition(request);
   const model = await dependencies.resolveModel({ request, definition });
@@ -41,43 +42,44 @@ export async function buildAgent(
     definition,
     context,
   });
-  const tracing = dependencies.createTracing({
-    config: definition.config,
-    threadId: request.threadId,
-  });
+  const environment = await dependencies.runtime.environments.attach(
+    request.executionLocation,
+    dependencies.runtime.environmentGrant,
+  );
+  let tracing;
+  try {
+    tracing = dependencies.runtime.createTracing({
+      config: definition.config,
+      threadId: request.threadId,
+    });
+  } catch (error) {
+    await environment.close();
+    throw error;
+  }
   let engine: Agent;
   try {
     const compactor = dependencies.createCompactor({
       config: definition.config,
-      profileName: request.selection.profile,
       contextWindow: model.contextWindow,
-      agentRegistry: definition.agentRegistry,
     });
     engine = createAgent({
       name: `ello-${definition.definition.name}`,
       model: model.model,
+      modelCall: model.modelCall,
       modelAdapter: model.modelAdapter,
       modelSettings: model.modelSettings,
       ...(definition.definition.prompt === undefined
         ? {}
         : { instructions: definition.definition.prompt }),
-      environment: createRuntimeEnvironment(
-        definition.config,
-        () => request.permission.rules(),
-        () => request.permission.externalPaths(),
-        context.readRoots,
-      ),
+      environment,
       executionTools: tools.executionTools,
       modelTools: tools.modelTools,
       compactor,
+      ...(modelCompactor === undefined ? {} : { modelCompactor }),
       ...(tracing.eventRecorder === undefined
         ? {}
         : { eventRecorder: tracing.eventRecorder }),
-      sessionWindow: { maxMessages: 200 },
-      modelInputBudget: {
-        maxInputTokens: definition.config.context.max_input_tokens,
-        reservedOutputTokens: definition.config.context.reserved_output_tokens,
-      },
+      modelInputBudget: model.modelInputBudget,
       modelInput: {
         systemSections: context.createSystemSections({
           ...(tools.memoryIndexLoader === undefined
@@ -87,15 +89,23 @@ export async function buildAgent(
           ...(tools.routingInstructions === undefined
             ? {}
             : { routingInstructions: tools.routingInstructions }),
+          ...(tools.taskNotificationSection === undefined
+            ? {}
+            : { taskNotificationSection: tools.taskNotificationSection }),
         }),
         providerOptions: model.providerOptions,
         prepare: model.prepareModelInput,
       },
-      metadata: { threadId: request.threadId, cwd: definition.config.cwd },
+      metadata: {
+        threadId: request.threadId,
+        cwd: request.executionLocation.workingDirectory,
+        environmentRef: request.executionLocation.environmentRef,
+        environmentGeneration: environment.generation,
+      },
     });
   } catch (error) {
     try {
-      await tracing.close();
+      await Promise.all([tracing.close(), environment.close()]);
     } catch (closeError) {
       throw new AggregateError(
         [error, closeError],
@@ -107,7 +117,11 @@ export async function buildAgent(
   }
   return {
     engine,
-    maxTurns: definition.definition.maxTurns,
+    maxTurns: request.delegation?.maxTurns ?? definition.definition.maxTurns,
+    ...(tools.waitForTaskNotification === undefined
+      ? {}
+      : { waitForTaskNotification: tools.waitForTaskNotification }),
+    modelCompactor: () => engine.modelCompactor(),
     setMode: tools.setMode,
     close: () => closeBuiltAgent(engine, tracing.close),
   };

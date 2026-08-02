@@ -41,8 +41,13 @@ describe('AI SDK model adapter', () => {
       ),
     );
 
-    expect(events.map((event) => event.type)).toEqual(['final']);
-    const final = events[0];
+    // 镜像文本最终不作为正文输出，但 provider 确实已经开始流式产出，
+    // 因此首字延迟仍应被记录。
+    expect(events.map((event) => event.type)).toEqual([
+      'stream-start',
+      'final',
+    ]);
+    const final = events[1];
     expect(final?.type).toBe('final');
     if (final?.type !== 'final') {
       throw new Error('expected final event');
@@ -86,9 +91,45 @@ describe('AI SDK model adapter', () => {
     );
 
     expect(events).toMatchObject([
+      { type: 'stream-start' },
       { type: 'text-delta', text: 'he' },
       { type: 'text-delta', text: 'llo' },
       { type: 'final', response: { text: 'hello' } },
+    ]);
+  });
+
+  it('forwards provider reasoning deltas', async () => {
+    const adapter = createAiSdkModelAdapter();
+    const events = await collectEvents(
+      adapter.stream(
+        createRequest([
+          { type: 'reasoning-start', id: 'reasoning_1' },
+          {
+            type: 'reasoning-delta',
+            id: 'reasoning_1',
+            delta: 'checking context',
+          },
+          { type: 'reasoning-end', id: 'reasoning_1' },
+          {
+            type: 'text-start',
+            id: 'text_1',
+          },
+          { type: 'text-delta', id: 'text_1', delta: 'done' },
+          { type: 'text-end', id: 'text_1' },
+          {
+            type: 'finish',
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: emptyUsage(),
+          },
+        ]),
+      ),
+    );
+
+    expect(events).toMatchObject([
+      { type: 'stream-start' },
+      { type: 'reasoning-delta', text: 'checking context' },
+      { type: 'text-delta', text: 'done' },
+      { type: 'final' },
     ]);
   });
 
@@ -123,6 +164,7 @@ describe('AI SDK model adapter', () => {
     expect(final.response.usage).toEqual({
       requests: 1,
       inputTokens: 100,
+      lastInputTokens: 100,
       outputTokens: 25,
       cacheReadTokens: 70,
       cacheWriteTokens: 10,
@@ -150,6 +192,7 @@ describe('AI SDK model adapter', () => {
     );
 
     expect(events).toMatchObject([
+      { type: 'stream-start' },
       { type: 'text-delta', text: '{"answer"' },
       { type: 'text-delta', text: ':"ok"}' },
       { type: 'final', response: { text: '{"answer":"ok"}' } },

@@ -15,6 +15,7 @@ import type { z } from 'zod';
 
 import {
   AppServerClient,
+  type AppServerClientCloseEvent,
   type IncomingServerRequest,
 } from '../../src/api/client.js';
 import {
@@ -164,6 +165,59 @@ describe('AppServerClient', () => {
     const request = context.client.request('server/read', {});
     await expect(request).rejects.toBeInstanceOf(RequestTimeoutError);
     expect(context.client.state).toBe('closed');
+    await context.client.close();
+  });
+
+  it('底层 transport 异常结束时发布唯一连接关闭事件', async () => {
+    const context = await initializedClient();
+    const closed = deferred<AppServerClientCloseEvent>();
+    const listener = vi.fn(closed.resolve);
+    context.client.onClose(listener);
+
+    await context.server.close();
+
+    await expect(closed.promise).resolves.toMatchObject({
+      reason: 'App Server transport ended unexpectedly.',
+      error: { message: 'App Server transport ended unexpectedly.' },
+    });
+    expect(listener).toHaveBeenCalledOnce();
+    expect(context.client.state).toBe('closed');
+    await context.client.close();
+  });
+
+  it('对超过连接预算的通知突发施加背压而不关闭 App Server 连接', async () => {
+    const context = await initializedClient();
+    const received = deferred<void>();
+    let notificationCount = 0;
+    context.client.onNotification((notification) => {
+      if (notification.method !== 'server/ready') return;
+      notificationCount += 1;
+      if (notificationCount === 300) received.resolve();
+    });
+
+    await Promise.all(
+      Array.from({ length: 300 }, () =>
+        send(context.server, {
+          jsonrpc: '2.0',
+          method: 'server/ready',
+          params: { protocolVersion: ELLO_PROTOCOL_VERSION },
+        }),
+      ),
+    );
+    await received.promise;
+
+    expect(notificationCount).toBe(300);
+    expect(context.client.state).toBe('ready');
+
+    const serverMessages = context.server.messages()[Symbol.asyncIterator]();
+    const read = context.client.request('server/read', {});
+    const request = await readRequest(serverMessages);
+    await send(context.server, {
+      jsonrpc: '2.0',
+      id: request.id,
+      result: serverReadResult,
+    });
+    await expect(read).resolves.toEqual(serverReadResult);
     await context.client.close();
   });
 

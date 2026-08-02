@@ -5,9 +5,10 @@
  * 每次 `stream()` 都创建独立 `RunState`。文件内的回合循环按“初始化 → 模型输入 → 模型调用 →
  * 工具执行 → 回合结算 → 终态”线性推进，不读取 Thread、JSON-RPC 或产品持久化状态。
  */
+import type { EnvironmentHandle } from '../../environment/index.js';
+
 import type {
   Agent,
-  AgentEnvironment,
   AgentInput,
   AgentResumeInput,
   AgentRunOptions,
@@ -15,12 +16,13 @@ import type {
   AgentStream,
   CreateAgentOptions,
 } from './contracts.js';
-import { closeAgentResources } from './events.js';
 import { buildModelInput } from './model-input.js';
 import { callModel, type ModelAdapter } from './model.js';
+import { createModelCompactor } from './model.js';
 import {
   beginRunTurn,
   canBeginRunTurn,
+  compactRunMessages,
   completeRunState,
   completeRunTurn,
   createRunState,
@@ -67,9 +69,10 @@ export function createAgent(options: CreateAgentOptions): Agent {
  */
 class ElloAgent implements Agent {
   /** 运行环境由创建者显式注入，并由 Agent 在 close 时释放。 */
-  private readonly environment: AgentEnvironment;
+  private readonly environment: EnvironmentHandle;
   /** 模型适配器由创建者显式注入，所有 run 共享同一无会话状态边界。 */
   private readonly modelAdapter: ModelAdapter;
+  private readonly compactorState;
 
   /**
    * 创建 `ElloAgent` 并保存跨 run 共享的稳定配置。
@@ -80,6 +83,7 @@ class ElloAgent implements Agent {
   constructor(private readonly config: CreateAgentOptions) {
     this.environment = config.environment;
     this.modelAdapter = config.modelAdapter;
+    this.compactorState = { current: config.modelCompactor };
   }
 
   /**
@@ -130,6 +134,7 @@ class ElloAgent implements Agent {
       runOptions: options,
       environment: this.environment,
       modelAdapter: this.modelAdapter,
+      compactorState: this.compactorState,
     });
     void runAgentLoop(run);
     return run.stream;
@@ -156,6 +161,44 @@ class ElloAgent implements Agent {
   }
 
   /**
+   * 使用当前主 Agent 配置恢复模型输入并执行上下文压缩。
+   *
+   * Args:
+   * - `input`: 完整上下文、待压缩消息、compact 提示词和取消信号。
+   *
+   * Returns:
+   * - 返回主模型生成的 compact 文本与 usage。
+   */
+  async compact(input: {
+    readonly contextMessages: ReadonlyArray<import('./model.js').AgentMessage>;
+    readonly messages: ReadonlyArray<import('./model.js').AgentMessage>;
+    readonly prompt: string;
+    readonly signal: AbortSignal;
+  }) {
+    const run = createRunState({
+      config: this.config,
+      input: { messages: [...input.contextMessages] },
+      runOptions: { signal: input.signal },
+      environment: this.environment,
+      modelAdapter: this.modelAdapter,
+      compactorState: this.compactorState,
+    });
+    run.state.messages.push(...input.contextMessages);
+    const modelInput = await buildModelInput(run);
+    const compactor = createModelCompactor(run, modelInput);
+    this.compactorState.current = compactor;
+    return compactor.compact({
+      messages: input.messages,
+      prompt: input.prompt,
+      signal: input.signal,
+    });
+  }
+
+  modelCompactor() {
+    return this.compactorState.current;
+  }
+
+  /**
    * 释放环境占用的资源（如关闭沙箱/子进程）。
    *
    * Args:
@@ -168,7 +211,7 @@ class ElloAgent implements Agent {
    * - 共享环境释放失败时直接拒绝，并保留底层失败原因。
    */
   async close(): Promise<void> {
-    await closeAgentResources(this.environment);
+    await this.environment.close();
   }
 }
 
@@ -199,7 +242,12 @@ async function runAgentLoop(run: RunState): Promise<void> {
         break;
       }
 
-      const input = await buildModelInput(run);
+      let input = await buildModelInput(run);
+      run.compactorState.current = createModelCompactor(run, input);
+      if (await compactRunMessages(run)) {
+        input = await buildModelInput(run);
+        run.compactorState.current = createModelCompactor(run, input);
+      }
       const assistant = await callModel(run, input);
       const toolResults = await executeToolCalls(run, assistant);
 

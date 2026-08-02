@@ -5,21 +5,22 @@
  * typecheck 失败，避免产品状态渗入通用 engine。
  */
 import type { ThreadSnapshot } from '../../protocol/v1/index.js';
+import type { EnvironmentHandle } from '../environment/index.js';
 
 import type {
   AgentRunEvent,
+  AgentRunInput,
   AgentRunRequest,
   AgentRunResult,
 } from './contracts.js';
 import type {
-  AgentEnvironment,
   AgentRunResult as EngineAgentRunResult,
   AgentUsage,
   CreateAgentOptions,
 } from './engine/index.js';
 
 type EnvironmentIsRequired = CreateAgentOptions extends {
-  readonly environment: AgentEnvironment;
+  readonly environment: EnvironmentHandle;
 }
   ? true
   : false;
@@ -42,8 +43,6 @@ const request = {
   cwd: '/workspace',
   selection: {
     mode: 'ask-before-changes',
-    profile: 'main',
-    model: 'provider/model',
     agent: 'build',
   },
   history: [{ role: 'user', content: '已有消息' }],
@@ -53,9 +52,19 @@ const request = {
     rules: () => [],
     externalPaths: () => [],
   },
+} satisfies AgentRunInput;
+
+request satisfies AgentRunInput;
+
+const locatedRequest = {
+  ...request,
+  executionLocation: {
+    environmentRef: 'local-host',
+    workingDirectory: request.cwd,
+  },
 } satisfies AgentRunRequest;
 
-request satisfies AgentRunRequest;
+locatedRequest satisfies AgentRunRequest;
 
 const productResult = {
   status: 'completed',
@@ -84,6 +93,9 @@ snapshot satisfies AgentRunRequest;
  */
 function eventType(event: AgentRunEvent): AgentRunEvent['type'] {
   switch (event.type) {
+    case 'reasoningStarted':
+    case 'reasoningDelta':
+    case 'reasoningCompleted':
     case 'messageStarted':
     case 'messageDelta':
     case 'messageCompleted':
@@ -92,8 +104,10 @@ function eventType(event: AgentRunEvent): AgentRunEvent['type'] {
     case 'toolFailed':
     case 'interactionRequired':
     case 'messagesAppended':
+    case 'contextCompactionStarted':
     case 'contextCompacted':
     case 'runFailed':
+    case 'steeringConsumed':
       return event.type;
     default:
       event satisfies never;

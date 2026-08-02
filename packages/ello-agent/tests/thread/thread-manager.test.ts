@@ -13,8 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   AgentRun,
   AgentRunEvent,
+  AgentRunInput,
   AgentRunResult,
-  AgentRunRequest,
 } from '../../src/features/agent/index.js';
 import { compactionView } from '../../src/features/thread/compact.js';
 import {
@@ -45,8 +45,6 @@ const EMPTY_USAGE: Usage = {
 function testInitialSettings(params: ParsedClientParams<'thread/start'>) {
   return Promise.resolve({
     mode: params.mode ?? 'ask-before-changes',
-    profile: params.profile ?? 'test',
-    model: params.model ?? 'test:model',
     agent: params.agent ?? 'build',
   } as const);
 }
@@ -56,8 +54,6 @@ function testSettingsUpdate(
 ): Promise<Partial<ThreadSnapshot['settings']>> {
   return Promise.resolve({
     ...(params.mode === undefined ? {} : { mode: params.mode }),
-    ...(params.profile === undefined ? {} : { profile: params.profile }),
-    ...(params.model === undefined ? {} : { model: params.model }),
     ...(params.agent === undefined ? {} : { agent: params.agent }),
   });
 }
@@ -98,8 +94,6 @@ describe('ThreadFeature', () => {
 
     expect(attachment.snapshot.settings).toEqual({
       mode: 'ask-before-changes',
-      profile: 'test',
-      model: 'test:model',
       agent: 'build',
     });
   });
@@ -146,7 +140,7 @@ describe('ThreadFeature', () => {
     const attachment = await startThread(manager, 'connection-1');
     await attachment.runtime.startTurn([{ type: 'text', text: 'first' }]);
     await expect(
-      attachment.runtime.steerTurn('turn_stale', [
+      attachment.runtime.steerTurn('turn_stale', 'steer_stale', [
         { type: 'text', text: 'steer' },
       ]),
     ).rejects.toMatchObject({ type: 'turnMismatch' });
@@ -157,6 +151,41 @@ describe('ThreadFeature', () => {
       status: 'completed',
       usage: EMPTY_USAGE,
     });
+  });
+
+  it('Agent 消费 steer 后把它持久化为带关联 id 的用户消息', async () => {
+    const attachment = await startThread(manager, 'connection-1');
+    const turn = await attachment.runtime.startTurn([
+      { type: 'text', text: 'first' },
+    ]);
+    const run = agent.run(attachment.snapshot.thread.id);
+
+    await attachment.runtime.steerTurn(turn.id, 'steer_focus', [
+      { type: 'text', text: 'focus tests' },
+    ]);
+    expect(run.steers).toEqual([
+      { steerId: 'steer_focus', text: 'focus tests' },
+    ]);
+
+    run.emit({
+      type: 'steeringConsumed',
+      steerId: 'steer_focus',
+      text: 'focus tests',
+      occurredAt: '2026-07-28T00:00:00.000Z',
+    });
+
+    await vi.waitFor(async () => {
+      expect(
+        (await attachment.runtime.snapshot()).turns[0]?.items,
+      ).toContainEqual(
+        expect.objectContaining({
+          type: 'userMessage',
+          steerId: 'steer_focus',
+          text: 'focus tests',
+        }),
+      );
+    });
+    run.finish({ status: 'completed', usage: EMPTY_USAGE });
   });
 
   it('fork 生成新 thread、turn 和 item id，原 thread 不变', async () => {
@@ -255,6 +284,7 @@ describe('ThreadFeature', () => {
     expect(snapshot.usage).toEqual({
       requests: 5,
       inputTokens: 50,
+      lastInputTokens: 30,
       outputTokens: 12,
       cacheReadTokens: 10,
       cacheWriteTokens: 3,
@@ -426,8 +456,6 @@ describe('ThreadFeature', () => {
       name: 'recovery',
       settings: {
         mode: 'ask-before-changes',
-        profile: 'main',
-        model: 'test:model',
         agent: 'primary',
       },
       metadata: {},
@@ -717,7 +745,7 @@ describe('ThreadFeature', () => {
       parseThreadRecord(
         {
           kind: 'thread.created',
-          schema: 1,
+          schema: 2,
           seq: 1,
           threadId: 'thr_orphan',
           createdAt: new Date().toISOString(),
@@ -726,8 +754,6 @@ describe('ThreadFeature', () => {
           name: 'orphan',
           settings: {
             mode: 'ask-before-changes',
-            profile: 'main',
-            model: 'test:model',
             agent: 'primary',
           },
           metadata: {},
@@ -787,6 +813,101 @@ describe('ThreadFeature', () => {
       status: 'completed',
       usage: EMPTY_USAGE,
     });
+  });
+
+  it('child 交互通过 root thread 上浮，并携带 Agent 归属信息', async () => {
+    const attachment = await startThread(manager, 'connection-1');
+    const childRun = new FakeAgentRun();
+    const childStartedAt = new Date().toISOString();
+    await attachment.runtime.registerAgentInteraction(
+      'job_child',
+      childStartedAt,
+      {
+        type: 'approval',
+        interactionId: 'child_approval',
+        item: {
+          kind: 'approval',
+          toolCallId: 'child_approval',
+          toolName: 'bash',
+          input: { command: 'pwd' },
+          metadata: {
+            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
+          },
+        },
+        occurredAt: childStartedAt,
+      },
+      childRun,
+      {
+        taskId: 'job_child',
+        name: 'explore',
+        definitionName: 'explore',
+        description: '检查仓库',
+        cwd: '/workspace',
+      },
+    );
+
+    const pending = (await attachment.runtime.snapshot())
+      .pendingServerRequests[0];
+    expect(pending?.params).toMatchObject({
+      agent: {
+        taskId: 'job_child',
+        name: 'explore',
+        description: '检查仓库',
+        cwd: '/workspace',
+      },
+    });
+    if (pending === undefined) throw new Error('Missing child approval.');
+    await attachment.runtime.resolveServerRequest(pending.id, {
+      decision: 'accept',
+    });
+    expect(childRun.resolutions).toEqual(['child_approval']);
+  });
+
+  it('正常关闭会持久拒绝 child 待处理交互，不留下失去运行句柄的请求', async () => {
+    const attachment = await startThread(manager, 'connection-1');
+    const childRun = new FakeAgentRun();
+    const childStartedAt = new Date().toISOString();
+    await attachment.runtime.registerAgentInteraction(
+      'job_child_close',
+      childStartedAt,
+      {
+        type: 'approval',
+        interactionId: 'child_approval_close',
+        item: {
+          kind: 'approval',
+          toolCallId: 'child_approval_close',
+          toolName: 'bash',
+          input: { command: 'pwd' },
+          metadata: {
+            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
+          },
+        },
+        occurredAt: childStartedAt,
+      },
+      childRun,
+      {
+        taskId: 'job_child_close',
+        name: 'explore',
+        definitionName: 'explore',
+        description: '检查关闭流程',
+        cwd: '/workspace',
+      },
+    );
+
+    await manager.close();
+
+    expect(childRun.rejections).toEqual([
+      expect.objectContaining({
+        type: 'rejected',
+        interactionId: 'child_approval_close',
+      }),
+    ]);
+    expect(await logs.read(attachment.snapshot.thread.id)).toContainEqual(
+      expect.objectContaining({
+        kind: 'serverRequest.resolved',
+        resolution: 'rejected',
+      }),
+    );
   });
 
   it('Server Request 只接受第一条 response', async () => {
@@ -946,7 +1067,7 @@ class FakeAgent {
    * Throws:
    * - 当 测试夹具的 `thread-manager.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
    */
-  startRun(input: AgentRunRequest): Promise<AgentRun> {
+  startRun(input: AgentRunInput): Promise<AgentRun> {
     this.started += 1;
     const run = new FakeAgentRun();
     this.runs.set(input.threadId, run);
@@ -962,6 +1083,8 @@ class FakeAgent {
 
 class FakeAgentRun implements AgentRun {
   readonly resolutions: string[] = [];
+  readonly steers: Array<{ readonly steerId: string; readonly text: string }> =
+    [];
   readonly rejections: Array<
     Extract<Parameters<AgentRun['resume']>[0], { type: 'rejected' }>
   > = [];
@@ -1014,7 +1137,11 @@ class FakeAgentRun implements AgentRun {
     this.resolveResult(result);
   }
 
-  steer(_input: string): void {}
+  steer(steerId: string, input: string): void {
+    this.steers.push({ steerId, text: input });
+  }
+
+  notify(): void {}
 
   interrupt(reason: string): void {
     this.finish({ status: 'interrupted', usage: EMPTY_USAGE, reason });

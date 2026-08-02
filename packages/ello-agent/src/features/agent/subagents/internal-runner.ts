@@ -5,12 +5,13 @@
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
 import type { CodingAgentConfig } from '../../config/index.js';
+import type { EnvironmentHandle } from '../../environment/index.js';
 import {
-  modelSettingsFromRole,
+  modelInputBudgetFromRuntimeModel,
+  modelSettingsFromRuntimeModel,
+  providerOptionsFromRuntimeModel,
   prepareModelInputForRuntimeModel,
-  providerOptionsForRole,
-  type ProviderRegistry,
-  type RuntimeRoleModel,
+  type ModelRegistry,
 } from '../../model/index.js';
 import {
   createAgent,
@@ -37,13 +38,17 @@ import type { CodingAgentDefinition } from './schema.js';
 export async function runInternalAgent(input: {
   readonly definition: CodingAgentDefinition;
   readonly prompt: string;
-  readonly profileName: string;
   readonly config: CodingAgentConfig;
-  readonly providerRegistry: ProviderRegistry;
+  readonly modelRegistry: ModelRegistry;
   readonly modelAdapter: ModelAdapter;
+  readonly environment: EnvironmentHandle;
   readonly signal?: AbortSignal;
 }): Promise<string> {
-  const binding = resolveBinding(input.definition, input);
+  const model = input.modelRegistry.resolveSelector(input.definition.model);
+  const modelInputBudget = modelInputBudgetFromRuntimeModel(
+    model,
+    input.config.context,
+  );
   const complete = defineTool({
     name: 'internal_complete',
     description: 'Return a completed internal-agent response payload.',
@@ -53,30 +58,41 @@ export async function runInternalAgent(input: {
       .strict(),
     execute: ({ output }) => output,
   });
-  const agent = createAgent({
-    name: `ello-${input.definition.name}`,
-    model: input.providerRegistry.resolveLanguageModel(binding.ref),
-    modelAdapter: input.modelAdapter,
-    environment: {},
-    modelSettings: modelSettingsFromRole(binding),
-    executionTools: [complete],
-    modelTools: [complete],
-    ...(input.definition.prompt === undefined
-      ? {}
-      : { instructions: input.definition.prompt }),
-    modelInput: {
-      providerOptions: () => providerOptionsForRole(binding),
-      prepare: (modelInput: ModelInput) =>
-        prepareModelInputForRuntimeModel(binding.model, modelInput, {
-          promptProfile: `internal:${input.definition.name}`,
-          cwdIdentity: input.config.cwd,
-        }),
-    },
-    metadata: { internal: true, agentName: input.definition.name },
-  });
+  let agent: ReturnType<typeof createAgent> | undefined;
   try {
+    agent = createAgent({
+      name: `ello-${input.definition.name}`,
+      model: input.modelRegistry.resolveLanguageModel(model.name),
+      modelCall: {
+        agentName: input.definition.name,
+        modelSelector: input.definition.model,
+        configuredModel: model.name,
+        protocol: model.protocol,
+        apiModel: model.apiModel,
+      },
+      modelAdapter: input.modelAdapter,
+      environment: input.environment,
+      modelSettings: modelSettingsFromRuntimeModel(model),
+      modelInputBudget,
+      executionTools: [complete],
+      modelTools: [complete],
+      ...(input.definition.prompt === undefined
+        ? {}
+        : { instructions: input.definition.prompt }),
+      modelInput: {
+        providerOptions: () => providerOptionsFromRuntimeModel(model),
+        prepare: (modelInput: ModelInput) =>
+          prepareModelInputForRuntimeModel(model, modelInput, {
+            promptProfile: `internal:${input.definition.name}`,
+            cwdIdentity: input.config.cwd,
+          }),
+      },
+      metadata: { internal: true, agentName: input.definition.name },
+    });
     const result = await agent.run(input.prompt, {
-      maxTurns: input.definition.maxTurns,
+      ...(input.definition.maxTurns === undefined
+        ? {}
+        : { maxTurns: input.definition.maxTurns }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
     if (result.output.trim() === '') {
@@ -86,25 +102,7 @@ export async function runInternalAgent(input: {
     }
     return result.output;
   } finally {
-    await agent.close();
+    if (agent === undefined) await input.environment.close();
+    else await agent.close();
   }
-}
-
-function resolveBinding(
-  definition: CodingAgentDefinition,
-  input: {
-    readonly profileName: string;
-    readonly providerRegistry: ProviderRegistry;
-  },
-): RuntimeRoleModel {
-  const base = input.providerRegistry.resolveRole(
-    input.profileName,
-    definition.role,
-  );
-  if (definition.modelRef === undefined) return base;
-  return {
-    ...base,
-    ref: definition.modelRef,
-    model: input.providerRegistry.getModel(definition.modelRef),
-  };
 }

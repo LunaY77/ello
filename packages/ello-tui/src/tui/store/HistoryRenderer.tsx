@@ -1,18 +1,13 @@
 import { Box, Text } from 'ink';
 
 import type { UserInputResolution } from '../../api/protocol-types.js';
+import { SubagentActivity } from '../component/SubagentActivity.js';
 import { DiffPreview } from '../presenters/index.js';
 import { useTheme, type TuiTheme } from '../theme/index.js';
 import { glyphs } from '../ui/glyphs.js';
 
-import type {
-  HistoryEntry,
-  SubagentRunView,
-  ToolCallView,
-} from './history-entry.js';
+import type { HistoryEntry, ToolCallView } from './history-entry.js';
 import { buildToolCardModel } from './tool-card.js';
-
-const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
 
 export function HistoryEntryRenderer({
   entry,
@@ -58,6 +53,10 @@ function renderHistoryEntryContent(
           ))}
         </Box>
       );
+    case 'reasoning':
+      return <ReasoningText text={entry.text} />;
+    case 'compaction':
+      return <HistoryCompaction entry={entry} />;
     case 'skill':
       return <Text color={theme.accent}>{`loaded [${entry.name}]`}</Text>;
     case 'tool':
@@ -84,7 +83,7 @@ function renderHistoryEntryContent(
         </Box>
       );
     case 'subagent':
-      return <HistorySubagent run={entry.run} />;
+      return <SubagentActivity run={entry.run} cwd={cwd} />;
     case 'separator':
       return <RunSeparator text={entry.text} />;
     case 'system':
@@ -92,6 +91,53 @@ function renderHistoryEntryContent(
     case 'diagnostic':
       return <Text color={theme.error}>{`x ${entry.text}`}</Text>;
   }
+}
+
+function HistoryCompaction({
+  entry,
+}: {
+  readonly entry: Extract<HistoryEntry, { kind: 'compaction' }>;
+}) {
+  const theme = useTheme();
+  const messageCounts =
+    entry.beforeMessageCount === undefined ||
+    entry.afterMessageCount === undefined
+      ? ''
+      : ` · ${entry.beforeMessageCount} -> ${entry.afterMessageCount} messages`;
+  return (
+    <Box flexDirection="column">
+      <Text color={theme.accent}>
+        {`- Context compacted${messageCounts} · ${formatHistoryTokens(entry.tokensBefore)} tokens before`}
+      </Text>
+      {entry.summary.split('\n').map((line, index) => (
+        <Text key={`${entry.id}:summary:${index}`} color={theme.textMuted}>
+          {`  ${line}`}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+function ReasoningText({ text }: { readonly text: string }) {
+  const theme = useTheme();
+  return (
+    <Box>
+      <Text color={theme.textMuted}>Thinking: </Text>
+      <Box flexDirection="column" flexShrink={1}>
+        {text.split('\n').map((line, index) => (
+          <Text key={`${index}:${line}`} color={theme.textMuted} wrap="wrap">
+            {line}
+          </Text>
+        ))}
+      </Box>
+    </Box>
+  );
+}
+
+function formatHistoryTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return String(tokens);
 }
 
 function summarizeUserInputResolution(resolution: UserInputResolution): string {
@@ -122,16 +168,12 @@ function SessionHeader({
         <Text color={theme.success}>ready</Text>
       </Box>
       <Text>
-        <Text color={theme.textMuted}>profile: </Text>
-        <Text color={theme.text}>{entry.profile}</Text>
-      </Text>
-      <Text>
         <Text color={theme.textMuted}>directory: </Text>
         <Text color={theme.text}>{compactPath(entry.cwd)}</Text>
       </Text>
       <Text>
-        <Text color={theme.textMuted}>model: </Text>
-        <Text color={theme.text}>{entry.model}</Text>
+        <Text color={theme.textMuted}>agent: </Text>
+        <Text color={theme.text}>{entry.agent}</Text>
       </Text>
       <Text>
         <Text color={theme.textMuted}>mode: </Text>
@@ -218,41 +260,6 @@ function toolStatusColor(
 function RunSeparator({ text }: { readonly text: string }) {
   const theme = useTheme();
   return <Text color={theme.border}>{`─ ${text} ${'─'.repeat(72)}`}</Text>;
-}
-
-function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
-  const theme = useTheme();
-  const hidden = Math.max(0, run.tools.length - SUBAGENT_VISIBLE_TOOL_LIMIT);
-  const visibleTools = run.tools.slice(-SUBAGENT_VISIBLE_TOOL_LIMIT);
-  return (
-    <Box flexDirection="column">
-      <Text color={run.status === 'fail' ? theme.error : theme.warning}>
-        {`${glyphs.subagent} ${run.agentName} ${run.background ? 'background' : 'foreground'} ${run.status}`}
-      </Text>
-      <Text color={theme.text}>{`  ${run.description}`}</Text>
-      {hidden > 0 ? (
-        <Text color={theme.textMuted}>{`  +${hidden} earlier tool calls`}</Text>
-      ) : null}
-      {visibleTools.map((tool) => (
-        <Text key={tool.id} color={theme.textMuted}>
-          {`  ${tool.name} ${tool.status}`}
-        </Text>
-      ))}
-      {run.output !== undefined && run.output.trim() !== '' ? (
-        <Text color={theme.textMuted}>{`  ${compactText(run.output)}`}</Text>
-      ) : null}
-      {run.error !== undefined ? (
-        <Text color={theme.error}>{`  ${run.error}`}</Text>
-      ) : null}
-    </Box>
-  );
-}
-
-function compactText(text: string): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  return normalized.length <= 240
-    ? normalized
-    : `${normalized.slice(0, 239)}...`;
 }
 
 function compactPath(cwd: string): string {

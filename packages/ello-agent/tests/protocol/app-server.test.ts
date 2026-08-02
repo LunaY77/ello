@@ -243,7 +243,7 @@ describe('AgentServer JSON-RPC processor', () => {
     });
   });
 
-  it('thread/settings/update 可持久化 settings-only metadata', async () => {
+  it('thread/settings/update persists the selected agent only', async () => {
     await initialize(transport);
     await transport.clientSend(
       request(2, 'thread/start', { cwd: '/workspace', subscribe: true }),
@@ -253,13 +253,13 @@ describe('AgentServer JSON-RPC processor', () => {
     await transport.clientSend(
       request(3, 'thread/settings/update', {
         threadId,
-        profile: 'deepseek',
+        agent: 'review',
       }),
     );
 
     expect(await transport.clientReceive()).toMatchObject({
       id: 3,
-      result: { profile: 'deepseek' },
+      result: { agent: 'review' },
     });
     expect(storage.threads.state(threadId)?.seq).toBe(2);
   });
@@ -355,8 +355,6 @@ function readThreadId(message: Readonly<Record<string, unknown>>): string {
 function testInitialSettings(params: ParsedClientParams<'thread/start'>) {
   return Promise.resolve({
     mode: params.mode ?? 'ask-before-changes',
-    profile: params.profile ?? 'test',
-    model: params.model ?? 'test:model',
     agent: params.agent ?? 'build',
   } as const);
 }
@@ -366,8 +364,6 @@ function testSettingsUpdate(
 ): Promise<Partial<ThreadSnapshot['settings']>> {
   return Promise.resolve({
     ...(params.mode === undefined ? {} : { mode: params.mode }),
-    ...(params.profile === undefined ? {} : { profile: params.profile }),
-    ...(params.model === undefined ? {} : { model: params.model }),
     ...(params.agent === undefined ? {} : { agent: params.agent }),
   });
 }

@@ -28,12 +28,15 @@ import {
   type AgentToolDiscovery,
   type ModelAdapter,
 } from '../../src/features/agent/engine/index.js';
-import { trimMessages } from '../../src/features/agent/engine/model-input.js';
 import {
   AgentRunControl,
   DefaultAgentMessageQueue,
 } from '../../src/features/agent/engine/run-control.js';
-import { createLocalEnvironment } from '../../src/features/agent/environment.js';
+import {
+  createLocalEnvironments,
+  LOCAL_HOST_ENVIRONMENT_REFERENCE,
+} from '../../src/features/environment/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 function defineTool<TInput, TOutput>(
   options: Omit<DefineToolOptions<TInput, TOutput>, 'discovery'> & {
@@ -55,12 +58,10 @@ const testTool = defineTool({
   execute: () => null,
 });
 
-const emptyTestEnvironment: CreateAgentOptions['environment'] = {};
-
 function createAgent(
   options: Omit<
     CreateAgentOptions,
-    'executionTools' | 'modelTools' | 'environment'
+    'executionTools' | 'modelTools' | 'environment' | 'modelCall'
   > & {
     readonly tools?: readonly AnyAgentTool[];
     readonly executionTools?: readonly AnyAgentTool[];
@@ -72,7 +73,15 @@ function createAgent(
   const selected = tools ?? executionTools ?? [testTool as AnyAgentTool];
   return createBaseAgent({
     ...rest,
-    environment: environment === undefined ? emptyTestEnvironment : environment,
+    modelCall: {
+      agentName: 'test-agent',
+      modelSelector: 'primary_model',
+      configuredModel: 'test-model',
+      protocol: 'openai',
+      apiModel: 'model',
+    },
+    environment:
+      environment === undefined ? createTestEnvironmentHandle() : environment,
     executionTools: executionTools ?? selected,
     modelTools: modelTools ?? selected,
   });
@@ -139,6 +148,41 @@ describe('createAgent', () => {
     await agent.close();
   });
 
+  it('publishes reasoning as an independent lifecycle', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        generate: (request) => new EchoAdapter().generate(request),
+        async *stream(request) {
+          yield { type: 'reasoning-delta', text: 'inspect ' };
+          yield { type: 'reasoning-delta', text: 'state' };
+          yield {
+            type: 'final',
+            response: await new EchoAdapter().generate(request),
+          };
+        },
+      },
+    });
+    const stream = agent.stream('hi');
+    const events: EngineEvent[] = [];
+    for await (const event of stream) events.push(event);
+    await stream.final;
+
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        'reasoning.started',
+        'reasoning.delta',
+        'reasoning.completed',
+      ]),
+    );
+    expect(
+      events.find((event) => event.type === 'reasoning.completed'),
+    ).toMatchObject({
+      text: 'inspect state',
+    });
+    await agent.close();
+  });
+
   it('adds ephemeral run instructions to system without persisting them', async () => {
     let request: AgentModelRequest | undefined;
     const agent = createAgent({
@@ -173,7 +217,7 @@ describe('createAgent', () => {
     const result = await agent.run('task', {
       ephemeralInstructions: 'temporary skill instructions',
     });
-    expect(request?.system).toBe('temporary skill instructions');
+    expect(request?.instructions).toBe('temporary skill instructions');
     expect(request?.messages).not.toContainEqual(
       expect.objectContaining({ role: 'system' }),
     );
@@ -398,12 +442,16 @@ describe('createAgent', () => {
   it('uses local environment and returns the current run messages', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ello-agent-'));
     dirs.push(dir);
-    const environment = createLocalEnvironment({
-      cwd: dir,
-      allowedPaths: [dir],
-    });
-    await environment.fileSystem?.writeText('note.txt', 'content');
-    const entries = await environment.fileSystem?.listDir('.');
+    const environments = createLocalEnvironments();
+    const environment = await environments.attach(
+      {
+        environmentRef: LOCAL_HOST_ENVIRONMENT_REFERENCE,
+        workingDirectory: dir,
+      },
+      { isolation: 'none' },
+    );
+    await environment.fileSystem.writeText('note.txt', 'content');
+    const entries = await environment.fileSystem.listDir('.');
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: new EchoAdapter(),
@@ -413,8 +461,7 @@ describe('createAgent', () => {
           name: 'read_note',
           description: 'Read note file',
           input: z.object({ path: z.string() }),
-          execute: ({ path }, ctx) =>
-            ctx.environment.fileSystem?.readText(path) ?? '',
+          execute: ({ path }, ctx) => ctx.environment.fileSystem.readText(path),
         }),
       ],
     });
@@ -426,9 +473,10 @@ describe('createAgent', () => {
       'assistant',
     ]);
     await agent.close();
+    await environments.close();
   });
 
-  it('passes the complete current messages to the pure compactor', async () => {
+  it('compacts the current input before the model call', async () => {
     let messagesSeenByCompactor: AgentMessage[] = [];
     const agent = createAgent({
       model: 'test:model',
@@ -453,9 +501,16 @@ describe('createAgent', () => {
       },
     });
 
-    const result = await agent.run('current input');
+    const result = await agent.run({
+      messages: [{ role: 'user', content: 'history' }],
+      prompt: 'current input',
+    });
 
     expect(messagesSeenByCompactor.map((message) => message.role)).toEqual([
+      'user',
+      'user',
+    ]);
+    expect(result.newMessages.map((message) => message.role)).toEqual([
       'user',
       'assistant',
     ]);
@@ -465,31 +520,23 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('runs environment lifecycle and resource instructions inside the agent loop', async () => {
+  it('uses Environment instructions and closes the attached Handle', async () => {
     const events: string[] = [];
     const requests: AgentModelRequest[] = [];
-    const environment = createLocalEnvironment({
-      cwd: process.cwd(),
-      allowedPaths: [process.cwd()],
-    });
-    environment.resources?.register('test-resource', {
-      setup: () => {
-        events.push('resource.setup');
+    const environments = createLocalEnvironments();
+    const attached = await environments.attach(
+      {
+        environmentRef: LOCAL_HOST_ENVIRONMENT_REFERENCE,
+        workingDirectory: process.cwd(),
       },
-      getContextInstructions: () => 'Resource instruction.',
-      close: () => {
-        events.push('resource.close');
+      { isolation: 'none' },
+    );
+    const environment = {
+      ...attached,
+      close: async () => {
+        events.push('close');
+        await attached.close();
       },
-    });
-    const originalSetup = environment.setup?.bind(environment);
-    const originalClose = environment.close?.bind(environment);
-    environment.setup = async (ctx) => {
-      events.push(`setup:${ctx.runId.length > 0}`);
-      await originalSetup?.(ctx);
-    };
-    environment.close = async () => {
-      events.push('close');
-      await originalClose?.();
     };
     const agent = createAgent({
       model: 'test:model',
@@ -520,20 +567,24 @@ describe('createAgent', () => {
     });
 
     await agent.run('hi');
-    const shellResult = await environment.shell?.run('echo shell-ok');
+    const shellResult = await environment.processes.exec({
+      command: 'echo shell-ok',
+      maxRuntimeMs: 10_000,
+    });
     await agent.close();
 
-    expect(events[0]).toBe('setup:true');
-    expect(events).toContain('resource.setup');
     expect(events).toContain('run.started');
     expect(events).toContain('run.completed');
     expect(events).toContain('close');
-    expect(events).toContain('resource.close');
-    expect(shellResult?.stdout.trim()).toBe('shell-ok');
-    expect(requests[0]?.system).toContain('<environment-context>');
-    expect(requests[0]?.system).toContain('<file-system>');
-    expect(requests[0]?.system).toContain('<shell>');
-    expect(requests[0]?.system).toContain('Resource instruction.');
+    expect(Buffer.from(shellResult.stdout.data).toString('utf8').trim()).toBe(
+      'shell-ok',
+    );
+    expect(requests[0]?.instructions).toContain('<environment-context>');
+    expect(requests[0]?.instructions).toContain('<working-directory>');
+    await expect(environment.fileSystem.listDir('.')).rejects.toThrow(
+      'Environment Handle is closed',
+    );
+    await environments.close();
   });
 
   it('drains message queues in stable modes and run-control order', () => {
@@ -684,7 +735,7 @@ describe('createAgent', () => {
       instructions: 'Be precise.',
       modelInput: {
         systemSections: [() => 'Working directory: /tmp/project'],
-        messageTransforms: [trimMessages({ maxMessages: 3 })],
+        messageTransforms: [async (messages) => messages.slice(-3)],
         providerOptions: () => ({ test: { enabled: true } }),
       },
       observers: [
@@ -703,8 +754,8 @@ describe('createAgent', () => {
       prompt: 'current',
     });
 
-    expect(seenMessages[0]?.system).toContain('Be precise.');
-    expect(seenMessages[0]?.system).toContain(
+    expect(seenMessages[0]?.instructions).toContain('Be precise.');
+    expect(seenMessages[0]?.instructions).toContain(
       'Working directory: /tmp/project',
     );
     expect(seenMessages[0]?.providerOptions).toEqual({
@@ -1095,6 +1146,104 @@ describe('createAgent', () => {
     await agent.close();
   });
 
+  it('does not impose a turn limit when maxTurns is omitted', async () => {
+    let calls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          calls += 1;
+          const complete = calls === 101;
+          const content = complete ? 'done' : `continue-${calls}`;
+          return {
+            text: content,
+            messages: [...request.messages, { role: 'assistant', content }],
+            newMessages: [{ role: 'assistant', content }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: complete ? 'stop' : 'tool-calls',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('hi');
+
+    expect(calls).toBe(101);
+    expect(result.finishReason).toBe('stop');
+    await agent.close();
+  });
+
+  it('treats maxTurns -1 as no turn limit', async () => {
+    let calls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          calls += 1;
+          const complete = calls === 3;
+          const content = complete ? 'done' : `continue-${calls}`;
+          return {
+            text: content,
+            messages: [...request.messages, { role: 'assistant', content }],
+            newMessages: [{ role: 'assistant', content }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: complete ? 'stop' : 'tool-calls',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('hi', { maxTurns: -1 });
+
+    expect(calls).toBe(3);
+    expect(result.finishReason).toBe('stop');
+    await agent.close();
+  });
+
+  it('rejects an invalid maxTurns value', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate() {
+          throw new Error('Model must not be called.');
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    await expect(agent.run('hi', { maxTurns: 0 })).rejects.toThrow(
+      'maxTurns must be a positive integer or -1.',
+    );
+    await expect(agent.run('hi', { maxTurns: -2 })).rejects.toThrow(
+      'maxTurns must be a positive integer or -1.',
+    );
+    await agent.close();
+  });
+
   it('stops tool-calls without new messages as no-progress', async () => {
     let calls = 0;
     const agent = createAgent({
@@ -1268,6 +1417,7 @@ describe('createAgent', () => {
     expect(secondTurn).toContain('"type":"tool-call"');
     expect(secondTurn).toContain('"type":"tool-result"');
     expect(secondTurn).toContain('call_1');
+    expect(result.usage.toolCalls).toBe(1);
     await agent.close();
   });
 

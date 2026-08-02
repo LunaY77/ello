@@ -116,6 +116,25 @@ describe('buildToolCardModel', () => {
     expect(model.headline).toBe('Activate Skill workspace');
   });
 
+  it('shows filePath for read and search tools', () => {
+    const read = buildToolCardModel(
+      call({
+        name: 'read',
+        input: { filePath: '/workspace/src/index.ts' },
+      }),
+    );
+    expect(read.headline).toBe('Read src/index.ts');
+    expect(read.summary).toBe('src/index.ts');
+
+    const search = buildToolCardModel(
+      call({
+        name: 'grep',
+        input: { pattern: 'createAgent', filePath: '/workspace/src' },
+      }),
+    );
+    expect(search.headline).toBe('Search createAgent in src');
+  });
+
   it('prioritizes denied/failed over exit code and duration', () => {
     const denied = buildToolCardModel(
       call({
@@ -175,6 +194,24 @@ describe('buildToolCardModel', () => {
     expect(model.artifact).toEqual({
       displayPath: '877233fd…f7b2/read.txt',
       fullPath: outputPath,
+    });
+  });
+
+  it('使用 artifactId 渲染子代理转存的工具结果', () => {
+    const artifactId =
+      '877233fdfb274dcbadc35918b6a9f7b2877233fdfb274dcbadc35918b6a9f7b2';
+    const model = buildToolCardModel(
+      call({
+        output: {
+          output: 'preview',
+          metadata: { artifactId, artifactBytes: 48_000, truncated: true },
+        },
+      }),
+    );
+
+    expect(model.artifact).toEqual({
+      displayPath: '877233fd…f7b2',
+      fullPath: artifactId,
     });
   });
 
@@ -255,5 +292,20 @@ describe('buildToolCardModel', () => {
       call({ status: 'fail', error: { name: 'E', message: 'x' } as never }),
     );
     expect(failed.defaultCollapsed).toBe(false);
+  });
+
+  it('shows the real tool error in a failed card', () => {
+    const failed = buildToolCardModel(
+      call({
+        name: 'glob',
+        input: { filePath: '/workspace/packages' },
+        status: 'fail',
+        error: { message: 'Path not allowed: /workspace/packages' },
+      }),
+    );
+
+    expect(failed.outputPreview).toEqual([
+      'Path not allowed: /workspace/packages',
+    ]);
   });
 });

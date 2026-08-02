@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 
 import type { Goal, Usage } from '../../api/protocol-types.js';
 import type { SubagentRunView, ToolCallView } from '../store/history-entry.js';
-import { tuiTokens } from '../ui/tokens.js';
 
 import { BottomDock, type TuiModeState } from './BottomDock.js';
 import { LiveViewport } from './LiveViewport.js';
@@ -14,6 +13,8 @@ export interface AppShellProps {
   readonly mode: TuiModeState;
   readonly pendingPlanApproval?: boolean;
   readonly liveAssistantText: string;
+  readonly liveReasoningText?: string;
+  readonly liveCompactionText?: string;
   readonly runningTools: readonly ToolCallView[];
   readonly runningSubagents: readonly SubagentRunView[];
   readonly running: boolean;
@@ -23,33 +24,40 @@ export interface AppShellProps {
   readonly usage?: Usage;
   readonly goal?: Goal;
   readonly contextPercent?: number;
+  readonly contextWindow?: number;
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
+  readonly agentSwitcher?: ReactNode;
+  readonly agentTranscript?: ReactNode;
 }
 
 export function AppShell(props: AppShellProps) {
   const size = useTerminalSize();
-  const mainWidth = Math.max(tuiTokens.width.minMain, size.columns - 2);
+  const mainWidth = Math.max(1, size.columns - 2);
 
   return (
     <Box flexDirection="column" width="100%" paddingX={1}>
       <Box flexDirection="column" width={mainWidth}>
-        <LiveViewport
-          cwd={props.cwd}
-          assistantText={props.liveAssistantText}
-          runningTools={props.runningTools}
-          runningSubagents={props.runningSubagents}
-          running={props.running}
-          {...(props.workingSeconds !== undefined
-            ? { workingSeconds: props.workingSeconds }
-            : {})}
-          {...(props.interruptNotice !== undefined
-            ? { interruptNotice: props.interruptNotice }
-            : {})}
-          {...(props.pendingSteers !== undefined
-            ? { pendingSteers: props.pendingSteers }
-            : {})}
-        />
+        {props.agentTranscript ?? (
+          <LiveViewport
+            cwd={props.cwd}
+            assistantText={props.liveAssistantText}
+            reasoningText={props.liveReasoningText ?? ''}
+            compactionText={props.liveCompactionText ?? ''}
+            runningTools={props.runningTools}
+            runningSubagents={props.runningSubagents}
+            running={props.running}
+            {...(props.workingSeconds !== undefined
+              ? { workingSeconds: props.workingSeconds }
+              : {})}
+            {...(props.interruptNotice !== undefined
+              ? { interruptNotice: props.interruptNotice }
+              : {})}
+            {...(props.pendingSteers !== undefined
+              ? { pendingSteers: props.pendingSteers }
+              : {})}
+          />
+        )}
       </Box>
       <BottomDock
         model={props.model}
@@ -60,8 +68,14 @@ export function AppShell(props: AppShellProps) {
         {...(props.contextPercent !== undefined
           ? { contextPercent: props.contextPercent }
           : {})}
+        {...(props.contextWindow !== undefined
+          ? { contextWindow: props.contextWindow }
+          : {})}
         overlay={props.overlay}
         composer={props.composer}
+        {...(props.agentSwitcher === undefined
+          ? {}
+          : { agentSwitcher: props.agentSwitcher })}
       />
     </Box>
   );

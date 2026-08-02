@@ -5,7 +5,6 @@ import { useEffect, useMemo } from 'react';
 import type { AgentSkill } from '../../api/protocol-types.js';
 import type { ThreadClient } from '../../client/thread-client.js';
 import { completeInput } from '../completion.js';
-import type { TuiProfile } from '../profile-types.js';
 import { detectTrigger } from '../store/autocomplete.js';
 
 const NO_FILE_SUGGESTIONS: readonly string[] = [];
@@ -18,7 +17,6 @@ export function useComposerSuggestions(input: {
   readonly fileSearch:
     | { readonly query: string; readonly suggestions: readonly string[] }
     | undefined;
-  readonly profiles: readonly TuiProfile[];
   readonly skills: readonly AgentSkill[];
   setFileSearch(value: {
     readonly query: string;
@@ -26,16 +24,8 @@ export function useComposerSuggestions(input: {
   }): void;
   onError(error: unknown): void;
 }) {
-  const {
-    thread,
-    draft,
-    cursor,
-    fileSearch,
-    profiles,
-    skills,
-    setFileSearch,
-    onError,
-  } = input;
+  const { thread, draft, cursor, fileSearch, skills, setFileSearch, onError } =
+    input;
   const activeTrigger = detectTrigger(currentLineBeforeCursor(draft, cursor));
   useEffect(() => {
     if (activeTrigger?.kind !== 'file') return;
@@ -76,15 +66,8 @@ export function useComposerSuggestions(input: {
       ? fileSearch.suggestions
       : NO_FILE_SUGGESTIONS;
   return useMemo(
-    () =>
-      completeInput(
-        draft,
-        profiles.map((profile) => profile.name),
-        fileSuggestions,
-        skills,
-        cursor,
-      ),
-    [fileSuggestions, cursor, draft, profiles, skills],
+    () => completeInput(draft, fileSuggestions, skills, cursor),
+    [fileSuggestions, cursor, draft, skills],
   );
 }
 

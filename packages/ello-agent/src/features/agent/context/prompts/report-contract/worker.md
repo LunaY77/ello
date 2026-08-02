@@ -1,0 +1,1 @@
+This report is from an implementation agent that owned the files it names. The verification commands it reports with exit codes have already run; do not re-run them to confirm. Its edits are already in the shared workspace: read a file it changed before editing it yourself, and never revert work you did not make.

@@ -104,7 +104,7 @@ export const workspaces = sqliteTable(
   ],
 );
 
-/** workspace 与 repo 的 worktree 关系；不把 usage/tasks/checkpoint 挂到这里。 */
+/** workspace 与 repo 的 worktree 关系；不把 usage/tasks 挂到这里。 */
 export const workspaceRepositories = sqliteTable(
   'workspace_repositories',
   {
@@ -267,49 +267,148 @@ export const memoryJobs = sqliteTable(
   ],
 );
 
-/** checkpoint 元数据；不挂 session/workspace 外键，runId 只是弱关联字符串。 */
-export const checkpoints = sqliteTable('checkpoints', {
-  id: text('id').primaryKey(),
-  runId: text('run_id'),
-  label: text('label'),
-  status: text('status').notNull(),
-  createdAt: text('created_at').notNull(),
-  rolledBackAt: text('rolled_back_at'),
+/** 每棵 Agent 树的公开事件序号；TUI 用它发现整棵树上的通知缺口。 */
+export const agentTaskRoots = sqliteTable('agent_task_roots', {
+  rootThreadId: text('root_thread_id').primaryKey(),
+  sequence: integer('sequence').notNull(),
+  updatedAt: text('updated_at').notNull(),
 });
 
-/** checkpoint 文件变化；文件内容通过 artifact 关联，不直接塞进 DB。 */
-export const checkpointFileChanges = sqliteTable(
-  'checkpoint_file_changes',
+/** 可恢复的子代理任务；输出、关系和列表投影随 Server 重启保留。 */
+export const agentTasks = sqliteTable(
+  'agent_tasks',
   {
     id: text('id').primaryKey(),
-    checkpointId: text('checkpoint_id')
+    agentId: text('agent_id').notNull(),
+    rootThreadId: text('root_thread_id')
       .notNull()
-      .references(() => checkpoints.id, { onDelete: 'cascade' }),
-    path: text('path').notNull(),
-    pathHash: text('path_hash').notNull(),
-    changeType: text('change_type').notNull(),
-    beforeArtifactId: text('before_artifact_id').references(() => artifacts.id),
-    afterArtifactId: text('after_artifact_id').references(() => artifacts.id),
-    beforeSha256: text('before_sha256'),
-    afterSha256: text('after_sha256'),
-    diff: text('diff'),
-    toolCallId: text('tool_call_id'),
+      .references(() => agentTaskRoots.rootThreadId, { onDelete: 'cascade' }),
+    parentTaskId: text('parent_task_id'),
+    resumeFromTaskId: text('resume_from_task_id'),
+    name: text('name'),
+    description: text('description').notNull(),
+    definitionName: text('definition_name').notNull(),
+    modelSelector: text('model_selector'),
+    contextMode: text('context_mode').notNull(),
+    executionMode: text('execution_mode').notNull(),
+    status: text('status').notNull(),
+    prompt: text('prompt').notNull(),
+    cwd: text('cwd').notNull(),
+    isolation: text('isolation').notNull(),
+    maxTurns: integer('max_turns').notNull(),
+    depth: integer('depth').notNull(),
+    revision: integer('revision').notNull(),
+    eventSequence: integer('event_sequence').notNull(),
+    currentToolJson: text('current_tool_json'),
+    toolCount: integer('tool_count').notNull().default(0),
+    recentToolsJson: text('recent_tools_json').notNull().default('[]'),
+    resultPreview: text('result_preview'),
+    errorPreview: text('error_preview'),
+    output: text('output'),
+    errorMessage: text('error_message'),
+    usageJson: text('usage_json'),
+    sidechainJson: text('sidechain_json').notNull(),
+    toolsJson: text('tools_json').notNull(),
+    permissionRulesJson: text('permission_rules_json').notNull(),
+    externalPathsJson: text('external_paths_json').notNull(),
     createdAt: text('created_at').notNull(),
+    startedAt: text('started_at'),
+    completedAt: text('completed_at'),
+    updatedAt: text('updated_at').notNull(),
   },
-  (table) => [index('checkpoint_file_changes_path_idx').on(table.pathHash)],
+  (table) => [
+    check(
+      'agent_tasks_context_mode_check',
+      sql`${table.contextMode} in ('fresh', 'fork')`,
+    ),
+    check(
+      'agent_tasks_execution_mode_check',
+      sql`${table.executionMode} in ('foreground', 'background')`,
+    ),
+    check(
+      'agent_tasks_status_check',
+      sql`${table.status} in ('queued', 'running', 'completed', 'failed', 'killed', 'recovered')`,
+    ),
+    check(
+      'agent_tasks_isolation_check',
+      sql`${table.isolation} in ('shared', 'worktree', 'container')`,
+    ),
+    check('agent_tasks_depth_check', sql`${table.depth} >= 1`),
+    check('agent_tasks_revision_check', sql`${table.revision} >= 0`),
+    check('agent_tasks_event_sequence_check', sql`${table.eventSequence} >= 0`),
+    check('agent_tasks_tool_count_check', sql`${table.toolCount} >= 0`),
+    uniqueIndex('agent_tasks_agent_id_idx').on(table.agentId),
+    uniqueIndex('agent_tasks_root_name_idx')
+      .on(table.rootThreadId, table.name)
+      .where(sql`${table.name} is not null`),
+    index('agent_tasks_root_status_idx').on(
+      table.rootThreadId,
+      table.status,
+      table.createdAt,
+    ),
+    index('agent_tasks_parent_task_idx').on(
+      table.parentTaskId,
+      table.createdAt,
+    ),
+  ],
 );
 
-/** 回滚记录；回滚仍由调用方按权限策略放行，本表只负责审计结果。 */
-export const checkpointRollbacks = sqliteTable('checkpoint_rollbacks', {
-  id: text('id').primaryKey(),
-  checkpointId: text('checkpoint_id')
-    .notNull()
-    .references(() => checkpoints.id),
-  runId: text('run_id'),
-  status: text('status').notNull(),
-  errorMessage: text('error_message'),
-  createdAt: text('created_at').notNull(),
-});
+/** 子代理 transcript 的追加式事件；task 与 root 序号都严格连续。 */
+export const agentTaskEvents = sqliteTable(
+  'agent_task_events',
+  {
+    rootThreadId: text('root_thread_id')
+      .notNull()
+      .references(() => agentTaskRoots.rootThreadId, { onDelete: 'cascade' }),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => agentTasks.id, { onDelete: 'cascade' }),
+    sequence: integer('sequence').notNull(),
+    rootSequence: integer('root_sequence').notNull(),
+    dedupeKey: text('dedupe_key'),
+    eventType: text('event_type').notNull(),
+    payloadJson: text('payload_json').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.taskId, table.sequence] }),
+    uniqueIndex('agent_task_events_root_sequence_idx').on(
+      table.rootThreadId,
+      table.rootSequence,
+    ),
+    uniqueIndex('agent_task_events_task_dedupe_idx')
+      .on(table.taskId, table.dedupeKey)
+      .where(sql`${table.dedupeKey} is not null`),
+    index('agent_task_events_task_created_idx').on(
+      table.taskId,
+      table.createdAt,
+    ),
+  ],
+);
+
+/** 子代理完成通知独立落盘，delivered_at 保证父线程只消费一次。 */
+export const agentTaskNotifications = sqliteTable(
+  'agent_task_notifications',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => agentTasks.id, { onDelete: 'cascade' }),
+    rootThreadId: text('root_thread_id').notNull(),
+    status: text('status').notNull(),
+    payloadJson: text('payload_json').notNull(),
+    createdAt: text('created_at').notNull(),
+    deliveredAt: text('delivered_at'),
+  },
+  (table) => [
+    uniqueIndex('agent_task_notifications_task_idx').on(table.taskId),
+    index('agent_task_notifications_pending_idx').on(
+      table.rootThreadId,
+      table.deliveredAt,
+      table.createdAt,
+    ),
+  ],
+);
 
 /** 显式 task board；scope 决定任务属于 session 或命名 global board。 */
 export const taskBoards = sqliteTable(
@@ -517,9 +616,10 @@ export const codingStorageSchema = {
   usagePriceSnapshots,
   usageReportCache,
   memoryJobs,
-  checkpoints,
-  checkpointFileChanges,
-  checkpointRollbacks,
+  agentTaskRoots,
+  agentTasks,
+  agentTaskEvents,
+  agentTaskNotifications,
   taskBoards,
   tasks,
   taskDependencies,

@@ -5,6 +5,7 @@ export * from './api/subscriptions.js';
 export * from './api/transport.js';
 export * from './api/transports/index.js';
 export * from './client/client-events.js';
+export * from './client/agent-task-client.js';
 export * from './client/connection.js';
 export * from './client/event-reducer.js';
 export * from './client/local-server.js';

@@ -5,17 +5,43 @@
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
 
-import { tool, type ToolSet } from 'ai';
-import type { z } from 'zod';
+import { jsonSchema, tool, type ToolSet } from 'ai';
+import { ZodError, type z } from 'zod';
+
+import type { EnvironmentHandle } from '../../environment/index.js';
 
 import type { AgentError } from './contracts.js';
-import type { AgentEnvironment } from './contracts.js';
 import { normalizeAgentError } from './errors.js';
 import { createAgentMessage } from './messages.js';
 import type { AgentMessage, MaybePromise, ModelCallResult } from './model.js';
 import type { RunState } from './run-state.js';
 
 export type ToolRisk = 'readonly' | 'workspace-write' | 'external';
+
+export type AgentToolInputJsonSchema = Exclude<
+  Parameters<typeof jsonSchema>[0],
+  PromiseLike<unknown> | (() => unknown)
+>;
+
+/** 单次工具调用在参数解析后采用的能力信息。 */
+export interface AgentToolCapabilities {
+  /** 实际执行的工具名；代理工具应填写目标工具名，而不是代理入口名。 */
+  readonly logicalName: string;
+  /** 是否允许与其他只读工具同时执行。 */
+  readonly concurrencySafe: boolean;
+  readonly readOnly: boolean;
+  readonly destructive: boolean;
+  readonly interruptible: boolean;
+  readonly enabled: boolean;
+  /** 用于监控统计的固定标签；未指定时使用实际工具名。 */
+  readonly telemetryTag: string;
+}
+
+/** 工具可根据参数和调用上下文声明调用能力。 */
+export type AgentToolCapabilityDeclaration<TInput> = (
+  input: TInput,
+  ctx: AgentToolContext,
+) => MaybePromise<Partial<AgentToolCapabilities>>;
 
 /** 供 tool_search 和权限/展示层使用的发现元数据。 */
 export interface AgentToolDiscovery {
@@ -63,6 +89,14 @@ export interface AgentTool<TInput = unknown, TOutput = unknown> {
   /** 工具发现信息必须随工具定义声明，不能由名称或独立 registry 推断。 */
   readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<TInput>;
+  readonly inputJsonSchema?: AgentToolInputJsonSchema;
+  /** 工具可根据参数和调用上下文声明调用能力。 */
+  capabilities?(
+    input: TInput,
+    ctx: AgentToolContext,
+  ): MaybePromise<Partial<AgentToolCapabilities>>;
+  /** 参数结构校验通过后，检查工具自身的使用限制。 */
+  validateInput?(input: TInput, ctx: AgentToolContext): MaybePromise<void>;
   /**
    * 在 产品 Agent Agent engine 工具执行 模块 中执行 `execute` 完整流程，并在返回前完成其必要副作用。
    *
@@ -100,6 +134,7 @@ export interface DeferredAgentTool<TInput = unknown> {
   readonly description: string;
   readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<TInput>;
+  readonly inputJsonSchema?: AgentToolInputJsonSchema;
   readonly inherit?: boolean;
 }
 
@@ -111,9 +146,13 @@ export interface AgentToolContext {
   readonly runId: string;
   readonly turnIndex: number;
   readonly toolCallId: string;
-  readonly environment: AgentEnvironment;
+  readonly environment: EnvironmentHandle;
   readonly metadata: Record<string, unknown>;
   readonly signal: AbortSignal;
+  /** 当前调用最终采用的工具能力信息。 */
+  readonly invocation?: AgentToolCapabilities & {
+    readonly physicalName: string;
+  };
 }
 
 export interface AgentToolCall {
@@ -142,6 +181,7 @@ export interface DefineToolOptions<TInput, TOutput> {
   readonly description: string;
   readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<TInput>;
+  readonly inputJsonSchema?: AgentToolInputJsonSchema;
   /**
    * 在 产品 Agent Agent engine 工具执行 模块 中执行 `execute` 完整流程，并在返回前完成其必要副作用。
    *
@@ -160,6 +200,8 @@ export interface DefineToolOptions<TInput, TOutput> {
     ctx: AgentToolContext,
   ) => MaybePromise<TOutput>;
   readonly approval?: AgentTool<TInput, TOutput>['approval'];
+  readonly capabilities?: AgentTool<TInput, TOutput>['capabilities'];
+  readonly validateInput?: AgentTool<TInput, TOutput>['validateInput'];
 }
 
 /**
@@ -180,7 +222,16 @@ export function defineTool<TInput, TOutput>(
     description: options.description,
     discovery: options.discovery,
     input: options.input,
+    ...(options.inputJsonSchema === undefined
+      ? {}
+      : { inputJsonSchema: options.inputJsonSchema }),
     execute: options.execute,
+    ...(options.capabilities === undefined
+      ? {}
+      : { capabilities: options.capabilities }),
+    ...(options.validateInput === undefined
+      ? {}
+      : { validateInput: options.validateInput }),
     ...(options.approval !== undefined ? { approval: options.approval } : {}),
   };
 }
@@ -198,13 +249,30 @@ export function defineAnyTool<TInput, TOutput>(
   options: DefineToolOptions<TInput, TOutput>,
 ): AnyAgentTool {
   const approval = options.approval;
+  const capabilities = options.capabilities;
+  const validateInput = options.validateInput;
   return {
     execution: 'immediate',
     name: options.name,
     description: options.description,
     discovery: options.discovery,
     input: options.input,
+    ...(options.inputJsonSchema === undefined
+      ? {}
+      : { inputJsonSchema: options.inputJsonSchema }),
     execute: (input, ctx) => options.execute(options.input.parse(input), ctx),
+    ...(capabilities === undefined
+      ? {}
+      : {
+          capabilities: (input: unknown, ctx: AgentToolContext) =>
+            capabilities(options.input.parse(input), ctx),
+        }),
+    ...(validateInput === undefined
+      ? {}
+      : {
+          validateInput: (input: unknown, ctx: AgentToolContext) =>
+            validateInput(options.input.parse(input), ctx),
+        }),
     ...(approval === undefined
       ? {}
       : {
@@ -214,11 +282,113 @@ export function defineAnyTool<TInput, TOutput>(
   };
 }
 
+/**
+ * 未声明的安全属性按最保守的策略处理；只有明确安全的只读调用可以并发执行。
+ */
+export async function resolveToolCapabilities(
+  tool: AgentTool<unknown, unknown>,
+  input: unknown,
+  ctx: AgentToolContext,
+): Promise<AgentToolCapabilities> {
+  const declared = await tool.capabilities?.(input, ctx);
+  const logicalName = nonEmptyString(declared?.logicalName) ?? tool.name;
+  const readOnly = declared?.readOnly === true;
+  const destructive = declared?.destructive !== false;
+  return {
+    logicalName,
+    concurrencySafe:
+      declared?.concurrencySafe === true && readOnly && !destructive,
+    readOnly,
+    destructive,
+    interruptible: declared?.interruptible === true,
+    enabled: declared?.enabled !== false,
+    telemetryTag: nonEmptyString(declared?.telemetryTag) ?? logicalName,
+  };
+}
+
+/** 执行工具自定义的参数检查。 */
+export async function validateToolInput(
+  tool: AgentTool<unknown, unknown>,
+  input: unknown,
+  ctx: AgentToolContext,
+): Promise<void> {
+  await tool.validateInput?.(input, ctx);
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+}
+
+/**
+ * 用工具自带 schema 解析模型给出的参数，并把校验失败翻译成自然语言。
+ *
+ * 模型只能读到 tool-result 文本，原始 ZodError 的 JSON issue 数组要求它反解
+ * Zod 内部字段才能知道哪个参数越界；因此边界上必须输出「参数名 + 约束」句子。
+ *
+ * Args:
+ * - `toolInput`: 该工具声明的输入 schema；是擦除类型后恢复具体输入的唯一运行时边界。
+ * - `toolName`: 目标工具名；出现在错误句子中供模型定位重试对象。
+ * - `input`: 模型给出的原始参数；未通过校验时不会被部分接受。
+ *
+ * Returns:
+ * - 返回通过 schema 校验的参数；返回值不包含未声明的兜底状态。
+ *
+ * Throws:
+ * - 校验失败时抛出携带自然语言说明的错误，并保留原始 ZodError 作为 cause。
+ */
+export function parseToolInput(
+  toolInput: z.ZodType<unknown>,
+  toolName: string,
+  input: unknown,
+): unknown {
+  try {
+    return toolInput.parse(input);
+  } catch (error) {
+    if (error instanceof ZodError) {
+      throw new Error(
+        `Invalid arguments for tool '${toolName}': ${describeZodIssues(error)}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * 把 ZodError 的全部 issue 渲染成一句自然语言说明。
+ *
+ * Args:
+ * - `error`: schema 校验失败产生的 ZodError；至少包含一个 issue。
+ *
+ * Returns:
+ * - 返回 `describeZodIssues` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ *
+ * Throws:
+ * - ZodError 不含任何 issue 时直接抛错，说明校验结果本身不满足契约。
+ */
+export function describeZodIssues(error: ZodError): string {
+  if (error.issues.length === 0) {
+    throw new Error('ZodError carries no issues to describe.');
+  }
+  return error.issues
+    .map((issue) => {
+      const target =
+        issue.path.length === 0
+          ? 'the arguments object'
+          : `'${issue.path.join('.')}'`;
+      return `${target} is invalid: ${issue.message}`;
+    })
+    .join('; ');
+}
+
 export interface DefineDeferredToolOptions<TInput> {
   readonly name: string;
   readonly description: string;
   readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<TInput>;
+  readonly inputJsonSchema?: AgentToolInputJsonSchema;
 }
 
 /**
@@ -281,7 +451,10 @@ export function buildToolSet(options: BuildToolSetOptions): ToolSet {
     }
     result[agentTool.name] = tool({
       description: agentTool.description,
-      inputSchema: agentTool.input,
+      inputSchema:
+        agentTool.inputJsonSchema === undefined
+          ? agentTool.input
+          : jsonSchema(agentTool.inputJsonSchema),
     });
   }
   return result;
@@ -431,13 +604,14 @@ export async function executeToolCalls(
     return { messages: [], toolCalls: [], pendingCount: 0 };
   }
   const scheduled = await run.toolScheduler.schedule(toolCallsFromModel, {
-    onToolStarted: (toolCallId, name, input) =>
+    onToolStarted: (toolCallId, name, input, invocation) =>
       run.events.emit({
         type: 'tool.started',
         turnIndex: run.state.turn,
         toolCallId,
         name,
         input,
+        ...(invocation === undefined ? {} : { invocation }),
       }),
     onApprovalRequired: async (item) => {
       await run.events.emit({

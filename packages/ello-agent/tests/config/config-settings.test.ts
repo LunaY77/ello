@@ -1,34 +1,26 @@
 /**
- * 本文件验证 config-settings 覆盖的运行时行为契约。
- *
- * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
- * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ * 本文件验证配置项描述只暴露可编辑字段及其生效范围。
  */
 import { describe, expect, it } from 'vitest';
 
 import { describeConfigSettings } from '../../src/features/config/settings.js';
 
 describe('config settings descriptors', () => {
-  it('展平可编辑配置，排除独立资源和运行期字段', () => {
+  it('excludes the model directory while exposing the two global references', () => {
     const settings = describeConfigSettings(
       {
-        active_profile: 'main',
-        models: { openai: {} },
-        profile: { main: {} },
+        models: { pro: { api_model: 'model-pro' } },
+        primary_model: 'pro',
+        auxiliary_model: 'flash',
         cwd: '/workspace',
         session_id: 'thr_1',
         initial_mode: 'ask-before-changes',
+        title_generation: false,
         allowed_paths: ['/workspace'],
+        subagents: { enabled: true, cwd_policy: 'workspace' },
         tools: { routing_enabled: false },
         context: { max_input_tokens: 160_000 },
-        provider: {
-          vault: {
-            enabled: true,
-            kind: 'openai',
-            api_key_env: 'OPENAI_API_KEY',
-          },
-        },
-        agent: {},
+        agent: { reviewer: { model: 'primary_model' } },
         projects: {},
       },
       [
@@ -36,8 +28,10 @@ describe('config settings descriptors', () => {
         {
           name: 'global',
           data: {
+            primary_model: 'pro',
+            auxiliary_model: 'flash',
             initial_mode: 'ask-before-changes',
-            provider: { vault: { kind: 'openai' } },
+            subagents: { enabled: true, cwd_policy: 'workspace' },
           },
         },
         {
@@ -49,25 +43,43 @@ describe('config settings descriptors', () => {
     );
 
     expect(settings.map((setting) => setting.id)).not.toEqual(
-      expect.arrayContaining([
-        'active_profile',
-        'cwd',
-        'models',
-        'profile',
-        'session_id',
-      ]),
+      expect.arrayContaining(['cwd', 'models', 'session_id']),
     );
     expect(settings).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          id: 'primary_model',
+          value: 'pro',
+          source: 'global',
+        }),
+        expect.objectContaining({
+          id: 'auxiliary_model',
+          value: 'flash',
+          source: 'global',
+        }),
         expect.objectContaining({
           id: 'initial_mode',
           type: 'enum',
           source: 'global',
           effect: 'newThread',
         }),
+        expect.objectContaining({ id: 'allowed_paths', type: 'stringList' }),
         expect.objectContaining({
-          id: 'allowed_paths',
-          type: 'stringList',
+          id: 'subagents.enabled',
+          type: 'boolean',
+          value: true,
+          source: 'global',
+        }),
+        expect.objectContaining({
+          id: 'subagents.cwd_policy',
+          type: 'enum',
+          value: 'workspace',
+          source: 'global',
+        }),
+        expect.objectContaining({
+          id: 'title_generation',
+          type: 'boolean',
+          effect: 'newThread',
         }),
         expect.objectContaining({
           id: 'tools.routing_enabled',
@@ -78,53 +90,10 @@ describe('config settings descriptors', () => {
           id: 'context.max_input_tokens',
           type: 'integer',
         }),
-        expect.objectContaining({ id: 'agent', type: 'json' }),
+        expect.objectContaining({ id: 'agent.reviewer.model', type: 'enum' }),
         expect.objectContaining({ id: 'projects', type: 'json' }),
         expect.objectContaining({ id: 'observability', type: 'json' }),
       ]),
     );
-  });
-
-  it('敏感 provider 字段可盲写但不包含当前值', () => {
-    const settings = describeConfigSettings(
-      {
-        provider: {
-          vault: {
-            kind: 'openai',
-            api_key: 'must-not-leak',
-            headers: { Authorization: 'must-not-leak' },
-          },
-        },
-      },
-      [
-        { name: 'defaults', data: {} },
-        {
-          name: 'global',
-          data: {
-            provider: {
-              vault: {
-                api_key: 'must-not-leak',
-                headers: { Authorization: 'must-not-leak' },
-              },
-            },
-          },
-        },
-        { name: 'project', data: {} },
-        { name: 'override', data: {} },
-      ],
-    );
-
-    const secrets = settings.filter((setting) => setting.sensitive);
-    expect(secrets.map((setting) => setting.id)).toEqual(
-      expect.arrayContaining([
-        'provider.vault.api_key',
-        'provider.vault.api_key_env',
-        'provider.vault.api_key_file',
-        'provider.vault.headers',
-        'provider.vault.options',
-      ]),
-    );
-    expect(secrets.every((setting) => !('value' in setting))).toBe(true);
-    expect(JSON.stringify(settings)).not.toContain('must-not-leak');
   });
 });

@@ -13,6 +13,7 @@ export type ContextSourceType =
   | 'skill'
   | 'reference'
   | 'mcp'
+  | 'policy'
   | 'environment';
 
 /** 单个可观测上下文来源。 */
@@ -248,6 +249,8 @@ function tagForSourceType(type: ContextSourceType): string {
       return 'reference-context';
     case 'mcp':
       return 'mcp-context';
+    case 'policy':
+      return 'policy-context';
   }
 }
 

@@ -209,6 +209,39 @@ async function recordAgentRunEvent(
   event: AgentRunEvent,
 ): Promise<void> {
   switch (event.type) {
+    case 'reasoningStarted': {
+      const item: ThreadItem = {
+        type: 'reasoning',
+        id: event.reasoningId,
+        turnId: turn.id,
+        createdAt: event.occurredAt,
+        summary: '',
+        status: 'inProgress',
+      };
+      await options.append({
+        kind: 'item.started',
+        turnId: turn.id,
+        item,
+      });
+      return;
+    }
+    case 'reasoningDelta':
+      await options.append({
+        kind: 'item.delta',
+        turnId: turn.id,
+        itemId: event.reasoningId,
+        delta: { type: 'reasoning', text: event.text },
+      });
+      return;
+    case 'reasoningCompleted': {
+      const current = requireReasoning(options, event.reasoningId);
+      await options.append({
+        kind: 'item.completed',
+        turnId: turn.id,
+        item: { ...current, summary: event.text, status: 'completed' },
+      });
+      return;
+    }
     case 'messageStarted': {
       const item: ThreadItem = {
         type: 'agentMessage',
@@ -296,6 +329,23 @@ async function recordAgentRunEvent(
     case 'interactionRequired':
       await options.registerInteraction(turn, event.interaction, run);
       return;
+    case 'contextCompactionStarted': {
+      const item: ThreadItem = {
+        type: 'contextCompaction',
+        id: event.compactionId,
+        turnId: turn.id,
+        createdAt: event.occurredAt,
+        summary: `Compacting ${event.beforeMessageCount} messages…`,
+        tokensBefore: event.tokensBefore,
+        status: 'inProgress',
+      };
+      await options.append({
+        kind: 'item.started',
+        turnId: turn.id,
+        item,
+      });
+      return;
+    }
     case 'contextCompacted': {
       const firstKept = options.compactionEntries().at(-event.keptMessageCount);
       if (firstKept === undefined) {
@@ -309,21 +359,25 @@ async function recordAgentRunEvent(
         summary: event.summary,
         firstKeptSeq: firstKept.seq,
         tokensBefore: event.tokensBefore,
+        beforeMessageCount: event.beforeMessageCount,
+        afterMessageCount: event.afterMessageCount,
+        keptMessageCount: event.keptMessageCount,
       });
+      const started = requireItem(options, event.compactionId);
+      if (started.type !== 'contextCompaction') {
+        throw new Error(
+          `Thread item ${event.compactionId} is ${started.type}, expected contextCompaction.`,
+        );
+      }
       const item: ThreadItem = {
-        type: 'contextCompaction',
-        id: createEntityId('item'),
-        turnId: turn.id,
-        createdAt: event.occurredAt,
-        summary: `${event.beforeMessageCount} -> ${event.afterMessageCount} messages`,
-        tokensBefore: 0,
+        ...started,
+        summary: event.summary,
+        tokensBefore: event.tokensBefore,
+        beforeMessageCount: event.beforeMessageCount,
+        afterMessageCount: event.afterMessageCount,
+        keptMessageCount: event.keptMessageCount,
         status: 'completed',
       };
-      await options.append({
-        kind: 'item.started',
-        turnId: turn.id,
-        item: { ...item, status: 'inProgress' },
-      });
       await options.append({
         kind: 'item.completed',
         turnId: turn.id,
@@ -339,6 +393,27 @@ async function recordAgentRunEvent(
         createdAt: event.occurredAt,
         code: event.code,
         message: event.message,
+      };
+      await options.append({
+        kind: 'item.started',
+        turnId: turn.id,
+        item,
+      });
+      await options.append({
+        kind: 'item.completed',
+        turnId: turn.id,
+        item,
+      });
+      return;
+    }
+    case 'steeringConsumed': {
+      const item: ThreadItem = {
+        type: 'userMessage',
+        id: createEntityId('item'),
+        turnId: turn.id,
+        createdAt: event.occurredAt,
+        text: event.text,
+        steerId: event.steerId,
       };
       await options.append({
         kind: 'item.started',
@@ -395,6 +470,19 @@ function requireAgentMessage(
   if (item.type !== 'agentMessage') {
     throw new Error(
       `Thread item ${itemId} is ${item.type}, expected agentMessage.`,
+    );
+  }
+  return item;
+}
+
+function requireReasoning(
+  options: ConsumeAgentRunOptions,
+  itemId: string,
+): Extract<ThreadItem, { type: 'reasoning' }> {
+  const item = requireItem(options, itemId);
+  if (item.type !== 'reasoning') {
+    throw new Error(
+      `Thread item ${itemId} is ${item.type}, expected reasoning.`,
     );
   }
   return item;
@@ -480,6 +568,7 @@ function addUsage(
   return {
     requests: left.requests + right.requests,
     inputTokens: left.inputTokens + right.inputTokens,
+    lastInputTokens: right.lastInputTokens ?? right.inputTokens,
     outputTokens: left.outputTokens + right.outputTokens,
     cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
     cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,

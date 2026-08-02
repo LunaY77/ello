@@ -4,20 +4,17 @@
  * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
  * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
  */
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { CheckpointStore } from '../../src/features/agent/change/checkpoint.js';
-import { recordCheckpointChanges } from '../../src/features/agent/change/recording.js';
 import { createTestStores, type TestStores } from '../support/stores.js';
 
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  vi.restoreAllMocks();
   await Promise.all(
     temporaryDirectories
       .splice(0)
@@ -39,316 +36,6 @@ async function createTestStorage(): Promise<{
     }),
   };
 }
-
-describe('Checkpoint 领域契约', () => {
-  it('空变更不创建检查点或 artifact', async () => {
-    const { storage } = await createTestStorage();
-    try {
-      await expect(
-        storage.checkpoints.seal({ runId: 'empty', changes: [] }),
-      ).resolves.toBeNull();
-      expect(await storage.checkpoints.list()).toEqual([]);
-      expect(
-        storage.db.$client
-          .prepare('select count(*) as count from artifacts')
-          .get(),
-      ).toEqual({ count: 0 });
-    } finally {
-      storage.close();
-    }
-  });
-
-  it('封存新增、修改和删除内容并可从内容寻址 artifact 完整恢复', async () => {
-    const { root, storage } = await createTestStorage();
-    try {
-      const checkpoint = await storage.checkpoints.seal({
-        runId: 'run-1',
-        label: '批量编辑',
-        changes: [
-          {
-            path: path.join(root, 'created.txt'),
-            before: null,
-            after: 'created\n',
-            toolCallId: 'call-create',
-            diff: 'create diff',
-          },
-          {
-            path: path.join(root, 'updated.txt'),
-            before: 'before\n',
-            after: 'after\n',
-            toolCallId: 'call-update',
-            diff: 'update diff',
-          },
-          {
-            path: path.join(root, 'deleted.txt'),
-            before: 'deleted\n',
-            after: null,
-            toolCallId: 'call-delete',
-            diff: 'delete diff',
-          },
-        ],
-      });
-
-      expect(checkpoint).toMatchObject({
-        runId: 'run-1',
-        label: '批量编辑',
-        changes: [
-          { before: null, after: 'created\n' },
-          { before: 'before\n', after: 'after\n' },
-          { before: 'deleted\n', after: null },
-        ],
-      });
-      expect(await storage.checkpoints.detail(checkpoint!.id)).toEqual(
-        checkpoint,
-      );
-      expect(await storage.checkpoints.list()).toEqual([checkpoint]);
-      expect(
-        storage.db.$client
-          .prepare('select count(*) as count from artifact_references')
-          .get(),
-      ).toEqual({ count: 4 });
-    } finally {
-      storage.close();
-    }
-  });
-
-  it('回滚按逆序恢复 before 内容并记录成功终态', async () => {
-    const { root, storage } = await createTestStorage();
-    try {
-      const createdPath = path.join(root, 'created.txt');
-      const updatedPath = path.join(root, 'updated.txt');
-      const deletedPath = path.join(root, 'nested', 'deleted.txt');
-      await writeFile(createdPath, 'created\n', 'utf8');
-      await writeFile(updatedPath, 'after\n', 'utf8');
-      const store = new CheckpointStore(storage.checkpoints);
-      store.record({
-        path: createdPath,
-        before: null,
-        after: 'created\n',
-        toolCallId: 'call-create',
-        diff: 'create',
-      });
-      store.record({
-        path: updatedPath,
-        before: 'before\n',
-        after: 'after\n',
-        toolCallId: 'call-update',
-        diff: 'update',
-      });
-      store.record({
-        path: deletedPath,
-        before: 'deleted\n',
-        after: null,
-        toolCallId: 'call-delete',
-        diff: 'delete',
-      });
-      const checkpoint = await store.seal('run-rollback', '回滚验证');
-
-      await expect(store.rollback(checkpoint!.id)).resolves.toHaveLength(3);
-      await expect(readFile(createdPath, 'utf8')).rejects.toThrow();
-      await expect(readFile(updatedPath, 'utf8')).resolves.toBe('before\n');
-      await expect(readFile(deletedPath, 'utf8')).resolves.toBe('deleted\n');
-      expect(
-        storage.db.$client
-          .prepare('select status from checkpoints where id = ?')
-          .get(checkpoint!.id),
-      ).toEqual({ status: 'rolled_back' });
-      expect(
-        storage.db.$client
-          .prepare(
-            'select status, error_message as errorMessage from checkpoint_rollbacks where checkpoint_id = ?',
-          )
-          .get(checkpoint!.id),
-      ).toEqual({ status: 'completed', errorMessage: null });
-    } finally {
-      storage.close();
-    }
-  });
-
-  it('回滚前发现文件漂移时不修改任何文件并记录失败终态', async () => {
-    const { root, storage } = await createTestStorage();
-    const createdPath = path.join(root, 'created-before-drift.txt');
-    const updatedPath = path.join(root, 'updated-before-drift.txt');
-    await writeFile(createdPath, 'created\n', 'utf8');
-    await writeFile(updatedPath, 'after\n', 'utf8');
-    try {
-      const store = new CheckpointStore(storage.checkpoints);
-      store.record({
-        path: createdPath,
-        before: null,
-        after: 'created\n',
-        toolCallId: 'call-created',
-        diff: 'create',
-      });
-      store.record({
-        path: updatedPath,
-        before: 'before\n',
-        after: 'after\n',
-        toolCallId: 'call-updated',
-        diff: 'update',
-      });
-      const checkpoint = await store.seal('run-drift');
-      await writeFile(updatedPath, 'manual user edit\n', 'utf8');
-
-      await expect(store.rollback(checkpoint!.id)).rejects.toThrow(
-        'file drifted',
-      );
-      await expect(readFile(createdPath, 'utf8')).resolves.toBe('created\n');
-      await expect(readFile(updatedPath, 'utf8')).resolves.toBe(
-        'manual user edit\n',
-      );
-      expect(
-        storage.db.$client
-          .prepare('select status from checkpoints where id = ?')
-          .get(checkpoint!.id),
-      ).toEqual({ status: 'active' });
-      expect(
-        storage.db.$client
-          .prepare(
-            'select status from checkpoint_rollbacks where checkpoint_id = ?',
-          )
-          .get(checkpoint!.id),
-      ).toEqual({ status: 'failed' });
-    } finally {
-      storage.close();
-    }
-  });
-
-  it('生产工具输出自动记录绝对路径，移动文件拆成可逆的删除与新增', async () => {
-    const { root, storage } = await createTestStorage();
-    const source = path.join(root, 'source.txt');
-    const moved = path.join(root, 'nested', 'moved.txt');
-    await mkdir(path.dirname(moved), { recursive: true });
-    await writeFile(moved, 'after\n', 'utf8');
-    try {
-      const store = new CheckpointStore(storage.checkpoints);
-      recordCheckpointChanges({
-        checkpoints: store,
-        cwd: root,
-        toolCallId: 'call-move',
-        output: {
-          kind: 'coding-tool-result',
-          title: 'Move file',
-          output: 'moved',
-          metadata: {
-            kind: 'edit',
-            fileChanges: [
-              {
-                kind: 'modified',
-                path: 'source.txt',
-                movePath: 'nested/moved.txt',
-                before: 'before\n',
-                after: 'after\n',
-                additions: 1,
-                deletions: 1,
-                hunks: [],
-                unifiedDiff: 'move diff',
-              },
-            ],
-          },
-        },
-      });
-      const checkpoint = await store.seal('run-move');
-
-      expect(checkpoint?.changes).toEqual([
-        expect.objectContaining({
-          path: source,
-          before: 'before\n',
-          after: null,
-        }),
-        expect.objectContaining({
-          path: moved,
-          before: null,
-          after: 'after\n',
-        }),
-      ]);
-      await store.rollback(checkpoint!.id);
-      await expect(readFile(source, 'utf8')).resolves.toBe('before\n');
-      await expect(readFile(moved, 'utf8')).rejects.toThrow();
-    } finally {
-      storage.close();
-    }
-  });
-
-  it('检查点持久化失败时保留待封存改动，允许显式重试', async () => {
-    const { root, storage } = await createTestStorage();
-    try {
-      const store = new CheckpointStore(storage.checkpoints);
-      store.record({
-        path: path.join(root, 'retry.txt'),
-        before: null,
-        after: 'retry',
-        toolCallId: 'call-retry',
-        diff: 'retry diff',
-      });
-      const failure = vi
-        .spyOn(storage.checkpoints, 'seal')
-        .mockRejectedValueOnce(new Error('暂时写盘失败'));
-
-      await expect(store.seal('run-retry')).rejects.toThrow('暂时写盘失败');
-      expect(store.hasPending()).toBe(true);
-      failure.mockRestore();
-      await expect(store.seal('run-retry')).resolves.toMatchObject({
-        runId: 'run-retry',
-      });
-      expect(store.hasPending()).toBe(false);
-    } finally {
-      storage.close();
-    }
-  });
-
-  it('检查点写入中途失败会清理已创建 artifact 且不留下半条元数据', async () => {
-    const { root, storage } = await createTestStorage();
-    const realPut = storage.artifacts.put.bind(storage.artifacts);
-    vi.spyOn(storage.artifacts, 'put')
-      .mockImplementationOnce(realPut)
-      .mockRejectedValueOnce(new Error('artifact 写入失败'));
-    try {
-      await expect(
-        storage.checkpoints.seal({
-          runId: 'run-failed',
-          changes: [
-            {
-              path: path.join(root, 'file.txt'),
-              before: 'before',
-              after: 'after',
-              toolCallId: 'call-1',
-              diff: 'diff',
-            },
-          ],
-        }),
-      ).rejects.toThrow('artifact 写入失败');
-      expect(
-        storage.db.$client
-          .prepare('select count(*) as count from checkpoints')
-          .get(),
-      ).toEqual({ count: 0 });
-      expect(
-        storage.db.$client
-          .prepare('select count(*) as count from artifacts')
-          .get(),
-      ).toEqual({ count: 0 });
-    } finally {
-      storage.close();
-    }
-  });
-
-  it('未知检查点查询和回滚返回明确失败', async () => {
-    const { storage } = await createTestStorage();
-    try {
-      await expect(storage.checkpoints.detail('missing')).resolves.toBeNull();
-      const store = new CheckpointStore(storage.checkpoints);
-      await expect(store.rollback('missing')).rejects.toThrow(
-        'Unknown checkpoint: missing',
-      );
-      await expect(store.rollback()).rejects.toThrow(
-        'No checkpoint to roll back',
-      );
-    } finally {
-      storage.close();
-    }
-  });
-});
 
 describe('Usage 仓储契约', () => {
   it('按模型、日期、状态和时间范围过滤及聚合安全字段', async () => {
@@ -602,8 +289,11 @@ function completedModelCall(input: {
       runId: 'run-model-calls',
       turnIndex: input.turnIndex,
       modelCallId: `call-${input.turnIndex}`,
-      provider: 'openai',
-      model: 'gpt-5.4',
+      agentName: 'build',
+      modelSelector: 'primary_model' as const,
+      configuredModel: 'openai-gpt-5.4',
+      protocol: 'openai' as const,
+      apiModel: 'gpt-5.4',
     },
     response: {
       text: '',

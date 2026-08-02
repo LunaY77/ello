@@ -61,7 +61,7 @@ Markdown 定义默认使用 `mode: subagent`，配置文件定义默认使用 `m
 | 工具       | `tools`         | `tools`              | Markdown 支持数组或逗号分隔字符串，配置文件使用数组 |
 | 工具继承   | `inherit-tools` | —                    | `true` 时由运行时按 mode 选择默认工具               |
 | 静态权限   | `permission`    | `permission`         | 与父级派生规则和运行时规则共同判定                  |
-| 最大回合数 | `max-turns`     | `max_turns`          | 必须是正整数                                        |
+| 最大回合数 | `max-turns`     | `max_turns`          | 正整数限制轮次，`-1` 表示不设置上限                 |
 | 固定模型   | —               | `model`              | 覆盖 role 解析出的模型引用                          |
 | 隐藏目录项 | —               | `hidden`             | 从用户可选目录中隐藏定义                            |
 
@@ -78,7 +78,9 @@ ello 随包提供四个 `mode: subagent` 定义：
 | `verify`    | `small`   | 只读工具、`bash`       | 执行定向验证           |
 | `implement` | `primary` | 读写工具、`bash`       | 完成范围明确的代码修改 |
 
-这些定义当前用于目录和配置覆盖。生产 delegation runner 的状态见[运行生命周期与当前接线](background-jobs-and-runner-status.md)。
+这些 definition 会进入 `agent/list`，也能被 `delegate_to_subagent` 的动态枚举解析。运行
+合同只接受 shared workspace；TUI 导航和运行摘要统一使用公开任务投影。完整边界见
+[运行时架构](runtime-architecture.md)。
 
 ## 覆盖顺序
 
@@ -106,4 +108,7 @@ flowchart LR
 - `selectablePrimaries()` 返回未隐藏的 `primary` 和 `all` 定义。
 - `delegatable()` 返回未隐藏的 `subagent` 和 `all` 定义。
 
-`agent/list` 基于注册表生成 Server 目录，并额外附加当前 runtime 状态。
+`agent/list` 基于注册表生成 Server 目录，并用 `metadata.runtime` 区分 primary、delegation 和
+internal-only。这个接口是“有哪些 definition 可选”的目录，不是“哪些 task 正在运行”的
+任务列表。运行 task 必须使用独立的公开投影，不能把 definition catalog 与 runtime state
+混在同一个响应中。

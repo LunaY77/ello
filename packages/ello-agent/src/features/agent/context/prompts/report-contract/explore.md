@@ -1,0 +1,1 @@
+This report is from a read-only exploration agent. Its coverage declaration lists the files it read in full. Re-read one of those files only when you are about to edit it and need the exact current text for an `edit`. The data shapes it states each carry an evidence location: confirm one by reading that location, not by re-reading the whole file.

@@ -38,6 +38,12 @@ export interface ThreadGoalRuntime {
 export function createThreadGoalRuntime(
   initialGoal: Goal | null,
 ): ThreadGoalRuntime {
+  if (initialGoal === null || initialGoal.status !== 'active') {
+    return {
+      tools: [],
+      systemSection: () => null,
+    };
+  }
   let currentGoal = initialGoal;
   return {
     systemSection: () => renderGoalSection(currentGoal),
@@ -47,6 +53,12 @@ export function createThreadGoalRuntime(
         description:
           'Get the current thread goal and its persisted token usage. Fails when this thread has no goal.',
         discovery: { aliases: ['goal status'], risk: 'readonly' },
+        capabilities: () => ({
+          concurrencySafe: true,
+          readOnly: true,
+          destructive: false,
+          telemetryTag: 'goal.get',
+        }),
         input: z.object({}).strict(),
         execute: () => {
           if (currentGoal === null) {

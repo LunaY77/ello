@@ -1,7 +1,7 @@
 /**
  * 产品 Agent feature 只拥有运行构建、活动运行生命周期和进程关闭顺序。
  *
- * Thread 通过 `AgentFeature.startRun()` 启动一次独立运行；engine、checkpoint 和装配资源都在
+ * Thread 通过 `AgentFeature.startRun()` 启动一次独立运行；engine 和装配资源都在
  * 运行完成前由本 feature 持有，关闭时先等待构建任务，再中断活动运行。
  */
 import { buildAgent } from './build.js';
@@ -11,6 +11,7 @@ import type {
   AgentRunRequest,
   CreateAgentFeatureInput,
 } from './contracts.js';
+import type { ModelCompactor } from './engine/index.js';
 import { startAgentRun } from './run.js';
 
 /**
@@ -29,19 +30,39 @@ export function createAgentFeature(
   input: CreateAgentFeatureInput,
 ): AgentFeature {
   const activeRuns = new Set<AgentRun>();
+  const activeRunsByThread = new Map<string, Set<AgentRun>>();
   const startingRuns = new Set<Promise<AgentRun>>();
+  const modelCompactors = new Map<string, ModelCompactor>();
   let closing = false;
 
-  const start = async (runInput: AgentRunRequest): Promise<AgentRun> => {
+  const start = async (
+    runInput: import('./contracts.js').AgentRunInput,
+  ): Promise<AgentRun> => {
     if (closing) throw new Error('Agent is closing.');
-    const built = await buildAgent(runInput, input);
+    const request = agentRunRequest(runInput, input);
+    const built = await buildAgent(
+      request,
+      input,
+      modelCompactors.get(runInput.threadId),
+    );
     if (closing) {
       await built.close();
       throw new Error('Agent closed while a run was being built.');
     }
-    const run = startAgentRun(built, runInput, input.createCheckpoints());
+    const run = startAgentRun(built, request);
     activeRuns.add(run);
-    const clear = () => activeRuns.delete(run);
+    const threadRuns = activeRunsByThread.get(runInput.threadId) ?? new Set();
+    threadRuns.add(run);
+    activeRunsByThread.set(runInput.threadId, threadRuns);
+    const clear = () => {
+      activeRuns.delete(run);
+      threadRuns.delete(run);
+      if (threadRuns.size === 0) activeRunsByThread.delete(runInput.threadId);
+      const compactor = built.modelCompactor();
+      if (compactor !== undefined) {
+        modelCompactors.set(runInput.threadId, compactor);
+      }
+    };
     void run.result.then(clear, clear);
     return run;
   };
@@ -66,6 +87,48 @@ export function createAgentFeature(
       void task.then(clear, clear);
       return task;
     },
+    async compact(compactInput) {
+      const threadId = compactInput.request.threadId;
+      const compactor = modelCompactors.get(threadId);
+      if (compactor !== undefined) {
+        return compactor.compact(compactInput);
+      }
+      if (closing) throw new Error('Agent is closing.');
+      const request = agentRunRequest(compactInput.request, input);
+      const built = await buildAgent(request, input);
+      try {
+        const result = await built.engine.compact({
+          contextMessages: request.history,
+          messages: compactInput.messages,
+          prompt: compactInput.prompt,
+          signal: compactInput.signal,
+        });
+        const restored = built.modelCompactor();
+        if (restored !== undefined) modelCompactors.set(threadId, restored);
+        return result;
+      } finally {
+        await built.close();
+      }
+    },
+    notify(threadId, notificationId, message) {
+      const runs = activeRunsByThread.get(threadId);
+      if (runs === undefined) return false;
+      for (const run of runs) {
+        try {
+          run.notify(notificationId, message);
+          return true;
+        } catch {
+          // run 可能刚好完成；通知继续留在持久队列，下一轮再注入。
+        }
+      }
+      return false;
+    },
+    interrupt(threadId, reason) {
+      const runs = activeRunsByThread.get(threadId);
+      if (runs === undefined) return false;
+      for (const run of runs) run.interrupt(reason);
+      return runs.size > 0;
+    },
     /**
      * 停止 产品 Agent 公开入口 模块 的异步工作并释放其拥有的资源；关闭完成后不再接受新操作。
      *
@@ -85,22 +148,41 @@ export function createAgentFeature(
       const runs = [...activeRuns];
       for (const run of runs) run.interrupt('agent closing');
       await Promise.all(runs.map((run) => run.result));
+      modelCompactors.clear();
+      activeRunsByThread.clear();
+    },
+  };
+}
+
+function agentRunRequest(
+  input: import('./contracts.js').AgentRunInput,
+  dependencies: CreateAgentFeatureInput,
+): AgentRunRequest {
+  const { cwd, ...request } = input;
+  return {
+    ...request,
+    executionLocation: {
+      environmentRef: dependencies.runtime.defaultEnvironmentRef,
+      workingDirectory: cwd,
     },
   };
 }
 
 export type {
+  AgentDelegationContext,
   AgentRunContextParts,
   AgentRunTools,
   AgentFeature,
   AgentInteraction,
   AgentRunGoal,
+  AgentRunInput,
   AgentRunSelection,
   AgentRunRequest,
   AgentResumeResult,
   AgentRun,
   AgentRunEvent,
   AgentRunResult,
+  AgentRuntime,
   CreateAgentFeatureInput,
   CreateAgentTools,
   LoadAgentContext,
@@ -112,14 +194,16 @@ export type {
 } from './contracts.js';
 export { PLAN_EXIT_TOOL_NAME } from './contracts.js';
 export { createAgentRoutes } from './routes.js';
-export { CheckpointStore } from './change/checkpoint.js';
-export {
-  createCheckpointRecordStore,
-  type CheckpointRecordStore,
-} from './change/store.js';
-export { recordCheckpointChanges } from './change/recording.js';
 export { createCodingSystemPromptSection } from './context/prompts.js';
 export { createAgentRegistry } from './subagents/registry.js';
+export {
+  AgentTaskService,
+  AgentTaskStore,
+  AgentTaskRpcFeature,
+  createAgentTaskEventPreparer,
+  createSubagentTools,
+  type AgentTask,
+} from './subagents/index.js';
 export {
   estimateTextTokens,
   type ContextSourceLoadResult,

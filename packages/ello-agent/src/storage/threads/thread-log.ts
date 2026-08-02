@@ -108,7 +108,7 @@ export class ThreadLogStore {
     const fullRecord = parseThreadRecord(
       {
         ...record,
-        schema: 1,
+        schema: 2,
         seq: 1,
         threadId,
         createdAt: new Date().toISOString(),
@@ -347,7 +347,7 @@ export class ThreadLogStore {
       const fullRecord = parseThreadRecord(
         {
           ...record,
-          schema: 1,
+          schema: 2,
           seq: writer.nextSeq,
           threadId,
           createdAt: new Date().toISOString(),

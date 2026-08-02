@@ -11,19 +11,30 @@ import {
   type FeatureHandlerMap,
 } from '../../server/rpc/route.js';
 import type { RpcRouteFragment } from '../../server/rpc/route.js';
-import { loadCodingAgentConfig } from '../config/index.js';
+import {
+  loadCodingAgentConfig,
+  type CodingAgentConfig,
+} from '../config/index.js';
 import type { TaskBoardStore } from '../task/index.js';
 
 import { createProductionToolRuntime } from './internal/production.js';
+import type { AnyCodingTool } from './internal/runtime/coding-tool.js';
+
+/** 根据 Agent 配置加载需要加入工具目录的扩展工具。 */
+export type LoadAdditionalTools = (
+  config: CodingAgentConfig,
+) => Promise<readonly AnyCodingTool[]>;
 
 interface ToolContext {
   readonly taskBoards: TaskBoardStore;
+  readonly loadAdditionalTools: LoadAdditionalTools;
 }
 
 /** tool catalog 使用真实 production runtime，避免展示与执行权限配置漂移。 */
 const toolHandlers = {
   'tool/list': async (context, params) => {
     const config = await loadCodingAgentConfig({ cwd: params.cwd });
+    const additionalTools = await context.loadAdditionalTools(config);
     const runtime = createProductionToolRuntime({
       config,
       taskBoards: context.taskBoards,
@@ -37,6 +48,7 @@ const toolHandlers = {
         source: 'config',
         changedAt: new Date().toISOString(),
       }),
+      ...(additionalTools.length === 0 ? {} : { additionalTools }),
     });
     return {
       data: runtime.tools.map((tool) => ({
@@ -59,6 +71,7 @@ const toolHandlers = {
  *
  * Args:
  * - `taskBoards`: `createToolRoutes` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `loadAdditionalTools`: 根据 Agent 配置加载扩展工具；默认返回空数组。
  *
  * Returns:
  * - 返回 `createToolRoutes` 计算出的声明结果；返回值不包含未声明的兜底状态。
@@ -68,11 +81,12 @@ const toolHandlers = {
  */
 export function createToolRoutes(
   taskBoards: TaskBoardStore,
+  loadAdditionalTools: LoadAdditionalTools = () => Promise.resolve([]),
 ): RpcRouteFragment<'tool/list'> {
   return {
     'tool/list': bindFeatureRoute(
       toolHandlers,
-      () => ({ taskBoards }),
+      () => ({ taskBoards, loadAdditionalTools }),
       'tool/list',
     ),
   };

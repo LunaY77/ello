@@ -16,7 +16,9 @@ export function BottomDock({
   goal,
   overlay,
   composer,
+  agentSwitcher,
   contextPercent,
+  contextWindow,
 }: {
   readonly model: string;
   readonly mode: TuiModeState;
@@ -25,11 +27,11 @@ export function BottomDock({
   readonly goal?: Goal;
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
+  readonly agentSwitcher?: ReactNode;
   readonly contextPercent?: number;
+  readonly contextWindow?: number;
 }) {
   const theme = useTheme();
-  const tokens =
-    usage !== undefined ? usage.inputTokens + usage.outputTokens : 0;
   const cacheLabel =
     usage === undefined || usage.inputTokens === 0
       ? 'cache unavailable'
@@ -45,14 +47,16 @@ export function BottomDock({
       >
         {composer}
       </Box>
-      <Box justifyContent="space-between">
+      <Box flexDirection="column">
+        <Text color={theme.textMuted}>{model}</Text>
         <Box gap={1}>
-          <Text color={theme.textMuted}>{model}</Text>
           <Text color={modeColor(theme, mode.mode)}>
             {modeLabel(mode.mode)}
           </Text>
           {contextPercent !== undefined ? (
-            <Text color={theme.textMuted}>context {contextPercent}% left</Text>
+            <Text color={theme.textMuted}>
+              {contextLabel(usage, contextWindow, contextPercent)}
+            </Text>
           ) : null}
           {mode.mode === 'plan' ? (
             <Text color={theme.accent}>Shift+Tab to cycle</Text>
@@ -68,13 +72,23 @@ export function BottomDock({
         </Box>
         <Box gap={1}>
           <Text color={theme.textMuted}>{cacheLabel}</Text>
-          <Text
-            color={theme.textMuted}
-          >{`${formatTokens(tokens)} tokens`}</Text>
         </Box>
       </Box>
+      {agentSwitcher}
     </Box>
   );
+}
+
+function contextLabel(
+  usage: Usage | undefined,
+  contextWindow: number | undefined,
+  contextPercent: number,
+): string {
+  const used = usage?.lastInputTokens;
+  if (used === undefined || contextWindow === undefined) {
+    return `context ${contextPercent}% left`;
+  }
+  return `context ${formatTokens(used)} / ${formatTokens(contextWindow)} · ${contextPercent}% left`;
 }
 
 function formatGoal(goal: Goal): string {
@@ -112,5 +126,6 @@ function modeLabel(mode: SessionMode): string {
 }
 
 function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
   return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
 }

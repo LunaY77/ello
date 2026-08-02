@@ -6,7 +6,11 @@
  */
 import type { TaskBoardStore } from '../task/index.js';
 
-import { createToolRoutes } from './routes.js';
+import { createToolRoutes, type LoadAdditionalTools } from './routes.js';
+
+export interface CreateToolFeatureOptions {
+  readonly loadAdditionalTools?: LoadAdditionalTools;
+}
 
 export { isPathInside, resolveAbsolute } from './permissions/engine.js';
 export {
@@ -25,8 +29,36 @@ export type {
   CreateProductionToolRuntimeOptions,
   ProductionToolRuntime,
 } from './internal/production.js';
+export {
+  SessionFileState,
+  SessionFileStateRegistry,
+} from './internal/runtime/file-state.js';
+export {
+  createCodingToolResult,
+  defineCodingTool,
+} from './internal/runtime/coding-tool.js';
+export type {
+  AnyCodingTool,
+  CodingToolContext,
+  CodingToolResult,
+  ToolAttachment,
+  ToolMetadata,
+} from './internal/runtime/coding-tool.js';
+export {
+  CodingToolExecutionError,
+  ToolFailureTracker,
+  type ToolFailureDiagnostic,
+} from './internal/runtime/tool-errors.js';
+export {
+  AgentWorkflowState,
+  type AgentWorkflowPhase,
+} from './internal/runtime/workflow-state.js';
 export { RulesStore } from './permissions/rules-store.js';
-export { genericApprovalFor, type ApprovalFor } from './permissions/policy.js';
+export {
+  genericApprovalFor,
+  type ApprovalFor,
+  type DecideApproval,
+} from './permissions/policy.js';
 export type {
   SessionMode,
   SessionModeState,
@@ -39,6 +71,7 @@ export type { PermissionRule } from './permissions/types.js';
  *
  * Args:
  * - `taskBoards`: `createToolFeature` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `options`: 可选的扩展工具加载函数；未提供时只注册内置工具。
  *
  * Returns:
  * - 返回 `createToolFeature` 计算出的声明结果；返回值不包含未声明的兜底状态。
@@ -46,6 +79,11 @@ export type { PermissionRule } from './permissions/types.js';
  * Throws:
  * - 当 工具 公开入口 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
-export function createToolFeature(taskBoards: TaskBoardStore) {
-  return { routes: createToolRoutes(taskBoards) };
+export function createToolFeature(
+  taskBoards: TaskBoardStore,
+  options: CreateToolFeatureOptions = {},
+) {
+  return {
+    routes: createToolRoutes(taskBoards, options.loadAdditionalTools),
+  };
 }

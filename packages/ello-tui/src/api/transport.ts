@@ -53,6 +53,7 @@ const CLIENT_RPC_LIMITS = {
 export class ClientMessageReader extends AbstractMessageReader {
   private readonly decoder = new TextDecoder('utf-8', { fatal: true });
   private readonly admitted = new Map<Message, number>();
+  private readonly capacityWaiters = new Set<() => void>();
   private callback: DataCallback | undefined;
   private started = false;
   private inboundMessages = 0;
@@ -85,7 +86,10 @@ export class ClientMessageReader extends AbstractMessageReader {
     void this.readMessages();
     return {
       dispose: () => {
-        if (this.callback === callback) this.callback = undefined;
+        if (this.callback === callback) {
+          this.callback = undefined;
+          this.wakeCapacityWaiters();
+        }
       },
     };
   }
@@ -105,12 +109,15 @@ export class ClientMessageReader extends AbstractMessageReader {
     this.admitted.delete(message);
     this.inboundMessages -= 1;
     this.inboundBytes -= bytes;
+    this.wakeCapacityWaiters();
   }
 
   private async readMessages(): Promise<void> {
     try {
       for await (const bytes of this.transport.messages()) {
-        this.deliver(this.parse(bytes), bytes.byteLength);
+        const message = this.parse(bytes);
+        if (!(await this.waitForCapacity(bytes.byteLength))) return;
+        this.deliver(message, bytes.byteLength);
       }
       this.fireClose();
     } catch (error) {
@@ -144,19 +151,27 @@ export class ClientMessageReader extends AbstractMessageReader {
     return toFrameworkMessage(parsed.data);
   }
 
+  private async waitForCapacity(bytes: number): Promise<boolean> {
+    while (
+      this.callback !== undefined &&
+      (this.inboundMessages + 1 > CLIENT_RPC_LIMITS.maxInboundMessages ||
+        this.inboundBytes + bytes > CLIENT_RPC_LIMITS.maxInboundBytes)
+    ) {
+      await new Promise<void>((resolve) => this.capacityWaiters.add(resolve));
+    }
+    return this.callback !== undefined;
+  }
+
+  private wakeCapacityWaiters(): void {
+    for (const resolve of this.capacityWaiters) resolve();
+    this.capacityWaiters.clear();
+  }
+
   private deliver(message: Message, bytes: number): void {
     const callback = this.callback;
     if (callback === undefined) {
       throw new TransportClosedError(
         'Server sent a message after the Client reader stopped.',
-      );
-    }
-    if (
-      this.inboundMessages + 1 > CLIENT_RPC_LIMITS.maxInboundMessages ||
-      this.inboundBytes + bytes > CLIENT_RPC_LIMITS.maxInboundBytes
-    ) {
-      throw new ClientProtocolError(
-        `Client inbound queue exceeds ${CLIENT_RPC_LIMITS.maxInboundMessages} messages or ${CLIENT_RPC_LIMITS.maxInboundBytes} bytes.`,
       );
     }
     this.inboundMessages += 1;

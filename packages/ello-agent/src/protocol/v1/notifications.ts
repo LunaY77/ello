@@ -14,6 +14,8 @@ import {
   UsageSchema,
 } from './common.js';
 import {
+  AgentTaskEventSchema,
+  AgentTaskSummarySchema,
   FileChangeSchema,
   GoalSchema,
   PlanSchema,
@@ -116,6 +118,13 @@ export const SERVER_NOTIFICATION_SCHEMAS = {
       delta: z.string(),
     })
     .strict(),
+  'item/reasoning/delta': z
+    .object({
+      ...TurnSequenceShape,
+      itemId: OpaqueIdSchema,
+      delta: z.string(),
+    })
+    .strict(),
   'item/plan/delta': z
     .object({
       ...TurnSequenceShape,
@@ -156,6 +165,29 @@ export const SERVER_NOTIFICATION_SCHEMAS = {
       details: z.record(z.string(), JsonValueSchema).optional(),
     })
     .strict(),
+  'agent/task/updated': z
+    .object({
+      rootThreadId: OpaqueIdSchema,
+      seq: z.number().int().positive(),
+      task: AgentTaskSummarySchema,
+    })
+    .strict(),
+  'agent/task/event': z
+    .object({
+      rootThreadId: OpaqueIdSchema,
+      seq: z.number().int().positive(),
+      taskId: OpaqueIdSchema,
+      task: AgentTaskSummarySchema.optional(),
+      event: AgentTaskEventSchema,
+    })
+    .strict(),
+  'agent/task/removed': z
+    .object({
+      rootThreadId: OpaqueIdSchema,
+      seq: z.number().int().positive(),
+      taskId: OpaqueIdSchema,
+    })
+    .strict(),
   warning: z
     .object({
       code: z.string().min(1),
@@ -163,7 +195,7 @@ export const SERVER_NOTIFICATION_SCHEMAS = {
       details: z.record(z.string(), JsonValueSchema).optional(),
     })
     .strict(),
-  'server/ready': z.object({ protocolVersion: z.literal(1) }).strict(),
+  'server/ready': z.object({ protocolVersion: z.literal(2) }).strict(),
 } as const;
 
 export type ClientNotificationMethod = keyof typeof CLIENT_NOTIFICATION_SCHEMAS;

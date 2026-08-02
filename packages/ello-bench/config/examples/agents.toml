@@ -1,0 +1,67 @@
+schema = "ello.benchmark.agents.v2"
+
+[[agent]]
+id = "ello"
+display_name = "Ello"
+kind = "ello"
+primary_model = "benchmark-pro"
+auxiliary_model = "benchmark-flash"
+
+[agent.models.benchmark-pro]
+protocol = "anthropic"
+auth_scheme = "bearer"
+api_model = "your-model-id"
+base_url = "https://api.example.com/anthropic"
+api_key_env = "ELLO_BENCH_API_KEY"
+context_window = 1000000
+max_output_tokens = 384000
+reasoning_effort = "high"
+
+[agent.models.benchmark-flash]
+protocol = "anthropic"
+auth_scheme = "bearer"
+api_model = "your-fast-model-id"
+base_url = "https://api.example.com/anthropic"
+api_key_env = "ELLO_BENCH_API_KEY"
+context_window = 1000000
+max_output_tokens = 384000
+reasoning_effort = "medium"
+
+[agent.features]
+subagents = true
+
+[[agent]]
+id = "claude-code"
+display_name = "Claude Code"
+kind = "claude-code"
+model = "your-model-id"
+reasoning_effort = "max"
+
+[agent.binary]
+path_env = "ELLO_BENCH_CLAUDE_EXE"
+expected_version = "2.1.217"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[agent.connection]
+base_url = "https://api.example.com/anthropic"
+api_key_env = "ELLO_BENCH_API_KEY"
+
+[agent.environment]
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = "true"
+
+[[agent]]
+id = "codex"
+display_name = "Codex"
+kind = "codex"
+model = "your-codex-model-id"
+reasoning_effort = "high"
+
+[agent.binary]
+path_env = "ELLO_BENCH_CODEX_EXE"
+expected_version = "0.145.0"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[agent.connection]
+base_url = "https://api.example.com/openai/v1"
+api_key_env = "ELLO_BENCH_API_KEY"

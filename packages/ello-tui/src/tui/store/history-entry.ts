@@ -1,4 +1,4 @@
-import type { UserInputResolution } from '../../api/protocol-types.js';
+import type { Usage, UserInputResolution } from '../../api/protocol-types.js';
 import type { ClientServerRequest } from '../../api/server-requests.js';
 
 export interface ToolCallView {
@@ -19,13 +19,23 @@ export interface ToolResultView {
 
 export interface SubagentRunView {
   readonly runId: string;
+  readonly revision?: number;
   readonly agentName: string;
   readonly description: string;
   readonly background: boolean;
-  readonly status: 'running' | 'completed' | 'fail';
+  readonly status:
+    | 'queued'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'killed'
+    | 'recovered'
+    | 'fail';
   readonly startedAt: string;
   readonly completedAt?: string;
+  readonly toolCount?: number;
   readonly tools: readonly ToolCallView[];
+  readonly usage?: Usage;
   readonly output?: string;
   readonly error?: string;
 }
@@ -41,8 +51,7 @@ export type HistoryEntry =
       readonly id: string;
       readonly threadId: string;
       readonly cwd: string;
-      readonly profile: string;
-      readonly model: string;
+      readonly agent: string;
       readonly mode: string;
       readonly version?: string;
     }
@@ -58,6 +67,20 @@ export type HistoryEntry =
       readonly id: string;
       readonly entryId?: string;
       readonly text: string;
+    }
+  | {
+      readonly kind: 'reasoning';
+      readonly id: string;
+      readonly text: string;
+    }
+  | {
+      readonly kind: 'compaction';
+      readonly id: string;
+      readonly summary: string;
+      readonly tokensBefore: number;
+      readonly beforeMessageCount?: number;
+      readonly afterMessageCount?: number;
+      readonly keptMessageCount?: number;
     }
   | { readonly kind: 'skill'; readonly id: string; readonly name: string }
   | { readonly kind: 'tool'; readonly id: string; readonly tool: ToolCallView }

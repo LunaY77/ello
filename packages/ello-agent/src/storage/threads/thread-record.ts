@@ -22,7 +22,7 @@ import {
 } from '../../protocol/v1/index.js';
 
 const RecordBaseShape = {
-  schema: z.literal(1),
+  schema: z.literal(2),
   seq: z.number().int().positive(),
   threadId: OpaqueIdSchema,
   createdAt: IsoDateTimeSchema,
@@ -112,6 +112,7 @@ export const ItemDeltaRecordSchema = z
     itemId: OpaqueIdSchema,
     delta: z.discriminatedUnion('type', [
       z.object({ type: z.literal('agentMessage'), text: z.string() }).strict(),
+      z.object({ type: z.literal('reasoning'), text: z.string() }).strict(),
       z.object({ type: z.literal('plan'), text: z.string() }).strict(),
       z
         .object({
@@ -151,6 +152,9 @@ export const CompactionRecordSchema = z
     summary: z.string(),
     firstKeptSeq: z.number().int().positive(),
     tokensBefore: NonNegativeIntegerSchema,
+    beforeMessageCount: NonNegativeIntegerSchema.optional(),
+    afterMessageCount: NonNegativeIntegerSchema.optional(),
+    keptMessageCount: NonNegativeIntegerSchema.optional(),
   })
   .strict();
 

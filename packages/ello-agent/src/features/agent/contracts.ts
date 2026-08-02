@@ -6,6 +6,12 @@
  */
 import type { SessionMode } from '../../protocol/v1/index.js';
 import type { CodingAgentConfig, PermissionRule } from '../config/index.js';
+import type {
+  EnvironmentGrant,
+  EnvironmentReference,
+  Environments,
+  ExecutionLocation,
+} from '../environment/index.js';
 
 import type { ContextSourceLoadResult } from './context/source-registry.js';
 import type {
@@ -21,7 +27,9 @@ import type {
   DeferredApprovalItem,
   DeferredToolCallItem,
   MessageCompactor,
+  ModelCompactor,
   ModelAdapter,
+  ModelCallConfiguration,
   ModelInput,
   SystemSection,
 } from './engine/index.js';
@@ -30,8 +38,6 @@ import type { CodingAgentDefinition } from './subagents/schema.js';
 
 export interface AgentRunSelection {
   readonly mode: SessionMode;
-  readonly profile: string;
-  readonly model: string;
   readonly agent: string;
 }
 
@@ -45,6 +51,21 @@ export interface AgentRunGoal {
   readonly tokensUsed: number;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+/** 子代理运行附带的父子关系和可恢复运行边界。 */
+export interface AgentDelegationContext {
+  readonly taskId: string;
+  readonly agentId: string;
+  readonly rootThreadId: string;
+  readonly parentTaskId?: string;
+  readonly depth: number;
+  readonly contextMode: 'fresh' | 'fork';
+  readonly executionMode: 'foreground' | 'background';
+  readonly maxTurns: number;
+  readonly modelSelector?: 'primary_model' | 'auxiliary_model';
+  /** fork 使用父级 exact tools；普通命名子代理省略并重新按 definition 装配。 */
+  readonly exactToolNames?: readonly string[];
 }
 
 export type AgentInteraction =
@@ -62,6 +83,21 @@ export type AgentInteraction =
     };
 
 export type AgentRunEvent =
+  | {
+      readonly type: 'reasoningStarted';
+      readonly reasoningId: string;
+      readonly occurredAt: string;
+    }
+  | {
+      readonly type: 'reasoningDelta';
+      readonly reasoningId: string;
+      readonly text: string;
+    }
+  | {
+      readonly type: 'reasoningCompleted';
+      readonly reasoningId: string;
+      readonly text: string;
+    }
   | {
       readonly type: 'messageStarted';
       readonly messageId: string;
@@ -100,7 +136,15 @@ export type AgentRunEvent =
       readonly interaction: AgentInteraction;
     }
   | {
+      readonly type: 'contextCompactionStarted';
+      readonly compactionId: string;
+      readonly beforeMessageCount: number;
+      readonly tokensBefore: number;
+      readonly occurredAt: string;
+    }
+  | {
       readonly type: 'contextCompacted';
+      readonly compactionId: string;
       readonly beforeMessageCount: number;
       readonly afterMessageCount: number;
       readonly summary: string;
@@ -112,6 +156,12 @@ export type AgentRunEvent =
       readonly type: 'runFailed';
       readonly code: string;
       readonly message: string;
+      readonly occurredAt: string;
+    }
+  | {
+      readonly type: 'steeringConsumed';
+      readonly steerId: string;
+      readonly text: string;
       readonly occurredAt: string;
     }
   | {
@@ -163,12 +213,24 @@ export interface AgentRun {
    * 把运行中的用户引导加入当前 run，供下一个可执行 turn 消费。
    *
    * Args:
+   * - `steerId`: 客户端分配的稳定标识；消费事件原样返回以关联 UI pending 状态。
    * - `input`: 非空用户文本；调用方保留字符串所有权，run 按调用顺序排队。
    *
    * Returns:
    * - 输入完成入队后同步返回；run 已结束或正在关闭时直接抛错。
    */
-  steer(input: string): void;
+  steer(steerId: string, input: string): void;
+  /**
+   * 把后台任务通知加入当前 run；通知参与模型上下文，但不会投影为用户消息。
+   *
+   * Args:
+   * - `notificationId`: 持久通知的稳定标识，用于保持运行内消费顺序。
+   * - `input`: 已渲染的任务通知文本；下一次可执行 turn 会读取该内容。
+   *
+   * Returns:
+   * - 通知完成入队后同步返回；run 已结束或正在关闭时直接抛错。
+   */
+  notify(notificationId: string, input: string): void;
   /**
    * 请求中断当前 run，并把原因写入最终 `interrupted` 结果。
    *
@@ -191,16 +253,24 @@ export interface AgentRun {
   resume(result: AgentResumeResult): void;
 }
 
-/** Thread 启动产品 Agent 所需的完整稳定快照；运行期间不得反向修改 Thread 状态。 */
-export interface AgentRunRequest {
+/** Thread 启动产品 Agent 所需的稳定输入；Environment Reference 由 Agent Application 补齐。 */
+export interface AgentRunInput {
   readonly threadId: string;
   readonly turnId: string;
   readonly cwd: string;
   readonly selection: AgentRunSelection;
+  /** 子代理每次执行工具前读取 root Thread 当前模式；主 Agent 不需要提供。 */
+  readonly modeSource?: () => SessionMode;
   readonly history: ReadonlyArray<AgentMessage>;
   readonly input: string;
   readonly goal: AgentRunGoal | null;
   readonly permission: PermissionSessionView;
+  readonly delegation?: AgentDelegationContext;
+}
+
+/** Agent Application 完成 Environment 定位后的内部运行请求。 */
+export interface AgentRunRequest extends Omit<AgentRunInput, 'cwd'> {
+  readonly executionLocation: ExecutionLocation;
 }
 
 export interface PermissionSessionView {
@@ -228,7 +298,29 @@ export interface PermissionSessionView {
 
 export interface BuiltAgent {
   readonly engine: EngineAgent;
-  readonly maxTurns: number;
+  readonly maxTurns: number | undefined;
+  /**
+   * 主模型自然停止但仍有后台任务时，等待下一批持久通知；没有活动任务时返回 `undefined`。
+   *
+   * Args:
+   * - `signal`: 当前产品 run 的中断信号；取消后等待必须立即释放。
+   *
+   * Returns:
+   * - 后台任务完成时返回要注入下一轮的通知文本；没有待交付任务时返回 `undefined`。
+   */
+  readonly waitForTaskNotification?: (
+    signal: AbortSignal,
+  ) => Promise<string | undefined>;
+  /**
+   * 读取当前主 Agent 最近一次完整模型请求派生的压缩能力。
+   *
+   * Args:
+   * - 无：该能力由当前 `BuiltAgent` 内部持有。
+   *
+   * Returns:
+   * - 已形成主模型上下文时返回压缩器，否则返回 `undefined`。
+   */
+  modelCompactor(): ModelCompactor | undefined;
   /**
    * 更新工具执行读取的 session mode。
    *
@@ -267,7 +359,45 @@ export interface AgentFeature {
    * Throws:
    * - definition、model、tool 或 tracing 装配失败时直接拒绝，不返回部分 run。
    */
-  startRun(input: AgentRunRequest): Promise<AgentRun>;
+  startRun(input: AgentRunInput): Promise<AgentRun>;
+  /**
+   * 使用指定 Thread 已保留的主 Agent 模型上下文执行压缩。
+   *
+   * Args:
+   * - `input`: Thread 标识、结构化历史、compact 提示词和取消信号。
+   *
+   * Returns:
+   * - 返回主模型生成的 checkpoint 文本和该模型调用的 usage。
+   */
+  compact(input: {
+    readonly request: AgentRunInput;
+    readonly messages: ReadonlyArray<AgentMessage>;
+    readonly prompt: string;
+    readonly signal: AbortSignal;
+  }): ReturnType<ModelCompactor['compact']>;
+  /**
+   * 尝试把一条持久任务通知引导到当前父 run。
+   *
+   * Args:
+   * - `threadId`: 父线程标识。
+   * - `notificationId`: 幂等通知标识，同时作为 steerId。
+   * - `message`: 已序列化的 task-notification 文本。
+   *
+   * Returns:
+   * - 当前存在可接收引导的 run 时返回 `true`，否则返回 `false`。
+   */
+  notify(threadId: string, notificationId: string, message: string): boolean;
+  /**
+   * 同步中断指定父 Thread 当前拥有的 run，使尚未执行的工具调用立即观察到取消信号。
+   *
+   * Args:
+   * - `threadId`: 父线程标识。
+   * - `reason`: 面向 run 和工具调度器的中断原因。
+   *
+   * Returns:
+   * - 至少一个 run 收到中断时返回 `true`，否则返回 `false`。
+   */
+  interrupt(threadId: string, reason: string): boolean;
   /**
    * 关闭 feature 创建但尚未释放的全部 run 资源。
    *
@@ -282,44 +412,6 @@ export interface AgentFeature {
    */
   close(): Promise<void>;
 }
-
-export interface AgentCheckpoints {
-  /**
-   * 从一次成功工具调用中提取并暂存文件改动。
-   *
-   * Args:
-   * - `input`: 工具运行目录、调用 ID 与结构化输出；仅包含有效 `fileChanges` 时才产生暂存状态。
-   *
-   * Returns:
-   * - 所有有效改动按工具调用顺序写入当前 open checkpoint 后返回。
-   */
-  record(input: {
-    readonly cwd: string;
-    readonly toolCallId: string;
-    readonly output: unknown;
-  }): void;
-  /**
-   * 把当前 run 累积的文件改动封存为 durable checkpoint。
-   *
-   * Args:
-   * - `runId`: 归属本批改动的稳定 run ID；用于建立 checkpoint owner 关系。
-   *
-   * Returns:
-   * - Promise 在 checkpoint 元数据和 artifact owner 关系提交后兑现；没有改动时不创建空记录。
-   */
-  seal(runId: string): Promise<void>;
-}
-
-/**
- * 为一个 Agent run 创建独立的 checkpoint 累积器。
- *
- * Args:
- * - 无：持久化依赖由 factory 闭包显式捕获。
- *
- * Returns:
- * - 返回仅归当前 run 使用的 `AgentCheckpoints`，其 pending changes 不与其他 run 共享。
- */
-export type CreateAgentCheckpoints = () => AgentCheckpoints;
 
 export interface AgentTracing {
   readonly eventRecorder?: AgentEventRecorder;
@@ -352,18 +444,23 @@ export type CreateAgentTracing = (input: {
   readonly threadId: string;
 }) => AgentTracing;
 
+export interface AgentRuntime {
+  readonly environments: Environments;
+  readonly defaultEnvironmentRef: EnvironmentReference;
+  readonly environmentGrant: EnvironmentGrant;
+  readonly createTracing: CreateAgentTracing;
+}
+
 export interface AgentCompactorInput {
   readonly config: CodingAgentConfig;
-  readonly profileName: string;
   readonly contextWindow: number;
-  readonly agentRegistry: AgentRegistry;
 }
 
 /**
  * 创建单次运行使用的上下文压缩器。
  *
  * Args:
- * - `input`: 已解析的配置、profile、上下文窗口和当前 agent registry。
+ * - `input`: 已解析的配置、上下文窗口和当前 agent registry。
  *
  * Returns:
  * - 返回与当前 run 生命周期一致的压缩端口。
@@ -379,10 +476,14 @@ export interface ResolvedAgentDefinition {
 }
 
 export interface ResolvedAgentModel {
-  readonly modelRef: string;
+  readonly modelCall: ModelCallConfiguration;
   readonly model: AgentModel;
   readonly modelAdapter: ModelAdapter;
   readonly modelSettings: NonNullable<CreateAgentOptions['modelSettings']>;
+  /** 已应用 model context window 与 context 配置上限的唯一输入预算。 */
+  readonly modelInputBudget: NonNullable<
+    CreateAgentOptions['modelInputBudget']
+  >;
   readonly contextWindow: number;
   /**
    * 读取当前 model role 对应的 provider options。
@@ -454,6 +555,7 @@ export interface AgentRunContextParts {
     readonly memoryIndexLoader?: AgentMemoryContextLoader;
     readonly goalSystemSection: SystemSection;
     readonly routingInstructions?: string;
+    readonly taskNotificationSection?: SystemSection;
   }): ReadonlyArray<SystemSection>;
 }
 
@@ -463,6 +565,21 @@ export interface AgentRunTools {
   readonly memoryIndexLoader?: AgentMemoryContextLoader;
   readonly goalSystemSection: SystemSection;
   readonly routingInstructions?: string;
+  readonly taskNotificationSection?: SystemSection;
+  /** 主 Agent 自然停止时等待后台任务通知；child run 不提供该能力。 */
+  readonly waitForTaskNotification?: (
+    signal: AbortSignal,
+  ) => Promise<string | undefined>;
+  /**
+   * 读取 execution tools 当前使用的 session mode。
+   *
+   * Args:
+   * - 无：mode state 由当前工具运行时持有。
+   *
+   * Returns:
+   * - 返回下一次审批和环境路径判断使用的 mode。
+   */
+  mode(): SessionMode;
   /**
    * 更新 execution tools 动态读取的 session mode。
    *
@@ -479,7 +596,7 @@ export interface AgentRunTools {
  * 解析运行请求选中的产品 Agent definition 与可用 subagent registry。
  *
  * Args:
- * - `request`: Thread 提供的完整运行请求；只读取 agent/profile 选择和工作目录。
+ * - `request`: Thread 提供的完整运行请求；只读取 agent 选择和工作目录。
  *
  * Returns:
  * - Promise 兑现为同源配置、definition 和 registry；三者在该 run 内保持稳定。
@@ -533,11 +650,10 @@ export type CreateAgentTools = (input: {
 }) => Promise<AgentRunTools>;
 
 export interface CreateAgentFeatureInput {
-  readonly createCheckpoints: CreateAgentCheckpoints;
   readonly resolveDefinition: ResolveAgentDefinition;
   readonly resolveModel: ResolveAgentModel;
   readonly loadContext: LoadAgentContext;
   readonly createTools: CreateAgentTools;
   readonly createCompactor: CreateAgentCompactor;
-  readonly createTracing: CreateAgentTracing;
+  readonly runtime: AgentRuntime;
 }

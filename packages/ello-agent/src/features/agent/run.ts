@@ -9,7 +9,6 @@ import { projectToolEvent } from '../tool/index.js';
 
 import type {
   AgentResumeResult,
-  AgentCheckpoints,
   AgentRun,
   AgentRunEvent,
   AgentRunRequest,
@@ -28,7 +27,6 @@ import type {
 
 interface RunningAgentOptions {
   readonly agent: BuiltAgent['engine'];
-  readonly checkpoints: AgentCheckpoints;
   /**
    * 按 产品 Agent 运行 模块 的一致性约束执行 `setMode` 状态变更。
    *
@@ -54,10 +52,27 @@ interface RunningAgentOptions {
   closeAgent(): Promise<void>;
   readonly threadId: string;
   readonly turnId: string;
-  readonly cwd: string;
   readonly history: ReadonlyArray<AgentMessage>;
   readonly input: string;
-  readonly maxTurns: number;
+  readonly maxTurns: number | undefined;
+  /**
+   * 主模型自然停止后等待后台任务的持久通知。
+   *
+   * Args:
+   * - `signal`: 当前等待阶段的取消信号；用户输入或 run 中断都会取消等待。
+   *
+   * Returns:
+   * - 有通知时返回下一轮模型输入，没有活动后台任务时返回 `undefined`。
+   */
+  readonly waitForTaskNotification?: (
+    signal: AbortSignal,
+  ) => Promise<string | undefined>;
+}
+
+interface QueuedRunInput {
+  readonly kind: 'steer' | 'notification';
+  readonly id: string;
+  readonly text: string;
 }
 
 /**
@@ -66,7 +81,6 @@ interface RunningAgentOptions {
  * Args:
  * - `built`: `startAgentRun` 所需的业务值；函数按声明读取，不补造缺失内容。
  * - `request`: 进入 产品 Agent 运行 模块 的稳定请求；校验后只读传递，不由函数修改。
- * - `checkpoints`: `startAgentRun` 所需的业务值；函数按声明读取，不补造缺失内容。
  *
  * Returns:
  * - 返回 `startAgentRun` 计算出的声明结果；返回值不包含未声明的兜底状态。
@@ -77,19 +91,19 @@ interface RunningAgentOptions {
 export function startAgentRun(
   built: BuiltAgent,
   request: AgentRunRequest,
-  checkpoints: AgentCheckpoints,
 ): AgentRun {
   return new RunningAgent({
     agent: built.engine,
-    checkpoints,
     setMode: built.setMode,
     closeAgent: built.close,
     threadId: request.threadId,
     turnId: request.turnId,
-    cwd: request.cwd,
     history: request.history,
     input: request.input,
     maxTurns: built.maxTurns,
+    ...(built.waitForTaskNotification === undefined
+      ? {}
+      : { waitForTaskNotification: built.waitForTaskNotification }),
   });
 }
 
@@ -100,7 +114,17 @@ class RunningAgent implements AgentRun {
   private readonly queue = new AsyncQueue<AgentRunEvent>();
   private readonly interactions;
   private readonly messageText = new Map<string, string>();
+  private readonly reasoningText = new Map<string, string>();
+  private readonly pendingCompactions: Array<
+    Extract<EngineEvent, { type: 'context.compaction' }>
+  > = [];
+  private readonly pendingInputs: QueuedRunInput[] = [];
+  private readonly waitingInputs: QueuedRunInput[] = [];
+  private readonly abortController = new AbortController();
   private activeStream: AgentStream | undefined;
+  private phase: 'transitioning' | 'streaming' | 'waiting' | 'closed' =
+    'transitioning';
+  private wakeWaitingInput: (() => void) | undefined;
   private interruptReason: string | undefined;
 
   constructor(private readonly options: RunningAgentOptions) {
@@ -112,20 +136,25 @@ class RunningAgent implements AgentRun {
     this.result = this.runAgent();
   }
 
-  steer(input: string): void {
-    const stream = this.activeStream;
-    if (stream === undefined) {
-      throw new Error('Agent run is not accepting steering.');
-    }
-    stream.steer({
-      role: 'user',
-      content: input,
+  steer(steerId: string, input: string): void {
+    this.enqueueInput({ kind: 'steer', id: steerId, text: input });
+  }
+
+  notify(notificationId: string, input: string): void {
+    this.enqueueInput({
+      kind: 'notification',
+      id: notificationId,
+      text: input,
     });
   }
 
   interrupt(reason: string): void {
     this.interruptReason = reason;
+    if (!this.abortController.signal.aborted) {
+      this.abortController.abort(reason);
+    }
     this.activeStream?.abort(reason);
+    this.wakeWaitingInput?.();
     this.interactions.interrupt(reason);
   }
 
@@ -143,10 +172,12 @@ class RunningAgent implements AgentRun {
       );
       while (true) {
         this.activeStream = stream;
+        this.phase = 'streaming';
         for await (const event of stream) await this.publish(event);
         const result = await stream.final;
+        this.activeStream = undefined;
+        this.phase = 'transitioning';
         usage = addUsage(usage, result.usage);
-        await this.options.checkpoints.seal(result.id);
         this.completeOpenMessages();
         if (result.newMessages.length > 0) {
           this.queue.push({
@@ -154,16 +185,16 @@ class RunningAgent implements AgentRun {
             messages: result.newMessages,
           });
         }
-        const compactedAt = new Date().toISOString();
-        for (const compaction of result.compactions) {
+        for (const compaction of this.pendingCompactions.splice(0)) {
           this.queue.push({
             type: 'contextCompacted',
+            compactionId: compaction.compactionId,
             beforeMessageCount: compaction.beforeMessageCount,
             afterMessageCount: compaction.afterMessageCount,
             summary: compaction.summary,
             keptMessageCount: compaction.keptMessageCount,
             tokensBefore: compaction.tokensBefore,
-            occurredAt: compactedAt,
+            occurredAt: compaction.occurredAt,
           });
         }
         messages = [...result.messages];
@@ -180,17 +211,51 @@ class RunningAgent implements AgentRun {
         }
         const pending = result.pending;
         if (pending.length === 0) {
-          this.queue.end();
           if (isFailure(result)) {
+            this.queue.end();
             return {
               status: 'failed',
               usage,
               error: {
                 code: 'AGENT_RUN_FAILED',
-                message: `Agent finished with ${result.finishReason}.`,
+                message:
+                  result.finishReason === 'length' &&
+                  result.output.trim() === ''
+                    ? 'Agent reached max turns without a final answer.'
+                    : `Agent finished with ${result.finishReason}.`,
               },
             };
           }
+          const notification = await this.waitForContinuation();
+          if (this.interruptReason !== undefined) {
+            this.phase = 'closed';
+            this.queue.end();
+            return {
+              status: 'interrupted',
+              usage,
+              reason: this.interruptReason,
+            };
+          }
+          if (notification !== undefined) {
+            stream = this.options.agent.stream(
+              { messages, prompt: notification },
+              this.runOptions(),
+            );
+            this.forwardWaitingInputs(stream);
+            continue;
+          }
+          const input = this.waitingInputs.shift();
+          if (input !== undefined) {
+            if (input.kind === 'steer') this.publishConsumedInput(input);
+            stream = this.options.agent.stream(
+              { messages, prompt: input.text },
+              this.runOptions(),
+            );
+            this.forwardWaitingInputs(stream);
+            continue;
+          }
+          this.phase = 'closed';
+          this.queue.end();
           return { status: 'completed', usage };
         }
         const resolution = await this.interactions.resolveDeferred(pending);
@@ -207,6 +272,7 @@ class RunningAgent implements AgentRun {
         );
       }
     } catch (error) {
+      this.phase = 'closed';
       this.queue.fail(error);
       if (this.interruptReason !== undefined) {
         return {
@@ -224,14 +290,80 @@ class RunningAgent implements AgentRun {
         },
       };
     } finally {
+      this.phase = 'closed';
       this.activeStream = undefined;
+      this.wakeWaitingInput?.();
       await this.options.closeAgent();
     }
   }
 
+  private enqueueInput(input: QueuedRunInput): void {
+    const stream = this.activeStream;
+    if (stream !== undefined && this.phase === 'streaming') {
+      stream.steer({ role: 'user', content: input.text });
+      this.pendingInputs.push(input);
+      return;
+    }
+    if (this.phase !== 'waiting') {
+      throw new Error('Agent run is not accepting input.');
+    }
+    this.waitingInputs.push(input);
+    this.wakeWaitingInput?.();
+  }
+
+  private async waitForContinuation(): Promise<string | undefined> {
+    const waitForTaskNotification = this.options.waitForTaskNotification;
+    if (waitForTaskNotification === undefined) return undefined;
+    this.phase = 'waiting';
+    const waitController = new AbortController();
+    const abortWait = () =>
+      waitController.abort(this.abortController.signal.reason);
+    this.abortController.signal.addEventListener('abort', abortWait, {
+      once: true,
+    });
+    try {
+      return await Promise.race([
+        waitForTaskNotification(waitController.signal),
+        this.waitForWaitingInput().then(() => undefined),
+      ]);
+    } finally {
+      this.phase = 'transitioning';
+      this.wakeWaitingInput = undefined;
+      this.abortController.signal.removeEventListener('abort', abortWait);
+      if (!waitController.signal.aborted) waitController.abort();
+    }
+  }
+
+  private waitForWaitingInput(): Promise<void> {
+    if (this.waitingInputs.length > 0 || this.abortController.signal.aborted) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.wakeWaitingInput = resolve;
+    });
+  }
+
+  private forwardWaitingInputs(stream: AgentStream): void {
+    for (const input of this.waitingInputs.splice(0)) {
+      stream.steer({ role: 'user', content: input.text });
+      this.pendingInputs.push(input);
+    }
+  }
+
+  private publishConsumedInput(input: QueuedRunInput): void {
+    this.queue.push({
+      type: 'steeringConsumed',
+      steerId: input.id,
+      text: input.text,
+      occurredAt: new Date().toISOString(),
+    });
+  }
+
   private runOptions() {
     return {
-      maxTurns: this.options.maxTurns,
+      ...(this.options.maxTurns === undefined
+        ? {}
+        : { maxTurns: this.options.maxTurns }),
       metadata: {
         threadId: this.options.threadId,
         turnId: this.options.turnId,
@@ -242,6 +374,39 @@ class RunningAgent implements AgentRun {
   private async publish(rawEvent: EngineEvent): Promise<void> {
     const event = projectToolEvent(rawEvent);
     switch (event.type) {
+      case 'reasoning.started':
+        if (this.reasoningText.has(event.reasoningId)) {
+          throw new Error(
+            `Reasoning ${event.reasoningId} started more than once.`,
+          );
+        }
+        this.reasoningText.set(event.reasoningId, '');
+        this.queue.push({
+          type: 'reasoningStarted',
+          reasoningId: event.reasoningId,
+          occurredAt: event.occurredAt,
+        });
+        return;
+      case 'reasoning.delta':
+        this.reasoningText.set(
+          event.reasoningId,
+          `${this.requireReasoningText(event.reasoningId)}${event.text}`,
+        );
+        this.queue.push({
+          type: 'reasoningDelta',
+          reasoningId: event.reasoningId,
+          text: event.text,
+        });
+        return;
+      case 'reasoning.completed':
+        this.requireReasoningText(event.reasoningId);
+        this.reasoningText.delete(event.reasoningId);
+        this.queue.push({
+          type: 'reasoningCompleted',
+          reasoningId: event.reasoningId,
+          text: event.text,
+        });
+        return;
       case 'message.started':
         if (this.messageText.has(event.messageId)) {
           throw new Error(`Message ${event.messageId} started more than once.`);
@@ -274,11 +439,6 @@ class RunningAgent implements AgentRun {
         });
         return;
       case 'tool.completed':
-        this.options.checkpoints.record({
-          cwd: this.options.cwd,
-          toolCallId: event.toolCallId,
-          output: event.output,
-        });
         this.queue.push({
           type: 'toolCompleted',
           toolCallId: event.toolCallId,
@@ -299,7 +459,17 @@ class RunningAgent implements AgentRun {
       case 'tool.deferred':
         this.interactions.register(event.item, event.occurredAt);
         return;
+      case 'context.compaction.started':
+        this.queue.push({
+          type: 'contextCompactionStarted',
+          compactionId: event.compactionId,
+          beforeMessageCount: event.beforeMessageCount,
+          tokensBefore: event.tokensBefore,
+          occurredAt: event.occurredAt,
+        });
+        return;
       case 'context.compaction':
+        this.pendingCompactions.push(event);
         return;
       case 'run.failed':
         this.queue.push({
@@ -309,15 +479,25 @@ class RunningAgent implements AgentRun {
           occurredAt: event.occurredAt,
         });
         return;
+      case 'model.completed':
+        this.completeOpenMessages();
+        return;
+      case 'model.failed':
+        // 重试会启动新的 assistant message；先关闭当前部分消息，避免客户端
+        // 永久保留 in-progress item。
+        this.completeOpenMessages();
+        return;
+      case 'queue.drained':
+        if (event.queue === 'steering') {
+          this.publishConsumedInputs(event.count, event.occurredAt);
+        }
+        return;
       case 'run.completed':
       case 'run.started':
       case 'turn.started':
       case 'turn.completed':
-      case 'queue.drained':
       case 'model.started':
       case 'model.first_token':
-      case 'model.completed':
-      case 'model.failed':
       case 'tool.approval_requested':
       case 'run.interrupted':
         return;
@@ -334,11 +514,56 @@ class RunningAgent implements AgentRun {
     }
   }
 
+  /**
+   * 把 engine 的 steering drain 事实关联回产品层输入，只为用户 steer 发布消费事件。
+   *
+   * Args:
+   * - `count`: engine 本回合实际抽取的 steering 数量。
+   * - `occurredAt`: engine 发布 drain 事实的时间。
+   *
+   * Returns:
+   * - 所有对应事件完成入队后同步返回。
+   *
+   * Throws:
+   * - 当 engine 抽取数量超过产品层已登记输入时抛错，避免错误关联。
+   */
+  private publishConsumedInputs(count: number, occurredAt: string): void {
+    if (count > this.pendingInputs.length) {
+      throw new Error(
+        `Engine drained ${count} steering messages with only ${this.pendingInputs.length} pending.`,
+      );
+    }
+    for (let index = 0; index < count; index += 1) {
+      const input = this.pendingInputs.shift();
+      if (input === undefined) {
+        throw new Error('Pending input correlation was unexpectedly empty.');
+      }
+      if (input.kind === 'steer') {
+        this.queue.push({
+          type: 'steeringConsumed',
+          steerId: input.id,
+          text: input.text,
+          occurredAt,
+        });
+      }
+    }
+  }
+
   private requireMessageText(messageId: string): string {
     const text = this.messageText.get(messageId);
     if (text === undefined) {
       throw new Error(
         `Message ${messageId} emitted a delta before it started.`,
+      );
+    }
+    return text;
+  }
+
+  private requireReasoningText(reasoningId: string): string {
+    const text = this.reasoningText.get(reasoningId);
+    if (text === undefined) {
+      throw new Error(
+        `Reasoning ${reasoningId} emitted an event before it started.`,
       );
     }
     return text;
@@ -563,8 +788,9 @@ function isFailure(result: EngineRunResult): boolean {
     case 'no-progress':
     case 'unknown':
       return true;
-    case 'stop':
     case 'length':
+      return result.output.trim() === '';
+    case 'stop':
     case 'tool-calls':
     case 'approval-required':
     case 'tool-result-required':
@@ -576,7 +802,7 @@ function isFailure(result: EngineRunResult): boolean {
   }
 }
 
-function emptyUsage() {
+function emptyUsage(): EngineRunResult['usage'] {
   return {
     requests: 0,
     inputTokens: 0,
@@ -588,12 +814,13 @@ function emptyUsage() {
 }
 
 function addUsage(
-  left: ReturnType<typeof emptyUsage>,
-  right: ReturnType<typeof emptyUsage>,
-): ReturnType<typeof emptyUsage> {
+  left: EngineRunResult['usage'],
+  right: EngineRunResult['usage'],
+): EngineRunResult['usage'] {
   return {
     requests: left.requests + right.requests,
     inputTokens: left.inputTokens + right.inputTokens,
+    lastInputTokens: right.lastInputTokens ?? right.inputTokens,
     outputTokens: left.outputTokens + right.outputTokens,
     cacheReadTokens: left.cacheReadTokens + right.cacheReadTokens,
     cacheWriteTokens: left.cacheWriteTokens + right.cacheWriteTokens,

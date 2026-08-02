@@ -12,16 +12,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ContextSnapshot } from '../../src/features/agent/context/context-snapshot.js';
 import { loadInstructionSources } from '../../src/features/agent/context/instructions.js';
+import { createCodingSystemPromptSection } from '../../src/features/agent/context/prompts.js';
 import {
   loadContextBundle,
   type ContextEvent,
 } from '../../src/features/agent/context/source-registry.js';
+import type { AgentRunContext } from '../../src/features/agent/engine/contracts.js';
 import { compactMessages } from '../../src/features/agent/engine/model-input.js';
 import {
   CodingAgentConfigSchema,
   type CodingAgentConfig,
 } from '../../src/features/config/schema.js';
 import { createThreadRoutes } from '../../src/features/thread/routes.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 
 describe('context source contract', () => {
@@ -102,6 +105,82 @@ describe('context source contract', () => {
     expect(nextRun.fingerprint).not.toBe(beforeChange.fingerprint);
   });
 
+  it('并发说明只允许直接调用现有工具，不声明额外包装工具', async () => {
+    const root = await temporaryRoot();
+    const section = createCodingSystemPromptSection(configFor(root, []), {
+      model: 'test-model',
+    });
+    const prompt = await section(promptRunContext());
+
+    expect(prompt).toContain(
+      'there is no separate batching or parallel-execution tool',
+    );
+    expect(prompt).toContain(
+      'name only those definitions and do not infer extra orchestration tools',
+    );
+    expect(prompt).toContain(
+      'Never borrow tool names, capabilities, or tool-use conventions',
+    );
+    expect(prompt).not.toContain('multi_tool_use.parallel');
+  });
+
+  it('关闭 subagent 时同时移除委派规则和 runtime delegation context', async () => {
+    const root = await temporaryRoot();
+    const config = CodingAgentConfigSchema.parse({
+      cwd: root,
+      initial_mode: 'ask-before-changes',
+      ...modelConfig(),
+      subagents: { enabled: false },
+      context: {
+        instructions: {
+          global: [],
+          project: [],
+          extra: [],
+          nearby: false,
+        },
+      },
+    });
+    const section = createCodingSystemPromptSection(config, {
+      model: 'test-model',
+    });
+
+    const prompt = await section(promptRunContext());
+
+    expect(prompt).not.toContain('# Delegation');
+    expect(prompt).not.toContain('<delegation>');
+  });
+
+  it('把 coding scope 标为 Tool Policy 而不是 Environment 隔离能力', async () => {
+    const root = await temporaryRoot();
+    const sibling = path.join(path.dirname(root), 'authorized-sibling');
+    const config = CodingAgentConfigSchema.parse({
+      cwd: root,
+      allowed_paths: [sibling],
+      initial_mode: 'ask-before-changes',
+      ...modelConfig(),
+    });
+
+    const rendered = await new ContextSnapshot(
+      config,
+      {},
+      'coding',
+      'base-hash',
+    ).render();
+
+    expect(rendered.system).toContain(
+      '<policy-context id="policy:runtime" title="Runtime tool policy"',
+    );
+    expect(rendered.system).toContain('<coding-scope>');
+    expect(rendered.system).toContain('<authorized-paths>');
+    expect(rendered.system).toContain(root);
+    expect(rendered.system).toContain(sibling);
+    expect(rendered.system).toContain(
+      'it is not an Environment isolation claim',
+    );
+    expect(rendered.system).not.toContain('<file-system>');
+    expect(rendered.system).not.toContain('<shell>');
+  });
+
   it('glob 结果稳定排序，并按真实文件来源去重', async () => {
     const root = await temporaryRoot();
     await mkdir(path.join(root, 'rules'));
@@ -162,14 +241,24 @@ describe('context source contract', () => {
     ).rejects.toThrow('HTTP 503');
   });
 
-  it('手动压缩调用生产 runner 并返回真实 job id', async () => {
+  it('手动压缩返回完整持久化报告', async () => {
     const compactThread = vi.fn(async () => ({
+      id: 'compaction-12',
+      threadId: 'thr_context_contract',
+      turnId: 'turn_context_contract',
+      createdAt: '2026-07-28T00:00:00.000Z',
       compactor: 'ello-thread-compactor',
+      beforeMessageCount: 12,
+      afterMessageCount: 3,
+      keptMessageCount: 2,
+      tokensBefore: 4_000,
+      summary: 'compact checkpoint',
     }));
     const services = {
       routes: createThreadRoutes({
         artifacts: {} as never,
         compact: compactThread,
+        interruptCompact: () => undefined,
         threads: {} as never,
       }),
     };
@@ -178,15 +267,42 @@ describe('context source contract', () => {
       invokeServiceRoute(services, createTestPeer(), 'thread/compact/start', {
         threadId: 'thr_context_contract',
       }),
-    ).resolves.toMatchObject({ jobId: expect.stringMatching(/^job_/u) });
+    ).resolves.toMatchObject({
+      id: 'compaction-12',
+      summary: 'compact checkpoint',
+      beforeMessageCount: 12,
+      afterMessageCount: 3,
+    });
     expect(compactThread).toHaveBeenCalledWith('thr_context_contract');
   });
 
+  it('手动压缩中断路由转发目标 Thread', async () => {
+    const interruptCompact = vi.fn();
+    const services = {
+      routes: createThreadRoutes({
+        artifacts: {} as never,
+        compact: vi.fn(async () => null),
+        interruptCompact,
+        threads: {} as never,
+      }),
+    };
+
+    await expect(
+      invokeServiceRoute(
+        services,
+        createTestPeer(),
+        'thread/compact/interrupt',
+        { threadId: 'thr_context_contract' },
+      ),
+    ).resolves.toEqual({ ok: true });
+    expect(interruptCompact).toHaveBeenCalledWith('thr_context_contract');
+  });
+
   it('按输入预算保留最新消息，并拒绝无可用输入空间的参数', async () => {
-    const transform = compactMessages({
-      maxInputTokens: 10,
-      reservedOutputTokens: 2,
-    });
+    const transform = compactMessages(
+      { maxInputTokens: 10, reservedOutputTokens: 2 },
+      { index: 0 },
+    );
     const messages = [
       { role: 'user' as const, content: '1111111111111111' },
       { role: 'assistant' as const, content: '2222222222222222' },
@@ -194,21 +310,79 @@ describe('context source contract', () => {
     ];
 
     await expect(transform(messages, {} as never)).resolves.toEqual(
-      messages.slice(1),
+      messages.slice(2),
     );
-    expect(() => compactMessages({ maxInputTokens: 0 })).toThrow(
+    expect(() => compactMessages({ maxInputTokens: 0 }, { index: 0 })).toThrow(
       'maxInputTokens must be a positive safe integer',
     );
     expect(() =>
-      compactMessages({ maxInputTokens: 8, reservedOutputTokens: 8 }),
+      compactMessages(
+        { maxInputTokens: 8, reservedOutputTokens: 8 },
+        { index: 0 },
+      ),
     ).toThrow('reservedOutputTokens must be');
     expect(() =>
       CodingAgentConfigSchema.parse({
         cwd: '/workspace',
         initial_mode: 'ask-before-changes',
+        ...modelConfig(),
         context: { max_input_tokens: 8, reserved_output_tokens: 8 },
       }),
     ).toThrow('must be below max_input_tokens');
+  });
+
+  it('最新单条消息超过有效窗口时在 provider 调用前明确失败', async () => {
+    const transform = compactMessages(
+      { maxInputTokens: 10, reservedOutputTokens: 2 },
+      { index: 0 },
+    );
+
+    await expect(
+      transform([{ role: 'user', content: 'x'.repeat(40) }], {} as never),
+    ).rejects.toThrow(
+      'Newest model input message exceeds the available context budget of 8',
+    );
+  });
+
+  it('锚点在未超预算的回合之间逐字节不动，超预算后一次推进到留有余量的水位', async () => {
+    const anchor = { index: 0 };
+    const transform = compactMessages({ maxInputTokens: 100 }, anchor);
+    // 每条 10 token（40 字符）。历史逐轮追加，模拟连续回合。
+    const history = Array.from({ length: 20 }, (_, index) => ({
+      role: (index % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: String(index % 10).repeat(40),
+    }));
+
+    await transform(history.slice(0, 8), {} as never);
+    expect(anchor.index).toBe(0);
+    await transform(history.slice(0, 10), {} as never);
+    expect(anchor.index).toBe(0);
+
+    // 12 条 = 120 token 超过 100，推进到 0.6*100=60 水位，即保留末 6 条。
+    await transform(history.slice(0, 12), {} as never);
+    expect(anchor.index).toBe(6);
+
+    // 推进后留有余量，后续几个回合锚点不再移动，缓存断点下标随之稳定。
+    for (const count of [13, 14, 15, 16]) {
+      const kept = await transform(history.slice(0, count), {} as never);
+      expect(anchor.index).toBe(6);
+      expect(kept[0]).toEqual(history[6]);
+    }
+  });
+
+  it('历史被压缩变短时锚点归零，不会发出空 messages 请求', async () => {
+    const anchor = { index: 8 };
+    const transform = compactMessages({ maxInputTokens: 100 }, anchor);
+    const kept = await transform(
+      [
+        { role: 'user' as const, content: 'a' },
+        { role: 'assistant' as const, content: 'b' },
+      ],
+      {} as never,
+    );
+
+    expect(anchor.index).toBe(0);
+    expect(kept).toHaveLength(2);
   });
 
   async function temporaryRoot(): Promise<string> {
@@ -225,6 +399,7 @@ function configFor(
   return CodingAgentConfigSchema.parse({
     cwd,
     initial_mode: 'ask-before-changes',
+    ...modelConfig(),
     context: {
       instructions: {
         global: [],
@@ -234,6 +409,37 @@ function configFor(
       },
     },
   });
+}
+
+function modelConfig() {
+  return {
+    models: {
+      test: {
+        protocol: 'openai' as const,
+        endpoint: 'responses' as const,
+        api_model: 'test-model',
+        base_url: 'https://api.example.test/v1',
+        api_key_env: 'TEST_API_KEY',
+        context_window: 128_000,
+        max_output_tokens: 16_000,
+        reasoning_effort: 'medium' as const,
+      },
+    },
+    primary_model: 'test',
+    auxiliary_model: 'test',
+  };
+}
+
+function promptRunContext(): AgentRunContext {
+  return {
+    runId: 'run-tool-list-contract',
+    agentName: 'build',
+    input: '你有哪些工具？',
+    context: undefined,
+    options: {},
+    environment: createTestEnvironmentHandle(),
+    metadata: {},
+  };
 }
 
 function source(id: string, priority: number, content: string, stale = false) {

@@ -109,6 +109,7 @@ export function applyNotification(
         false,
       );
     case 'item/agentMessage/delta':
+    case 'item/reasoning/delta':
     case 'item/plan/delta':
     case 'item/commandExecution/outputDelta':
     case 'thread/started':
@@ -120,6 +121,9 @@ export function applyNotification(
     case 'skills/changed':
     case 'fs/changed':
     case 'memory/job/updated':
+    case 'agent/task/updated':
+    case 'agent/task/event':
+    case 'agent/task/removed':
     case 'warning':
     case 'server/ready':
       return snapshot;

@@ -44,7 +44,7 @@ describe('Thread catalog projection', () => {
     storage.threads.apply(
       threadRecord({
         kind: 'thread.metadata',
-        schema: 1,
+        schema: 2,
         seq: 2,
         threadId: 'thr_c',
         createdAt: '2026-07-18T00:01:00.000Z',
@@ -92,14 +92,12 @@ describe('Thread catalog projection', () => {
     storage.threads.apply(
       threadRecord({
         kind: 'thread.metadata',
-        schema: 1,
+        schema: 2,
         seq: 2,
         threadId,
         createdAt: CREATED_AT,
         settings: {
           mode: 'ask-before-changes',
-          profile: 'deepseek',
-          model: 'deepseek/deepseek-v4-flash',
           agent: 'primary',
         },
       }),
@@ -120,7 +118,7 @@ describe('Thread catalog projection', () => {
       createdRecord(threadId, '/workspace', 'projection'),
       threadRecord({
         kind: 'turn.started',
-        schema: 1,
+        schema: 2,
         seq: 2,
         threadId,
         createdAt: CREATED_AT,
@@ -134,7 +132,7 @@ describe('Thread catalog projection', () => {
       }),
       threadRecord({
         kind: 'item.started',
-        schema: 1,
+        schema: 2,
         seq: 3,
         threadId,
         createdAt: CREATED_AT,
@@ -151,7 +149,7 @@ describe('Thread catalog projection', () => {
       }),
       threadRecord({
         kind: 'item.delta',
-        schema: 1,
+        schema: 2,
         seq: 4,
         threadId,
         createdAt: CREATED_AT,
@@ -161,7 +159,7 @@ describe('Thread catalog projection', () => {
       }),
       threadRecord({
         kind: 'serverRequest.created',
-        schema: 1,
+        schema: 2,
         seq: 5,
         threadId,
         createdAt: CREATED_AT,
@@ -177,7 +175,7 @@ describe('Thread catalog projection', () => {
       }),
       threadRecord({
         kind: 'serverRequest.resolved',
-        schema: 1,
+        schema: 2,
         seq: 6,
         threadId,
         createdAt: CREATED_AT,
@@ -188,7 +186,7 @@ describe('Thread catalog projection', () => {
       }),
       threadRecord({
         kind: 'compaction',
-        schema: 1,
+        schema: 2,
         seq: 7,
         threadId,
         createdAt: CREATED_AT,
@@ -239,7 +237,7 @@ describe('Thread catalog projection', () => {
     const created = createdRecord(threadId, '/workspace', 'original');
     const renamed = threadRecord({
       kind: 'thread.metadata',
-      schema: 1,
+      schema: 2,
       seq: 2,
       threadId,
       createdAt: CREATED_AT,
@@ -252,7 +250,7 @@ describe('Thread catalog projection', () => {
       storage.threads.apply(
         threadRecord({
           kind: 'thread.status',
-          schema: 1,
+          schema: 2,
           seq: 4,
           threadId,
           createdAt: CREATED_AT,
@@ -266,7 +264,7 @@ describe('Thread catalog projection', () => {
         createdRecord(threadId, '/workspace', 'replacement'),
         threadRecord({
           kind: 'item.started',
-          schema: 1,
+          schema: 2,
           seq: 2,
           threadId,
           createdAt: CREATED_AT,
@@ -308,7 +306,7 @@ function createdRecord(
 ): ThreadRecord {
   return threadRecord({
     kind: 'thread.created',
-    schema: 1,
+    schema: 2,
     seq: 1,
     threadId,
     createdAt: CREATED_AT,
@@ -317,8 +315,6 @@ function createdRecord(
     name,
     settings: {
       mode: 'ask-before-changes',
-      profile: 'main',
-      model: 'test:model',
       agent: 'primary',
     },
     metadata: {},

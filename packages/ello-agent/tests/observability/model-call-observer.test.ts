@@ -6,20 +6,19 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type {
-  AgentEventRecorder,
-  AgentModelRequest,
-  AgentModelResponse,
-  EngineEvent,
-  ModelAdapter,
-  AnyAgentTool,
-  CreateAgentOptions,
-} from '../../src/features/agent/engine/index.js';
 import {
   createAgent as createBaseAgent,
   defineTool,
   z,
+  type AnyAgentTool,
+  AgentEventRecorder,
+  AgentModelRequest,
+  AgentModelResponse,
+  type CreateAgentOptions,
+  EngineEvent,
+  ModelAdapter,
 } from '../../src/features/agent/engine/index.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 const testTool = defineTool({
   name: 'test_noop',
@@ -32,7 +31,7 @@ const testTool = defineTool({
 function createAgent(
   options: Omit<
     CreateAgentOptions,
-    'executionTools' | 'modelTools' | 'environment'
+    'executionTools' | 'modelTools' | 'environment' | 'modelCall'
   > & {
     readonly tools?: readonly AnyAgentTool[];
   },
@@ -41,7 +40,14 @@ function createAgent(
   const selected = tools ?? [testTool as AnyAgentTool];
   return createBaseAgent({
     ...rest,
-    environment: {},
+    modelCall: {
+      agentName: 'test-agent',
+      modelSelector: 'primary_model',
+      configuredModel: 'test-model',
+      protocol: 'openai',
+      apiModel: 'model-a',
+    },
+    environment: createTestEnvironmentHandle(),
     executionTools: selected,
     modelTools: selected,
   });
@@ -94,7 +100,14 @@ describe('model-call lifecycle', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      identity: { turnIndex: 0, provider: 'test', model: 'model-a' },
+      identity: {
+        turnIndex: 0,
+        agentName: 'test-agent',
+        modelSelector: 'primary_model',
+        configuredModel: 'test-model',
+        protocol: 'openai',
+        apiModel: 'model-a',
+      },
       response: { finishReason: 'stop', usage },
       diagnostics: { compactionBoundary: false },
     });

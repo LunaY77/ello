@@ -2,7 +2,7 @@
 
 ## ArtifactStore 的内容寻址
 
-大工具输出、checkpoint 文件内容和 session export 不直接塞进 SQLite。`ArtifactStore.put()` 对内容计算 SHA-256，artifact id 等于 hash，文件路径由 hash 前两位分片：
+大工具输出和 session export 不直接塞进 SQLite。`ArtifactStore.put()` 对内容计算 SHA-256，artifact id 等于 hash，文件路径由 hash 前两位分片：
 
 ```ts
 private pathFor(sha256: string): string {
@@ -16,23 +16,19 @@ private pathFor(sha256: string): string {
 
 ## 引用和 GC
 
-`artifact_references` 的主键由 artifact、owner kind、owner id、relation 组成。owner kind 包括 checkpoint、tool-result 和 session-export。释放 owner 后执行 `deleteUnreferenced()`，只删除没有任何引用的 metadata 和文件。
+`artifact_references` 的主键由 artifact、owner kind、owner id、relation 组成。owner kind 包括 tool-result 和 session-export。释放 owner 后执行 `deleteUnreferenced()`，只删除没有任何引用的 metadata 和文件。
 
 ```mermaid
 flowchart LR
-  A[Artifact sha256] --> R1[checkpoint ref]
-  A --> R2[tool-result ref]
-  Drop[release tool-result] --> R2
-  R1 --> Keep[artifact retained]
-  Drop2[release checkpoint] --> R1
-  Keep --> GC[delete unreferenced]
+  A[Artifact sha256] --> R1[tool-result ref]
+  A --> R2[session-export ref]
+  Drop1[release tool-result] --> R1
+  Drop2[release session-export] --> R2
+  R1 --> GC[delete unreferenced]
+  R2 --> GC
 ```
 
-过期清理只删除 tool-result 和 session-export 引用，checkpoint 永久保留。读取 artifact 时再次校验 byte size 和 SHA-256，磁盘损坏不会作为正常内容返回。
-
-## Checkpoint 如何复用 Artifact
-
-`CheckpointRepository.seal()` 对每个 file change 的 before/after 内容创建 artifact，再在 SQLite transaction 中写 checkpoint 和变化元数据。中途失败会释放 checkpoint owner 的全部引用。数据库只保存 path hash、change type、diff、toolCallId 和 artifact ids。
+过期清理删除 tool-result 和 session-export 引用。读取 artifact 时再次校验 byte size 和 SHA-256，磁盘损坏不会作为正常内容返回。
 
 ## Usage 为什么不保存 prompt
 

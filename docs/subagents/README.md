@@ -13,32 +13,30 @@ flowchart LR
   O --> P
 ```
 
-## 当前可用状态
+## 核心合同
 
-当前版本已经提供 Subagent 定义、内置模板、注册表、权限派生和后台任务数据结构。生产 Server 尚未装配 delegation runner，主 agent 还不能创建 Subagent run。
+- definition registry 为主 Agent 提供严格的 Subagent 枚举；
+- fresh/fork 与 foreground/background 分别描述上下文和调度；
+- task、event、usage 和父模型通知通过 Drizzle Store 持久化；
+- list/detail/control/transcript 使用独立公开协议和双重连续序号；
+- Agent 列表固定在完整 footer 的 cache/token 行之后；
+- composer 光标位于最后一个视觉行时按 `↓` 进入列表；
+- 主视图最多展示 4 个 child tool call，终态展示有界结果文本；
+- root 为 `bypass` 时 child 不产生审批，其他模式与 main 动态一致；
+- `x` 停止选中 task 子树，`Ctrl+C` 停止 main 和 root 下全部活动 child；
+- 完整工具过程进入 child transcript 查看，不提供展开快捷键。
 
-`agent/list` 会返回已发现的 Subagent，并设置以下状态：
-
-```json
-{
-  "enabled": false,
-  "metadata": {
-    "mode": "subagent",
-    "runtime": "unavailable:no-delegation-runner"
-  }
-}
-```
-
-用户现在可以创建或覆盖 Subagent 定义，用于检查注册和配置结果。定义会进入目录，但当前会话不会执行这些定义。`explore`、`implement`、`review` 和 `verify` 四个随包模板也受同一运行时限制。
+isolation 合同只接受 shared。请求 `worktree` 或 `container` 必须在启动前明确失败，不能静默
+降级到 shared。
 
 ## 三种 Agent 形态
 
-| `mode`     | 用途                                  | 当前运行状态                         |
-| ---------- | ------------------------------------- | ------------------------------------ |
-| `primary`  | 承载用户会话和主回合                  | 可用                                 |
-| `subagent` | 接收主 agent 委派的独立任务           | 定义可加载，runner 未装配            |
-| `internal` | 执行标题生成、上下文压缩等系统任务    | 系统按功能调用                       |
-| `all`      | 同时进入 primary 与 Subagent 选择范围 | primary 可用，委派受 runner 状态限制 |
+| `mode`     | 用途                                  |
+| ---------- | ------------------------------------- |
+| `primary`  | 承载用户会话和主回合                  |
+| `subagent` | 接收主 agent 委派的独立任务           |
+| `internal` | 执行标题生成、上下文压缩等系统任务    |
+| `all`      | 同时进入 primary 与 Subagent 选择范围 |
 
 `role` 负责从当前 profile 中选择模型用途，例如 `primary`、`small` 或 `review`。`mode` 负责确定 Agent 的运行形态，两者分别配置。
 
@@ -46,4 +44,7 @@ flowchart LR
 
 - [定义与加载](registry-and-loading.md)：创建项目级或用户级 Subagent，选择字段并理解覆盖顺序。
 - [权限与工具边界](permission-isolation.md)：了解工具白名单、父级规则继承和默认限制。
-- [运行生命周期与当前接线](background-jobs-and-runner-status.md)：了解委派 runner、前后台任务、取消和 internal runner。
+- [运行时架构](runtime-architecture.md)：了解正交运行模式、标识、生命周期、取消、恢复和隔离边界。
+- [持久化与公开投影](persistence-and-projection.md)：了解 Drizzle Store、task event 和 TUI 读模型。
+- [TUI 导航与运行视图](../tui/subagent-navigation-and-runtime.md)：了解 footer 下 Agent 列表、
+  键盘切换、运行摘要、停止和 child transcript 设计。

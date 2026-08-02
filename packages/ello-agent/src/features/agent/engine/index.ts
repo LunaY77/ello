@@ -10,7 +10,19 @@ export {
   AgentStreamBackpressureError,
   ModelAdapterProtocolError,
 } from './errors.js';
-export { defineAnyTool, defineDeferredTool, defineTool } from './tools.js';
+export {
+  defineAnyTool,
+  defineDeferredTool,
+  defineTool,
+  describeZodIssues,
+  parseToolInput,
+  resolveToolCapabilities,
+  validateToolInput,
+} from './tools.js';
+export {
+  ToolExecutionGate,
+  toolExecutionGateFor,
+} from './tool-execution-gate.js';
 export {
   compactMessages,
   dynamicSystemSection,
@@ -18,7 +30,6 @@ export {
   preserveToolCallPairs,
   skillIndexContext,
   splitSystemCacheSegments,
-  trimMessages,
   wrapDynamicSystemContent,
 } from './model-input.js';
 export { createEmptyUsage, mapAiSdkUsage } from './result.js';

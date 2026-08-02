@@ -14,6 +14,10 @@
       "types": "./dist/protocol/v1/index.d.ts",
       "import": "./dist/protocol/v1/index.js"
     },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js"
+    },
     "./server-entry": "./dist/main.js",
     "./package.json": "./package.json"
   },
@@ -31,9 +35,10 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.0",
-    "@ai-sdk/openai": "^4.0.0",
+    "@ai-sdk/openai": "^4.0.22",
     "@fastify/websocket": "11.3.0",
     "@langfuse/otel": "5.9.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@opentelemetry/api": "1.9.0",
     "@opentelemetry/core": "2.0.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.208.0",
@@ -41,7 +46,7 @@
     "@opentelemetry/sdk-trace-base": "2.0.1",
     "@opentelemetry/sdk-trace-node": "2.0.1",
     "@opentelemetry/semantic-conventions": "1.37.0",
-    "ai": "^7.0.2",
+    "ai": "^7.0.40",
     "better-sqlite3": "^12.11.1",
     "diff": "^9.0.0",
     "drizzle-orm": "^0.45.2",

@@ -12,7 +12,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type { DeferredApprovalItem } from '../../src/features/agent/engine/index.js';
 import { projectPermissionsFile } from '../../src/features/config/paths.js';
+import { CodingAgentConfigSchema } from '../../src/features/config/schema.js';
 import { evaluatePermission } from '../../src/features/tool/permissions/engine.js';
+import { makeApprovalPolicy } from '../../src/features/tool/permissions/policy.js';
 import { RulesStore } from '../../src/features/tool/permissions/rules-store.js';
 import type { PermissionRule } from '../../src/features/tool/permissions/types.js';
 
@@ -56,6 +58,108 @@ describe('permission policy', () => {
 
   it('falls back to ask when nothing matches', () => {
     expect(evaluatePermission([], 'external_api', 'example.com')).toBe('ask');
+  });
+
+  it('treats configured allowed_paths as Tool Policy scope, not Environment isolation', async () => {
+    const root = await tempDir();
+    const workspace = path.join(root, 'workspace');
+    const sibling = path.join(root, 'sibling');
+    const config = CodingAgentConfigSchema.parse({
+      cwd: workspace,
+      allowed_paths: [sibling],
+      initial_mode: 'ask-before-changes',
+      models: {
+        test: {
+          protocol: 'openai',
+          endpoint: 'responses',
+          api_model: 'test-model',
+          base_url: 'https://api.example.test/v1',
+          api_key_env: 'TEST_API_KEY',
+          context_window: 128_000,
+          max_output_tokens: 16_000,
+          reasoning_effort: 'medium',
+        },
+      },
+      primary_model: 'test',
+      auxiliary_model: 'test',
+    });
+    const decide = makeApprovalPolicy(
+      config,
+      () => [],
+      () => ({
+        mode: 'ask-before-changes',
+        previousMode: null,
+        source: 'config',
+        changedAt: '2026-07-31T00:00:00.000Z',
+      }),
+    );
+    const descriptor = (target: string) => ({
+      permission: 'read',
+      patterns: [target],
+      always: [target],
+      paths: [target],
+      metadata: { kind: 'read' as const, path: target },
+    });
+
+    expect(
+      decide(descriptor(path.join(sibling, 'README.md')), {} as never),
+    ).toBe('auto');
+    expect(
+      decide(descriptor(path.join(root, 'outside', 'README.md')), {} as never),
+    ).toMatchObject({
+      action: 'required',
+      metadata: {
+        externalDirs: [path.join(root, 'outside', 'README.md')],
+      },
+    });
+  });
+
+  it('resolves relative allowed_paths from the coding working directory', async () => {
+    const root = await tempDir();
+    const workspace = path.join(root, 'workspace');
+    const config = CodingAgentConfigSchema.parse({
+      cwd: workspace,
+      allowed_paths: ['../sibling'],
+      initial_mode: 'ask-before-changes',
+      models: {
+        test: {
+          protocol: 'openai',
+          endpoint: 'responses',
+          api_model: 'test-model',
+          base_url: 'https://api.example.test/v1',
+          api_key_env: 'TEST_API_KEY',
+          context_window: 128_000,
+          max_output_tokens: 16_000,
+          reasoning_effort: 'medium',
+        },
+      },
+      primary_model: 'test',
+      auxiliary_model: 'test',
+    });
+    const decide = makeApprovalPolicy(
+      config,
+      () => [],
+      () => ({
+        mode: 'ask-before-changes',
+        previousMode: null,
+        source: 'config',
+        changedAt: '2026-07-31T00:00:00.000Z',
+      }),
+    );
+    const target = path.join(root, 'sibling', 'README.md');
+
+    expect(
+      decide(
+        {
+          permission: 'read',
+          patterns: [target],
+          always: [target],
+          paths: [target],
+          metadata: { kind: 'read', path: target },
+        },
+        {} as never,
+      ),
+    ).toBe('auto');
   });
 
   it('persists project approval rules as YAML using typed metadata', async () => {

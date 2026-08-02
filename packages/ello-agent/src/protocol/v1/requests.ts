@@ -50,8 +50,6 @@ export const ThreadStartParamsSchema = z
   .object({
     cwd: z.string().min(1),
     name: z.string().default(''),
-    profile: z.string().min(1).optional(),
-    model: z.string().min(1).optional(),
     mode: SessionModeSchema.optional(),
     agent: z.string().min(1).optional(),
     subscribe: z.boolean().default(true),
@@ -89,8 +87,6 @@ export const TurnStartParamsSchema = z
   .object({
     threadId: OpaqueIdSchema,
     input: z.array(UserInputSchema).min(1).readonly(),
-    model: z.string().min(1).optional(),
-    profile: z.string().min(1).optional(),
     mode: SessionModeSchema.optional(),
     metadata: z.record(z.string(), z.string()).optional(),
   })
@@ -100,6 +96,7 @@ export const TurnSteerParamsSchema = z
   .object({
     threadId: OpaqueIdSchema,
     expectedTurnId: OpaqueIdSchema,
+    steerId: OpaqueIdSchema,
     input: z.array(UserInputSchema).min(1).readonly(),
   })
   .strict();
@@ -206,6 +203,7 @@ export const CLIENT_REQUEST_SCHEMAS = {
     })
     .strict(),
   'thread/compact/start': ThreadIdParamsSchema,
+  'thread/compact/interrupt': ThreadIdParamsSchema,
   'thread/shellCommand': z
     .object({
       threadId: OpaqueIdSchema,
@@ -217,17 +215,11 @@ export const CLIENT_REQUEST_SCHEMAS = {
     .object({
       threadId: OpaqueIdSchema,
       mode: SessionModeSchema.optional(),
-      profile: z.string().min(1).optional(),
-      model: z.string().min(1).optional(),
       agent: z.string().min(1).optional(),
     })
     .strict()
     .refine(
-      (value) =>
-        value.mode !== undefined ||
-        value.profile !== undefined ||
-        value.model !== undefined ||
-        value.agent !== undefined,
+      (value) => value.mode !== undefined || value.agent !== undefined,
       'At least one setting is required.',
     ),
   'turn/start': TurnStartParamsSchema,
@@ -255,8 +247,47 @@ export const CLIENT_REQUEST_SCHEMAS = {
     .strict(),
   'config/sources': CwdParamsSchema,
   'model/list': CwdParamsSchema,
-  'provider/list': CwdParamsSchema,
+  'agent/effort/update': z
+    .object({
+      cwd: z.string().min(1),
+      agent: z.string().min(1),
+      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']),
+    })
+    .strict(),
   'agent/list': OptionalThreadParamsSchema,
+  'agent/task/subscribe': ThreadIdParamsSchema,
+  'agent/task/unsubscribe': ThreadIdParamsSchema,
+  'agent/task/list': ThreadIdParamsSchema,
+  'agent/task/read': z
+    .object({ threadId: OpaqueIdSchema, taskId: OpaqueIdSchema })
+    .strict(),
+  'agent/task/steer': z
+    .object({
+      threadId: OpaqueIdSchema,
+      taskId: OpaqueIdSchema,
+      steerId: OpaqueIdSchema,
+      input: z.string().trim().min(1),
+    })
+    .strict(),
+  'agent/task/stop': z
+    .object({ threadId: OpaqueIdSchema, taskId: OpaqueIdSchema })
+    .strict(),
+  'agent/task/resume': z
+    .object({
+      threadId: OpaqueIdSchema,
+      taskId: OpaqueIdSchema,
+      prompt: z.string().trim().min(1),
+      name: z
+        .string()
+        .regex(/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/u)
+        .optional(),
+      description: z.string().trim().min(1).optional(),
+      executionMode: z.enum(['foreground', 'background']).default('background'),
+    })
+    .strict(),
+  'agent/task/background': z
+    .object({ threadId: OpaqueIdSchema, taskId: OpaqueIdSchema })
+    .strict(),
   'tool/list': OptionalThreadParamsSchema,
   'skills/list': OptionalThreadParamsSchema.extend({
     query: z.string().optional(),

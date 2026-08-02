@@ -222,11 +222,54 @@ function applyThreadRecord(
     case 'usage.updated':
       snapshot.usage = record.usage;
       return;
-    case 'transcript.entry':
     case 'compaction':
+      projectCompactionItem(state, record);
+      return;
+    case 'transcript.entry':
     case 'content.replacement':
       return;
   }
+}
+
+function projectCompactionItem(
+  state: MutableProjection,
+  record: Extract<ThreadRecord, { kind: 'compaction' }>,
+): void {
+  const snapshot = requireSnapshot(state);
+  const turnIndex = state.turnIndexes.get(record.turnId);
+  if (turnIndex === undefined) {
+    throw new Error(`Unknown compaction turn ${record.turnId}.`);
+  }
+  const turn = snapshot.turns[turnIndex];
+  if (turn === undefined) {
+    throw new Error(`Missing compaction turn ${record.turnId}.`);
+  }
+  if (
+    turn.items.some(
+      (item) =>
+        item.type === 'contextCompaction' && item.status === 'inProgress',
+    )
+  ) {
+    return;
+  }
+  addItem(state, record.turnId, {
+    type: 'contextCompaction',
+    id: `compaction-${record.seq}`,
+    turnId: record.turnId,
+    createdAt: record.createdAt,
+    summary: record.summary,
+    tokensBefore: record.tokensBefore,
+    ...(record.beforeMessageCount === undefined
+      ? {}
+      : { beforeMessageCount: record.beforeMessageCount }),
+    ...(record.afterMessageCount === undefined
+      ? {}
+      : { afterMessageCount: record.afterMessageCount }),
+    ...(record.keptMessageCount === undefined
+      ? {}
+      : { keptMessageCount: record.keptMessageCount }),
+    status: 'completed',
+  });
 }
 
 function requireSnapshot(state: MutableProjection): MutableThreadSnapshot {
@@ -324,6 +367,10 @@ export function projectThreadItemDelta(
   const projected = structuredClone(item);
   if (delta.type === 'agentMessage' && projected.type === 'agentMessage') {
     projected.text += delta.text;
+    return projected;
+  }
+  if (delta.type === 'reasoning' && projected.type === 'reasoning') {
+    projected.summary += delta.text;
     return projected;
   }
   if (delta.type === 'plan' && projected.type === 'plan') {

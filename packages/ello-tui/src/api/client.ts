@@ -80,6 +80,13 @@ type ServerRequestListener = (
   request: IncomingServerRequest<ServerRequestMethod>,
 ) => boolean | void | Promise<boolean | void>;
 
+export interface AppServerClientCloseEvent {
+  readonly reason: string;
+  readonly error?: Error;
+}
+
+type CloseListener = (event: AppServerClientCloseEvent) => void;
+
 export type AppServerClientState =
   | 'disconnected'
   | 'connected'
@@ -93,6 +100,7 @@ export class AppServerClient {
   private readonly requestTimeoutMs: number;
   private readonly notificationListeners = new Set<NotificationListener>();
   private readonly serverRequestListeners = new Set<ServerRequestListener>();
+  private readonly closeListeners = new Set<CloseListener>();
   private readonly serverRequestContext = new AsyncLocalStorage<
     string | number | null
   >();
@@ -100,6 +108,7 @@ export class AppServerClient {
   private readonly writer: ClientMessageWriter;
   private readonly rpc: MessageConnection;
   private closeTask: Promise<void> | undefined;
+  private closeEvent: AppServerClientCloseEvent | undefined;
   private closeError: Error | undefined;
   private closeFailure: Error | undefined;
   private currentState: AppServerClientState = 'disconnected';
@@ -270,6 +279,24 @@ export class AppServerClient {
   onServerRequest(listener: ServerRequestListener): () => void {
     this.serverRequestListeners.add(listener);
     return () => this.serverRequestListeners.delete(listener);
+  }
+
+  /**
+   * 注册连接关闭 listener；异常关闭携带原始错误，主动关闭只携带 reason。
+   *
+   * Args:
+   * - `listener`: 接收唯一连接终态的 listener。
+   *
+   * Returns:
+   * - 返回只移除当前 listener 的函数；连接已关闭时会立即同步通知。
+   */
+  onClose(listener: CloseListener): () => void {
+    if (this.closeEvent !== undefined) {
+      listener(this.closeEvent);
+      return () => undefined;
+    }
+    this.closeListeners.add(listener);
+    return () => this.closeListeners.delete(listener);
   }
 
   /**
@@ -523,6 +550,13 @@ export class AppServerClient {
     this.rpc.dispose();
     this.writer.end();
     this.closeTask = this.closeConnection(reason, force);
+    const event: AppServerClientCloseEvent = {
+      reason,
+      ...(this.closeError === undefined ? {} : { error: this.closeError }),
+    };
+    this.closeEvent = event;
+    for (const listener of this.closeListeners) listener(event);
+    this.closeListeners.clear();
     return this.closeTask;
   }
 

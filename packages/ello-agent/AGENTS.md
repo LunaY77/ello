@@ -10,7 +10,7 @@ src/
 ├── app.ts                   # Composition root — creates features, wires routes, manages lifecycle
 ├── index.ts                 # Public export: createApp, AgentServer
 ├── features/                # 11 feature modules
-│   ├── agent/               # Agent lifecycle, engine, system prompts, subagents, checkpoints, user-input
+│   ├── agent/               # Agent lifecycle, engine, system prompts, subagents, user-input
 │   ├── thread/              # Thread/Turn/Item CRUD, compaction, goals, title generation, export
 │   ├── tool/                # Tool registry, permissions engine, tool runtime (shell, fs, patch, search)
 │   ├── workspace/           # Repository management, workspace CRUD, tmux integration
@@ -44,17 +44,17 @@ src/
 
 ## WHERE TO LOOK
 
-| Task | Location | Notes |
-|------|----------|-------|
-| Start a server instance | `src/app.ts` → `createApp()` | Returns `AgentServer`; wires all features |
-| Process entry point | `src/main.ts` → `runAppServer()` | Parses `--listen`, `--root`, `--auth-token-env` |
-| Add a new tool | `src/features/tool/internal/production.ts` | Add to tool array in `createProductionToolRuntime()` |
-| Add a new RPC route | Feature `routes.ts` → merge in `src/app.ts` | Route must satisfy `RpcApplicationRouteTable` |
-| Modify system prompts | `src/features/agent/context/prompts/*.md` | Nunjucks templates, injected as context sections |
-| Add a bundled subagent | `src/features/agent/subagents/bundled/*.md` | Markdown definitions loaded at runtime |
-| Database schema | `src/infra/database/schema.ts` + `migrations/` | Drizzle ORM table definitions + SQL migrations |
-| Add a new feature | `src/features/<name>/` | Must have `index.ts` (public API), `routes.ts` (RPC routes) |
-| Config file location | `src/features/config/paths.ts` | `ELLO_HOME` env var (default `~/.ello`) |
+| Task                    | Location                                       | Notes                                                       |
+| ----------------------- | ---------------------------------------------- | ----------------------------------------------------------- |
+| Start a server instance | `src/app.ts` → `createApp()`                   | Returns `AgentServer`; wires all features                   |
+| Process entry point     | `src/main.ts` → `runAppServer()`               | Parses `--listen`, `--root`, `--auth-token-env`             |
+| Add a new tool          | `src/features/tool/internal/production.ts`     | Add to tool array in `createProductionToolRuntime()`        |
+| Add a new RPC route     | Feature `routes.ts` → merge in `src/app.ts`    | Route must satisfy `RpcApplicationRouteTable`               |
+| Modify system prompts   | `src/features/agent/context/prompts/*.md`      | Nunjucks templates, injected as context sections            |
+| Add a bundled subagent  | `src/features/agent/subagents/bundled/*.md`    | Markdown definitions loaded at runtime                      |
+| Database schema         | `src/infra/database/schema.ts` + `migrations/` | Drizzle ORM table definitions + SQL migrations              |
+| Add a new feature       | `src/features/<name>/`                         | Must have `index.ts` (public API), `routes.ts` (RPC routes) |
+| Config file location    | `src/features/config/paths.ts`                 | `ELLO_HOME` env var (default `~/.ello`)                     |
 
 ## CONVENTIONS
 
@@ -78,7 +78,6 @@ src/
 - **Atomic build**: `scripts/build.mjs` compiles to PID-temp dir, runs `verify-dist.mjs`, then atomically swaps `dist`
 - **Dist verification**: `verify-dist.mjs` rejects builds containing React/Ink (server contamination)
 - **Comment verification**: `scripts/verify-source-comments.mjs` validates Chinese documentation via AST
-- **Change tracking**: Agent runs produce checkpoints (`features/agent/change/`) for plan-mode workflows
 - **Goals subsystem**: `features/thread/goals/` manages persistent goals with tool integration
 
 ## COMMANDS

@@ -7,20 +7,32 @@
  * 的工具不会先于人工决定就被执行。
  */
 
+import type { EnvironmentHandle } from '../../environment/index.js';
+
 import type {
-  AgentEnvironment,
   DeferredApprovalItem,
   DeferredToolCallItem,
 } from './contracts.js';
 import { normalizeAgentError } from './errors.js';
 import type { AgentMessage } from './model.js';
+import {
+  toolExecutionGateFor,
+  type ToolExecutionGate,
+} from './tool-execution-gate.js';
 import type {
   AgentApprovalDecision,
+  AgentTool,
+  AgentToolCapabilities,
   AgentToolCall,
   AgentToolContext,
   AnyAgentTool,
 } from './tools.js';
-import { createToolResultMessage } from './tools.js';
+import {
+  createToolResultMessage,
+  parseToolInput,
+  resolveToolCapabilities,
+  validateToolInput,
+} from './tools.js';
 
 /** 构造 {@link ToolScheduler} 的入参。 */
 export interface ToolSchedulerOptions {
@@ -40,8 +52,8 @@ export interface ToolSchedulerOptions {
   readonly tools: readonly AnyAgentTool[];
   /** 模型实际可以发起的名称；隐藏目标仍在 tools 中供代理调用。 */
   readonly callableToolNames: ReadonlySet<string>;
-  /** 工具运行所处的环境（文件系统、shell、资源等）。 */
-  readonly environment: AgentEnvironment;
+  /** 工具运行所处的 Environment Handle。 */
+  readonly environment: EnvironmentHandle;
   /** 透传给工具上下文的元数据。 */
   readonly metadata: Record<string, unknown>;
   readonly signal: AbortSignal;
@@ -64,6 +76,7 @@ export interface ToolSchedulerEventSink {
     toolCallId: string,
     name: string,
     input: unknown,
+    invocation?: AgentToolCapabilities & { readonly physicalName: string },
   ): Promise<void>;
   /**
    * 某个工具需要人工审批、被挂起时触发。
@@ -126,6 +139,24 @@ export interface ToolScheduleResult {
   readonly pending: Array<DeferredApprovalItem | DeferredToolCallItem>;
 }
 
+interface PreparedToolCall {
+  readonly kind: 'ready';
+  readonly call: AgentToolCall;
+  readonly tool: AgentTool<unknown, unknown>;
+  readonly input: unknown;
+  readonly context: AgentToolContext;
+  readonly capabilities: AgentToolCapabilities;
+}
+
+interface FailedToolCallPreparation {
+  readonly kind: 'failed';
+  readonly call: AgentToolCall;
+  readonly input: unknown;
+  readonly error: Error;
+}
+
+type ToolCallPreparation = PreparedToolCall | FailedToolCallPreparation;
+
 /**
  * core 工具调度器。
  *
@@ -135,6 +166,7 @@ export interface ToolScheduleResult {
 export class ToolScheduler {
   /** 工具名到工具实现的索引，便于按名查找。 */
   private readonly byName: Map<string, AnyAgentTool>;
+  private readonly executionGate: ToolExecutionGate;
 
   /**
    * 创建 `ToolScheduler`，由该实例独占 产品 Agent Agent engine 工具调度 模块 中声明的可变状态和资源生命周期。
@@ -144,6 +176,7 @@ export class ToolScheduler {
    */
   constructor(private readonly options: ToolSchedulerOptions) {
     this.byName = new Map(options.tools.map((tool) => [tool.name, tool]));
+    this.executionGate = toolExecutionGateFor(options.environment);
   }
 
   /**
@@ -198,7 +231,7 @@ export class ToolScheduler {
       }
       let input: unknown;
       try {
-        input = tool.input.parse(call.input);
+        input = parseToolInput(tool.input, call.name, call.input);
       } catch (error) {
         const normalized =
           error instanceof Error ? error : new Error(String(error));
@@ -221,114 +254,219 @@ export class ToolScheduler {
       await sink.onToolDeferred(item);
       return { messages, toolCalls, pending };
     }
-    for (const call of calls) {
-      const tool = this.options.callableToolNames.has(call.name)
-        ? this.byName.get(call.name)
-        : undefined;
-      // 模型可能臆造出不存在的工具名：记为失败并回灌错误结果，而非直接抛出中断整批。
-      if (tool === undefined) {
-        const error = new Error(`Unknown tool: ${call.name}`);
-        await sink.onToolStarted(call.id, call.name, call.input);
-        await sink.onToolFailed(call.id, error);
-        toolCalls.push({ ...call, error: normalizeAgentError(error) });
-        messages.push(
-          createToolResultMessage(call, { error: error.message }, 'error'),
-        );
-        continue;
-      }
-      if (tool.execution !== 'immediate') {
-        throw new Error(`Deferred tool escaped batch preflight: ${call.name}`);
-      }
-      let input: unknown;
-      try {
-        input = tool.input.parse(call.input);
-      } catch (error) {
-        const normalized =
-          error instanceof Error ? error : new Error(String(error));
-        await sink.onToolStarted(call.id, call.name, call.input);
-        await sink.onToolFailed(call.id, normalized);
-        toolCalls.push({ ...call, error: normalizeAgentError(normalized) });
-        messages.push(
-          createToolResultMessage(call, { error: normalized.message }, 'error'),
-        );
-        continue;
-      }
-      const ctx = this.createContext(call.id);
-      // 执行前先跑工具自带的审批策略（若有），据其结果决定拒绝 / 挂起 / 放行。
-      let decision: ReturnType<typeof normalizeApprovalDecision>;
-      try {
-        decision = normalizeApprovalDecision(await tool.approval?.(input, ctx));
-      } catch (error) {
-        const normalized =
-          error instanceof Error ? error : new Error(String(error));
-        await sink.onToolStarted(call.id, call.name, call.input);
-        await sink.onToolFailed(call.id, normalized);
-        toolCalls.push({
-          ...call,
-          input,
-          error: normalizeAgentError(normalized),
-        });
-        messages.push(
-          createToolResultMessage(call, { error: normalized.message }, 'error'),
-        );
-        continue;
-      }
-      if (decision.action === 'denied') {
-        const error = new Error(
-          decision.reason ??
-            `Tool '${call.name}' was denied by approval policy.`,
-        );
-        await sink.onToolStarted(call.id, call.name, call.input);
-        await sink.onToolFailed(call.id, error);
-        toolCalls.push({ ...call, input, error: normalizeAgentError(error) });
-        messages.push(
-          createToolResultMessage(
-            call,
-            { denied: true, reason: error.message },
-            'denied',
-          ),
-        );
-        continue;
-      }
-      // 需要人工审批：仅入队挂起并通知，不执行，等待产品层批准后再重放。
-      if (decision.action === 'required') {
-        const item = {
-          kind: 'approval' as const,
-          toolCallId: call.id,
-          toolName: call.name,
-          input,
-          reason: decision.reason ?? `Tool '${call.name}' requires approval.`,
-          ...(decision.metadata !== undefined
-            ? { metadata: decision.metadata }
-            : {}),
-        };
-        pending.push(item);
-        await sink.onToolStarted(call.id, call.name, input);
-        await sink.onApprovalRequired(item);
-        continue;
-      }
-      // 放行：正常执行工具，捕获异常并归一化，单个工具失败不影响整批其余调用。
-      await sink.onToolStarted(call.id, call.name, input);
-      try {
-        const output = await tool.execute(input, ctx);
-        await sink.onToolCompleted(call.id, output);
-        toolCalls.push({ ...call, input, output });
-        messages.push(createToolResultMessage(call, output));
-      } catch (error) {
-        const normalized =
-          error instanceof Error ? error : new Error(String(error));
-        await sink.onToolFailed(call.id, normalized);
-        toolCalls.push({
-          ...call,
-          input,
-          error: normalizeAgentError(normalized),
-        });
-        messages.push(
-          createToolResultMessage(call, { error: normalized.message }, 'error'),
-        );
-      }
+    // 先完成参数结构校验和能力判断。后续的参数检查、审批与执行均受同一把
+    // 环境级读写锁保护，使用同一环境的多个 Agent 运行也会遵守写操作的先后顺序。
+    const preparations = await Promise.all(
+      calls.map((call) => this.prepareCall(call)),
+    );
+    const outcomes = await mapWithConcurrency(
+      preparations,
+      maxToolConcurrency(),
+      (prepared) =>
+        prepared.kind === 'failed'
+          ? this.failPreparedCall(prepared, sink)
+          : this.runPreparedCall(prepared, sink),
+    );
+    for (const outcome of outcomes) {
+      messages.push(...outcome.messages);
+      toolCalls.push(...outcome.toolCalls);
+      pending.push(...outcome.pending);
     }
     return { messages, toolCalls, pending };
+  }
+
+  private async prepareCall(call: AgentToolCall): Promise<ToolCallPreparation> {
+    const tool = this.options.callableToolNames.has(call.name)
+      ? this.byName.get(call.name)
+      : undefined;
+    if (tool === undefined) {
+      return {
+        kind: 'failed',
+        call,
+        input: call.input,
+        error: new Error(`Unknown tool: ${call.name}`),
+      };
+    }
+    if (tool.execution !== 'immediate') {
+      return {
+        kind: 'failed',
+        call,
+        input: call.input,
+        error: new Error(`Deferred tool escaped batch preflight: ${call.name}`),
+      };
+    }
+    let input: unknown;
+    try {
+      input = parseToolInput(tool.input, call.name, call.input);
+      const baseContext = this.createContext(call.id);
+      const capabilities = await resolveToolCapabilities(
+        tool,
+        input,
+        baseContext,
+      );
+      if (!capabilities.enabled) {
+        throw new Error(`Tool '${capabilities.logicalName}' is disabled.`);
+      }
+      return {
+        kind: 'ready',
+        call,
+        tool,
+        input,
+        capabilities,
+        context: this.createContext(call.id, capabilities, call.name),
+      };
+    } catch (error) {
+      return {
+        kind: 'failed',
+        call,
+        input: input ?? call.input,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+  }
+
+  private async runPreparedCall(
+    prepared: PreparedToolCall,
+    sink: ToolSchedulerEventSink,
+  ): Promise<ToolScheduleResult> {
+    const operation = () => this.runInsideGate(prepared, sink);
+    try {
+      return prepared.capabilities.concurrencySafe
+        ? await this.executionGate.runShared(operation, this.options.signal)
+        : await this.executionGate.runExclusive(operation, this.options.signal);
+    } catch (error) {
+      return await this.failPreparedCall(
+        {
+          kind: 'failed',
+          call: prepared.call,
+          input: prepared.input,
+          error: error instanceof Error ? error : new Error(String(error)),
+        },
+        sink,
+      );
+    }
+  }
+
+  private async runInsideGate(
+    prepared: PreparedToolCall,
+    sink: ToolSchedulerEventSink,
+  ): Promise<ToolScheduleResult> {
+    const { call, tool, input, context } = prepared;
+    const messages: AgentMessage[] = [];
+    const toolCalls: AgentToolCall[] = [];
+    const pending: ToolScheduleResult['pending'] = [];
+    try {
+      await validateToolInput(tool, input, context);
+    } catch (error) {
+      return await this.failPreparedCall(
+        {
+          kind: 'failed',
+          call,
+          input,
+          error: error instanceof Error ? error : new Error(String(error)),
+        },
+        sink,
+      );
+    }
+    // 工具自身的参数检查和审批判断也在锁内完成，确保它们看到前序写操作完成后的状态。
+    let decision: ReturnType<typeof normalizeApprovalDecision>;
+    try {
+      decision = normalizeApprovalDecision(
+        await tool.approval?.(input, context),
+      );
+    } catch (error) {
+      return await this.failPreparedCall(
+        {
+          kind: 'failed',
+          call,
+          input,
+          error: error instanceof Error ? error : new Error(String(error)),
+        },
+        sink,
+      );
+    }
+    if (decision.action === 'denied') {
+      const error = new Error(
+        decision.reason ?? `Tool '${call.name}' was denied by approval policy.`,
+      );
+      await sink.onToolStarted(call.id, call.name, input, context.invocation);
+      await sink.onToolFailed(call.id, error);
+      toolCalls.push({ ...call, input, error: normalizeAgentError(error) });
+      messages.push(
+        createToolResultMessage(
+          call,
+          { denied: true, reason: error.message },
+          'denied',
+        ),
+      );
+      return { messages, toolCalls, pending };
+    }
+    // 需要人工审批时，只加入待审批队列并通知上层；批准后再重新提交执行。
+    if (decision.action === 'required') {
+      const item = {
+        kind: 'approval' as const,
+        toolCallId: call.id,
+        toolName: call.name,
+        input,
+        reason: decision.reason ?? `Tool '${call.name}' requires approval.`,
+        ...(decision.metadata !== undefined
+          ? { metadata: decision.metadata }
+          : {}),
+      };
+      pending.push(item);
+      await sink.onToolStarted(call.id, call.name, input, context.invocation);
+      await sink.onApprovalRequired(item);
+      return { messages, toolCalls, pending };
+    }
+    // 审批通过后执行工具。单个工具报错时记录失败结果，不中断同批其他调用。
+    await sink.onToolStarted(call.id, call.name, input, context.invocation);
+    try {
+      const output = await tool.execute(input, context);
+      await sink.onToolCompleted(call.id, output);
+      toolCalls.push(this.recordCall(call, input, { output }, context));
+      messages.push(createToolResultMessage(call, output));
+    } catch (error) {
+      const normalized =
+        error instanceof Error ? error : new Error(String(error));
+      await sink.onToolFailed(call.id, normalized);
+      toolCalls.push({
+        ...this.recordCall(call, input, {}, context),
+        error: normalizeAgentError(normalized),
+      });
+      messages.push(
+        createToolResultMessage(call, { error: normalized.message }, 'error'),
+      );
+    }
+    return { messages, toolCalls, pending };
+  }
+
+  private async failPreparedCall(
+    prepared: FailedToolCallPreparation,
+    sink: ToolSchedulerEventSink,
+  ): Promise<ToolScheduleResult> {
+    await sink.onToolStarted(
+      prepared.call.id,
+      prepared.call.name,
+      prepared.input,
+    );
+    await sink.onToolFailed(prepared.call.id, prepared.error);
+    return {
+      messages: [
+        createToolResultMessage(
+          prepared.call,
+          { error: prepared.error.message },
+          'error',
+        ),
+      ],
+      toolCalls: [
+        {
+          ...prepared.call,
+          input: prepared.input,
+          error: normalizeAgentError(prepared.error),
+        },
+      ],
+      pending: [],
+    };
   }
 
   /**
@@ -351,53 +489,87 @@ export class ToolScheduler {
     call: AgentToolCall,
     sink: ToolSchedulerEventSink,
   ): Promise<AgentToolCall> {
-    const tool = this.options.callableToolNames.has(call.name)
-      ? this.byName.get(call.name)
-      : undefined;
-    if (tool === undefined) {
-      const error = new Error(`Unknown tool: ${call.name}`);
-      await sink.onToolFailed(call.id, error);
-      return { ...call, error: normalizeAgentError(error) };
+    const prepared = await this.prepareCall(call);
+    if (prepared.kind === 'failed') {
+      const failed = await this.failPreparedCall(prepared, sink);
+      return failed.toolCalls[0] ?? call;
     }
-    if (tool.execution !== 'immediate') {
-      const error = new Error(
-        `Deferred tool '${call.name}' cannot be executed as an approved tool.`,
-      );
-      await sink.onToolFailed(call.id, error);
-      return { ...call, error: normalizeAgentError(error) };
-    }
-    let input: unknown;
-    try {
-      input = tool.input.parse(call.input);
-    } catch (error) {
-      const normalized =
-        error instanceof Error ? error : new Error(String(error));
-      await sink.onToolStarted(call.id, call.name, call.input);
-      await sink.onToolFailed(call.id, normalized);
-      return { ...call, error: normalizeAgentError(normalized) };
-    }
-    await sink.onToolStarted(call.id, call.name, input);
-    try {
-      const output = await tool.execute(input, this.createContext(call.id));
-      await sink.onToolCompleted(call.id, output);
-      return { ...call, input, output };
-    } catch (error) {
-      const normalized =
-        error instanceof Error ? error : new Error(String(error));
-      await sink.onToolFailed(call.id, normalized);
-      return { ...call, input, error: normalizeAgentError(normalized) };
-    }
+    const operation = async (): Promise<AgentToolCall> => {
+      try {
+        await validateToolInput(
+          prepared.tool,
+          prepared.input,
+          prepared.context,
+        );
+        await sink.onToolStarted(
+          call.id,
+          call.name,
+          prepared.input,
+          prepared.context.invocation,
+        );
+        const output = await prepared.tool.execute(
+          prepared.input,
+          prepared.context,
+        );
+        await sink.onToolCompleted(call.id, output);
+        return this.recordCall(
+          call,
+          prepared.input,
+          { output },
+          prepared.context,
+        );
+      } catch (error) {
+        const normalized =
+          error instanceof Error ? error : new Error(String(error));
+        await sink.onToolFailed(call.id, normalized);
+        return {
+          ...this.recordCall(call, prepared.input, {}, prepared.context),
+          error: normalizeAgentError(normalized),
+        };
+      }
+    };
+    return prepared.capabilities.concurrencySafe
+      ? await this.executionGate.runShared(operation, this.options.signal)
+      : await this.executionGate.runExclusive(operation, this.options.signal);
   }
 
   /** 构造工具执行上下文。 */
-  private createContext(toolCallId: string): AgentToolContext {
+  private createContext(
+    toolCallId: string,
+    capabilities?: AgentToolCapabilities,
+    physicalName?: string,
+  ): AgentToolContext {
     return {
       runId: this.options.runId,
       turnIndex: this.options.turnIndex(),
       toolCallId,
       environment: this.options.environment,
-      metadata: { ...this.options.metadata },
+      metadata: { ...this.options.metadata, toolCallId },
       signal: this.options.signal,
+      ...(capabilities === undefined || physicalName === undefined
+        ? {}
+        : { invocation: { ...capabilities, physicalName } }),
+    };
+  }
+
+  private recordCall(
+    call: AgentToolCall,
+    input: unknown,
+    result: { readonly output?: unknown },
+    context: AgentToolContext,
+  ): AgentToolCall {
+    return {
+      ...call,
+      input,
+      ...result,
+      ...(context.invocation === undefined
+        ? {}
+        : {
+            metadata: {
+              ...(call.metadata ?? {}),
+              invocation: context.invocation,
+            },
+          }),
     };
   }
 }
@@ -420,4 +592,61 @@ function normalizeApprovalDecision(
     ...(decision.reason !== undefined ? { reason: decision.reason } : {}),
     ...(decision.metadata !== undefined ? { metadata: decision.metadata } : {}),
   };
+}
+
+const DEFAULT_MAX_TOOL_CONCURRENCY = 10;
+
+/**
+ * 读取单个并发段内允许同时执行的工具上限。
+ *
+ * Returns:
+ * - 返回并发上限；环境变量缺失或非正整数时返回默认值。
+ */
+function maxToolConcurrency(): number {
+  const configured = Number.parseInt(
+    process.env.ELLO_MAX_TOOL_CONCURRENCY ?? '',
+    10,
+  );
+  return Number.isInteger(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_TOOL_CONCURRENCY;
+}
+
+/**
+ * 以固定并发上限映射一批输入，并按输入顺序返回结果。
+ *
+ * 模型单轮可以返回任意多个并发安全调用；无上限地全部同时启动会同时打满文件
+ * 描述符与内存。上限只约束同时在飞的数量，不改变结果顺序。
+ *
+ * Args:
+ * - `items`: 待处理的输入序列，结果按其下标对齐。
+ * - `limit`: 同时在飞的最大任务数，必须为正整数。
+ * - `run`: 单个输入的执行函数。
+ *
+ * Returns:
+ * - Promise 兑现为与 `items` 等长、下标对齐的结果数组。
+ */
+async function mapWithConcurrency<TItem, TResult>(
+  items: readonly TItem[],
+  limit: number,
+  run: (item: TItem) => Promise<TResult>,
+): Promise<TResult[]> {
+  if (items.length <= limit) {
+    return await Promise.all(items.map((item) => run(item)));
+  }
+  const results = new Array<TResult>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: limit }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      const item = items[index];
+      if (item === undefined) {
+        throw new Error(`Tool call batch lost its item at index ${index}.`);
+      }
+      results[index] = await run(item);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }

@@ -61,15 +61,18 @@ sequenceDiagram
 
 ## 自动触发条件
 
-生产执行器将当前模型的 context limit 与 `context.max_input_tokens` 的较小值传给
-compactor。`compactionView()` 计算当前投影的 token 估算值，满足以下条件时启动
-compact agent：
+生产执行器同时扣除模型的 `max_output_tokens` 和配置的
+`context.reserved_output_tokens`，将两条约束所得可用输入容量的较小值传给 compactor。
+`compactionView()` 计算当前投影的 token 估算值，满足以下条件时启动 compact agent：
 
 ```text
 context.compaction.auto = true
 且
 projectedTokens > max(1, contextWindow - reserved_tokens)
 ```
+
+这个有效窗口在 model resolution 阶段生成，并同时交给请求裁剪和 compactor；
+compactor 工厂还会用同一窗口再次钳制运行时参数，防止后续调用意外放大窗口。
 
 `projectedTokens` 包含最新 checkpoint message 和当前保留的 transcript entries，
 每条消息按 `ceil(chars / 4)` 估算。
@@ -149,6 +152,9 @@ entries 少于两条、摘要侧为空或找不到合法边界时，compactor �
 内置 `compact` agent 绑定当前 profile 的 `compact` role。`runInternalAgent()` 为它
 注册唯一的 `internal_complete` 工具，默认最多运行 4 个模型回合。执行器只装配该
 完成工具；文件、Shell 和业务工具位于这个执行环境之外。
+
+internal agent 使用与产品 Agent 相同的有效模型输入预算，因此辅助模型较小时也不会
+绕过其 `context_window`；无法安全容纳的单条 compact 输入会在 provider 调用前失败。
 
 待摘要消息按 role 分节：
 

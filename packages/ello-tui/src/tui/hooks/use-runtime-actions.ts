@@ -1,3 +1,5 @@
+import { useRef, useState } from 'react';
+
 import type { CommandResult } from '../../cli/slash-commands.js';
 import type { ThreadClient } from '../../client/thread-client.js';
 import type { OverlayState, RewindTarget } from '../component/OverlayHost.js';
@@ -17,7 +19,10 @@ export function useRuntimeActions(input: {
   switchThread(thread: ThreadClient, draft?: string): Promise<void>;
   closeCurrentThread(): Promise<void>;
   exit(): void;
+  onError(error: unknown): void;
 }) {
+  const [compactionRunning, setCompactionRunning] = useState(false);
+  const compactionInterruptRequested = useRef(false);
   const rewindToTarget = async (target: RewindTarget): Promise<void> => {
     const next = await input.thread.fork(target.turnId);
     await input.switchThread(next, target.text);
@@ -29,10 +34,23 @@ export function useRuntimeActions(input: {
         await input.switchThread(await input.thread.startNewThread());
         return;
       case 'compact': {
-        const result = await input.thread.request('thread/compact/start', {
-          threadId: input.thread.threadId,
-        });
-        message(`Context compaction completed (${result.jobId}).`);
+        compactionInterruptRequested.current = false;
+        setCompactionRunning(true);
+        input.dispatch({ type: 'ui.compaction.started' });
+        try {
+          const report = await input.thread.request('thread/compact/start', {
+            threadId: input.thread.threadId,
+          });
+          if (!compactionInterruptRequested.current) {
+            input.dispatch({ type: 'ui.compaction.completed', report });
+          }
+        } catch (error) {
+          input.dispatch({ type: 'ui.compaction.cleared' });
+          if (!compactionInterruptRequested.current) throw error;
+        } finally {
+          compactionInterruptRequested.current = false;
+          setCompactionRunning(false);
+        }
         return;
       }
       case 'fork':
@@ -149,7 +167,26 @@ export function useRuntimeActions(input: {
   const message = (text: string): void =>
     input.dispatch({ type: 'ui.message', text });
 
-  return { runRuntimeAction: run, rewindToTarget };
+  const cancelCompaction = (): boolean => {
+    if (!compactionRunning) return false;
+    if (!compactionInterruptRequested.current) {
+      compactionInterruptRequested.current = true;
+      input.dispatch({ type: 'ui.compaction.cleared' });
+      void input.thread
+        .request('thread/compact/interrupt', {
+          threadId: input.thread.threadId,
+        })
+        .catch(input.onError);
+    }
+    return true;
+  };
+
+  return {
+    runRuntimeAction: run,
+    rewindToTarget,
+    compactionRunning,
+    cancelCompaction,
+  };
 }
 
 export function rewindTargets(

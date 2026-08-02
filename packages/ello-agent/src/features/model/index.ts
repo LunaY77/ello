@@ -4,7 +4,7 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
-import { createProviderRegistry } from './providers/catalog/index.js';
+import { createModelRegistry } from './providers/catalog/index.js';
 import { createModelRoutes } from './routes.js';
 
 /**
@@ -21,18 +21,18 @@ import { createModelRoutes } from './routes.js';
  */
 export function createModelFeature() {
   return {
-    resolve: createProviderRegistry,
+    resolve: createModelRegistry,
     routes: createModelRoutes(),
   };
 }
 
 export {
-  createProviderRegistry,
-  modelSettingsFromRole,
+  createModelRegistry,
+  modelInputBudgetFromRuntimeModel,
+  modelSettingsFromRuntimeModel,
+  providerOptionsFromRuntimeModel,
   prepareModelInputForRuntimeModel,
-  providerOptionsForRole,
-  type ModelRole,
-  type ProviderRegistry,
-  type RuntimeRoleModel,
+  type ModelRegistry,
+  type RuntimeModel,
 } from './providers/catalog/index.js';
 export { createAiSdkModelAdapter } from './providers/ai-sdk/ai-sdk.js';

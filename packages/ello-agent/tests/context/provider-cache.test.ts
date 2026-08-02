@@ -1,17 +1,20 @@
 /**
- * 本文件验证 provider-cache 覆盖的运行时行为契约。
- *
- * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
- * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
+ * 验证 runtime model 的输入预算、模型设置和 provider cache 转换契约。
  */
 import { describe, expect, it } from 'vitest';
 
 import {
   splitSystemCacheSegments,
   wrapDynamicSystemContent,
+  type ModelInput,
 } from '../../src/features/agent/engine/index.js';
-import type { ModelInput } from '../../src/features/agent/engine/index.js';
-import { prepareModelInputForRuntimeModel } from '../../src/features/model/providers/catalog/transforms.js';
+import type { ContextConfig } from '../../src/features/config/index.js';
+import {
+  modelInputBudgetFromRuntimeModel,
+  modelSettingsFromRuntimeModel,
+  providerOptionsFromRuntimeModel,
+  prepareModelInputForRuntimeModel,
+} from '../../src/features/model/providers/catalog/transforms.js';
 import type { RuntimeModel } from '../../src/features/model/providers/catalog/types.js';
 
 const diagnostics = {
@@ -26,14 +29,40 @@ const diagnostics = {
 };
 
 describe('provider cache transforms', () => {
-  it('cache layout 只允许稳定前缀后连续追加动态段', () => {
-    const system = [
+  it('caps the model-input budget at the selected model context window', () => {
+    const model = {
+      ...runtimeModel('anthropic'),
+      contextWindow: 64_000,
+      maxOutputTokens: 8_000,
+    };
+    const context = {
+      max_input_tokens: 160_000,
+      reserved_output_tokens: 8_000,
+    } as ContextConfig;
+
+    expect(modelInputBudgetFromRuntimeModel(model, context)).toEqual({
+      maxInputTokens: 64_000,
+      reservedOutputTokens: 8_000,
+    });
+    expect(
+      modelInputBudgetFromRuntimeModel(
+        { ...model, maxOutputTokens: 32_000 },
+        context,
+      ),
+    ).toEqual({
+      maxInputTokens: 40_000,
+      reservedOutputTokens: 8_000,
+    });
+  });
+
+  it('allows dynamic cache sections only after a stable instruction prefix', () => {
+    const instructions = [
       'stable prefix',
       wrapDynamicSystemContent('active skill'),
       wrapDynamicSystemContent('memory'),
     ].join('\n\n');
 
-    expect(splitSystemCacheSegments(system)).toEqual({
+    expect(splitSystemCacheSegments(instructions)).toEqual({
       stable: 'stable prefix',
       dynamic: 'active skill\n\nmemory',
     });
@@ -44,120 +73,203 @@ describe('provider cache transforms', () => {
     ).toThrow('Stable system content must not follow dynamic context.');
   });
 
-  it('OpenAI key 隔离稳定指令集，但不随动态 skill 变化', () => {
+  it('adds the OpenAI cache key from stable instructions and tool contract', () => {
     const model = runtimeModel('openai');
     const first = prepareModelInputForRuntimeModel(
       model,
       modelInput(diagnostics, {
-        system: cacheSystem('stable rule A', 'skill review'),
+        instructions: cacheInstructions('stable rule A', 'skill review'),
       }),
       { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
     const dynamicChanged = prepareModelInputForRuntimeModel(
       model,
       modelInput(diagnostics, {
-        system: cacheSystem('stable rule A', 'skill verify'),
+        instructions: cacheInstructions('stable rule A', 'skill verify'),
       }),
       { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
     const instructionChanged = prepareModelInputForRuntimeModel(
       model,
       modelInput(diagnostics, {
-        system: cacheSystem('stable rule B', 'skill verify'),
-      }),
-      { promptProfile: 'coding', cwdIdentity: '/workspace' },
-    );
-    const historyGrew = prepareModelInputForRuntimeModel(
-      model,
-      modelInput(diagnostics, {
-        system: cacheSystem('stable rule A', 'skill review'),
-        messages: Array.from({ length: 40 }, (_, index) => ({
-          role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
-          content: `message-${index}`,
-        })),
+        instructions: cacheInstructions('stable rule B', 'skill verify'),
       }),
       { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
 
     const firstKey = readPromptCacheKey(first);
     expect(firstKey).toHaveLength(64);
-    expect(firstKey).not.toContain('run');
     expect(readPromptCacheKey(dynamicChanged)).toBe(firstKey);
-    expect(readPromptCacheKey(historyGrew)).toBe(firstKey);
     expect(readPromptCacheKey(instructionChanged)).not.toBe(firstKey);
   });
 
-  it('OpenAI key 随工具契约变化', () => {
-    const model = runtimeModel('openai');
-    const changedTools = prepareModelInputForRuntimeModel(
-      model,
-      modelInput({ ...diagnostics, toolsetFingerprint: 'x'.repeat(64) }),
-      { promptProfile: 'coding', cwdIdentity: '/workspace' },
-    );
-    const baseline = prepareModelInputForRuntimeModel(
-      model,
+  it('does not apply official OpenAI prompt cache options to compatible models', () => {
+    const transformed = prepareModelInputForRuntimeModel(
+      runtimeModel('openai-compatible'),
       modelInput(diagnostics),
       { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
-    expect(readPromptCacheKey(changedTools)).not.toBe(
-      readPromptCacheKey(baseline),
-    );
+    expect(transformed.providerOptions).toBeUndefined();
   });
 
-  it('Anthropic 缓存稳定 system/tool 前缀和长会话前沿', () => {
-    const input = modelInput(diagnostics, {
-      system: cacheSystem('stable prefix', 'skill review'),
-      messages: [
-        { role: 'user', content: 'first instruction' },
-        { role: 'assistant', content: 'first result' },
-        { role: 'user', content: 'next instruction' },
-      ],
+  it('passes reasoning effort to every supported provider protocol', () => {
+    for (const protocol of [
+      'anthropic',
+      'openai',
+      'openai-compatible',
+    ] as const) {
+      expect(modelSettingsFromRuntimeModel(runtimeModel(protocol))).toEqual({
+        maxOutputTokens: 10_000,
+        reasoning: 'medium',
+      });
+    }
+
+    expect(
+      modelSettingsFromRuntimeModel({
+        ...runtimeModel('anthropic'),
+        reasoningEffort: 'max',
+      }),
+    ).toEqual({ maxOutputTokens: 10_000, reasoning: 'xhigh' });
+  });
+
+  it('passes DeepSeek thinking and effort as Anthropic provider input', () => {
+    expect(
+      providerOptionsFromRuntimeModel({
+        ...runtimeModel('anthropic'),
+        name: 'deepseek-v4-pro',
+        apiModel: 'deepseek-v4-pro',
+        baseUrl: 'https://api.deepseek.com/anthropic',
+        reasoningEffort: 'high',
+      }),
+    ).toEqual({
+      anthropic: {
+        thinking: { type: 'adaptive' },
+        effort: 'high',
+      },
     });
+    expect(
+      providerOptionsFromRuntimeModel(runtimeModel('anthropic')),
+    ).toBeUndefined();
+    expect(
+      providerOptionsFromRuntimeModel(runtimeModel('openai-compatible')),
+    ).toBeUndefined();
+  });
+
+  it('keeps official OpenAI Responses requests stateless', () => {
+    expect(providerOptionsFromRuntimeModel(runtimeModel('openai'))).toEqual({
+      openai: { store: false },
+    });
+    expect(
+      providerOptionsFromRuntimeModel({
+        ...runtimeModel('openai'),
+        endpoint: 'chat',
+      }),
+    ).toBeUndefined();
+  });
+
+  it('puts Anthropic cache breakpoints in instructions, never conversation messages', () => {
     const transformed = prepareModelInputForRuntimeModel(
       runtimeModel('anthropic'),
-      input,
+      modelInput(diagnostics, {
+        instructions: cacheInstructions('stable prefix', 'skill review'),
+        messages: [
+          { role: 'user', content: 'first instruction' },
+          { role: 'assistant', content: 'first result' },
+          { role: 'user', content: 'next instruction' },
+        ],
+      }),
       { promptProfile: 'coding', cwdIdentity: '/workspace' },
     );
 
-    expect(transformed).not.toHaveProperty('system');
-    expect(transformed.messages[0]).toMatchObject({
-      role: 'system',
-      providerOptions: {
-        anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } },
-      },
-    });
-    expect(JSON.stringify(transformed.messages[0])).not.toContain(
-      'skill review',
+    expect(transformed.instructions).toEqual([
+      expect.objectContaining({
+        role: 'system',
+        content: 'stable prefix',
+        providerOptions: {
+          anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } },
+        },
+      }),
+      expect.objectContaining({ role: 'system', content: 'skill review' }),
+    ]);
+    expect(transformed.messages).not.toContainEqual(
+      expect.objectContaining({ role: 'system' }),
     );
-    expect(JSON.stringify(transformed.messages[1])).toContain('skill review');
     expect(transformed.messages.at(-1)).toMatchObject({
       providerOptions: {
         anthropic: { cacheControl: { type: 'ephemeral', ttl: '5m' } },
       },
     });
+    expect(cacheBreakpointLayout(transformed)).toEqual([[2, '5m']]);
   });
 
-  it('Anthropic 动态上下文变化不改变稳定 cache 前缀', () => {
-    const first = prepareModelInputForRuntimeModel(
-      runtimeModel('anthropic'),
-      modelInput(diagnostics, {
-        system: cacheSystem('stable rule', 'skill review'),
-      }),
-      { promptProfile: 'coding', cwdIdentity: '/workspace' },
-    );
-    const second = prepareModelInputForRuntimeModel(
-      runtimeModel('anthropic'),
-      modelInput(diagnostics, {
-        system: cacheSystem('stable rule', 'skill verify'),
-      }),
-      { promptProfile: 'coding', cwdIdentity: '/workspace' },
-    );
+  it('anchors long conversations so the rolling breakpoint is not the only fallback', () => {
+    expect(cacheBreakpointLayout(transformAnthropic(60))).toEqual([
+      [19, '1h'],
+      [39, '1h'],
+      [59, '5m'],
+    ]);
+    // 锚点在一个 stride 内逐字节不动：61…80 条消息给出同一组 1h 断点，
+    // 只有尾部断点前移。锚点每轮变化就等于没有回落层。
+    expect(cacheBreakpointLayout(transformAnthropic(61))).toEqual([
+      [39, '1h'],
+      [59, '1h'],
+      [60, '5m'],
+    ]);
+    expect(cacheBreakpointLayout(transformAnthropic(80))).toEqual([
+      [39, '1h'],
+      [59, '1h'],
+      [79, '5m'],
+    ]);
+    // 越过下一个 stride 边界后，两个锚点整体前移一格。
+    expect(cacheBreakpointLayout(transformAnthropic(81))).toEqual([
+      [59, '1h'],
+      [79, '1h'],
+      [80, '5m'],
+    ]);
+  });
 
-    expect(first.messages[0]).toEqual(second.messages[0]);
+  it('never exceeds the Anthropic four-breakpoint budget', () => {
+    for (const count of [1, 2, 20, 21, 40, 41, 199, 200, 501]) {
+      const layout = cacheBreakpointLayout(transformAnthropic(count));
+      expect(layout.length).toBeLessThanOrEqual(3);
+      expect(layout.at(-1)?.[0]).toBe(count - 1);
+      expect(new Set(layout.map(([index]) => index)).size).toBe(layout.length);
+    }
   });
 });
 
-function cacheSystem(stable: string, dynamic: string): string {
+function transformAnthropic(messageCount: number): ModelInput {
+  return prepareModelInputForRuntimeModel(
+    runtimeModel('anthropic'),
+    modelInput(diagnostics, {
+      instructions: cacheInstructions('stable prefix', 'skill review'),
+      messages: Array.from({ length: messageCount }, (_unused, index) => ({
+        role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+        content: `message ${String(index)}`,
+      })),
+    }),
+    { promptProfile: 'coding', cwdIdentity: '/workspace' },
+  );
+}
+
+function cacheBreakpointLayout(
+  input: ModelInput,
+): readonly (readonly [number, string])[] {
+  return input.messages.flatMap((message, index) => {
+    const anthropic = message.providerOptions?.anthropic;
+    if (anthropic === undefined) return [];
+    const cacheControl = (
+      anthropic as { readonly cacheControl?: { readonly ttl?: unknown } }
+    ).cacheControl;
+    if (cacheControl === undefined) return [];
+    if (typeof cacheControl.ttl !== 'string') {
+      throw new Error(`Cache breakpoint at ${String(index)} has no ttl.`);
+    }
+    return [[index, cacheControl.ttl] as const];
+  });
+}
+
+function cacheInstructions(stable: string, dynamic: string): string {
   return `${stable}\n\n${wrapDynamicSystemContent(dynamic)}`;
 }
 
@@ -166,7 +278,7 @@ function modelInput(
   overrides: Partial<ModelInput> = {},
 ): ModelInput {
   return {
-    system: 'stable system',
+    instructions: 'stable system',
     messages: [{ role: 'user', content: 'hello' }],
     tools: {},
     diagnostics: inputDiagnostics,
@@ -175,27 +287,20 @@ function modelInput(
 }
 
 function runtimeModel(
-  kind: 'openai' | 'anthropic' | 'openai-compatible',
+  protocol: 'openai' | 'anthropic' | 'openai-compatible',
 ): RuntimeModel {
   return {
-    ref: `${kind}/model-a`,
-    providerId: kind,
-    id: 'model-a',
-    name: 'Model A',
-    apiId: 'model-a',
-    providerKind: kind,
-    status: 'active',
-    capabilities: {
-      temperature: true,
-      reasoning: true,
-      toolCall: true,
-      input: ['text'],
-      output: ['text'],
-    },
-    limit: { context: 100_000, output: 10_000 },
-    headers: {},
-    options: {},
-    variants: {},
+    name: `${protocol}-model`,
+    protocol,
+    ...(protocol === 'anthropic'
+      ? { authScheme: 'api-key' as const }
+      : { endpoint: 'responses' as const }),
+    apiModel: 'model-a',
+    baseUrl: 'https://api.example.test/v1',
+    apiKeyEnv: 'TEST_API_KEY',
+    contextWindow: 100_000,
+    maxOutputTokens: 10_000,
+    reasoningEffort: 'medium',
   };
 }
 
@@ -205,8 +310,6 @@ function readPromptCacheKey(input: ModelInput): string {
     throw new Error('missing openai provider options');
   }
   const key = (openai as { readonly promptCacheKey?: unknown }).promptCacheKey;
-  if (typeof key !== 'string') {
-    throw new Error('missing promptCacheKey');
-  }
+  if (typeof key !== 'string') throw new Error('missing promptCacheKey');
   return key;
 }

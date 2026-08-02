@@ -10,6 +10,7 @@ import type {
   AgentApprovalDecision,
   AgentToolContext,
   AgentToolDiscovery,
+  AgentToolInputJsonSchema,
   MaybePromise,
 } from '../../../agent/engine/index.js';
 import type { FileChange } from '../file-change.js';
@@ -69,7 +70,6 @@ export interface CodingPermissionRequestDraft {
 
 export interface CodingToolContext {
   readonly cwd: string;
-  readonly allowedPaths: readonly string[];
   readonly sessionId: string;
   readonly runId: string;
   readonly callId: string;
@@ -82,6 +82,7 @@ export interface DefineCodingToolOptions<TInput> {
   readonly description: string;
   readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<TInput>;
+  readonly inputJsonSchema?: AgentToolInputJsonSchema;
   /**
    * 在 工具 `coding-tool` 模块 中执行 `execute` 完整流程，并在返回前完成其必要副作用。
    *
@@ -113,6 +114,15 @@ export interface DefineCodingToolOptions<TInput> {
     input: TInput,
     ctx: CodingToolContext,
   ): MaybePromise<AgentApprovalDecision>;
+  /** 工具可根据参数和调用上下文声明调用能力。 */
+  capabilities?(
+    input: TInput,
+    ctx: CodingToolContext,
+  ): MaybePromise<
+    Partial<import('../../../agent/engine/index.js').AgentToolCapabilities>
+  >;
+  /** 参数结构校验通过后，检查工具自身的使用限制。 */
+  validateInput?(input: TInput, ctx: CodingToolContext): MaybePromise<void>;
 }
 
 export type CodingTool<TInput = unknown> = DefineCodingToolOptions<TInput>;
@@ -122,6 +132,7 @@ export type AnyCodingTool = {
   readonly description: string;
   readonly discovery: AgentToolDiscovery;
   readonly input: z.ZodType<unknown>;
+  readonly inputJsonSchema?: AgentToolInputJsonSchema;
   execute(
     input: unknown,
     ctx: CodingToolContext,
@@ -130,6 +141,14 @@ export type AnyCodingTool = {
     input: unknown,
     ctx: CodingToolContext,
   ): MaybePromise<AgentApprovalDecision>;
+
+  capabilities?(
+    input: unknown,
+    ctx: CodingToolContext,
+  ): MaybePromise<
+    Partial<import('../../../agent/engine/index.js').AgentToolCapabilities>
+  >;
+  validateInput?(input: unknown, ctx: CodingToolContext): MaybePromise<void>;
 };
 
 /**
@@ -145,12 +164,29 @@ export function defineCodingTool<TInput>(
   options: DefineCodingToolOptions<TInput>,
 ): AnyCodingTool {
   const approval = options.approval;
+  const capabilities = options.capabilities;
+  const validateInput = options.validateInput;
   return {
     name: options.name,
     description: options.description,
     discovery: options.discovery,
     input: options.input,
+    ...(options.inputJsonSchema === undefined
+      ? {}
+      : { inputJsonSchema: options.inputJsonSchema }),
     execute: (input, ctx) => options.execute(options.input.parse(input), ctx),
+    ...(capabilities === undefined
+      ? {}
+      : {
+          capabilities: (input: unknown, ctx: CodingToolContext) =>
+            capabilities(options.input.parse(input), ctx),
+        }),
+    ...(validateInput === undefined
+      ? {}
+      : {
+          validateInput: (input: unknown, ctx: CodingToolContext) =>
+            validateInput(options.input.parse(input), ctx),
+        }),
     ...(approval === undefined
       ? {}
       : {

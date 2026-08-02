@@ -33,6 +33,7 @@ import {
   type MemoryStore,
 } from '../../src/features/memory/index.js';
 import { createProductionToolRuntime } from '../../src/features/tool/internal/production.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 import { createTestStores } from '../support/stores.js';
 
@@ -82,7 +83,7 @@ function memoryRunContext(input: AgentInput): AgentRunContext {
     input,
     context: undefined,
     options: {},
-    environment: {},
+    environment: createTestEnvironmentHandle(),
     metadata: {},
   };
 }
@@ -361,6 +362,7 @@ describe('Memory 上下文加载契约', () => {
       cwd: root,
       session_dir: path.join(root, 'sessions'),
       initial_mode: 'ask-before-changes',
+      ...modelConfig(),
       context: {
         memory: {
           enabled: true,
@@ -408,6 +410,7 @@ describe('Memory 生产装配契约', () => {
         cwd: root,
         session_dir: path.join(root, '.ello', 'sessions'),
         initial_mode: 'ask-before-changes',
+        ...modelConfig(),
         context: {
           memory: {
             enabled: true,
@@ -480,6 +483,7 @@ describe('Memory 生产装配契约', () => {
         cwd: path.dirname(repository.roots.team),
         session_dir: path.join(repository.roots.team, '..', 'sessions'),
         initial_mode: 'plan',
+        ...modelConfig(),
         context: {
           memory: {
             enabled: true,
@@ -544,19 +548,26 @@ describe('Memory 生产装配契约', () => {
     );
     const notifications = vi.fn();
     const services = createMemoryFeature();
+    const previousHome = process.env.ELLO_HOME;
+    process.env.ELLO_HOME = root;
 
-    await expect(
-      invokeServiceRoute(
-        services,
-        createTestPeer({ notify: notifications }),
-        'memory/dream/start',
-        { cwd: root },
-      ),
-    ).rejects.toMatchObject({
-      type: 'invalidParams',
-      message: expect.stringContaining('no production dream runner'),
-    });
-    expect(notifications).not.toHaveBeenCalled();
+    try {
+      await expect(
+        invokeServiceRoute(
+          services,
+          createTestPeer({ notify: notifications }),
+          'memory/dream/start',
+          { cwd: root },
+        ),
+      ).rejects.toMatchObject({
+        type: 'invalidParams',
+        message: expect.stringContaining('no production dream runner'),
+      });
+      expect(notifications).not.toHaveBeenCalled();
+    } finally {
+      if (previousHome === undefined) delete process.env.ELLO_HOME;
+      else process.env.ELLO_HOME = previousHome;
+    }
   });
 });
 
@@ -564,10 +575,29 @@ const TOOL_CONTEXT: AgentToolContext = {
   runId: 'run-memory',
   turnIndex: 0,
   toolCallId: 'call-memory',
-  environment: {},
+  environment: createTestEnvironmentHandle(),
   metadata: {},
   signal: new AbortController().signal,
 };
+
+function modelConfig() {
+  return {
+    models: {
+      test: {
+        protocol: 'openai' as const,
+        endpoint: 'responses' as const,
+        api_model: 'test-model',
+        base_url: 'https://api.example.test/v1',
+        api_key_env: 'TEST_API_KEY',
+        context_window: 128_000,
+        max_output_tokens: 16_000,
+        reasoning_effort: 'medium' as const,
+      },
+    },
+    primary_model: 'test',
+    auxiliary_model: 'test',
+  };
+}
 
 function immediateTool(tools: ReadonlyArray<AnyAgentTool>, name: string) {
   const tool = tools.find((candidate) => candidate.name === name);

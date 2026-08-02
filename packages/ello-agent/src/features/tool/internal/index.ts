@@ -19,10 +19,16 @@ import type { PermissionRule } from '../permissions/types.js';
 
 import { createFsTools } from './fs.js';
 import { adaptCodingTools } from './runtime/adapter.js';
+import type { AnyCodingTool } from './runtime/coding-tool.js';
+import { ShellCommandHistory } from './runtime/command-history.js';
+import { SessionFileState } from './runtime/file-state.js';
 import { SessionToolOutputStore } from './runtime/output-store.js';
+import { ToolFailureTracker } from './runtime/tool-errors.js';
+import { AgentWorkflowState } from './runtime/workflow-state.js';
 import { createSearchTools } from './search.js';
 import { createShellTools } from './shell.js';
 import { createTaskTools } from './task.js';
+import { createWorkspaceSnapshotTools } from './workspace-snapshot.js';
 
 /**
  * coding 工具集装配。
@@ -69,6 +75,9 @@ export interface CreateCodingToolsOptions {
    * - 当 工具 公开入口 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
    */
   readonly readRoots?: () => readonly string[];
+  readonly fileState?: SessionFileState;
+  readonly additionalTools?: readonly AnyCodingTool[];
+  readonly workflow?: AgentWorkflowState;
 }
 
 /**
@@ -101,15 +110,29 @@ export function createCodingTools(
   const disabled = new Set(config.tools.disabled);
   const outputStore = new SessionToolOutputStore(config.session_dir);
   const tasks = createTaskService(options.taskBoards, options.taskBoardScope);
+  // 全部 coding 工具共用一份轮次记录，重复命令判定才能看到期间的文件变更。
+  const commandHistory = new ShellCommandHistory();
+  const failures = new ToolFailureTracker();
+  const workflow = options.workflow ?? new AgentWorkflowState();
+  const fileState = options.fileState ?? new SessionFileState();
 
   const codingTools = [
-    ...createFsTools(config, decide),
+    ...createFsTools(config, decide, fileState),
     ...createSearchTools(config, decide),
     ...createShellTools(config, decide),
+    ...createWorkspaceSnapshotTools(config, decide),
+    ...(options.additionalTools ?? []),
   ];
 
   return [
-    ...adaptCodingTools(codingTools, { config, outputStore }),
+    ...adaptCodingTools(codingTools, {
+      config,
+      outputStore,
+      commandHistory,
+      fileState,
+      failures,
+      workflow,
+    }),
     ...createTaskTools(approval, tasks),
   ].filter((tool) => !disabled.has(tool.name));
 }

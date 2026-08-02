@@ -95,10 +95,19 @@ function summarize(
   }
   if (typeof input === 'object' && input !== null) {
     const record = input as Record<string, unknown>;
-    for (const key of ['path', 'command', 'pattern', 'url', 'query']) {
+    for (const key of [
+      'filePath',
+      'path',
+      'command',
+      'pattern',
+      'url',
+      'query',
+    ]) {
       const value = record[key];
       if (typeof value === 'string' && value !== '') {
-        return key === 'path' ? formatToolPath(value, options) : value;
+        return key === 'filePath' || key === 'path'
+          ? formatToolPath(value, options)
+          : value;
       }
     }
   }
@@ -248,7 +257,11 @@ function searchTarget(
   options: ToolCardDisplayOptions,
 ): string {
   const pattern = text(metadata?.pattern) || inputString(input, 'pattern');
-  const targetPath = text(metadata?.path) || inputString(input, 'path');
+  const targetPath =
+    text(metadata?.filePath) ||
+    text(metadata?.path) ||
+    inputString(input, 'filePath') ||
+    inputString(input, 'path');
   const displayPath = formatToolPath(targetPath, options);
   if (pattern === '') {
     return displayPath !== '' ? ` in ${displayPath}` : '';
@@ -349,6 +362,7 @@ export function buildToolCardModel(
   const diff = unifiedDiffFromFileChanges(sourceFileChanges);
   const hasDiff = diff !== '';
   const outputPath = text(metadata?.outputPath);
+  const artifactId = text(metadata?.artifactId);
 
   return {
     status: call.status,
@@ -360,14 +374,19 @@ export function buildToolCardModel(
     metrics: metricList(metadata),
     details: detailList(metadata, diff),
     outputPreview:
-      metadata?.kind === 'shell' || call.name === 'bash'
-        ? outputPreview(call.output)
-        : [],
-    ...(outputPath !== ''
+      call.status === 'fail' && call.error?.message !== undefined
+        ? outputPreview(call.error.message)
+        : metadata?.kind === 'shell' || call.name === 'bash'
+          ? outputPreview(call.output)
+          : [],
+    ...(outputPath !== '' || artifactId !== ''
       ? {
           artifact: {
-            displayPath: formatArtifactPath(outputPath),
-            fullPath: outputPath,
+            displayPath:
+              outputPath === ''
+                ? compactArtifactId(artifactId)
+                : formatArtifactPath(outputPath),
+            fullPath: outputPath || artifactId,
           },
         }
       : {}),
@@ -377,6 +396,12 @@ export function buildToolCardModel(
     // 默认折叠普通成功工具；diff / 失败默认展开。
     defaultCollapsed: !hasDiff && call.status !== 'fail',
   };
+}
+
+function compactArtifactId(artifactId: string): string {
+  return artifactId.length <= 16
+    ? artifactId
+    : `${artifactId.slice(0, 8)}…${artifactId.slice(-4)}`;
 }
 
 function compactToolPath(value: string, maxLength: number): string {
@@ -418,7 +443,7 @@ function displayMetadataPath(
   metadata: ToolMetadata | undefined,
   options: ToolCardDisplayOptions,
 ): string {
-  const metadataPath = text(metadata?.path);
+  const metadataPath = text(metadata?.filePath) || text(metadata?.path);
   const metadataPaths = Array.isArray(metadata?.paths)
     ? metadata.paths.filter(
         (value): value is string => typeof value === 'string',

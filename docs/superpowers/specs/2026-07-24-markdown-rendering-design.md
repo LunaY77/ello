@@ -50,7 +50,11 @@ tui/utils/markdown/
 暴露纯函数：
 
 ```ts
-function renderMarkdown(text: string, theme: TuiTheme, options?: { streaming?: boolean }): ReactNode
+function renderMarkdown(
+  text: string,
+  theme: TuiTheme,
+  options?: { streaming?: boolean },
+): ReactNode;
 ```
 
 - 不依赖 React 上下文、不调用 hook，传入 theme 直接产出节点树。
@@ -63,7 +67,13 @@ function renderMarkdown(text: string, theme: TuiTheme, options?: { streaming?: b
 薄组件：
 
 ```tsx
-function MarkdownText({ text, streaming }: { text: string; streaming?: boolean })
+function MarkdownText({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming?: boolean;
+});
 ```
 
 唯一职责是 `useTheme()` 取 theme 后转发给 `renderMarkdown`。接入点只认这个组件，不直接碰 marked 或 token。
@@ -78,27 +88,27 @@ function MarkdownText({ text, streaming }: { text: string; streaming?: boolean }
 
 ### 块级节点
 
-| 节点 | 映射 |
-|---|---|
-| `heading`（`#`~`######`） | `<Text bold color={theme.markdownHeading}>`，不带 `#` 前缀，靠颜色 + bold 区分（v1 粗粒度，不按层级分色）。层级间空行隔开。 |
-| `paragraph` | `<Text color={theme.text}>`，inline token 递归。 |
-| `code`（fenced） | 调 `cli-highlight`：有 lang 按语言上色（keyword→`syntaxKeyword`、string→`syntaxString`、其余回退 `markdownCode`）；无 lang 整块 `markdownCode` 单色。整体包在 `<Box flexDirection="column">`，不画边框。 |
-| `list`（ordered/unordered） | 每项一行，ordered 前缀 `1. 2. `，unordered 前缀复用 `glyphs.mutedBullet`（`-`）+ 缩进。嵌套按 `tuiTokens.space.indent`（2）递进。list item 内容按 inline token 递归。 |
-| `blockquote` | 每行前缀 `> `，颜色 `theme.textMuted`。 |
-| `hr` | 一行 `theme.border` 色的 `─`。 |
-| `space` | 空行，用于段间距。 |
+| 节点                        | 映射                                                                                                                                                                                                     |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `heading`（`#`~`######`）   | `<Text bold color={theme.markdownHeading}>`，不带 `#` 前缀，靠颜色 + bold 区分（v1 粗粒度，不按层级分色）。层级间空行隔开。                                                                              |
+| `paragraph`                 | `<Text color={theme.text}>`，inline token 递归。                                                                                                                                                         |
+| `code`（fenced）            | 调 `cli-highlight`：有 lang 按语言上色（keyword→`syntaxKeyword`、string→`syntaxString`、其余回退 `markdownCode`）；无 lang 整块 `markdownCode` 单色。整体包在 `<Box flexDirection="column">`，不画边框。 |
+| `list`（ordered/unordered） | 每项一行，ordered 前缀 `1. 2. `，unordered 前缀复用 `glyphs.mutedBullet`（`-`）+ 缩进。嵌套按 `tuiTokens.space.indent`（2）递进。list item 内容按 inline token 递归。                                    |
+| `blockquote`                | 每行前缀 `> `，颜色 `theme.textMuted`。                                                                                                                                                                  |
+| `hr`                        | 一行 `theme.border` 色的 `─`。                                                                                                                                                                           |
+| `space`                     | 空行，用于段间距。                                                                                                                                                                                       |
 
 ### 行内节点（inline，在 paragraph / list item 内递归）
 
-| 节点 | 映射 |
-|---|---|
-| `text` | 透传，递归 inline 子 token。 |
-| `strong`（`**x**`） | `<Text bold>`。 |
-| `em`（`*x*`） | `<Text italic>`。 |
-| `codespan` | `<Text color={theme.markdownCode}>`，不加背景（v1）。 |
-| `link` | `<Text color={theme.info} underline>`，仅显示链接文字，不显示 href（v1）。 |
-| `del`（`~~x~~`） | `<Text strikethrough>`。 |
-| `escape` / `br` | 原样字符 / 换行。 |
+| 节点                | 映射                                                                       |
+| ------------------- | -------------------------------------------------------------------------- |
+| `text`              | 透传，递归 inline 子 token。                                               |
+| `strong`（`**x**`） | `<Text bold>`。                                                            |
+| `em`（`*x*`）       | `<Text italic>`。                                                          |
+| `codespan`          | `<Text color={theme.markdownCode}>`，不加背景（v1）。                      |
+| `link`              | `<Text color={theme.info} underline>`，仅显示链接文字，不显示 href（v1）。 |
+| `del`（`~~x~~`）    | `<Text strikethrough>`。                                                   |
+| `escape` / `br`     | 原样字符 / 换行。                                                          |
 
 ### 流式容错
 
@@ -151,17 +161,17 @@ function LiveAssistantText({ text }: { readonly text: string }) {
 
 所有颜色只走 `TuiTheme` 语义 token，不写死色值。汇总：
 
-| markdown 节点 | token |
-|---|---|
-| heading | `markdownHeading` + bold |
-| codespan / 无 lang 代码块 | `markdownCode` |
-| 代码块 keyword | `syntaxKeyword` |
-| 代码块 string | `syntaxString` |
-| 代码块其余 token | `markdownCode`（回退） |
-| 段落正文 | `text` |
-| blockquote | `textMuted` |
-| hr | `border` |
-| link | `info` + underline |
+| markdown 节点             | token                    |
+| ------------------------- | ------------------------ |
+| heading                   | `markdownHeading` + bold |
+| codespan / 无 lang 代码块 | `markdownCode`           |
+| 代码块 keyword            | `syntaxKeyword`          |
+| 代码块 string             | `syntaxString`           |
+| 代码块其余 token          | `markdownCode`（回退）   |
+| 段落正文                  | `text`                   |
+| blockquote                | `textMuted`              |
+| hr                        | `border`                 |
+| link                      | `info` + underline       |
 
 这印证了 theme 当初预留的四个 token 正好被本设计用满。现有四个主题（tokyo-night / github-dark / github-light / catppuccin）都已定义这些 token 的色值，无需改动主题文件。
 

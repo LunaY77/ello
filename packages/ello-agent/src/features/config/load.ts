@@ -13,11 +13,8 @@ import { AppServerError } from '../../protocol/errors.js';
 
 import { atomicWriteText } from './atomic-write.js';
 import { ensureBuiltinAssets, ensureGlobalConfig } from './initializer.js';
+import { builtinModelConfig } from './model-catalog.js';
 import { globalConfigPath, globalHomeDir, projectConfigPath } from './paths.js';
-import {
-  builtinProviderCatalog,
-  validateProviderCatalog,
-} from './provider-catalog.js';
 import {
   CodingAgentConfigSchema,
   type CodingAgentConfig,
@@ -70,8 +67,7 @@ export class ConfigValidationError extends AppServerError {
  * 读取并合并 coding-agent 配置。
  *
  * 配置来源：全局 `~/.ello/config.yaml`、项目 `.ello/config.yaml`、
- * 以及 CLI/测试传入的 runtime overrides。模型配置只接受 provider/models/profile
- * 三层结构。
+ * 以及 CLI/测试传入的 runtime overrides。模型配置只接受模型目录和两个显式引用。
  *
  * Args:
  * - `overrides`: `loadCodingAgentConfig` 所需的业务值；函数按声明读取，不补造缺失内容；省略时使用声明中明确的调用语义。
@@ -101,11 +97,9 @@ function resolveCodingAgentConfig(
   projectConfig: Record<string, unknown>,
   overrides: CodingAgentConfigOverrides,
 ): CodingAgentConfig {
-  rejectProjectProfileConfig(projectConfig, projectConfigPath(cwd));
+  rejectProjectModelConfig(projectConfig, projectConfigPath(cwd));
   const defaults = {
-    provider: builtinProviderCatalog.provider,
-    models: builtinProviderCatalog.models,
-    profile: builtinProviderCatalog.profile,
+    ...builtinModelConfig,
   };
   const sessionDirValue = firstString(
     overrides.session_dir,
@@ -140,7 +134,7 @@ function resolveCodingAgentConfig(
     );
   }
   const parsed = result.data;
-  const resolved = {
+  return {
     ...parsed,
     context: {
       ...parsed.context,
@@ -159,16 +153,6 @@ function resolveCodingAgentConfig(
       },
     },
   };
-  try {
-    validateProviderCatalog(resolved);
-  } catch (error) {
-    throw new ConfigValidationError(
-      `Coding agent provider catalog is invalid: ${errorMessage(error)}`,
-      [{ path: [], message: errorMessage(error), source: 'merged' }],
-      { cause: error },
-    );
-  }
-  return resolved;
 }
 
 /**
@@ -489,10 +473,6 @@ function mergePlainRecord(
   const result: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(override)) {
     const existing = result[key];
-    if (key === 'profile' && isPlainRecord(value)) {
-      result[key] = value;
-      continue;
-    }
     result[key] =
       isPlainRecord(existing) && isPlainRecord(value)
         ? mergePlainRecord(existing, value)
@@ -501,15 +481,18 @@ function mergePlainRecord(
   return result;
 }
 
-function rejectProjectProfileConfig(
+function rejectProjectModelConfig(
   projectConfig: Record<string, unknown>,
   filePath: string,
 ): void {
-  if (projectConfig.profile !== undefined) {
-    throw projectConfigKeyError('profile', filePath);
+  if (projectConfig.models !== undefined) {
+    throw projectConfigKeyError('models', filePath);
   }
-  if (projectConfig.active_profile !== undefined) {
-    throw projectConfigKeyError('active_profile', filePath);
+  if (projectConfig.primary_model !== undefined) {
+    throw projectConfigKeyError('primary_model', filePath);
+  }
+  if (projectConfig.auxiliary_model !== undefined) {
+    throw projectConfigKeyError('auxiliary_model', filePath);
   }
   if (projectConfig.default_agent !== undefined) {
     throw projectConfigKeyError('default_agent', filePath);

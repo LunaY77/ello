@@ -40,11 +40,31 @@ export function normalizeAgentError(error: unknown): AgentError {
       name: error.name,
       message: error.message,
       ...(error.stack !== undefined ? { stack: error.stack } : {}),
-      ...(error.cause !== undefined ? { cause: error.cause } : {}),
+      ...(error.cause !== undefined
+        ? { cause: normalizeErrorCause(error.cause) }
+        : {}),
     };
   }
   return {
     name: 'Error',
     message: String(error),
+  };
+}
+
+/**
+ * 递归保留 Error cause 的可序列化诊断字段。
+ *
+ * Args:
+ * - `cause`: 原始 Error cause 或 provider 提供的结构化值。
+ *
+ * Returns:
+ * - Error 被归一化为 AgentError；其他结构化值保持原样。
+ */
+function normalizeErrorCause(cause: unknown): unknown {
+  if (!(cause instanceof Error)) return cause;
+  const code = Reflect.get(cause, 'code');
+  return {
+    ...normalizeAgentError(cause),
+    ...(typeof code === 'string' && code !== '' ? { code } : {}),
   };
 }

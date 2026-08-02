@@ -145,6 +145,8 @@ class LangfuseEventRecorder {
       case 'run.failed':
         this.endRun(event);
         return;
+      case 'context.compaction.started':
+        return;
       case 'context.compaction':
         this.recordCompaction(event);
         return;
@@ -242,15 +244,19 @@ class LangfuseEventRecorder {
     );
     const span = startChildSpan(
       this.runtime.tracer,
-      `llm.${event.identity.provider}/${event.identity.model}`,
+      `llm.${event.identity.protocol}/${event.identity.apiModel}`,
       turn,
       event.occurredAt,
     );
     span.setAttributes({
       [LANGFUSE_ATTRIBUTES.observationType]: 'generation',
-      [LANGFUSE_ATTRIBUTES.observationModel]: event.identity.model,
+      [LANGFUSE_ATTRIBUTES.observationModel]: event.identity.apiModel,
       'ello.model.call.id': event.identity.modelCallId,
-      'ello.model.provider': event.identity.provider,
+      'ello.model.agent.name': event.identity.agentName,
+      'ello.model.selector': event.identity.modelSelector,
+      'ello.model.configured': event.identity.configuredModel,
+      'ello.model.protocol': event.identity.protocol,
+      'ello.model.api': event.identity.apiModel,
       'ello.model.turn.index': event.identity.turnIndex,
       'ello.model.fingerprints': JSON.stringify(event.diagnostics),
       ...contentAttributes(this.runtime.config.content, 'input', event.request),
@@ -295,7 +301,7 @@ class LangfuseEventRecorder {
     );
     const span = startChildSpan(
       this.runtime.tracer,
-      `tool.${event.name}`,
+      `tool.${event.invocation?.logicalName ?? event.name}`,
       turn,
       event.occurredAt,
     );
@@ -303,6 +309,12 @@ class LangfuseEventRecorder {
       [LANGFUSE_ATTRIBUTES.observationType]: 'tool',
       'ello.tool.call.id': event.toolCallId,
       'ello.tool.name': event.name,
+      'ello.tool.logical_name': event.invocation?.logicalName ?? event.name,
+      'ello.tool.telemetry_tag': event.invocation?.telemetryTag ?? event.name,
+      'ello.tool.read_only': event.invocation?.readOnly ?? false,
+      'ello.tool.destructive': event.invocation?.destructive ?? true,
+      'ello.tool.concurrency_safe': event.invocation?.concurrencySafe ?? false,
+      'ello.tool.interruptible': event.invocation?.interruptible ?? false,
       'ello.tool.turn.index': event.turnIndex,
       ...contentAttributes(this.runtime.config.content, 'input', event.input),
     });

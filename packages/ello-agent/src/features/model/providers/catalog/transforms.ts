@@ -1,343 +1,286 @@
 /**
- * 本文件负责 model feature 的“transforms”模块职责。
- *
- * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
- * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
+ * 本文件负责把已解析的 runtime model 转换为 engine 调用预算、模型参数和 provider cache 输入。
+ * 所有窗口限制都在这里收敛为单一预算，调用方不得重新从原始 config 推导更宽的值。
  */
 import { createHash } from 'node:crypto';
 
-import type { JSONValue } from 'ai';
-
-import { isRecord } from '../../../../protocol/json-value.js';
+import type {
+  AgentModelSettings,
+  AgentProviderOptions,
+  CreateAgentOptions,
+  ModelInput,
+} from '../../../agent/engine/index.js';
 import {
-  createAgentMessage,
   joinSystemCacheSegments,
   splitSystemCacheSegments,
-  type AgentMessage,
-  type AgentModelSettings,
-  type AgentProviderOptionObject,
-  type AgentProviderOptions,
-  type ModelInput,
 } from '../../../agent/engine/index.js';
+import type { ContextConfig } from '../../../config/index.js';
 
-import type { ModelModality, RuntimeModel, RuntimeRoleModel } from './types.js';
+import type { RuntimeModel } from './types.js';
 
 /**
- * 从 role binding 和模型能力派生 AI SDK modelSettings。
+ * 生成产品 Agent 与 internal Agent 共用的唯一模型输入预算。
  *
  * Args:
- * - `binding`: `modelSettingsFromRole` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `model`: 已解析的 runtime model，包含模型声明的 context window。
+ * - `context`: 已校验的 context 配置，只能缩小模型窗口，不能放大。
  *
  * Returns:
- * - 返回 `modelSettingsFromRole` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ * - 返回 engine 使用的输入上限与输出预留量。
+ *
+ * Throws:
+ * - 模型的最大输出占满 context window、没有剩余输入容量时抛出配置错误。
  */
-export function modelSettingsFromRole(
-  binding: RuntimeRoleModel,
-): AgentModelSettings {
-  const { model, settings } = binding;
+export function modelInputBudgetFromRuntimeModel(
+  model: RuntimeModel,
+  context: ContextConfig,
+): NonNullable<CreateAgentOptions['modelInputBudget']> {
+  const configuredInputTokens =
+    context.max_input_tokens - context.reserved_output_tokens;
+  const modelInputTokens = model.contextWindow - model.maxOutputTokens;
+  if (modelInputTokens < 1) {
+    throw new Error(
+      `max_output_tokens (${model.maxOutputTokens}) leaves no input capacity within context_window (${model.contextWindow}) for model '${model.name}'.`,
+    );
+  }
+  const availableInputTokens = Math.min(
+    configuredInputTokens,
+    modelInputTokens,
+  );
   return {
-    ...(settings.reasoningEffort !== undefined && model.capabilities.reasoning
-      ? { reasoning: settings.reasoningEffort }
-      : {}),
-    ...(settings.temperature !== undefined && model.capabilities.temperature
-      ? { temperature: settings.temperature }
-      : {}),
-    ...(settings.topP !== undefined ? { topP: settings.topP } : {}),
-    ...(settings.topK !== undefined ? { topK: settings.topK } : {}),
+    maxInputTokens: availableInputTokens + context.reserved_output_tokens,
+    reservedOutputTokens: context.reserved_output_tokens,
   };
 }
 
 /**
- * 根据模型 catalog 能力生成本轮 providerOptions。
+ * 把 runtime model 的输出与 reasoning 配置转换为 engine model settings。
  *
  * Args:
- * - `binding`: `providerOptionsForRole` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `model`: 已解析并固定协议的 runtime model。
  *
  * Returns:
- * - 返回匹配值；领域上允许不存在时显式返回 `null` 或 `undefined`，不会合成默认对象。
+ * - 返回可直接传给 model adapter 的稳定设置。
  */
-export function providerOptionsForRole(
-  binding: RuntimeRoleModel,
-): AgentProviderOptions | undefined {
-  const options = {
-    ...binding.model.options,
-    ...(binding.settings.providerOptions ?? {}),
+export function modelSettingsFromRuntimeModel(
+  model: RuntimeModel,
+): AgentModelSettings {
+  return {
+    maxOutputTokens: model.maxOutputTokens,
+    reasoning:
+      model.reasoningEffort === 'max' ? 'xhigh' : model.reasoningEffort,
   };
-  return Object.keys(options).length > 0
-    ? parseAgentProviderOptions(options, 'model provider options')
-    : undefined;
 }
 
 /**
- * 在请求发给 AI SDK 前做产品层 provider transform。
- *
- * 这里不在 `@ello/agent` 内核里硬编码厂商方言，而是根据 coding-agent 的
- * RuntimeModel catalog 做两类收敛：
- * - 模型不支持 tool call 时清空工具，避免上游收到无效工具 schema；
- * - 模型不支持图片、音频或 PDF 时，把对应 part 替换成可读占位文本。
+ * 把 runtime model 的协议专用状态与思考强度转换为 provider options。
  *
  * Args:
- * - `model`: `prepareModelInputForRuntimeModel` 所需的业务值；函数按声明读取，不补造缺失内容。
- * - `input`: `prepareModelInputForRuntimeModel` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
- * - `cache`: `prepareModelInputForRuntimeModel` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `model`: 已解析并固定协议的 runtime model。
  *
  * Returns:
- * - 返回 `prepareModelInputForRuntimeModel` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ * - OpenAI Responses 模型关闭服务端状态，避免兼容代理跨请求引用失效的 item ID。
+ * - DeepSeek Anthropic 兼容模型返回原生 thinking 与 effort；其他模型返回 `undefined`。
+ */
+export function providerOptionsFromRuntimeModel(
+  model: RuntimeModel,
+): AgentProviderOptions | undefined {
+  if (model.protocol === 'openai' && model.endpoint === 'responses') {
+    return { openai: { store: false } };
+  }
+  if (model.protocol === 'anthropic' && isDeepSeekModel(model)) {
+    return {
+      anthropic: {
+        thinking: { type: 'adaptive' },
+        effort: model.reasoningEffort,
+      },
+    };
+  }
+  return undefined;
+}
+
+function isDeepSeekModel(model: RuntimeModel): boolean {
+  return [model.name, model.apiModel, model.baseUrl].some((value) =>
+    value.toLowerCase().includes('deepseek'),
+  );
+}
+
+/**
+ * 按模型协议整理最终输入并添加 provider cache 元数据。
+ *
+ * Args:
+ * - `model`: 决定 cache 策略和协议分支的 runtime model。
+ * - `input`: engine 已完成预算处理的最终模型输入。
+ * - `cache`: 构造稳定 cache identity 所需的 prompt profile 与 cwd。
+ *
+ * Returns:
+ * - 返回 provider 可接受且保留 diagnostics 的新模型输入。
+ *
+ * Throws:
+ * - 指令结构或协议不满足对应 provider 约束时抛错。
  */
 export function prepareModelInputForRuntimeModel(
-  model: RuntimeRoleModel['model'],
+  model: RuntimeModel,
   input: ModelInput,
-  cache: {
-    readonly promptProfile: string;
-    readonly cwdIdentity: string;
-  },
+  cache: { readonly promptProfile: string; readonly cwdIdentity: string },
 ): ModelInput {
-  const messages = input.messages.map((message) =>
-    stripUnsupportedParts(model, message),
-  );
-  const transformed: ModelInput = {
-    ...input,
-    messages,
-  };
-  const cacheSegments =
-    transformed.system === undefined
-      ? { stable: '', dynamic: '' }
-      : splitSystemCacheSegments(transformed.system);
+  if (input.instructions === undefined) {
+    return input;
+  }
+  if (typeof input.instructions !== 'string') {
+    throw new Error(
+      'Engine instructions must be a string before model transforms.',
+    );
+  }
+  const segments = splitSystemCacheSegments(input.instructions);
   const normalized = {
-    ...transformed,
-    ...(transformed.system !== undefined
-      ? { system: joinSystemCacheSegments(cacheSegments) }
-      : {}),
-  };
-  if (model.providerKind === 'anthropic') {
-    return addAnthropicCacheBreakpoints(normalized, cacheSegments);
+    ...input,
+    instructions: joinSystemCacheSegments(segments),
+  } satisfies ModelInput;
+  switch (model.protocol) {
+    case 'anthropic':
+      return addAnthropicCacheBreakpoints(normalized, segments);
+    case 'openai':
+      return addOpenAiPromptCacheKey(model, normalized, cache, segments);
+    case 'openai-compatible':
+      return normalized;
+    default:
+      model.protocol satisfies never;
+      throw new Error(`Unsupported model protocol: ${String(model.protocol)}`);
   }
-  if (
-    model.providerKind === 'openai' ||
-    model.providerKind === 'openai-compatible'
-  ) {
-    return addOpenAiPromptCacheKey(model, normalized, cache, cacheSegments);
-  }
-  return normalized;
 }
 
 function addOpenAiPromptCacheKey(
   model: RuntimeModel,
   input: ModelInput,
-  cache: {
-    readonly promptProfile: string;
-    readonly cwdIdentity: string;
-  },
-  cacheSegments: { readonly stable: string; readonly dynamic: string },
+  cache: { readonly promptProfile: string; readonly cwdIdentity: string },
+  segments: { readonly stable: string; readonly dynamic: string },
 ): ModelInput {
   if (input.diagnostics === undefined) {
     throw new Error('Model input diagnostics are required for prompt caching.');
   }
-  const providerOptions = input.providerOptions;
-  const openai = providerOptions?.openai;
-  const toolsetFingerprint = model.capabilities.toolCall
-    ? input.diagnostics.toolsetFingerprint
-    : hash('[]');
+  const existingProviderOptions = input.providerOptions;
+  const openai =
+    existingProviderOptions === undefined
+      ? undefined
+      : existingProviderOptions.openai;
   const promptCacheKey = hash(
     [
-      model.providerId,
-      model.id,
+      model.name,
       cache.promptProfile,
       cache.cwdIdentity,
-      toolsetFingerprint,
-      hash(cacheSegments.stable),
+      input.diagnostics.toolsetFingerprint,
+      hash(segments.stable),
     ].join('\n'),
   );
   return {
     ...input,
     providerOptions: {
-      ...(providerOptions === undefined ? {} : providerOptions),
-      openai: {
-        ...(openai === undefined ? {} : openai),
-        promptCacheKey,
-      },
+      ...(existingProviderOptions === undefined ? {} : existingProviderOptions),
+      openai: { ...(openai === undefined ? {} : openai), promptCacheKey },
     },
   };
 }
 
 function addAnthropicCacheBreakpoints(
   input: ModelInput,
-  cacheSegments: { readonly stable: string; readonly dynamic: string },
+  segments: { readonly stable: string; readonly dynamic: string },
 ): ModelInput {
-  if (input.system === undefined || cacheSegments.stable === '') {
-    throw new Error('Anthropic cache breakpoint requires a system prompt.');
+  if (segments.stable === '') {
+    throw new Error(
+      'Anthropic cache breakpoint requires non-empty instructions.',
+    );
   }
-  const conversation = addConversationCacheBreakpoint(input.messages);
-  const messages: AgentMessage[] = [
-    {
-      role: 'system',
-      content: cacheSegments.stable,
-      providerOptions: {
-        // 稳定规则和工具契约使用 1h TTL，避免长时间工具执行后基础前缀失效。
-        anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } },
-      },
-    },
-    ...(cacheSegments.dynamic === ''
-      ? []
-      : [{ role: 'system' as const, content: cacheSegments.dynamic }]),
-    ...conversation,
-  ];
-  const { system: _system, ...withoutSystem } = input;
+  if (input.messages.length === 0) {
+    throw new Error(
+      'Anthropic cache breakpoint requires conversation messages.',
+    );
+  }
   return {
-    ...withoutSystem,
-    messages,
+    ...input,
+    instructions: [
+      {
+        role: 'system',
+        content: segments.stable,
+        providerOptions: {
+          anthropic: { cacheControl: { type: 'ephemeral', ttl: '1h' } },
+        },
+      },
+      ...(segments.dynamic === ''
+        ? []
+        : [{ role: 'system' as const, content: segments.dynamic }]),
+    ],
+    messages: addConversationCacheBreakpoints(input.messages),
   };
 }
 
-function addConversationCacheBreakpoint(
-  messages: readonly AgentMessage[],
-): AgentMessage[] {
-  if (messages.length === 0) {
-    return [];
-  }
-  const frontier = messages.length - 1;
-  return messages.map((message, index) =>
-    index === frontier ? addMessageCacheControl(message) : message,
-  );
-}
+/**
+ * 对话断点分层布局。Anthropic 每请求最多 4 个断点，system stable 占 1 个
+ * （tools 在请求里排在 system 之前，被同一前缀覆盖，不需要独立断点），
+ * 余下 3 个全部落在 messages 上：尾部断点每轮前移，锚点断点每
+ * `CONVERSATION_ANCHOR_STRIDE` 轮才前移一次。
+ *
+ * 锚点必须在两次前移之间逐字节不动，否则退化成与尾部断点同样的每轮失效。
+ * 尾部断点失效（TTL 过期、驱逐、路由未命中）时，锚点仍能命中绝大部分前缀，
+ * 而不是跌回只剩 system 的量级。
+ */
+const CONVERSATION_ANCHOR_STRIDE = 20;
+const CONVERSATION_ANCHOR_COUNT = 2;
 
-function addMessageCacheControl(message: AgentMessage): AgentMessage {
-  const providerOptionsValue = Reflect.get(message, 'providerOptions');
-  const providerOptions =
-    providerOptionsValue === undefined
-      ? undefined
-      : parseAgentProviderOptions(
-          providerOptionsValue,
-          'message provider options',
-        );
-  const anthropic = providerOptions?.anthropic;
-  if (
-    anthropic?.cacheControl !== undefined ||
-    anthropic?.cache_control !== undefined
-  ) {
-    throw new Error('Anthropic message cache policy is owned by coding-agent.');
-  }
-  return createAgentMessage({
-    ...message,
-    providerOptions: {
-      ...(providerOptions === undefined ? {} : providerOptions),
-      anthropic: {
-        ...(anthropic === undefined ? {} : anthropic),
-        // 会话前沿每轮推进，使用 5m TTL 控制高频写入成本。
-        cacheControl: { type: 'ephemeral', ttl: '5m' },
-      },
-    },
+type CacheTtl = '1h' | '5m';
+
+function addConversationCacheBreakpoints(
+  messages: ModelInput['messages'],
+): ModelInput['messages'] {
+  const breakpoints = conversationCacheBreakpoints(messages.length);
+  return messages.map((message, index) => {
+    const ttl = breakpoints.get(index);
+    return ttl === undefined
+      ? message
+      : addAnthropicConversationCacheBreakpoint(message, ttl);
   });
 }
 
-function parseAgentProviderOptions(
-  value: unknown,
-  name: string,
-): AgentProviderOptions {
-  if (!isRecord(value)) {
-    throw new Error(`${name} must be an object.`);
-  }
-  const options: AgentProviderOptions = {};
-  for (const [provider, providerValue] of Object.entries(value)) {
-    options[provider] = parseProviderOptionObject(
-      providerValue,
-      `${name}.${provider}`,
-    );
-  }
-  return options;
-}
-
-function parseProviderOptionObject(
-  value: unknown,
-  name: string,
-): AgentProviderOptionObject {
-  if (!isRecord(value)) {
-    throw new Error(`${name} must be an object.`);
-  }
-  const result: AgentProviderOptionObject = {};
-  for (const [key, entry] of Object.entries(value)) {
-    result[key] = parseJsonValue(entry, `${name}.${key}`);
-  }
-  return result;
-}
-
-function parseJsonValue(value: unknown, name: string): JSONValue {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'boolean'
+function conversationCacheBreakpoints(
+  messageCount: number,
+): Map<number, CacheTtl> {
+  const tail = messageCount - 1;
+  const breakpoints = new Map<number, CacheTtl>();
+  for (
+    let ordinal = Math.floor(tail / CONVERSATION_ANCHOR_STRIDE);
+    ordinal >= 1 && breakpoints.size < CONVERSATION_ANCHOR_COUNT;
+    ordinal -= 1
   ) {
-    return value;
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      throw new Error(`${name} must be a finite JSON number.`);
+    const index = ordinal * CONVERSATION_ANCHOR_STRIDE - 1;
+    if (index < tail) {
+      breakpoints.set(index, '1h');
     }
-    return value;
   }
-  if (Array.isArray(value)) {
-    return value.map((entry, index) =>
-      parseJsonValue(entry, `${name}[${index}]`),
-    );
-  }
-  if (isRecord(value)) {
-    const result: Record<string, JSONValue> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      result[key] = parseJsonValue(entry, `${name}.${key}`);
-    }
-    return result;
-  }
-  throw new Error(`${name} must be JSON serializable.`);
+  breakpoints.set(tail, '5m');
+  return breakpoints;
+}
+
+function addAnthropicConversationCacheBreakpoint(
+  message: ModelInput['messages'][number],
+  ttl: CacheTtl,
+): ModelInput['messages'][number] {
+  const existingProviderOptions = message.providerOptions;
+  const existingAnthropic =
+    existingProviderOptions === undefined
+      ? undefined
+      : existingProviderOptions.anthropic;
+  return {
+    ...message,
+    providerOptions: {
+      ...(existingProviderOptions === undefined ? {} : existingProviderOptions),
+      anthropic: {
+        ...(existingAnthropic === undefined ? {} : existingAnthropic),
+        cacheControl: { type: 'ephemeral', ttl },
+      },
+    } as AgentProviderOptions,
+  };
 }
 
 function hash(value: string): string {
   return createHash('sha256').update(value).digest('hex');
-}
-
-function stripUnsupportedParts(
-  model: RuntimeModel,
-  message: AgentMessage,
-): AgentMessage {
-  const content = Reflect.get(message, 'content');
-  if (!Array.isArray(content)) {
-    return message;
-  }
-
-  let changed = false;
-  const parts: ReadonlyArray<unknown> = content;
-  const next = parts.map((part) => {
-    const modality = modalityForPart(part);
-    if (modality === undefined || model.capabilities.input.includes(modality)) {
-      return part;
-    }
-    changed = true;
-    return {
-      type: 'text',
-      text: `[ello omitted unsupported ${modality} input for ${model.ref}]`,
-    };
-  });
-
-  return changed ? createAgentMessage({ ...message, content: next }) : message;
-}
-
-function modalityForPart(part: unknown): ModelModality | undefined {
-  if (typeof part !== 'object' || part === null) {
-    return undefined;
-  }
-  const type = Reflect.get(part, 'type');
-  if (type === 'image') {
-    return 'image';
-  }
-  if (type === 'audio') {
-    return 'audio';
-  }
-  const mediaType = Reflect.get(part, 'mediaType');
-  if (
-    type === 'file' &&
-    typeof mediaType === 'string' &&
-    mediaType.includes('pdf')
-  ) {
-    return 'pdf';
-  }
-  return undefined;
 }

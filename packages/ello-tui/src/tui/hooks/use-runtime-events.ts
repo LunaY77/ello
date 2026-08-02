@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 
 import type { UserInputResolution } from '../../api/protocol-types.js';
+import { createSteerId } from '../../client/steer-id.js';
 import { ThreadClient } from '../../client/thread-client.js';
 import {
   createInitialTuiEventState,
@@ -14,7 +15,7 @@ export function useRuntimeEvents(thread: ThreadClient): {
   readonly historyResetKey: number;
   readonly workingSeconds: number | undefined;
   dispatch(event: TuiEventInput): void;
-  queueSteer(text: string): void;
+  queueSteer(text: string): string;
   resolveInteraction(requestId: string, resolution?: UserInputResolution): void;
 } {
   const [state, dispatch] = useReducer(
@@ -48,8 +49,10 @@ export function useRuntimeEvents(thread: ThreadClient): {
     return () => clearInterval(timer);
   }, [state.runStartedAt]);
 
-  const queueSteer = useCallback((text: string) => {
-    dispatch({ type: 'steer.queued', text });
+  const queueSteer = useCallback((text: string): string => {
+    const steerId = createSteerId();
+    dispatch({ type: 'steer.queued', steerId, text });
+    return steerId;
   }, []);
   const resolveInteraction = useCallback(
     (requestId: string, resolution?: UserInputResolution) => {

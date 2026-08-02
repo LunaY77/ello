@@ -10,6 +10,7 @@ import type {
   AgentMessage,
   AgentProviderOptions,
   AgentToolSet,
+  ConversationMessage,
   MessageTransform,
   ModelInput,
   ModelInputDiagnostics,
@@ -164,44 +165,60 @@ export function skillIndexContext(options: {
   };
 }
 
-export interface TrimMessagesOptions {
-  readonly maxMessages: number;
-}
-
-/**
- * 创建按消息数量裁剪并修复工具调用配对的 transform。
- *
- * Args:
- * - `options.maxMessages`: 最多保留的尾部消息数量。
- *
- * Returns:
- * - 返回不修改输入数组的消息 transform。
- */
-export function trimMessages(options: TrimMessagesOptions): MessageTransform {
-  if (!Number.isSafeInteger(options.maxMessages) || options.maxMessages < 1) {
-    throw new Error('maxMessages must be a positive safe integer.');
-  }
-  return async (messages) =>
-    preserveToolCallPairs(messages.slice(-options.maxMessages));
-}
-
 export interface CompactMessagesOptions {
   readonly maxInputTokens: number;
   readonly reservedOutputTokens?: number;
 }
 
 /**
- * 创建按 token 预算从头裁剪消息的 transform。
+ * 返回预算中真正可供完整模型输入使用的 token 数。
+ *
+ * Args:
+ * - `options`: 已校验的输入上限与可选输出预留量。
+ *
+ * Returns:
+ * - 返回扣除输出预留后的输入容量。
+ */
+export function availableModelInputTokens(
+  options: CompactMessagesOptions,
+): number {
+  return options.maxInputTokens - (options.reservedOutputTokens ?? 0);
+}
+
+/** 锚点前移的目标水位：砍到预算的这个比例，留出余量供后续回合追加。 */
+const BUDGET_ADVANCE_RATIO = 0.6;
+
+/** 前缀指纹覆盖的消息条数，用于观测锚点是否漂移。 */
+const PREFIX_FINGERPRINT_MESSAGE_COUNT = 4;
+
+/**
+ * 跨回合共享的前缀锚点。
+ *
+ * `index` 是当前保留窗口在完整历史里的起点下标。它只在超预算时前移，
+ * 两次前移之间逐字节不动 —— provider 侧缓存断点按下标放置，锚点漂移会让
+ * 所有断点指向不同消息，缓存整体失效。
+ */
+export interface MessageBudgetAnchor {
+  index: number;
+}
+
+/**
+ * 创建按 token 预算前移前缀锚点的 transform。
+ *
+ * 超预算时一次性把锚点推进到 {@link BUDGET_ADVANCE_RATIO} 的余量水位，
+ * 而不是逐条 shift 到刚好不超 —— 后者会让锚点几乎每轮都动。
  *
  * Args:
  * - `options.maxInputTokens`: 模型输入上限，单位为 token。
  * - `options.reservedOutputTokens`: 为输出预留的 token 数。
+ * - `anchor`: 跨回合复用的锚点；同一个 run 内必须传同一个对象。
  *
  * Returns:
  * - 返回保持工具调用/结果配对的消息 transform。
  */
 export function compactMessages(
   options: CompactMessagesOptions,
+  anchor: MessageBudgetAnchor,
 ): MessageTransform {
   if (
     !Number.isSafeInteger(options.maxInputTokens) ||
@@ -219,7 +236,7 @@ export function compactMessages(
       'reservedOutputTokens must be a non-negative safe integer below maxInputTokens.',
     );
   }
-  return async (messages) => applyTokenBudget(messages, options);
+  return async (messages) => applyTokenBudget(messages, options, anchor);
 }
 
 /**
@@ -231,13 +248,30 @@ export function compactMessages(
  * Returns:
  * - 返回按领域顺序排列的快照集合；调用方不能借此修改内部状态。
  */
-export function defaultMessageTransforms(run: RunState): MessageTransform[] {
+export function defaultMessageTransforms(
+  run: RunState,
+  fixedInputTokens = 0,
+): MessageTransform[] {
   const transforms: MessageTransform[] = [];
-  if (run.config.sessionWindow !== undefined) {
-    transforms.push(trimMessages(run.config.sessionWindow));
-  }
   if (run.config.modelInputBudget !== undefined) {
-    transforms.push(compactMessages(run.config.modelInputBudget));
+    const adjustedMaxInputTokens =
+      run.config.modelInputBudget.maxInputTokens - fixedInputTokens;
+    const reservedOutputTokens =
+      run.config.modelInputBudget.reservedOutputTokens ?? 0;
+    if (adjustedMaxInputTokens <= reservedOutputTokens) {
+      throw new Error(
+        `Fixed model input context (${fixedInputTokens} estimated tokens) leaves no message budget within maxInputTokens=${run.config.modelInputBudget.maxInputTokens}.`,
+      );
+    }
+    transforms.push(
+      compactMessages(
+        {
+          maxInputTokens: adjustedMaxInputTokens,
+          reservedOutputTokens,
+        },
+        run.messageBudgetAnchor,
+      ),
+    );
   }
   transforms.push(async (messages) => preserveToolCallPairs(messages));
   return transforms;
@@ -272,6 +306,22 @@ export function estimateMessagesTokens(
  */
 export function estimateTextTokens(text: string): number {
   return Math.ceil(text.length / 4);
+}
+
+function estimateInstructionsTokens(
+  instructions: ModelInput['instructions'],
+): number {
+  if (instructions === undefined) {
+    return 0;
+  }
+  if (typeof instructions === 'string') {
+    return estimateTextTokens(instructions);
+  }
+  const serialized = JSON.stringify(instructions);
+  if (serialized === undefined) {
+    throw new Error('Instructions are not JSON serializable.');
+  }
+  return estimateTextTokens(serialized);
 }
 
 /**
@@ -321,15 +371,9 @@ export function preserveToolCallPairs(
  * - 返回 `fingerprintSystem` 计算出的声明结果；返回值不包含未声明的兜底状态。
  */
 export function fingerprintSystem(
-  system: string | undefined,
-  messages: ReadonlyArray<AgentMessage> = [],
+  instructions: ModelInput['instructions'],
 ): string {
-  const leadingSystemMessages: AgentMessage[] = [];
-  for (const message of messages) {
-    if (message.role !== 'system') break;
-    leadingSystemMessages.push(message);
-  }
-  return sha256(stableJson({ system, leadingSystemMessages }));
+  return sha256(stableJson({ instructions }));
 }
 
 /**
@@ -342,30 +386,28 @@ export function fingerprintSystem(
  * - 返回 `fingerprintToolset` 计算出的声明结果；返回值不包含未声明的兜底状态。
  */
 export function fingerprintToolset(tools: AgentToolSet): string {
-  const definitions = Object.entries(tools)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([name, tool]) => ({
-      name,
-      description: tool.description,
-      inputSchema: schemaJson(tool.inputSchema),
-      providerOptions: tool.providerOptions,
-    }));
-  return sha256(stableJson(definitions));
+  return sha256(stableJson(toolDefinitions(tools)));
 }
 
 /**
- * 执行 产品 Agent Agent engine 模型输入 模块 定义的 `fingerprintMessagePrefix` 领域操作，输入和副作用均受该边界约束。
+ * 对保留窗口的头部消息取指纹，用于观测前缀锚点是否漂移。
+ *
+ * 只覆盖前 {@link PREFIX_FINGERPRINT_MESSAGE_COUNT} 条：provider 缓存断点按下标放置，
+ * 头部一动则所有断点指向不同消息、缓存整体失效。指纹覆盖全部历史时每轮
+ * 必变（历史逐轮追加），无法区分"正常增长"与"前缀漂移"，也就无法告警。
  *
  * Args:
- * - `messages`: 按既定顺序提供的只读集合；函数不会重排或修改调用方持有的集合。
+ * - `messages`: 当轮最终发给模型的消息序列。
  *
  * Returns:
- * - 返回 `fingerprintMessagePrefix` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ * - 返回头部消息的 sha256；同一锚点区间内逐字节稳定。
  */
 export function fingerprintMessagePrefix(
   messages: ReadonlyArray<AgentMessage>,
 ): string {
-  return sha256(stableJson(messages.slice(0, -1)));
+  return sha256(
+    stableJson(messages.slice(0, PREFIX_FINGERPRINT_MESSAGE_COUNT)),
+  );
 }
 
 /**
@@ -405,37 +447,42 @@ export function hasCompactionBoundary(
  * - 当 产品 Agent Agent engine 模型输入 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
 export async function buildModelInput(run: RunState): Promise<ModelInput> {
-  const systemResult = await buildSystem(run);
-  const messagesResult = await buildFinalMessages(run);
+  const instructionsResult = await buildInstructions(run);
   const tools = buildTools(run);
+  const fixedInputTokens =
+    estimateInstructionsTokens(instructionsResult.instructions) +
+    estimateToolsTokens(tools);
+  const messagesResult = await buildFinalMessages(run, fixedInputTokens);
   const providerOptions = await buildProviderOptions(run);
   const input: ModelInput = {
-    ...(systemResult.system !== undefined
-      ? { system: systemResult.system }
+    ...(instructionsResult.instructions !== undefined
+      ? { instructions: instructionsResult.instructions }
       : {}),
     messages: messagesResult.messages,
     tools,
     ...(providerOptions !== undefined ? { providerOptions } : {}),
     diagnostics: createModelInputDiagnostics({
-      ...(systemResult.system !== undefined
-        ? { system: systemResult.system }
+      ...(instructionsResult.instructions !== undefined
+        ? { instructions: instructionsResult.instructions }
         : {}),
-      systemSections: systemResult.sectionCount,
+      systemSections: instructionsResult.sectionCount,
       messages: messagesResult.messages,
       tools,
       ...(providerOptions !== undefined ? { providerOptions } : {}),
       appliedMessageTransforms: messagesResult.appliedTransforms,
     }),
   };
-  // prepare 可能改写 system/messages/tools，指纹必须基于最终输入重算。
+  // prepare 可能改写 instructions/messages/tools，指纹必须基于最终输入重算。
   const prepared = await applyPrepareModelInput(input, run);
   if (prepared.diagnostics === undefined) {
     throw new Error('PrepareModelInput must preserve model input diagnostics.');
   }
-  return {
+  const finalInput = {
     ...prepared,
     diagnostics: createModelInputDiagnostics({
-      ...(prepared.system !== undefined ? { system: prepared.system } : {}),
+      ...(prepared.instructions !== undefined
+        ? { instructions: prepared.instructions }
+        : {}),
       systemSections: prepared.diagnostics.systemSections,
       messages: prepared.messages,
       tools: prepared.tools,
@@ -445,25 +492,25 @@ export async function buildModelInput(run: RunState): Promise<ModelInput> {
       appliedMessageTransforms: prepared.diagnostics.appliedMessageTransforms,
     }),
   };
+  assertModelInputWithinBudget(finalInput, run);
+  return finalInput;
 }
 
 /**
  * 拼接 system 提示。
  *
  * 段落顺序为：内核指令 → 环境指令 → 配置注入的动态段落。
- * 环境指令通过统一的 `getInstructions(ctx)` 获取。所有非空段落以空行分隔
+ * 环境指令通过统一的 `getInstructions()` 获取。所有非空段落以空行分隔
  * 拼接，并回报段落计数。
  */
-async function buildSystem(
+async function buildInstructions(
   run: RunState,
-): Promise<{ readonly system?: string; readonly sectionCount: number }> {
+): Promise<{ readonly instructions?: string; readonly sectionCount: number }> {
   const sections: string[] = [];
   if (run.config.instructions) {
     sections.push(run.config.instructions);
   }
-  const environmentInstructions = await run.environment.getInstructions?.(
-    run.ctx,
-  );
+  const environmentInstructions = await run.environment.getInstructions();
   if (environmentInstructions) {
     sections.push(environmentInstructions);
   }
@@ -478,7 +525,7 @@ async function buildSystem(
     sections.push(run.options.ephemeralInstructions);
   }
   return {
-    ...(sections.length > 0 ? { system: sections.join('\n\n') } : {}),
+    ...(sections.length > 0 ? { instructions: sections.join('\n\n') } : {}),
     sectionCount: sections.length,
   };
 }
@@ -490,14 +537,17 @@ async function buildSystem(
  * 工具对配对修复等），再应用用户在 `modelInput.messageTransforms`
  * 中注册的变换。同时记录每个变换的名字，供诊断回溯。
  */
-async function buildFinalMessages(run: RunState): Promise<{
-  readonly messages: AgentMessage[];
+async function buildFinalMessages(
+  run: RunState,
+  fixedInputTokens: number,
+): Promise<{
+  readonly messages: ConversationMessage[];
   readonly appliedTransforms: readonly string[];
 }> {
   let messages: readonly AgentMessage[] = [...run.state.messages];
   const appliedTransforms: string[] = [];
   // 默认变换：内核根据配置自动装配。
-  for (const transform of defaultMessageTransforms(run)) {
+  for (const transform of defaultMessageTransforms(run, fixedInputTokens)) {
     messages = await transform(messages, run.ctx);
     appliedTransforms.push(transform.name || 'default-message-transform');
   }
@@ -506,7 +556,20 @@ async function buildFinalMessages(run: RunState): Promise<{
     messages = await transform(messages, run.ctx);
     appliedTransforms.push(transform.name || 'modelInput.messageTransform');
   }
-  return { messages: [...messages], appliedTransforms };
+  return { messages: requireConversationMessages(messages), appliedTransforms };
+}
+
+function requireConversationMessages(
+  messages: readonly AgentMessage[],
+): ConversationMessage[] {
+  for (const message of messages) {
+    if (message.role === 'system') {
+      throw new Error('Conversation messages must not contain a system role.');
+    }
+  }
+  return messages.filter(
+    (message): message is ConversationMessage => message.role !== 'system',
+  );
 }
 
 /** 取本次回合可用的工具集。 */
@@ -541,11 +604,11 @@ async function applyPrepareModelInput(
 /**
  * 汇总本次输入的诊断信息。
  *
- * 估算 token 为消息正文与 system 文本之和（按字符数粗估）；
+ * 估算 token 为消息正文、system 文本与工具定义之和（按字符数粗估）；
  * 同时记录段落数、消息数、是否带 providerOptions 与已应用的变换名。
  */
 function createModelInputDiagnostics(options: {
-  readonly system?: string;
+  readonly instructions?: ModelInput['instructions'];
   readonly systemSections: number;
   readonly messages: readonly AgentMessage[];
   readonly tools: AgentToolSet;
@@ -557,29 +620,72 @@ function createModelInputDiagnostics(options: {
     messageCount: options.messages.length,
     estimatedInputTokens:
       estimateMessagesTokens(options.messages) +
-      estimateTextTokens(options.system ?? ''),
+      estimateInstructionsTokens(options.instructions) +
+      estimateToolsTokens(options.tools),
     hasProviderOptions: options.providerOptions !== undefined,
     appliedMessageTransforms: options.appliedMessageTransforms,
-    systemFingerprint: fingerprintSystem(options.system, options.messages),
+    systemFingerprint: fingerprintSystem(options.instructions),
     toolsetFingerprint: fingerprintToolset(options.tools),
     messagePrefixFingerprint: fingerprintMessagePrefix(options.messages),
     compactionBoundary: hasCompactionBoundary(options.messages),
   };
 }
 
+function assertModelInputWithinBudget(input: ModelInput, run: RunState): void {
+  const budget = run.config.modelInputBudget;
+  if (budget === undefined) return;
+  const diagnostics = input.diagnostics;
+  if (diagnostics === undefined) {
+    throw new Error('Model input diagnostics are required for budget checks.');
+  }
+  const estimatedInputTokens = diagnostics.estimatedInputTokens;
+  if (estimatedInputTokens === undefined) {
+    throw new Error(
+      'Estimated model input tokens are required for budget checks.',
+    );
+  }
+  const available = budget.maxInputTokens - (budget.reservedOutputTokens ?? 0);
+  if (estimatedInputTokens > available) {
+    throw new Error(
+      `Prepared model input exceeds the effective context budget: estimated ${estimatedInputTokens} tokens, available ${available}.`,
+    );
+  }
+}
+
 function applyTokenBudget(
   messages: ReadonlyArray<AgentMessage>,
   options: CompactMessagesOptions,
+  anchor: MessageBudgetAnchor,
 ): ReadonlyArray<AgentMessage> {
-  const available = Math.max(
-    0,
-    options.maxInputTokens - (options.reservedOutputTokens ?? 0),
-  );
-  const kept = [...messages];
-  while (kept.length > 0 && estimateMessagesTokens(kept) > available) {
-    kept.shift();
+  const available = Math.max(0, availableModelInputTokens(options));
+  // 历史被压缩或替换后会变短，此时旧下标已无意义：归零后由下面的预算判断重新推进，
+  // 否则会切掉全部消息，发出一个空的 messages 请求。
+  if (anchor.index > messages.length) {
+    anchor.index = 0;
   }
-  return preserveToolCallPairs(kept);
+  // suffixCosts[i] 是从下标 i 到末尾的估算 token 总量，末位补 0 便于取空后缀。
+  const suffixCosts = new Array<number>(messages.length + 1).fill(0);
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    suffixCosts[index] =
+      suffixCosts[index + 1]! +
+      estimateTextTokens(messageText(messages[index]!));
+  }
+  const suffixCost = (from: number): number => suffixCosts[from]!;
+  if (suffixCost(anchor.index) > available) {
+    // 一次推进到目标水位，让锚点在随后多个回合里保持不动。
+    const target = available * BUDGET_ADVANCE_RATIO;
+    let next = anchor.index;
+    while (next < messages.length && suffixCost(next) > target) {
+      next += 1;
+    }
+    if (next === messages.length && messages.length > 0) {
+      throw new Error(
+        `Newest model input message exceeds the available context budget of ${available} estimated tokens.`,
+      );
+    }
+    anchor.index = next;
+  }
+  return preserveToolCallPairs(messages.slice(anchor.index));
 }
 
 function readPartIds(message: AgentMessage, type: string): string[] {
@@ -622,6 +728,21 @@ function schemaJson(schema: unknown): unknown {
     return schema.jsonSchema;
   }
   throw new Error('Tool input schema does not expose JSON Schema.');
+}
+
+function estimateToolsTokens(tools: AgentToolSet): number {
+  return estimateTextTokens(stableJson(toolDefinitions(tools)));
+}
+
+function toolDefinitions(tools: AgentToolSet): ReadonlyArray<unknown> {
+  return Object.entries(tools)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, tool]) => ({
+      name,
+      description: tool.description,
+      inputSchema: schemaJson(tool.inputSchema),
+      providerOptions: tool.providerOptions,
+    }));
 }
 
 function stableJson(value: unknown): string {

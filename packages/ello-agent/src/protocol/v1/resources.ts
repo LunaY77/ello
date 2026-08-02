@@ -61,6 +61,7 @@ export const UserMessageItemSchema = z
     ...ItemBaseShape,
     type: z.literal('userMessage'),
     text: z.string(),
+    steerId: OpaqueIdSchema.optional(),
   })
   .strict();
 
@@ -124,6 +125,7 @@ export const ToolCallItemSchema = z
     toolName: z.string().min(1),
     headline: z.string(),
     status: ItemStatusSchema,
+    error: z.string().min(1).optional(),
     outputPreview: z.string().optional(),
     artifactId: OpaqueIdSchema.optional(),
     metadata: z.record(z.string(), JsonValueSchema).optional(),
@@ -148,6 +150,9 @@ export const ContextCompactionItemSchema = z
     type: z.literal('contextCompaction'),
     summary: z.string(),
     tokensBefore: NonNegativeIntegerSchema,
+    beforeMessageCount: NonNegativeIntegerSchema.optional(),
+    afterMessageCount: NonNegativeIntegerSchema.optional(),
+    keptMessageCount: NonNegativeIntegerSchema.optional(),
     status: ItemStatusSchema,
   })
   .strict();
@@ -250,8 +255,6 @@ export const PlanSchema = z
 export const ThreadSettingsSchema = z
   .object({
     mode: SessionModeSchema,
-    profile: z.string().min(1),
-    model: z.string().min(1),
     agent: z.string().min(1),
   })
   .strict();
@@ -269,6 +272,95 @@ export const ThreadSnapshotSchema = z
   })
   .strict();
 
+export const AgentTaskStatusSchema = z.enum([
+  'queued',
+  'running',
+  'completed',
+  'failed',
+  'killed',
+  'recovered',
+]);
+
+export const AgentTaskToolSummarySchema = z
+  .object({
+    toolCallId: z.string().min(1),
+    name: z.string().min(1),
+    invocationPreview: z.string(),
+    status: z.enum(['running', 'completed', 'failed']),
+    startedAt: IsoDateTimeSchema,
+    completedAt: IsoDateTimeSchema.optional(),
+  })
+  .strict();
+
+/** Composer 下 Agent switcher 使用的稳定任务摘要。 */
+export const AgentTaskSummarySchema = z
+  .object({
+    taskId: OpaqueIdSchema,
+    agentId: OpaqueIdSchema,
+    rootThreadId: OpaqueIdSchema,
+    parentTaskId: OpaqueIdSchema.optional(),
+    resumeFromTaskId: OpaqueIdSchema.optional(),
+    name: z.string().min(1).optional(),
+    definitionName: z.string().min(1),
+    description: z.string().min(1),
+    contextMode: z.enum(['fresh', 'fork']),
+    executionMode: z.enum(['foreground', 'background']),
+    status: AgentTaskStatusSchema,
+    cwd: z.string().min(1),
+    isolation: z.enum(['shared', 'worktree', 'container']),
+    revision: NonNegativeIntegerSchema,
+    eventSequence: NonNegativeIntegerSchema,
+    usage: UsageSchema.optional(),
+    currentTool: z
+      .object({
+        toolCallId: z.string().min(1),
+        name: z.string().min(1),
+        startedAt: IsoDateTimeSchema,
+      })
+      .strict()
+      .optional(),
+    toolCount: NonNegativeIntegerSchema,
+    recentTools: z.array(AgentTaskToolSummarySchema).max(4).readonly(),
+    resultPreview: z.string().max(480).optional(),
+    errorPreview: z.string().max(480).optional(),
+    createdAt: IsoDateTimeSchema,
+    startedAt: IsoDateTimeSchema.optional(),
+    completedAt: IsoDateTimeSchema.optional(),
+    updatedAt: IsoDateTimeSchema,
+  })
+  .strict();
+
+/** 子代理 transcript 的持久事件。payload 必须是闭合 JSON 值。 */
+export const AgentTaskEventSchema = z
+  .object({
+    rootThreadId: OpaqueIdSchema,
+    taskId: OpaqueIdSchema,
+    sequence: z.number().int().positive(),
+    rootSequence: z.number().int().positive(),
+    eventType: z.string().min(1),
+    payload: JsonValueSchema,
+    createdAt: IsoDateTimeSchema,
+  })
+  .strict();
+
+export const AgentTaskTreeSnapshotSchema = z
+  .object({
+    rootThreadId: OpaqueIdSchema,
+    seq: NonNegativeIntegerSchema,
+    tasks: z.array(AgentTaskSummarySchema).readonly(),
+  })
+  .strict();
+
+export const AgentTaskDetailSchema = z
+  .object({
+    task: AgentTaskSummarySchema,
+    prompt: z.string(),
+    output: z.string().optional(),
+    error: z.string().optional(),
+    events: z.array(AgentTaskEventSchema).readonly(),
+  })
+  .strict();
+
 export type ThreadStatus = z.infer<typeof ThreadStatusSchema>;
 export type TurnStatus = z.infer<typeof TurnStatusSchema>;
 export type FileChange = z.infer<typeof FileChangeSchema>;
@@ -280,3 +372,9 @@ export type PendingServerRequest = z.infer<typeof PendingServerRequestSchema>;
 export type Goal = z.infer<typeof GoalSchema>;
 export type Plan = z.infer<typeof PlanSchema>;
 export type ThreadSettings = z.infer<typeof ThreadSettingsSchema>;
+export type AgentTaskStatus = z.infer<typeof AgentTaskStatusSchema>;
+export type AgentTaskToolSummary = z.infer<typeof AgentTaskToolSummarySchema>;
+export type AgentTaskSummary = z.infer<typeof AgentTaskSummarySchema>;
+export type AgentTaskEvent = z.infer<typeof AgentTaskEventSchema>;
+export type AgentTaskTreeSnapshot = z.infer<typeof AgentTaskTreeSnapshotSchema>;
+export type AgentTaskDetail = z.infer<typeof AgentTaskDetailSchema>;

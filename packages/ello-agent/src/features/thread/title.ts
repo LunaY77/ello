@@ -14,10 +14,8 @@ import {
   loadCodingAgentConfig,
   type CodingAgentConfig,
 } from '../config/index.js';
-import { createProviderRegistry } from '../model/index.js';
-
-import { compactionView } from './compact.js';
-import type { ThreadStore } from './store.js';
+import type { EnvironmentHandle } from '../environment/index.js';
+import { createModelRegistry } from '../model/index.js';
 
 export interface ThreadTitleGenerator {
   /**
@@ -49,23 +47,29 @@ export interface ThreadTitleGenerator {
  * - 当 Thread `title` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
 export function createThreadTitleGenerator(options: {
-  readonly store: ThreadStore;
   readonly modelAdapter: ModelAdapter;
+  readonly attachEnvironment: (
+    workingDirectory: string,
+  ) => Promise<EnvironmentHandle>;
 }): ThreadTitleGenerator {
   return {
     async generate(snapshot, signal) {
-      const [config, records] = await Promise.all([
-        loadCodingAgentConfig({
-          cwd: snapshot.thread.cwd,
-          initial_mode: snapshot.settings.mode,
-        }),
-        options.store.read(snapshot.thread.id),
-      ]);
+      const firstUserMessage = snapshot.turns
+        .flatMap((turn) => turn.items)
+        .find((item) => item.type === 'userMessage');
+      if (firstUserMessage === undefined) {
+        throw new Error('Thread title requires a user message.');
+      }
+      const config = await loadCodingAgentConfig({
+        cwd: snapshot.thread.cwd,
+        initial_mode: snapshot.settings.mode,
+      });
       return generateThreadTitle({
         snapshot,
-        messages: compactionView(records).projectedMessages,
+        message: { role: 'user', content: firstUserMessage.text },
         config,
         modelAdapter: options.modelAdapter,
+        attachEnvironment: options.attachEnvironment,
         signal,
       });
     },
@@ -83,51 +87,77 @@ export function createThreadTitleGenerator(options: {
  */
 export async function generateThreadTitle(input: {
   readonly snapshot: ThreadSnapshot;
-  readonly messages: readonly AgentMessage[];
+  readonly message: AgentMessage;
   readonly config: CodingAgentConfig;
   readonly modelAdapter: ModelAdapter;
+  readonly attachEnvironment: (
+    workingDirectory: string,
+  ) => Promise<EnvironmentHandle>;
   readonly signal?: AbortSignal;
 }): Promise<string | undefined> {
-  if (input.snapshot.thread.name.trim() !== '' || input.messages.length === 0) {
-    return undefined;
+  if (input.snapshot.thread.name.trim() !== '') return undefined;
+  assertUserTitleMessage(input.message);
+  const firstMessageTitle = normalizeGeneratedTitle(
+    titleMessageText(input.message),
+  );
+  if (firstMessageTitle === '') {
+    throw new Error('Thread title source message is empty.');
   }
-  const providerRegistry = createProviderRegistry(input.config);
+  if (!input.config.title_generation) return firstMessageTitle;
+
+  const modelRegistry = createModelRegistry(input.config);
   const agentRegistry = await createAgentRegistry(input.config);
-  const generated = await runInternalAgent({
-    definition: agentRegistry.get('title'),
-    prompt: renderTitleConversation(input.messages),
-    profileName: input.snapshot.settings.profile,
-    config: input.config,
-    providerRegistry,
-    modelAdapter: input.modelAdapter,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
+  const environment = await input.attachEnvironment(input.config.cwd);
+  let generated: string;
+  try {
+    generated = await runInternalAgent({
+      definition: agentRegistry.get('title'),
+      prompt: renderTitleMessage(input.message),
+      config: input.config,
+      modelRegistry,
+      modelAdapter: input.modelAdapter,
+      environment,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+  } catch (error) {
+    if (input.signal?.aborted) return undefined;
+    throw error;
+  }
+  if (input.signal?.aborted) return undefined;
   const title = normalizeGeneratedTitle(generated);
-  return title === '' ? undefined : title;
+  if (title === '') {
+    throw new Error('Thread title model returned an empty title.');
+  }
+  return title;
 }
 
 /**
- * 执行 Thread `title` 模块 定义的 `renderTitleConversation` 领域操作，输入和副作用均受该边界约束。
+ * 执行 Thread `title` 模块 定义的 `renderTitleMessage` 领域操作，输入和副作用均受该边界约束。
  *
  * Args:
- * - `messages`: 按既定顺序提供的只读集合；函数不会重排或修改调用方持有的集合。
+ * - `message`: 首条用户消息；标题模型不得读取后续消息或 Agent 输出。
  *
  * Returns:
- * - 返回 `renderTitleConversation` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ * - 返回只包含首条用户消息的标题生成输入。
+ *
+ * Throws:
+ * - 输入不是用户消息或内容无法被 JSON 表示时直接抛错。
  */
-export function renderTitleConversation(
-  messages: readonly AgentMessage[],
-): string {
-  return messages
-    .slice(-12)
-    .map((message) => {
-      const text =
-        typeof message.content === 'string'
-          ? message.content
-          : serializeTitleMessageContent(message.content);
-      return `### ${message.role}\n${text.slice(0, 1_000)}`;
-    })
-    .join('\n\n');
+export function renderTitleMessage(message: AgentMessage): string {
+  assertUserTitleMessage(message);
+  return `### user\n${titleMessageText(message).slice(0, 1_000)}`;
+}
+
+function assertUserTitleMessage(message: AgentMessage): void {
+  if (message.role !== 'user') {
+    throw new Error('Thread title input must be a user message.');
+  }
+}
+
+function titleMessageText(message: AgentMessage): string {
+  return typeof message.content === 'string'
+    ? message.content
+    : serializeTitleMessageContent(message.content);
 }
 
 /**

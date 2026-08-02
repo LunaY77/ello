@@ -5,7 +5,6 @@ export type TuiOverlayName =
   | 'help'
   | 'agents'
   | 'models'
-  | 'profiles'
   | 'session-selector'
   | 'rewind-selector'
   | 'settings'
@@ -25,8 +24,11 @@ export type CommandResult =
       readonly action: 'memory' | 'goal' | 'rewind' | 'fork' | 'export';
       readonly args: readonly string[];
     }
-  | { readonly type: 'set-profile'; readonly profile: string }
   | { readonly type: 'set-mode'; readonly mode: SessionMode }
+  | {
+      readonly type: 'set-effort';
+      readonly effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+    }
   | { readonly type: 'submit'; readonly prompt: string };
 
 export interface SlashCommand {
@@ -58,6 +60,19 @@ export const slashCommands: readonly SlashCommand[] = [
       : { type: 'submit', prompt: rawArgs },
   ),
   command(
+    'effort',
+    'Set thinking effort for the current agent model',
+    (args) => {
+      const effort = parseEffort(args);
+      return effort === undefined
+        ? {
+            type: 'message',
+            message: 'Usage: /effort <low|medium|high|xhigh|max>',
+          }
+        : { type: 'set-effort', effort };
+    },
+  ),
+  command(
     'help',
     'Show commands',
     () => ({ type: 'open-overlay', overlay: 'help' }),
@@ -75,11 +90,6 @@ export const slashCommands: readonly SlashCommand[] = [
     type: 'open-overlay',
     overlay: 'agents',
   })),
-  command('profiles', 'Switch profile', (args) =>
-    args[0] === undefined
-      ? { type: 'open-overlay', overlay: 'profiles' }
-      : { type: 'set-profile', profile: args[0] },
-  ),
   command('settings', 'Open settings', () => ({
     type: 'open-overlay',
     overlay: 'settings',
@@ -184,12 +194,26 @@ function parseSessionMode(value: string | undefined): SessionMode | undefined {
     : undefined;
 }
 
+function parseEffort(
+  args: readonly string[],
+): Extract<CommandResult, { type: 'set-effort' }>['effort'] | undefined {
+  if (args.length !== 1) return undefined;
+  const value = args[0];
+  return value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh' ||
+    value === 'max'
+    ? value
+    : undefined;
+}
+
 function renderCommandResult(result: CommandResult): string {
   if (result.type === 'message') return result.message;
   if (result.type === 'open-overlay') return `Open overlay: ${result.overlay}`;
   if (result.type === 'runtime-action')
     return `Runtime action: ${result.action}`;
-  if (result.type === 'set-profile') return `Switch profile: ${result.profile}`;
   if (result.type === 'set-mode') return `Set mode: ${result.mode}`;
+  if (result.type === 'set-effort') return `Set effort: ${result.effort}`;
   return result.prompt;
 }

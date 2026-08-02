@@ -6,6 +6,8 @@ import { render } from 'ink-testing-library';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  AgentTaskDetail,
+  AgentTaskSummary,
   ServerNotification,
   ThreadSnapshot,
   ThreadSummary,
@@ -28,6 +30,104 @@ afterEach(async () => {
 });
 
 describe('App typed client behavior', () => {
+  it('composer 下方可选择 child、进入 transcript、steer 并原地后台化', async () => {
+    const task = agentTask();
+    const harness = createThreadHarness(snapshot(), {
+      agentTasks: [task],
+      agentDetail: {
+        task,
+        prompt: '检查取消链路',
+        events: [
+          {
+            rootThreadId: 'thr_1',
+            taskId: task.taskId,
+            sequence: 1,
+            rootSequence: 1,
+            eventType: 'messageCompleted',
+            payload: { messageId: 'message_1', text: '已定位入口' },
+            createdAt,
+          },
+        ],
+      },
+    });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('检查取消链路'));
+
+    view.stdin.write('\u001b[B');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('Enter to view · x to stop'),
+    );
+    view.stdin.write('\u001b[Z');
+    expect(harness.setMode).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('❯ ○ reader'));
+    view.stdin.write('\r');
+    await vi.waitFor(() => {
+      expect(harness.agentRead).toHaveBeenCalledWith(task.taskId);
+      expect(view.lastFrame()).toContain('@reader');
+      expect(view.lastFrame()).toContain('已定位入口');
+    });
+
+    view.stdin.write('继续检查测试');
+    view.stdin.write('\r');
+    await vi.waitFor(() =>
+      expect(harness.agentSteer).toHaveBeenCalledWith(
+        '继续检查测试',
+        task.taskId,
+      ),
+    );
+    view.stdin.write('\x02');
+    await vi.waitFor(() =>
+      expect(harness.agentBackground).toHaveBeenCalledWith(task.taskId),
+    );
+    view.unmount();
+  });
+
+  it('主 Turn 结束后不再常驻已经完成的 Agent 列表', async () => {
+    const task = agentTask();
+    const harness = createThreadHarness(snapshot(), {
+      agentTasks: [
+        {
+          ...task,
+          status: 'completed',
+          revision: 2,
+          completedAt: createdAt,
+          resultPreview: '调研完成',
+        },
+      ],
+    });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await vi.waitFor(() =>
+      expect(harness.createAgentTaskClient).toHaveBeenCalledOnce(),
+    );
+    expect(view.lastFrame()).not.toContain('○ reader');
+    view.unmount();
+  });
+
+  it('thread snapshot 重置后仍只显示一份已完成 Agent 摘要', async () => {
+    const task: AgentTaskSummary = {
+      ...agentTask(),
+      status: 'completed',
+      revision: 2,
+      completedAt: createdAt,
+      resultPreview: '调研完成',
+    };
+    const harness = createThreadHarness(snapshot(), { agentTasks: [task] });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('调研完成'));
+
+    harness.replaceSnapshot(snapshot());
+
+    await vi.waitFor(() => {
+      expect(view.lastFrame()).toContain('调研完成');
+      expect(view.lastFrame()?.match(/调研完成/gu)).toHaveLength(1);
+    });
+    view.unmount();
+  });
+
   it('/workspace 只通过 workspace/list 加载 Server 数据', async () => {
     const harness = createThreadHarness(snapshot());
     const view = render(<App thread={harness.thread} />);
@@ -39,20 +139,6 @@ describe('App typed client behavior', () => {
       expect(harness.request).toHaveBeenCalledWith('workspace/list', {});
       expect(view.lastFrame()).toContain('/workspace/refactor/client-server');
     });
-    view.unmount();
-  });
-
-  it('/profiles 补全使用 profile 名称而不是模型 ID', async () => {
-    const harness = createThreadHarness(snapshot());
-    const view = render(<App thread={harness.thread} />);
-    await waitForCatalogs(harness);
-
-    view.stdin.write('/profiles rev');
-
-    await vi.waitFor(() =>
-      expect(view.lastFrame()).toContain('/profiles reviewer'),
-    );
-    expect(view.lastFrame()).not.toContain('/profiles mock/new');
     view.unmount();
   });
 
@@ -159,54 +245,106 @@ describe('App typed client behavior', () => {
     view.unmount();
   });
 
-  it('profile role 与 active profile 使用各自的精确 global config path', async () => {
+  it('/models 只改写明确选择的全局模型引用', async () => {
     const harness = createThreadHarness(snapshot());
     const view = render(<App thread={harness.thread} />);
     await waitForCatalogs(harness);
 
-    await submitCommand(view, '/profiles');
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('main [active]'));
-    view.stdin.write('\r');
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('Profile: main'));
+    await submitCommand(view, '/models');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('Select model reference'),
+    );
     view.stdin.write('\r');
     await vi.waitFor(() =>
-      expect(view.lastFrame()).toContain('Select primary model for main'),
+      expect(view.lastFrame()).toContain('Select primary_model'),
     );
     view.stdin.write('\r');
     await vi.waitFor(() =>
       expect(harness.request).toHaveBeenCalledWith('config/write', {
         cwd: '/workspace',
         source: 'global',
-        path: ['profile', 'main', 'models', 'primary'],
+        path: ['primary_model'],
         operation: 'set',
         value: 'mock/new',
       }),
     );
-    await vi.waitFor(() => {
-      expect(view.lastFrame()).not.toContain('Select primary model for main');
-      expect(view.lastFrame()).toContain('Profile: main');
-    });
+    view.unmount();
+  });
 
-    view.stdin.write('\u001b');
+  it('/effort 通过 agent 写入当前模型的全局配置', async () => {
+    const harness = createThreadHarness(snapshot());
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, '/effort max');
+
     await vi.waitFor(() =>
-      expect(view.lastFrame()).not.toContain('Profile: main'),
-    );
-    await submitCommand(view, '/profiles');
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('main [active]'));
-    view.stdin.write('\u001b[B');
-    await vi.waitFor(() => expect(view.lastFrame()).toMatch(/›\s+reviewer/u));
-    view.stdin.write('f');
-    await vi.waitFor(() => {
-      expect(harness.request).toHaveBeenCalledWith('config/write', {
+      expect(harness.request).toHaveBeenCalledWith('agent/effort/update', {
         cwd: '/workspace',
-        source: 'global',
-        path: ['active_profile'],
-        operation: 'set',
-        value: 'reviewer',
-      });
-      expect(harness.setProfile).not.toHaveBeenCalled();
-      expect(view.lastFrame()).toContain('reviewer [active]');
+        agent: 'build',
+        effort: 'max',
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('Thinking effort set to max'),
+    );
+    view.unmount();
+  });
+
+  it('/compact 用完整 checkpoint 替换进行中提示', async () => {
+    const harness = createThreadHarness(snapshot());
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, '/compact');
+
+    await vi.waitFor(() =>
+      expect(harness.request).toHaveBeenCalledWith('thread/compact/start', {
+        threadId: 'thr_1',
+      }),
+    );
+    await vi.waitFor(() => {
+      const frame = view.lastFrame();
+      expect(frame).toContain(
+        'Context compacted · 12 -> 3 messages · 4.1k tokens before',
+      );
+      expect(frame).toContain('## Goal');
+      expect(frame).toContain('Preserve the active compact checkpoint.');
+      expect(frame).not.toContain('jobId');
+      expect(frame).not.toContain('Compacting context…');
     });
+    view.unmount();
+  });
+
+  it('/compact 进行中可用 Ctrl+C 中断', async () => {
+    let rejectCompact!: (error: Error) => void;
+    const compact = new Promise<never>((_resolve, reject) => {
+      rejectCompact = reject;
+    });
+    const harness = createThreadHarness(snapshot(), {
+      compact: () => compact,
+    });
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, '/compact');
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain('Compacting context…'),
+    );
+
+    view.stdin.write('\x03');
+
+    await vi.waitFor(() =>
+      expect(harness.request).toHaveBeenCalledWith('thread/compact/interrupt', {
+        threadId: 'thr_1',
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).not.toContain('Compacting context…'),
+    );
+    rejectCompact(new Error('context compaction aborted'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(view.lastFrame()).not.toContain('context compaction aborted');
     view.unmount();
   });
 
@@ -215,14 +353,11 @@ describe('App typed client behavior', () => {
     const view = render(<App thread={harness.thread} />);
     await waitForCatalogs(harness);
 
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('profile: main'));
-    expect(view.lastFrame()).toContain('model: mock/new');
+    await vi.waitFor(() => expect(view.lastFrame()).toContain('agent: build'));
+    expect(view.lastFrame()).toContain('primary: mock/new · auxiliary:');
+    expect(view.lastFrame()).toContain('mock/flash');
     expect(view.lastFrame()).toContain('mode: ask-before-changes');
-    expect(view.lastFrame()).not.toContain('profile: default');
-    expect(view.lastFrame()).not.toContain('model: default');
     expect(view.lastFrame()?.match(/Ello Coding Agent/gu)).toHaveLength(1);
-    await submitCommand(view, '/profiles');
-    await vi.waitFor(() => expect(view.lastFrame()).toContain('main [active]'));
     view.unmount();
   });
 
@@ -395,6 +530,75 @@ describe('App typed client behavior', () => {
     view.unmount();
   });
 
+  it('运行中连接断开后停止 working，Ctrl+C 直接退出', async () => {
+    const harness = createThreadHarness(runningSnapshot());
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    harness.disconnect(new Error('transport failed'));
+
+    await vi.waitFor(() => {
+      expect(view.lastFrame()).toContain(
+        'App Server connection closed: transport failed',
+      );
+      expect(view.lastFrame()).not.toContain('working');
+    });
+    view.stdin.write('\x03');
+
+    await vi.waitFor(() => expect(harness.close).toHaveBeenCalledOnce());
+    expect(harness.interrupt).not.toHaveBeenCalled();
+  });
+
+  it('运行中 steer 被消费后从 pending 移入正常用户历史', async () => {
+    const current = runningSnapshot();
+    const harness = createThreadHarness(current);
+    const view = render(<App thread={harness.thread} />);
+    await waitForCatalogs(harness);
+
+    await submitCommand(view, 'focus tests');
+    await vi.waitFor(() => expect(harness.steerInput).toHaveBeenCalledOnce());
+    const steerId = harness.steerInput.mock.calls[0]?.[1] as string;
+    expect(steerId).toMatch(/^steer_[a-f0-9]{32}$/u);
+    await vi.waitFor(() =>
+      expect(view.lastFrame()).toContain(
+        'Messages queued for the running turn',
+      ),
+    );
+
+    const item = {
+      id: 'item_consumed_steer',
+      turnId: 'turn_running',
+      type: 'userMessage' as const,
+      text: 'focus tests',
+      steerId,
+      createdAt,
+    };
+    harness.emit(
+      notification(
+        'item/started',
+        2,
+        { turnId: item.turnId, itemId: item.id, item },
+        current.thread.id,
+      ),
+    );
+    harness.emit(
+      notification(
+        'item/completed',
+        3,
+        { turnId: item.turnId, itemId: item.id, item },
+        current.thread.id,
+      ),
+    );
+
+    await vi.waitFor(() => {
+      expect(view.lastFrame()).not.toContain(
+        'Messages queued for the running turn',
+      );
+      expect(view.lastFrame()).toContain('focus tests');
+    });
+    view.unmount();
+  });
+
   it('/resume 隐藏空白 thread，空白 TUI 退出时删除当前 thread', async () => {
     const named = summary('thr_named', 'Named session', 'work');
     const blank = summary('thr_blank', '', '');
@@ -415,61 +619,6 @@ describe('App typed client behavior', () => {
         threadId: 'thr_1',
       }),
     );
-  });
-
-  it('profile create/delete 使用 profile 叶节点，不覆盖整个配置', async () => {
-    const createHarness = createThreadHarness(snapshot());
-    const createView = render(<App thread={createHarness.thread} />);
-    await waitForCatalogs(createHarness);
-    await submitCommand(createView, '/profiles');
-    await vi.waitFor(() =>
-      expect(createView.lastFrame()).toContain('main [active]'),
-    );
-    createView.stdin.write('c');
-    await vi.waitFor(() =>
-      expect(createView.lastFrame()).toContain('Create profile'),
-    );
-    createView.stdin.write('new_profile');
-    await vi.waitFor(() =>
-      expect(createView.lastFrame()).toContain('Name: new_profile_'),
-    );
-    createView.stdin.write('\r');
-    await vi.waitFor(() =>
-      expect(createHarness.request).toHaveBeenCalledWith('config/write', {
-        cwd: '/workspace',
-        source: 'global',
-        path: ['profile', 'new_profile'],
-        operation: 'set',
-        value: profileConfig().profile.main,
-      }),
-    );
-    createView.unmount();
-
-    const deleteHarness = createThreadHarness(snapshot());
-    const deleteView = render(<App thread={deleteHarness.thread} />);
-    await waitForCatalogs(deleteHarness);
-    await submitCommand(deleteView, '/profiles');
-    await vi.waitFor(() =>
-      expect(deleteView.lastFrame()).toContain('reviewer'),
-    );
-    deleteView.stdin.write('\u001b[B');
-    await vi.waitFor(() =>
-      expect(selectedLine(deleteView.lastFrame(), 'reviewer')).toContain('›'),
-    );
-    deleteView.stdin.write('d');
-    await vi.waitFor(() =>
-      expect(deleteView.lastFrame()).toContain('Delete profile'),
-    );
-    deleteView.stdin.write('\r');
-    await vi.waitFor(() =>
-      expect(deleteHarness.request).toHaveBeenCalledWith('config/write', {
-        cwd: '/workspace',
-        source: 'global',
-        path: ['profile', 'reviewer'],
-        operation: 'delete',
-      }),
-    );
-    deleteView.unmount();
   });
 
   it('/settings 中的 theme 立即生效并写入 Client 本地 tui.json', async () => {
@@ -553,21 +702,31 @@ interface ThreadHarness {
   readonly fork: ReturnType<typeof vi.fn>;
   readonly close: ReturnType<typeof vi.fn>;
   readonly interrupt: ReturnType<typeof vi.fn>;
-  readonly setProfile: ReturnType<typeof vi.fn>;
   readonly setMode: ReturnType<typeof vi.fn>;
   readonly submitInput: ReturnType<typeof vi.fn>;
+  readonly steerInput: ReturnType<typeof vi.fn>;
+  readonly agentRead: ReturnType<typeof vi.fn>;
+  readonly agentSteer: ReturnType<typeof vi.fn>;
+  readonly agentBackground: ReturnType<typeof vi.fn>;
+  readonly agentStop: ReturnType<typeof vi.fn>;
+  readonly createAgentTaskClient: ReturnType<typeof vi.fn>;
   emit(notification: ServerNotification): void;
+  replaceSnapshot(snapshot: ThreadSnapshot): void;
+  disconnect(error: Error): void;
 }
 
 function createThreadHarness(
   initialSnapshot: ThreadSnapshot,
   options: {
+    readonly compact?: () => Promise<unknown>;
     readonly fileSearchError?: Error;
     readonly submitInput?: () => Promise<string>;
     readonly sessions?: readonly ThreadSummary[];
+    readonly agentTasks?: readonly AgentTaskSummary[];
+    readonly agentDetail?: AgentTaskDetail;
   } = {},
 ): ThreadHarness {
-  const config = profileConfig();
+  const config = modelConfig();
   const request = vi.fn(async (method: string, _params?: unknown) => {
     switch (method) {
       case 'model/list':
@@ -578,18 +737,55 @@ function createThreadHarness(
               name: 'new',
               title: 'New model',
               enabled: true,
-              metadata: { provider: 'mock' },
+              metadata: { protocol: 'openai', contextWindow: 200000 },
+            },
+            {
+              id: 'mock/flash',
+              name: 'flash',
+              title: 'Flash model',
+              enabled: true,
+              metadata: { protocol: 'openai', contextWindow: 200000 },
             },
           ],
         };
-      case 'provider/list':
-        return {
-          data: [{ id: 'mock', name: 'Mock', enabled: true, metadata: {} }],
-        };
       case 'skills/list':
-      case 'agent/list':
       case 'task/list':
         return { data: [] };
+      case 'agent/list':
+        return {
+          data: [
+            {
+              id: 'build',
+              name: 'build',
+              enabled: true,
+              metadata: { mode: 'primary', model: 'primary_model' },
+            },
+          ],
+        };
+      case 'agent/effort/update':
+        return {
+          agent: 'build',
+          selector: 'primary_model',
+          model: 'mock/new',
+          effort: 'max',
+        };
+      case 'thread/compact/start':
+        if (options.compact !== undefined) return options.compact();
+        return {
+          id: 'compaction-7',
+          threadId: initialSnapshot.thread.id,
+          turnId: 'turn_1',
+          createdAt,
+          compactor: 'ello-thread-compactor',
+          beforeMessageCount: 12,
+          afterMessageCount: 3,
+          keptMessageCount: 2,
+          tokensBefore: 4_096,
+          summary: '## Goal\nPreserve the active compact checkpoint.',
+          metadata: { summarizedMessageCount: 10 },
+        };
+      case 'thread/compact/interrupt':
+        return { ok: true };
       case 'config/read':
       case 'config/write':
         return { config };
@@ -652,10 +848,44 @@ function createThreadHarness(
   const fork = vi.fn();
   const close = vi.fn(async () => undefined);
   const interrupt = vi.fn(async () => undefined);
-  const setProfile = vi.fn(async () => undefined);
   const setMode = vi.fn(async () => undefined);
   const submitInput = vi.fn(options.submitInput ?? (async () => 'turn_new'));
+  const steerInput = vi.fn(async () => undefined);
   const listeners = new Set<(event: ThreadClientEvent) => void>();
+  const agentListeners = new Set<
+    (event: { type: string; detail?: AgentTaskDetail }) => void
+  >();
+  const agentRead = vi.fn(async () => {
+    if (options.agentDetail !== undefined) {
+      for (const listener of agentListeners) {
+        listener({ type: 'detail', detail: options.agentDetail });
+      }
+    }
+    return options.agentDetail;
+  });
+  const agentSteer = vi.fn(async () => options.agentTasks?.[0]);
+  const agentBackground = vi.fn(async () => options.agentTasks?.[0]);
+  const agentStop = vi.fn(async () => options.agentTasks?.[0]);
+  const agentTaskSnapshot = {
+    rootThreadId: initialSnapshot.thread.id,
+    seq: options.agentTasks?.length ?? 0,
+    tasks: options.agentTasks ?? [],
+  } as const;
+  const createAgentTaskClient = vi.fn(async () => ({
+    snapshot: agentTaskSnapshot,
+    subscribe: (
+      listener: (event: { type: string; detail?: AgentTaskDetail }) => void,
+    ) => {
+      agentListeners.add(listener);
+      return () => agentListeners.delete(listener);
+    },
+    close: async () => undefined,
+    detail: () => undefined,
+    read: agentRead,
+    steer: agentSteer,
+    background: agentBackground,
+    stop: agentStop,
+  }));
   const thread = {
     threadId: initialSnapshot.thread.id,
     cwd: initialSnapshot.thread.cwd,
@@ -669,9 +899,10 @@ function createThreadHarness(
     fork,
     close,
     interrupt,
-    setProfile,
     setMode,
     submitInput,
+    steerInput,
+    createAgentTaskClient,
   } as unknown as ThreadClient;
   return {
     thread,
@@ -679,14 +910,77 @@ function createThreadHarness(
     fork,
     close,
     interrupt,
-    setProfile,
     setMode,
     submitInput,
+    steerInput,
+    agentRead,
+    agentSteer,
+    agentBackground,
+    agentStop,
+    createAgentTaskClient,
     emit: (notification: ServerNotification) => {
       for (const listener of listeners) {
         listener({ type: 'notification', notification });
       }
     },
+    replaceSnapshot: (snapshot: ThreadSnapshot) => {
+      for (const listener of listeners)
+        listener({ type: 'snapshot', snapshot });
+    },
+    disconnect: (error: Error) => {
+      for (const listener of listeners) {
+        listener({ type: 'connectionClosed', error });
+      }
+    },
+  };
+}
+
+function runningSnapshot(): ThreadSnapshot {
+  const current = snapshot('thr_running');
+  return {
+    ...current,
+    thread: { ...current.thread, status: 'running' },
+    turns: [
+      {
+        id: 'turn_running',
+        threadId: current.thread.id,
+        status: 'inProgress',
+        items: [
+          {
+            id: 'item_reasoning',
+            turnId: 'turn_running',
+            type: 'reasoning',
+            summary: 'Inspecting the repository',
+            status: 'completed',
+            createdAt,
+          },
+        ],
+        startedAt: createdAt,
+      },
+    ],
+  };
+}
+
+function agentTask(): AgentTaskSummary {
+  return {
+    taskId: 'job_reader',
+    agentId: 'agent_reader',
+    rootThreadId: 'thr_1',
+    name: 'reader',
+    definitionName: 'explore',
+    description: '检查取消链路',
+    contextMode: 'fresh',
+    executionMode: 'foreground',
+    status: 'running',
+    cwd: '/workspace',
+    isolation: 'shared',
+    revision: 1,
+    eventSequence: 1,
+    toolCount: 0,
+    recentTools: [],
+    createdAt,
+    startedAt: createdAt,
+    updatedAt: createdAt,
   };
 }
 
@@ -705,9 +999,7 @@ function snapshot(threadId = 'thr_1', withHistory = false): ThreadSnapshot {
     },
     settings: {
       mode: 'ask-before-changes',
-      profile: 'main',
-      model: 'mock/new',
-      agent: 'primary',
+      agent: 'build',
     },
     turns: withHistory
       ? [
@@ -744,33 +1036,12 @@ function snapshot(threadId = 'thr_1', withHistory = false): ThreadSnapshot {
   };
 }
 
-function profileConfig() {
+function modelConfig() {
   return {
-    active_profile: 'main',
     initial_mode: 'ask-before-changes',
     bypass_enabled: true,
-    profile: {
-      main: {
-        label: 'Main',
-        models: {
-          primary: 'mock/old',
-          small: 'mock/old',
-          compact: 'mock/old',
-          title: 'mock/old',
-          review: 'mock/old',
-        },
-      },
-      reviewer: {
-        label: 'Reviewer',
-        models: {
-          primary: 'mock/old',
-          small: 'mock/old',
-          compact: 'mock/old',
-          title: 'mock/old',
-          review: 'mock/old',
-        },
-      },
-    },
+    primary_model: 'mock/new',
+    auxiliary_model: 'mock/flash',
   };
 }
 
@@ -818,9 +1089,10 @@ function notification<M extends ServerNotification['method']>(
     Extract<ServerNotification, { method: M }>['params'],
     'threadId' | 'seq'
   >,
+  threadId = 'thr_1',
 ): Extract<ServerNotification, { method: M }> {
   return {
     method,
-    params: { threadId: 'thr_1', seq, ...params },
+    params: { threadId, seq, ...params },
   } as unknown as Extract<ServerNotification, { method: M }>;
 }

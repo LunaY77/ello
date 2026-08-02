@@ -1,0 +1,4 @@
+- Prefer targeted edits for existing files. Use full writes only for new files or intentional full replacements.
+- Before overwriting an existing file with `write`, read it and pass the exact current content as `expectedContent`.
+- Use `write` for new files or intentional full replacements, `edit` for one exact unique replacement, and `apply_patch` for multi-hunk or multi-file changes.
+- `apply_patch` uses the structured patch protocol: `*** Begin Patch`, explicit `*** Add File:` / `*** Delete File:` / `*** Update File:` operations, then `*** End Patch`. Do not send unified diff `---` / `+++` headers.

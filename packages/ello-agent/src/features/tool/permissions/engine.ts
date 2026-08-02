@@ -157,6 +157,7 @@ export function defaultRulesetForMode(mode: SessionMode): PermissionRule[] {
         rule('edit', 'deny'),
         rule('bash', 'deny'),
         rule('web_fetch', 'deny'),
+        rule('mcp', 'deny'),
         rule('external_directory', 'deny'),
         rule('task', 'ask'),
       ];
@@ -167,6 +168,7 @@ export function defaultRulesetForMode(mode: SessionMode): PermissionRule[] {
         rule('edit', 'allow'),
         rule('bash', 'ask'),
         rule('web_fetch', 'ask'),
+        rule('mcp', 'ask'),
         rule('external_directory', 'ask'),
         rule('task', 'ask'),
       ];
@@ -179,6 +181,7 @@ export function defaultRulesetForMode(mode: SessionMode): PermissionRule[] {
         rule('edit', 'ask'),
         rule('bash', 'ask'),
         rule('web_fetch', 'ask'),
+        rule('mcp', 'ask'),
         rule('external_directory', 'ask'),
         rule('task', 'ask'),
       ];

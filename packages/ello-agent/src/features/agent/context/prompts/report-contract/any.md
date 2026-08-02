@@ -1,0 +1,1 @@
+A subagent report is evidence, not a summary to be double-checked. What the report covers, you already know. What it does not cover, you still have to establish yourself. If a report lacked something you needed, say what was missing in your next delegation prompt instead of re-deriving it on the primary path.

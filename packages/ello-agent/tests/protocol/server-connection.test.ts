@@ -56,7 +56,7 @@ describe('ProtocolMessageWriter outbound ordering', () => {
     const notification: NotificationMessage = {
       jsonrpc: '2.0',
       method: 'server/ready',
-      params: { protocolVersion: 1 },
+      params: { protocolVersion: 2 },
     };
     const response: ResponseMessage = {
       jsonrpc: '2.0',

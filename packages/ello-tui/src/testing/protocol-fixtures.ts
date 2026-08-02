@@ -69,8 +69,6 @@ export function fixtureSettings(
 ): ThreadSettings {
   return {
     mode: 'ask-before-changes',
-    profile: 'main',
-    model: 'openai/gpt-5.5',
     agent: 'build',
     ...overrides,
   };

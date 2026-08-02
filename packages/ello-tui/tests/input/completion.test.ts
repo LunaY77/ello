@@ -16,7 +16,7 @@ function skill(overrides: Partial<AgentSkill> = {}): AgentSkill {
 
 describe('输入补全', () => {
   it('输入单个斜杠时列出带说明的用户命令', () => {
-    const suggestions = completeInput('/', [], []);
+    const suggestions = completeInput('/', []);
 
     expect(suggestions).toEqual(
       expect.arrayContaining([
@@ -39,7 +39,7 @@ describe('输入补全', () => {
   });
 
   it('按命令前缀过滤结果且不任意截断', () => {
-    expect(completeInput('/mo', [], [])).toEqual([
+    expect(completeInput('/mo', [])).toEqual([
       {
         value: '/mode',
         label: '/mode',
@@ -53,16 +53,9 @@ describe('输入补全', () => {
     ]);
   });
 
-  it('为 profile 参数补全可选名称', () => {
-    expect(completeInput('/profiles ma', ['main', 'anthropic'], [])).toEqual([
-      '/profiles main',
-    ]);
-  });
-
   it('按名称或说明匹配技能，并保持技能来源可见', () => {
     const suggestions = completeInput(
       '$work',
-      [],
       [],
       [skill({ description: 'Manage repositories and working trees.' })],
     );
@@ -83,7 +76,6 @@ describe('输入补全', () => {
     const suggestions = completeInput(
       '$work',
       [],
-      [],
       [
         skill({
           description:
@@ -102,7 +94,7 @@ describe('输入补全', () => {
 
   it('光标位于词元中间时只替换当前技能词元', () => {
     expect(
-      completeInput('please $work-old keep', [], [], [skill()], {
+      completeInput('please $work-old keep', [], [skill()], {
         line: 0,
         column: 12,
       }),
@@ -116,7 +108,7 @@ describe('输入补全', () => {
   });
 
   it('普通输入仅返回调用方提供的文件候选，无候选时不弹出列表', () => {
-    expect(completeInput('see @src', [], ['src/a.ts'])).toEqual(['src/a.ts']);
-    expect(completeInput('plain text', [], [])).toBeUndefined();
+    expect(completeInput('see @src', ['src/a.ts'])).toEqual(['src/a.ts']);
+    expect(completeInput('plain text', [])).toBeUndefined();
   });
 });

@@ -12,7 +12,7 @@ import type { CodingAgentDefinition } from './schema.js';
  * 内置 agent 定义。
  *
  * - build 是 primary。
- * - title/compact/summary/memory-extractor/dream 是 internal：系统专用。
+ * - title/summary/memory-extractor/dream 是 internal：系统专用。
  *
  * Args:
  * - 无：操作使用实例或闭包已经持有的稳定状态。
@@ -25,15 +25,14 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
     {
       name: 'build',
       mode: 'primary',
-      role: 'primary',
+      model: 'primary_model',
       source: 'builtin',
       description: 'Default coding agent.',
-      maxTurns: 100,
     },
     {
       name: 'title',
       mode: 'internal',
-      role: 'title',
+      model: 'auxiliary_model',
       source: 'builtin',
       hidden: true,
       tools: [],
@@ -42,20 +41,9 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
       maxTurns: 4,
     },
     {
-      name: 'compact',
-      mode: 'internal',
-      role: 'compact',
-      source: 'builtin',
-      hidden: true,
-      tools: [],
-      description: 'Internal compact checkpoint generator.',
-      prompt: renderPromptTemplate('compact'),
-      maxTurns: 4,
-    },
-    {
       name: 'summary',
       mode: 'internal',
-      role: 'compact',
+      model: 'auxiliary_model',
       source: 'builtin',
       hidden: true,
       tools: [],
@@ -66,7 +54,7 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
     {
       name: 'memory-extractor',
       mode: 'internal',
-      role: 'small',
+      model: 'auxiliary_model',
       source: 'builtin',
       hidden: true,
       tools: [
@@ -82,7 +70,7 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
     {
       name: 'dream',
       mode: 'internal',
-      role: 'compact',
+      model: 'auxiliary_model',
       source: 'builtin',
       hidden: true,
       tools: [

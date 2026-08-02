@@ -8,13 +8,12 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { compactionView } from '../../src/features/thread/compact.js';
+import { projectThreadSnapshot } from '../../src/features/thread/records.js';
 import { ThreadLogStore } from '../../src/storage/threads/thread-log.js';
 
 const roots: string[] = [];
 const THREAD_SETTINGS = {
   mode: 'ask-before-changes',
-  profile: 'main',
-  model: 'openai/gpt-5.5',
   agent: 'build',
 } as const;
 
@@ -69,6 +68,117 @@ describe('Thread history projection', () => {
 
     const records = await logs.read('thr_invalid_history');
     expect(() => compactionView(records)).toThrow('invalid role or content');
+  });
+
+  it('恢复 snapshot 时保留手动 compact 的完整 checkpoint 和统计', async () => {
+    const logs = await createLogs('thr_manual_compact');
+    const startedAt = '2026-07-18T00:00:00.000Z';
+    await logs.append('thr_manual_compact', {
+      kind: 'turn.started',
+      turn: {
+        id: 'turn_manual',
+        threadId: 'thr_manual_compact',
+        status: 'inProgress',
+        items: [],
+        startedAt,
+      },
+    });
+    await logs.append('thr_manual_compact', {
+      kind: 'turn.completed',
+      turn: {
+        id: 'turn_manual',
+        threadId: 'thr_manual_compact',
+        status: 'completed',
+        items: [],
+        startedAt,
+        completedAt: '2026-07-18T00:00:05.000Z',
+      },
+    });
+    await logs.append('thr_manual_compact', {
+      kind: 'compaction',
+      turnId: 'turn_manual',
+      summary: '## Goal\nPreserve the compact checkpoint.',
+      firstKeptSeq: 2,
+      tokensBefore: 4_096,
+      beforeMessageCount: 12,
+      afterMessageCount: 3,
+      keptMessageCount: 2,
+    });
+
+    const snapshot = projectThreadSnapshot(
+      await logs.read('thr_manual_compact'),
+    );
+    expect(snapshot.turns[0]?.items).toEqual([
+      expect.objectContaining({
+        type: 'contextCompaction',
+        summary: '## Goal\nPreserve the compact checkpoint.',
+        tokensBefore: 4_096,
+        beforeMessageCount: 12,
+        afterMessageCount: 3,
+        keptMessageCount: 2,
+        status: 'completed',
+      }),
+    ]);
+  });
+
+  it('自动 compact 已有进行中 item 时不投影重复 checkpoint', async () => {
+    const logs = await createLogs('thr_auto_compact');
+    const startedAt = '2026-07-18T00:00:00.000Z';
+    const inProgressItem = {
+      type: 'contextCompaction' as const,
+      id: 'compact-auto',
+      turnId: 'turn_auto',
+      createdAt: startedAt,
+      summary: 'Compacting 12 messages…',
+      tokensBefore: 4_096,
+      status: 'inProgress' as const,
+    };
+    await logs.append('thr_auto_compact', {
+      kind: 'turn.started',
+      turn: {
+        id: 'turn_auto',
+        threadId: 'thr_auto_compact',
+        status: 'inProgress',
+        items: [],
+        startedAt,
+      },
+    });
+    await logs.append('thr_auto_compact', {
+      kind: 'item.started',
+      turnId: 'turn_auto',
+      item: inProgressItem,
+    });
+    await logs.append('thr_auto_compact', {
+      kind: 'compaction',
+      turnId: 'turn_auto',
+      summary: '## Goal\nPreserve the compact checkpoint.',
+      firstKeptSeq: 2,
+      tokensBefore: 4_096,
+      beforeMessageCount: 12,
+      afterMessageCount: 3,
+      keptMessageCount: 2,
+    });
+    await logs.append('thr_auto_compact', {
+      kind: 'item.completed',
+      turnId: 'turn_auto',
+      item: {
+        ...inProgressItem,
+        summary: '## Goal\nPreserve the compact checkpoint.',
+        beforeMessageCount: 12,
+        afterMessageCount: 3,
+        keptMessageCount: 2,
+        status: 'completed',
+      },
+    });
+
+    const snapshot = projectThreadSnapshot(await logs.read('thr_auto_compact'));
+    expect(snapshot.turns[0]?.items).toHaveLength(1);
+    expect(snapshot.turns[0]?.items[0]).toMatchObject({
+      id: 'compact-auto',
+      type: 'contextCompaction',
+      summary: '## Goal\nPreserve the compact checkpoint.',
+      status: 'completed',
+    });
   });
 });
 

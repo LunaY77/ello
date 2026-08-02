@@ -15,6 +15,7 @@ import {
   RpcMessageSchema,
   SERVER_NOTIFICATION_SCHEMAS,
   SERVER_REQUEST_SCHEMAS,
+  parseClientResult,
   parseServerNotificationParams,
   parseServerRequestParams,
   parseServerRequestResult,
@@ -94,7 +95,7 @@ describe('Ello protocol v1 fixtures', () => {
         wireSamples.serverNotification.method,
         wireSamples.serverNotification.params,
       ),
-    ).toEqual({ protocolVersion: 1 });
+    ).toEqual({ protocolVersion: 2 });
     expect(
       parseServerRequestParams(
         wireSamples.serverRequest.method,
@@ -129,6 +130,28 @@ describe('Ello protocol v1 fixtures', () => {
     ]) {
       expect(OpaqueIdSchema.safeParse(id).success, id).toBe(false);
     }
+  });
+
+  it('手动 compact 响应接受完整 checkpoint 报告及 JSON metadata', () => {
+    expect(
+      parseClientResult('thread/compact/start', {
+        id: 'compaction-12',
+        threadId: 'thr_compact',
+        turnId: 'turn_compact',
+        createdAt: '2026-07-28T00:00:00.000Z',
+        compactor: 'ello-thread-compactor',
+        beforeMessageCount: 12,
+        afterMessageCount: 3,
+        keptMessageCount: 2,
+        tokensBefore: 4_096,
+        summary: '## Goal\nPreserve the compact checkpoint.',
+        metadata: { summarizedMessageCount: 10 },
+      }),
+    ).toMatchObject({
+      id: 'compaction-12',
+      summary: '## Goal\nPreserve the compact checkpoint.',
+      metadata: { summarizedMessageCount: 10 },
+    });
   });
 });
 

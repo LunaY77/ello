@@ -9,8 +9,7 @@ import { presenterFor } from '../../src/tui/presenters/index.js';
 import { overlayCallbacks } from '../support/overlay-fixture.js';
 
 const DISPLAY_SETTINGS = {
-  profile: 'main',
-  model: 'openai-chat:test',
+  agent: 'build',
   mode: 'ask-before-changes',
 } as const;
 
@@ -58,8 +57,7 @@ describe('TerminalHistoryOutput', () => {
             id: 'header',
             threadId: 'thread-header',
             cwd: '/tmp/ello-workspace',
-            profile: 'main',
-            model: 'openai-chat:test',
+            agent: 'build',
             mode: 'ask',
           },
         ]}
@@ -68,10 +66,82 @@ describe('TerminalHistoryOutput', () => {
     );
 
     expect(output).toContain('Ello Coding Agent');
-    expect(output).toContain('profile: main');
     expect(output).toContain('directory: /tmp/ello-workspace');
-    expect(output).toContain('model: openai-chat:test');
+    expect(output).toContain('agent: build');
     expect(output).toContain('mode: ask-before-changes');
+  });
+
+  it('keeps committed reasoning muted and above the assistant output', () => {
+    const output = renderToString(
+      <TerminalHistoryOutput
+        cwd="/workspace"
+        resetKey={0}
+        settings={DISPLAY_SETTINGS}
+        entries={[
+          {
+            kind: 'reasoning',
+            id: 'reasoning-1',
+            text: 'checking the context',
+          },
+          { kind: 'assistant', id: 'assistant-1', text: 'final output' },
+        ]}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).not.toContain('reasoning:');
+    expect(output.indexOf('Thinking: checking the context')).toBeLessThan(
+      output.indexOf('* final output'),
+    );
+  });
+
+  it('indents every committed reasoning line after the Thinking label', () => {
+    const output = renderToString(
+      <TerminalHistoryOutput
+        cwd="/workspace"
+        resetKey={0}
+        settings={DISPLAY_SETTINGS}
+        entries={[
+          {
+            kind: 'reasoning',
+            id: 'reasoning-multiline',
+            text: 'first line\nsecond line',
+          },
+        ]}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('Thinking: first line\n          second line');
+  });
+
+  it('renders the complete compact checkpoint as muted history', () => {
+    const output = renderToString(
+      <TerminalHistoryOutput
+        cwd="/workspace"
+        resetKey={0}
+        settings={DISPLAY_SETTINGS}
+        entries={[
+          {
+            kind: 'compaction',
+            id: 'compaction-7',
+            summary: '## Goal\nPreserve the current implementation state.',
+            tokensBefore: 4_096,
+            beforeMessageCount: 12,
+            afterMessageCount: 3,
+            keptMessageCount: 2,
+          },
+        ]}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain(
+      'Context compacted · 12 -> 3 messages · 4.1k tokens before',
+    );
+    expect(output).toContain('## Goal');
+    expect(output).toContain('Preserve the current implementation state.');
+    expect(output).not.toContain('jobId');
   });
 
   it('renders user, assistant and tool history outside AppShell', () => {
@@ -216,6 +286,45 @@ describe('AppShell', () => {
     expect(output).toContain('bypass');
   });
 
+  it('keeps model references separate from runtime status on narrow terminals', () => {
+    const output = renderToString(
+      <AppShell
+        cwd="/workspace"
+        model="primary: deepseek-v4-pro · auxiliary: deepseek-v4-flash"
+        mode={{ mode: 'bypass' }}
+        contextPercent={100}
+        contextWindow={1_000_000}
+        usage={{
+          requests: 0,
+          inputTokens: 4_600_000,
+          lastInputTokens: 100_000,
+          outputTokens: 4_800,
+          cacheReadTokens: 4_500_000,
+          cacheWriteTokens: 0,
+          toolCalls: 0,
+        }}
+        liveAssistantText=""
+        runningTools={[]}
+        runningSubagents={[]}
+        running={false}
+        overlay={null}
+        composer={null}
+      />,
+      { columns: 60 },
+    );
+
+    expect(output).toContain('primary: deepseek-v4-pro');
+    expect(output).toContain('auxiliary: deepseek-v4-flash');
+    expect(output).toContain('context 100.0k / 1.0m');
+    expect(output).not.toContain('session 4.6m tokens');
+    expect(output).toContain('98% cached');
+    expect(
+      output
+        .split('\n')
+        .some((line) => line.includes('auxiliary:') && line.includes('bypass')),
+    ).toBe(false);
+  });
+
   it('shows running status in the live viewport', () => {
     const output = renderToString(
       <AppShell
@@ -237,6 +346,49 @@ describe('AppShell', () => {
 
     expect(output).toContain('* I am checking the parser');
     expect(output).toContain('working 12s');
+  });
+
+  it('shows live reasoning separately from assistant output', () => {
+    const output = renderToString(
+      <AppShell
+        cwd="/workspace"
+        model="main"
+        mode={{ mode: 'ask-before-changes' }}
+        liveAssistantText="final output"
+        liveReasoningText="checking the context"
+        runningTools={[]}
+        runningSubagents={[]}
+        running
+        overlay={null}
+        composer={null}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('Thinking: checking the context');
+    expect(output.indexOf('Thinking: checking the context')).toBeLessThan(
+      output.indexOf('* final output'),
+    );
+  });
+
+  it('preserves line breaks in live reasoning', () => {
+    const output = renderToString(
+      <AppShell
+        cwd="/workspace"
+        model="main"
+        mode={{ mode: 'ask-before-changes' }}
+        liveAssistantText=""
+        liveReasoningText={'first line\nsecond line'}
+        runningTools={[]}
+        runningSubagents={[]}
+        running
+        overlay={null}
+        composer={null}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('Thinking: first line\n           second line');
   });
 
   it('does not render blank assistant stream chunks as empty message lines', () => {
@@ -343,7 +495,6 @@ describe('AppShell', () => {
     );
 
     expect(output).toContain('explore');
-    expect(output).toContain('foreground');
     expect(output).toContain('inspect loader');
     expect(output).toContain('Read');
     expect(output).toContain('src/config.ts');
@@ -385,7 +536,7 @@ describe('AppShell', () => {
       { columns: 100 },
     );
 
-    expect(output).toContain('+2 earlier tool calls');
+    expect(output).toContain('+2 tool uses');
     expect(output).not.toContain('src/file-0.ts');
     expect(output).not.toContain('src/file-1.ts');
     expect(output).toContain('src/file-2.ts');

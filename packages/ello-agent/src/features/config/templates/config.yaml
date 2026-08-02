@@ -1,62 +1,27 @@
-# 当前激活的模型套件；TUI 使用 /profiles 切换。
-active_profile: main
-
-# provider 只描述连接、认证和 provider 类型，不承载 agent 使用意图。
-provider:
-  openai:
-    name: OpenAI
-    enabled: true
-    kind: openai
-    api_key_env: OPENAI_API_KEY
+# 已命名模型目录。每项都包含完整协议、连接和调用限制。
+models:
+  openai-gpt-5.5:
+    protocol: openai
+    endpoint: responses
+    api_model: gpt-5.5
     base_url: https://api.openai.com/v1
-  anthropic:
-    name: Anthropic
-    enabled: true
-    kind: anthropic
-    api_key_env: ANTHROPIC_API_KEY
+    api_key_env: OPENAI_API_KEY
+    context_window: 400000
+    max_output_tokens: 32000
+    reasoning_effort: high
+  openai-gpt-5.4:
+    protocol: openai
+    endpoint: responses
+    api_model: gpt-5.4
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    context_window: 400000
+    max_output_tokens: 16000
+    reasoning_effort: low
 
-# profile 是一组 role 到模型的明确绑定。
-profile:
-  main:
-    label: Main
-    description: 高质量编码任务的默认模型套件。
-    models:
-      primary: openai/gpt-5.5
-      small: openai/gpt-5.4
-      compact: openai/gpt-5.4
-      title: openai/gpt-5.4
-      review: anthropic/claude-sonnet-4.6
-    settings:
-      primary:
-        reasoning_effort: medium
-      small:
-        reasoning_effort: low
-      compact:
-        reasoning_effort: low
-      title:
-        reasoning_effort: low
-      review:
-        reasoning_effort: high
-  anthropic:
-    label: Anthropic
-    description: 偏向 Anthropic 的编码与审查模型套件。
-    models:
-      primary: anthropic/claude-sonnet-4.6
-      small: anthropic/claude-haiku-4.5
-      compact: anthropic/claude-haiku-4.5
-      title: anthropic/claude-haiku-4.5
-      review: anthropic/claude-opus-4.8
-    settings:
-      primary:
-        reasoning_effort: medium
-      small:
-        reasoning_effort: low
-      compact:
-        reasoning_effort: low
-      title:
-        reasoning_effort: low
-      review:
-        reasoning_effort: high
+# Agent definition 只能选择这两个全局引用字段，不能直接绑定模型名称。
+primary_model: openai-gpt-5.5
+auxiliary_model: openai-gpt-5.4
 
 # 默认工作目录；通常不要写死，命令行 --cwd 会覆盖。
 # cwd: /path/to/project
@@ -69,9 +34,18 @@ initial_mode: ask-before-changes
 # bypass 必须同时由这个安全开关显式启用。
 bypass_enabled: false
 
+# false 时直接使用第一条用户消息作为 Thread 标题；true 时使用 title Agent 的辅助模型生成。
+title_generation: false
+
 # 允许工具访问的路径根目录；默认至少包含当前 cwd。
 # allowed_paths:
 #   - /path/to/project
+
+# 子 Agent 能力开关。false 时不注册 delegate_to_subagent / task_output / task_stop 三个
+# 工具，也不注入 Delegation 提示词段落。cwd_policy 控制 child 工作目录范围。
+# subagents:
+#   enabled: true
+#   cwd_policy: allowed_paths
 
 # 细粒度权限规则；通常由权限命令或 TUI 写入，不建议手写复杂规则。
 # permission_rules: []
@@ -85,8 +59,8 @@ bypass_enabled: false
 # context pipeline 配置。
 # 运行期信息会作为可观测 source 注入 system，而不是拼在 base prompt 尾部。
 # context:
-#   max_input_tokens: 160000
-#   reserved_output_tokens: 8000
+#   max_input_tokens: 1000000
+#   reserved_output_tokens: 64000
 #   show_sources_in_tui: true
 #   system_prompt_profile: coding
 #   instructions:
@@ -158,11 +132,7 @@ bypass_enabled: false
 #   max_lines: 400
 #   preview_lines: 120
 
-# provider 专属 HTTP headers。
-# provider:
-#   openai:
-#     headers:
-#       OpenAI-Organization: ${OPENAI_ORG_ID}
+# 额外 HTTP headers 直接写在对应 model 的 http_headers 字段中。
 
 # 项目信任配置；路径可以直接作为 YAML key。
 # projects:

@@ -5,14 +5,15 @@ import type { SubagentRunView, ToolCallView } from '../store/history-entry.js';
 import { useTheme } from '../theme/index.js';
 import { glyphs } from '../ui/glyphs.js';
 
+import { SubagentActivity } from './SubagentActivity.js';
 import { ToolActivityList } from './ToolActivityList.js';
-
-const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
 
 /** live 区只接收当前增量状态；已提交历史由 TerminalHistoryOutput 冻结。 */
 export const LiveViewport = memo(function LiveViewport({
   cwd,
   assistantText,
+  reasoningText,
+  compactionText,
   runningTools,
   runningSubagents,
   running,
@@ -22,6 +23,8 @@ export const LiveViewport = memo(function LiveViewport({
 }: {
   readonly cwd: string;
   readonly assistantText: string;
+  readonly reasoningText: string;
+  readonly compactionText: string;
   readonly runningTools: readonly ToolCallView[];
   readonly runningSubagents: readonly SubagentRunView[];
   readonly running: boolean;
@@ -30,8 +33,16 @@ export const LiveViewport = memo(function LiveViewport({
   readonly pendingSteers?: readonly string[];
 }) {
   const visibleAssistantText = assistantText.trim();
+  const visibleReasoningText = reasoningText.trim();
+  const visibleCompactionText = compactionText.trim();
   return (
     <Box flexDirection="column" flexGrow={1} minHeight={1}>
+      {visibleCompactionText !== '' ? (
+        <LiveCompactionText text={visibleCompactionText} />
+      ) : null}
+      {visibleReasoningText !== '' ? (
+        <LiveReasoningText text={visibleReasoningText} />
+      ) : null}
       {visibleAssistantText !== '' ? (
         <LiveAssistantText text={visibleAssistantText} />
       ) : null}
@@ -51,6 +62,27 @@ export const LiveViewport = memo(function LiveViewport({
   );
 });
 
+function LiveCompactionText({ text }: { readonly text: string }) {
+  const theme = useTheme();
+  return <Text color={theme.accent}>{`- ${text}`}</Text>;
+}
+
+function LiveReasoningText({ text }: { readonly text: string }) {
+  const theme = useTheme();
+  return (
+    <Box>
+      <Text color={theme.textMuted}>Thinking: </Text>
+      <Box flexDirection="column" flexShrink={1} minWidth={1}>
+        {text.split(/\r?\n/u).map((line, index) => (
+          <Text key={`${index}:${line}`} color={theme.textMuted} wrap="wrap">
+            {line}
+          </Text>
+        ))}
+      </Box>
+    </Box>
+  );
+}
+
 function LiveAssistantText({ text }: { readonly text: string }) {
   const theme = useTheme();
   return (
@@ -60,41 +92,6 @@ function LiveAssistantText({ text }: { readonly text: string }) {
           {`${index === 0 ? glyphs.assistant : ' '} ${line}`}
         </Text>
       ))}
-    </Box>
-  );
-}
-
-function SubagentActivity({
-  run,
-  cwd,
-}: {
-  readonly run: SubagentRunView;
-  readonly cwd: string;
-}) {
-  const theme = useTheme();
-  const hidden = Math.max(0, run.tools.length - SUBAGENT_VISIBLE_TOOL_LIMIT);
-  const visibleTools = run.tools.slice(-SUBAGENT_VISIBLE_TOOL_LIMIT);
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      <Box gap={1}>
-        <Text color={run.status === 'fail' ? theme.error : theme.warning}>
-          {glyphs.subagent}
-        </Text>
-        <Text color={theme.warning}>{run.agentName}</Text>
-        <Text color={theme.textMuted}>
-          {run.background ? 'background' : 'foreground'}
-        </Text>
-      </Box>
-      <Text color={theme.text} wrap="wrap">
-        {run.description}
-      </Text>
-      {hidden > 0 ? (
-        <Text color={theme.textMuted}>{`  +${hidden} earlier tool calls`}</Text>
-      ) : null}
-      <ToolActivityList tools={visibleTools} cwd={cwd} indent={2} />
-      {run.status === 'fail' && run.error !== undefined ? (
-        <Text color={theme.error}>{run.error}</Text>
-      ) : null}
     </Box>
   );
 }

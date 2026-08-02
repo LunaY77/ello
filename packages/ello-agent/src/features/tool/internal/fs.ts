@@ -4,7 +4,6 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
-import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { z } from 'zod';
@@ -14,24 +13,29 @@ import type { CodingAgentConfig } from '../../config/index.js';
 import type { DecideApproval } from '../permissions/policy.js';
 import type { PermissionMetadata } from '../permissions/types.js';
 
-import { parseApplyPatch, prepareApplyPatch } from './apply-patch.js';
+import {
+  applyPatchPaths,
+  parseApplyPatch,
+  prepareApplyPatch,
+} from './apply-patch.js';
 import { createFileChange, summarizeFileChanges } from './file-change.js';
 import {
   createCodingToolResult,
   defineCodingTool,
 } from './runtime/coding-tool.js';
+import { SessionFileState } from './runtime/file-state.js';
 import {
+  findNearestLine,
   requireFs,
   resolveRuntimePath,
   statRuntimePath,
-  truncate,
 } from './shared.js';
 
 /**
  * 文件系统工具：read / write / edit / apply_patch。
  *
- * IO 与 allowedPaths 边界检查全部委托给 `ctx.environment.fileSystem`，
- * 工具本身只负责产品化输出（行号、diff、字节数）和声明审批策略。
+ * IO 全部委托给 `ctx.environment.fileSystem`，coding scope 由工具声明的路径进入
+ * Tool Policy 判定；工具本身只负责产品化输出（行号、diff、字节数）。
  *
  * Args:
  * - `config`: 已解析的稳定配置；作为装配输入读取，函数不在原对象上写入状态。
@@ -46,12 +50,22 @@ import {
 export function createFsTools(
   config: CodingAgentConfig,
   decide: DecideApproval,
+  fileState: SessionFileState = new SessionFileState(),
 ) {
   return [
     defineCodingTool({
       name: 'read',
-      description:
-        'Read a UTF-8 text file with optional offset and limit. Output includes line numbers.',
+      capabilities: () => ({
+        concurrencySafe: true,
+        readOnly: true,
+        destructive: false,
+        interruptible: true,
+        telemetryTag: 'filesystem.read',
+      }),
+      description: `Read a UTF-8 text file, or list one directory, at 'filePath'.
+File output is line-numbered in a right-aligned gutter followed by two spaces; the gutter is display only, so never copy it into edit or apply_patch. 'offset' is the 1-based first line or directory entry and 'limit' the maximum number of lines or entries, default 400 and at most 2000; the result reports the returned range and total count so you can page with successive offsets. Re-reading the same unchanged file range returns a short unchanged marker instead of duplicating content already present in the thread. A directory path returns a sorted, non-recursive listing of 'name<TAB>kind<TAB>size'. A binary file returns a byte count and is attached as an artifact rather than inlined.
+A missing or unreadable path fails the call. Reading outside the configured coding scope requires Tool Policy approval. Very long output is centrally reduced to a bounded head/tail preview while the complete result is retained as an artifact.
+Read a file before editing it: edit and apply_patch match text literally, so they need the exact current content. Use grep to find which file contains some text, and glob to find files by name. Put independent read, grep, and glob calls directly in the same model response; the runtime schedules safe calls concurrently without a wrapper tool.`,
       discovery: { aliases: ['file', 'directory', 'cat'], risk: 'readonly' },
       input: z
         .object({
@@ -89,20 +103,25 @@ export function createFsTools(
         const fs = requireFs(ctx.agent);
         const absolutePath = resolveRuntimePath(fs, targetPath);
         const info = await statRuntimePath(fs, targetPath);
-        if (info.isDirectory()) {
+        if (info.kind === 'directory') {
           const entries = await fs.listDir(targetPath);
           entries.sort((left, right) => left.localeCompare(right));
+          const selectedEntries = entries.slice(offset - 1, offset - 1 + limit);
           const renderedEntries = await Promise.all(
-            entries.map(async (entry) => {
+            selectedEntries.map(async (entry) => {
               const entryInfo = await statRuntimePath(
                 fs,
                 path.join(targetPath, entry),
               );
-              const entryStat = await stat(
-                resolveRuntimePath(fs, path.join(targetPath, entry)),
-              );
-              return `${entry}\t${entryInfo.isDirectory() ? 'directory' : 'file'}\t${entryStat.size}`;
+              return `${entry}\t${entryInfo.kind}\t${entryInfo.size}`;
             }),
+          );
+          const nextOffset =
+            offset - 1 + selectedEntries.length < entries.length
+              ? offset + selectedEntries.length
+              : undefined;
+          renderedEntries.push(
+            `[Listed ${selectedEntries.length} of ${entries.length} entries.${nextOffset === undefined ? '' : ` Continue with offset ${nextOffset}.`}]`,
           );
           return createCodingToolResult({
             title: `Directory ${targetPath}`,
@@ -111,12 +130,41 @@ export function createFsTools(
               kind: 'read',
               path: targetPath,
               bytes: 0,
-              entryCount: entries.length,
+              entryCount: selectedEntries.length,
+              totalEntries: entries.length,
+              offset,
+              ...(nextOffset === undefined ? {} : { nextOffset }),
               isDirectory: true,
             },
           });
         }
-        const buffer = await readFile(absolutePath);
+        const sourceStat = await fs.stat(targetPath);
+        const sourceVersion = {
+          mtimeMs: sourceStat.modifiedAtMs,
+          size: sourceStat.size,
+        };
+        const cached = fileState.unchanged(absolutePath, sourceVersion, {
+          offset,
+          limit,
+        });
+        if (cached !== undefined) {
+          return createCodingToolResult({
+            title: `Unchanged ${targetPath}`,
+            output: `File unchanged since the previous read of ${targetPath} lines ${cached.lineStart}-${cached.lineEnd}. Reuse the earlier content already present in this thread.`,
+            metadata: {
+              kind: 'read',
+              path: targetPath,
+              bytes: cached.size,
+              lineStart: cached.lineStart,
+              lineEnd: cached.lineEnd,
+              totalLines: cached.totalLines,
+              mime: 'text/plain; charset=utf-8',
+              unchanged: true,
+            },
+          });
+        }
+        const stableRead = await readStableFile(fs, targetPath, sourceVersion);
+        const buffer = stableRead.buffer;
         if (isBinary(buffer)) {
           return createCodingToolResult({
             title: `Binary file ${targetPath}`,
@@ -132,7 +180,7 @@ export function createFsTools(
               {
                 type: 'binary',
                 mime: 'application/octet-stream',
-                path: absolutePath,
+                content: buffer.toString('base64'),
                 name: targetPath,
                 bytes: buffer.byteLength,
               },
@@ -142,23 +190,40 @@ export function createFsTools(
         const text = buffer.toString('utf8');
         const lines = text.split(/\r?\n/u);
         const slice = lines.slice(offset - 1, offset - 1 + limit);
-        const content = truncate(
-          slice
-            .map(
-              (line, index) =>
-                `${String(offset + index).padStart(5, ' ')}  ${line}`,
-            )
-            .join('\n'),
+        const lineEnd = offset + slice.length - 1;
+        const content = slice
+          .map(
+            (line, index) =>
+              `${String(offset + index).padStart(5, ' ')}  ${line}`,
+          )
+          .join('\n');
+        const nextOffset = lineEnd < lines.length ? lineEnd + 1 : undefined;
+        const modelOutput = [
+          content,
+          `[Read lines ${offset}-${lineEnd} of ${lines.length}.${nextOffset === undefined ? '' : ` Continue with offset ${nextOffset}.`}]`,
+        ]
+          .filter((part) => part !== '')
+          .join('\n');
+        fileState.record(
+          absolutePath,
+          stableRead.version,
+          { offset, limit },
+          {
+            size: stableRead.version.size,
+            lineStart: offset,
+            lineEnd,
+            totalLines: lines.length,
+          },
         );
         return createCodingToolResult({
           title: `Read ${targetPath}`,
-          output: content,
+          output: modelOutput,
           metadata: {
             kind: 'read',
             path: targetPath,
             bytes: buffer.byteLength,
             lineStart: offset,
-            lineEnd: offset + slice.length - 1,
+            lineEnd,
             totalLines: lines.length,
             mime: 'text/plain; charset=utf-8',
           },
@@ -167,8 +232,9 @@ export function createFsTools(
     }),
     defineCodingTool({
       name: 'write',
-      description:
-        'Create or overwrite a file. Requires approval outside bypass or accept-edits mode.',
+      description: `Create a new file, or replace an existing file whole, with 'content' as its complete new text.
+Use this for new files. Do not use it to change a file that already exists just to alter a few lines: sending a whole file costs output proportional to its size and loses the rest of the file if your copy is stale. Use edit for one fragment and apply_patch for several fragments or several files.
+Overwriting an existing file requires 'expectedContent' to equal its current content exactly; the call fails when 'expectedContent' is missing or stale, which means re-read the file. Parent directories are created as needed. Writing outside the configured coding scope requires Tool Policy approval; the Environment itself does not claim that scope as an isolation boundary.`,
       discovery: {
         aliases: ['create file', 'overwrite file'],
         risk: 'workspace-write',
@@ -176,28 +242,30 @@ export function createFsTools(
       input: z
         .object({
           filePath: z.string().min(1).describe('File path to write'),
-          content: z.string().describe('File content to write'),
+          content: z.string().describe('Complete new file content'),
           expectedContent: z
             .string()
             .optional()
-            .describe('Expected current content for safe overwrite'),
+            .describe(
+              'Exact current content; required to overwrite an existing file',
+            ),
           reason: z
             .string()
             .optional()
             .describe('Reason for writing this file'),
         })
         .strict(),
-      approval: async (input, ctx) =>
-        decide(
-          {
-            permission: 'edit',
-            patterns: [input.filePath],
-            always: [input.filePath],
-            paths: [input.filePath],
-            metadata: await writeMetadata(input, ctx.agent),
-          },
+      approval: async (input, ctx) => {
+        const descriptor = editDescriptor([input.filePath]);
+        const pathDecision = decide(descriptor, ctx.agent, {
+          externalPathsOnly: true,
+        });
+        if (pathDecision !== 'auto') return pathDecision;
+        return decide(
+          { ...descriptor, metadata: await writeMetadata(input, ctx.agent) },
           ctx.agent,
-        ),
+        );
+      },
       execute: async (
         { filePath: targetPath, content, expectedContent, reason },
         ctx,
@@ -225,8 +293,10 @@ export function createFsTools(
     }),
     defineCodingTool({
       name: 'edit',
-      description:
-        'Replace a unique text fragment in a file. Fails when the old text is not unique.',
+      description: `Replace one exact text fragment in an existing file. This is the preferred way to change a file that already exists: it sends only the changed region instead of the whole file, so prefer it over write for every modification.
+Read the file first and copy 'oldText' verbatim from what read returned, without the line-number gutter. 'oldText' must appear exactly once in the file, matched literally with no regex and no whitespace normalization; include enough surrounding lines to make it unique. 'newText' replaces it verbatim and may be empty to delete the fragment.
+Failures are precise and recoverable: several occurrences report the count and the line number of each match, zero occurrences report the nearest partial match with its line number and text. Both mean re-read the file or extend 'oldText'; neither is a reason to rewrite the file.
+Boundaries: use write only to create a new file or to replace a file whole; use edit for a single fragment in one file; use apply_patch for several fragments at once, several files in one atomic change, or file creation, deletion, and renames.`,
       discovery: {
         aliases: ['replace text', 'modify file'],
         risk: 'workspace-write',
@@ -234,35 +304,36 @@ export function createFsTools(
       input: z
         .object({
           filePath: z.string().min(1).describe('File path to edit'),
-          oldText: z.string().min(1).describe('Text to find and replace'),
-          newText: z.string().describe('Replacement text'),
+          oldText: z
+            .string()
+            .min(1)
+            .describe(
+              'Exact text to replace, copied from the file and unique within it',
+            ),
+          newText: z
+            .string()
+            .describe('Replacement text; empty deletes the fragment'),
           reason: z.string().optional().describe('Reason for this edit'),
         })
         .strict(),
-      approval: async (input, ctx) =>
-        decide(
-          {
-            permission: 'edit',
-            patterns: [input.filePath],
-            always: [input.filePath],
-            paths: [input.filePath],
-            metadata: await editMetadata(input, ctx.agent),
-          },
+      approval: async (input, ctx) => {
+        const descriptor = editDescriptor([input.filePath]);
+        const pathDecision = decide(descriptor, ctx.agent, {
+          externalPathsOnly: true,
+        });
+        if (pathDecision !== 'auto') return pathDecision;
+        return decide(
+          { ...descriptor, metadata: await editMetadata(input, ctx.agent) },
           ctx.agent,
-        ),
+        );
+      },
       execute: async (
         { filePath: targetPath, oldText, newText, reason },
         ctx,
       ) => {
         const fs = requireFs(ctx.agent);
         const current = await fs.readText(targetPath);
-        const first = current.indexOf(oldText);
-        if (first === -1) {
-          throw new Error(`Text not found in ${targetPath}`);
-        }
-        if (current.indexOf(oldText, first + oldText.length) !== -1) {
-          throw new Error(`Text is not unique in ${targetPath}`);
-        }
+        const first = locateUniqueMatch(targetPath, current, oldText);
         const next =
           current.slice(0, first) +
           newText +
@@ -286,15 +357,17 @@ export function createFsTools(
     }),
     defineCodingTool({
       name: 'apply_patch',
-      description: `Apply file changes using the structured patch protocol.
-The patch must start with *** Begin Patch and end with *** End Patch. Use explicit *** Add File:, *** Delete File:, or *** Update File: operations. Added file content and inserted update lines start with +; removed lines start with -; unchanged context lines start with a space. Do not use unified diff ---/+++ file headers.
+      description: `Apply file changes using the structured patch protocol. All operations in one patch are previewed in memory and then written together, so a patch either fully applies or changes nothing.
+The patch must start with *** Begin Patch and end with *** End Patch. Use explicit *** Add File:, *** Delete File:, or *** Update File: operations, optionally followed by *** Move to: for a rename. Added file content and inserted update lines start with +; removed lines start with -; unchanged context lines start with a space. Do not use unified diff ---/+++ file headers and do not write @@ -1,4 +1,6 @@ line ranges; a bare @@, or @@ followed by a context line to anchor from, is all that is supported.
+Removed and context lines must reproduce the file's current text, so read the file first. A line whose first character is none of ' ', '+', '-' fails the parse and the error echoes that line. Update hunks that cannot be located fail and the error echoes the expected lines.
 Example:
 *** Begin Patch
 *** Update File: src/example.ts
 @@
 -old line
 +new line
-*** End Patch`,
+*** End Patch
+Boundaries: use write to create a single new file, edit for one fragment in one file, and apply_patch when a change spans several fragments or several files, or when it deletes or renames files.`,
       discovery: {
         aliases: ['patch', 'structured patch', 'multi file edit'],
         risk: 'workspace-write',
@@ -314,17 +387,17 @@ Example:
         })
         .strict(),
       approval: async (input, ctx) => {
-        const fs = requireFs(ctx.agent);
-        const prepared = await prepareApplyPatch(
-          fs,
-          parseApplyPatch(input.patch),
-        );
+        const patch = parseApplyPatch(input.patch);
+        const paths = applyPatchPaths(patch);
+        const descriptor = editDescriptor(paths);
+        const pathDecision = decide(descriptor, ctx.agent, {
+          externalPathsOnly: true,
+        });
+        if (pathDecision !== 'auto') return pathDecision;
+        const prepared = await prepareApplyPatch(requireFs(ctx.agent), patch);
         return decide(
           {
-            permission: 'edit',
-            patterns: prepared.paths,
-            always: prepared.paths,
-            paths: prepared.paths,
+            ...descriptor,
             metadata: {
               kind: 'edit',
               path: prepared.paths.join(', '),
@@ -353,6 +426,109 @@ Example:
       },
     }),
   ];
+}
+
+function editDescriptor(paths: readonly string[]) {
+  return {
+    permission: 'edit',
+    patterns: paths,
+    always: paths,
+    paths,
+    metadata: {
+      kind: 'edit' as const,
+      path: paths.join(', '),
+    },
+  };
+}
+
+interface FileVersion {
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+async function readStableFile(
+  fs: ReturnType<typeof requireFs>,
+  targetPath: string,
+  initialVersion: FileVersion,
+): Promise<{ readonly buffer: Buffer; readonly version: FileVersion }> {
+  let before = initialVersion;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const buffer = Buffer.from(await fs.readFile(targetPath));
+    const stat = await fs.stat(targetPath);
+    const after = { mtimeMs: stat.modifiedAtMs, size: stat.size };
+    if (
+      before.mtimeMs === after.mtimeMs &&
+      before.size === after.size &&
+      buffer.byteLength === after.size
+    ) {
+      return { buffer, version: after };
+    }
+    before = after;
+  }
+  throw new Error(`File changed while it was being read: ${targetPath}`);
+}
+
+/**
+ * 定位 `oldText` 的唯一匹配位置，非唯一或缺失时抛出可直接行动的错误。
+ *
+ * 唯一性是 edit 的核心不变量：多匹配必须报告数量和全部命中行号，零匹配必须
+ * 报告最接近的部分匹配及其行号，否则调用方只能靠整文件重写绕过。
+ */
+function locateUniqueMatch(
+  targetPath: string,
+  content: string,
+  oldText: string,
+): number {
+  const offsets = collectMatchOffsets(content, oldText);
+  if (offsets.length === 1) {
+    const only = offsets[0];
+    if (only === undefined) {
+      throw new Error(`Match offset list lost its only entry: ${targetPath}`);
+    }
+    return only;
+  }
+  if (offsets.length > 1) {
+    const lines = offsets.map((offset) => lineNumberAt(content, offset));
+    throw new Error(
+      `oldText occurs ${offsets.length} times in ${targetPath}, at lines ${lines.join(', ')}; edit requires exactly one occurrence. Extend oldText with surrounding lines until it is unique, or apply one edit per occurrence.`,
+    );
+  }
+  const firstNeedleLine = oldText.split('\n')[0];
+  if (firstNeedleLine === undefined) {
+    throw new Error(`oldText has no lines to match against ${targetPath}.`);
+  }
+  const nearest = findNearestLine(content.split('\n'), firstNeedleLine);
+  if (nearest === undefined) {
+    throw new Error(
+      `oldText occurs 0 times in ${targetPath} and no line of it matches any line in the file. Re-read ${targetPath} and copy oldText from the returned content; whitespace, indentation, or line endings may differ from what you assumed.`,
+    );
+  }
+  throw new Error(
+    `oldText occurs 0 times in ${targetPath}. Nearest partial match is line ${nearest.line}: ${JSON.stringify(nearest.text)}. Re-read ${targetPath} and copy oldText from the returned content; whitespace, indentation, or line endings may differ from what you assumed.`,
+  );
+}
+
+function collectMatchOffsets(content: string, oldText: string): number[] {
+  const offsets: number[] = [];
+  let from = 0;
+  for (;;) {
+    const found = content.indexOf(oldText, from);
+    if (found === -1) {
+      return offsets;
+    }
+    offsets.push(found);
+    from = found + oldText.length;
+  }
+}
+
+function lineNumberAt(content: string, offset: number): number {
+  let line = 1;
+  for (let index = 0; index < offset; index += 1) {
+    if (content[index] === '\n') {
+      line += 1;
+    }
+  }
+  return line;
 }
 
 /** 读文件，文件不存在时返回 null（供 write 生成 diff 用）。 */
@@ -425,13 +601,7 @@ async function editMetadata(
   ctx: Parameters<DecideApproval>[1],
 ): Promise<Extract<PermissionMetadata, { kind: 'edit' }>> {
   const current = await requireFs(ctx).readText(input.filePath);
-  const first = current.indexOf(input.oldText);
-  if (first === -1) {
-    throw new Error(`Text not found in ${input.filePath}`);
-  }
-  if (current.indexOf(input.oldText, first + input.oldText.length) !== -1) {
-    throw new Error(`Text is not unique in ${input.filePath}`);
-  }
+  const first = locateUniqueMatch(input.filePath, current, input.oldText);
   const next =
     current.slice(0, first) +
     input.newText +

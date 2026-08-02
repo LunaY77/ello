@@ -1,5 +1,10 @@
 export type {
   AppServerErrorType,
+  AgentTaskDetail,
+  AgentTaskEvent,
+  AgentTaskStatus,
+  AgentTaskSummary,
+  AgentTaskTreeSnapshot,
   ApprovalDecision,
   ClientMethod,
   ClientNotificationMethod,
@@ -40,10 +45,9 @@ export type MemoryStatus = ProtocolClientResult<'memory/status'>;
 export type AgentSkill = ProtocolClientResult<'skills/list'>['data'][number];
 export type ModelCatalogEntry =
   ProtocolClientResult<'model/list'>['data'][number];
-export type ProviderCatalogEntry =
-  ProtocolClientResult<'provider/list'>['data'][number];
 export type AgentCatalogEntry =
   ProtocolClientResult<'agent/list'>['data'][number];
+export type AgentTaskListResult = ProtocolClientResult<'agent/task/list'>;
 export type WorkspaceSummary =
   ProtocolClientResult<'workspace/list'>['data'][number];
 

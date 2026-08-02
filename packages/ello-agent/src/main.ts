@@ -9,6 +9,12 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import { createApp } from './app.js';
+import type { AgentRuntime } from './features/agent/contracts.js';
+import {
+  createLocalEnvironments,
+  LOCAL_HOST_ENVIRONMENT_REFERENCE,
+} from './features/environment/index.js';
+import { createTurnTracing } from './infra/telemetry/turn-tracing.js';
 import type { Capability } from './protocol/v1/index.js';
 import {
   listenEndpoint,
@@ -31,6 +37,7 @@ import { StdioTransport } from './server/transport/stdio.js';
 export async function runAppServer(
   argv = process.argv.slice(2),
 ): Promise<void> {
+  configureAiSdkWarningLogging();
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -52,6 +59,7 @@ export async function runAppServer(
   const capabilities = parseCapabilities(values.capabilities);
   const server = await createApp({
     transports: [kind],
+    agentRuntime: createProductionAgentRuntime(),
     ...(values.root === undefined ? {} : { root: values.root }),
   });
   let stopping = false;
@@ -92,6 +100,33 @@ export async function runAppServer(
     process.off('SIGTERM', onSigterm);
     process.off('SIGINT', onSigint);
   }
+}
+
+function configureAiSdkWarningLogging(): void {
+  globalThis.AI_SDK_LOG_WARNINGS = ({ warnings, provider, model }) => {
+    for (const warning of warnings) {
+      process.stderr.write(
+        `${JSON.stringify({
+          level: 'warn',
+          event: 'model.warning',
+          at: new Date().toISOString(),
+          ...(provider === undefined ? {} : { provider }),
+          ...(model === undefined ? {} : { model }),
+          warning,
+        })}\n`,
+      );
+    }
+  };
+}
+
+function createProductionAgentRuntime(): AgentRuntime {
+  return {
+    environments: createLocalEnvironments(),
+    defaultEnvironmentRef: LOCAL_HOST_ENVIRONMENT_REFERENCE,
+    environmentGrant: { isolation: 'none' },
+    createTracing: ({ config, threadId }) =>
+      createTurnTracing(config.observability?.langfuse, threadId),
+  };
 }
 
 function endpointKind(listen: string): 'stdio' | 'websocket' | 'unix' {

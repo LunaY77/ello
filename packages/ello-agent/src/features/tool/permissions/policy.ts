@@ -38,7 +38,13 @@ import type {
 export type DecideApproval = (
   descriptor: PermissionDescriptor,
   ctx: AgentToolContext,
+  options?: DecideApprovalOptions,
 ) => AgentApprovalDecision;
+
+export interface DecideApprovalOptions {
+  /** 只判定路径是否已获 external_directory 授权，不判定工具自身权限。 */
+  readonly externalPathsOnly?: boolean;
+}
 
 /**
  * 执行 工具 `policy` 模块 定义的 `ApprovalFor` 领域操作，输入和副作用均受该边界约束。
@@ -77,13 +83,44 @@ export function makeApprovalPolicy(
   mode: () => SessionModeState,
   readRoots: () => readonly string[] = () => [],
 ): DecideApproval {
-  return (descriptor: PermissionDescriptor): AgentApprovalDecision => {
+  return (
+    descriptor: PermissionDescriptor,
+    _ctx: AgentToolContext,
+    options: DecideApprovalOptions = {},
+  ): AgentApprovalDecision => {
     assertDescriptor(descriptor);
     const currentMode = mode().mode;
-    // Bypass 是显式开启的会话级安全边界，不能再被配置或历史规则降级成审批。
-    if (currentMode === 'bypass') {
-      return 'auto';
+    const boundaryRules = dynamicRules().filter(
+      (rule) => rule.action === 'deny',
+    );
+    const externalDirs = externalPaths(
+      config.cwd,
+      descriptor.paths ?? [],
+      config.allowed_paths,
+      descriptor.permission === 'read' || descriptor.permission === 'search'
+        ? readRoots()
+        : [],
+    );
+    // definition、父级 deny 与路径边界始终先于会话模式，bypass 也不能扩大 child 能力。
+    if (
+      descriptor.patterns.some(
+        (pattern) =>
+          evaluatePermission(boundaryRules, descriptor.permission, pattern) ===
+          'deny',
+      ) ||
+      externalDirs.some(
+        (externalDir) =>
+          evaluatePermission(
+            boundaryRules,
+            'external_directory',
+            externalDir,
+          ) === 'deny',
+      )
+    ) {
+      return buildDecision('denied', descriptor, externalDirs);
     }
+    // Bypass 只跳过普通审批，前面的硬边界仍然有效。
+    if (currentMode === 'bypass') return 'auto';
     // Plan 规则是安全边界而非默认偏好，因此不能被配置或历史审批规则覆盖。
     // Accept edits 会忽略 edit 类 need_approval，并在下方把普通 ask 提升为 allow；
     // 显式 deny 和 external_directory 仍保留，避免自动编辑扩大禁止项或路径边界。
@@ -121,18 +158,11 @@ export function makeApprovalPolicy(
             : undefined,
         );
       }
-      if (action === 'ask') {
+      if (action === 'ask' && options.externalPathsOnly !== true) {
         needsApproval = true;
       }
     }
 
-    const externalDirs = externalPaths(
-      config.cwd,
-      descriptor.paths ?? [],
-      descriptor.permission === 'read' || descriptor.permission === 'search'
-        ? readRoots()
-        : [],
-    );
     // 路径越界是独立权限维度；Skill 根目录只放行只读和搜索，不扩大写权限。
     for (const externalDir of externalDirs) {
       const action = evaluatePermission(
@@ -269,6 +299,7 @@ function derivePermission(toolName: string): string {
     return 'edit';
   if (toolName === 'bash') return 'bash';
   if (toolName === 'web_fetch') return 'web_fetch';
+  if (toolName.startsWith('mcp__')) return 'mcp';
   if (toolName.startsWith('task_')) return 'task';
   return toolName;
 }
@@ -277,6 +308,7 @@ function derivePermission(toolName: string): string {
 function externalPaths(
   cwd: string,
   targets: readonly string[],
+  authorizedRoots: readonly string[],
   readRoots: readonly string[],
 ): string[] {
   return [
@@ -284,8 +316,17 @@ function externalPaths(
       targets.filter(
         (target) =>
           isExternalPath(cwd, target) &&
+          !authorizedRoots.some((root) =>
+            isPathInside(
+              resolveAbsolute(cwd, root),
+              resolveAbsolute(cwd, target),
+            ),
+          ) &&
           !readRoots.some((root) =>
-            isPathInside(root, resolveAbsolute(cwd, target)),
+            isPathInside(
+              resolveAbsolute(cwd, root),
+              resolveAbsolute(cwd, target),
+            ),
           ),
       ),
     ),

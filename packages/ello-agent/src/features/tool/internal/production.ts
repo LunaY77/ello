@@ -16,11 +16,17 @@ import {
 import type { SessionModeState } from '../permissions/session-mode.js';
 import type { PermissionRule } from '../permissions/types.js';
 
+import type { AnyCodingTool } from './runtime/coding-tool.js';
+import type { SessionFileState } from './runtime/file-state.js';
+import { AgentWorkflowState } from './runtime/workflow-state.js';
+
 import { createCodingTools } from './index.js';
 
 export interface ProductionToolRuntime {
   readonly tools: readonly AnyAgentTool[];
   readonly approval: ApprovalFor;
+  /** 读取当前工具执行阶段对应的短动态提示。 */
+  readonly workflowInstructions: () => string;
 }
 
 export interface CreateProductionToolRuntimeOptions {
@@ -60,6 +66,8 @@ export interface CreateProductionToolRuntimeOptions {
    * - 当 工具 `production` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
    */
   readonly readRoots?: () => readonly string[];
+  readonly fileState?: SessionFileState;
+  readonly additionalTools?: readonly AnyCodingTool[];
 }
 
 /**
@@ -78,6 +86,11 @@ export function createProductionToolRuntime(
   options: CreateProductionToolRuntimeOptions,
 ): ProductionToolRuntime {
   const decide = createDecisionPolicy(options);
+  const additionalTools = (options.additionalTools ?? []).map((tool) =>
+    withAdditionalToolApproval(tool, decide),
+  );
+  const additionalNames = new Set(additionalTools.map((tool) => tool.name));
+  const workflow = new AgentWorkflowState();
   const codingTools = createCodingTools({
     config: options.config,
     taskBoards: options.taskBoards,
@@ -87,11 +100,19 @@ export function createProductionToolRuntime(
     ...(options.readRoots === undefined
       ? {}
       : { readRoots: options.readRoots }),
+    ...(options.fileState === undefined
+      ? {}
+      : { fileState: options.fileState }),
+    ...(additionalTools.length === 0 ? {} : { additionalTools }),
     decide,
-  }).map(markCoreTool);
+    workflow,
+  }).map((tool) =>
+    additionalNames.has(tool.name) ? tool : markCoreTool(tool),
+  );
   return {
     tools: codingTools,
     approval: genericApprovalFor(decide),
+    workflowInstructions: () => workflow.instructions(),
   };
 }
 
@@ -120,4 +141,42 @@ function createDecisionPolicy(
     options.mode,
     options.readRoots ?? (() => []),
   );
+}
+
+function withAdditionalToolApproval(
+  tool: AnyCodingTool,
+  decide: DecideApproval,
+): AnyCodingTool {
+  if (tool.approval !== undefined) return tool;
+  return {
+    ...tool,
+    approval: (input, ctx) => {
+      const invocation = ctx.agent.invocation;
+      const readOnly =
+        invocation?.readOnly === true && invocation.destructive === false;
+      const permission = readOnly
+        ? 'read'
+        : tool.name.startsWith('mcp__')
+          ? 'mcp'
+          : tool.name;
+      return decide(
+        {
+          permission,
+          patterns: [tool.name],
+          always: [tool.name],
+          metadata: {
+            kind: 'generic',
+            inputPreview: previewInput(input),
+          },
+        },
+        ctx.agent,
+      );
+    },
+  };
+}
+
+function previewInput(input: unknown): string {
+  const value = JSON.stringify(input);
+  if (value === undefined) return '-';
+  return value.length > 200 ? `${value.slice(0, 200)}...` : value;
 }

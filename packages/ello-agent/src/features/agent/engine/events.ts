@@ -6,7 +6,6 @@
  */
 import type {
   AgentError,
-  AgentEnvironment,
   AgentFinishReason,
   AgentRunContext,
   AgentRunResult,
@@ -20,10 +19,15 @@ import type {
   AgentModelRequest,
   AgentModelResponse,
   MaybePromise,
+  ModelCallConfiguration,
 } from './model.js';
 import type { AgentTraceEvent, InternalAgentRunContext } from './run-state.js';
 import type { AgentEventStream } from './stream.js';
-import type { AgentApprovalRequest, AgentToolCall } from './tools.js';
+import type {
+  AgentApprovalRequest,
+  AgentToolCall,
+  AgentToolCapabilities,
+} from './tools.js';
 
 export interface AgentEventMetadata {
   readonly runId: string;
@@ -31,12 +35,10 @@ export interface AgentEventMetadata {
   readonly occurredAt: string;
 }
 
-export interface ModelCallIdentity {
+export interface ModelCallIdentity extends ModelCallConfiguration {
   readonly runId: string;
   readonly turnIndex: number;
   readonly modelCallId: string;
-  readonly provider: string;
-  readonly model: string;
 }
 
 export interface ModelCallDiagnostics {
@@ -80,6 +82,23 @@ export type EngineEvent =
       readonly text: string;
     })
   | (AgentEventMetadata & {
+      readonly type: 'reasoning.started';
+      readonly turnIndex: number;
+      readonly reasoningId: string;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'reasoning.delta';
+      readonly turnIndex: number;
+      readonly reasoningId: string;
+      readonly text: string;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'reasoning.completed';
+      readonly turnIndex: number;
+      readonly reasoningId: string;
+      readonly text: string;
+    })
+  | (AgentEventMetadata & {
       readonly type: 'model.started';
       readonly identity: ModelCallIdentity;
       readonly request: AgentModelRequest;
@@ -110,6 +129,9 @@ export type EngineEvent =
       readonly toolCallId: string;
       readonly name: string;
       readonly input: unknown;
+      readonly invocation?: AgentToolCapabilities & {
+        readonly physicalName: string;
+      };
     })
   | (AgentEventMetadata & {
       readonly type: 'tool.approval_requested';
@@ -137,10 +159,20 @@ export type EngineEvent =
       readonly error: AgentError;
     })
   | (AgentEventMetadata & {
+      readonly type: 'context.compaction.started';
+      readonly compactionId: string;
+      readonly beforeMessageCount: number;
+      readonly tokensBefore: number;
+    })
+  | (AgentEventMetadata & {
       readonly type: 'context.compaction';
+      readonly compactionId: string;
       readonly beforeMessageCount: number;
       readonly afterMessageCount: number;
       readonly compactor: string;
+      readonly summary: string;
+      readonly keptMessageCount: number;
+      readonly tokensBefore: number;
       readonly metadata?: Record<string, unknown>;
     })
   | (AgentEventMetadata & {
@@ -265,6 +297,30 @@ export interface AgentObserver<TContext = unknown> {
 export interface MessageCompactionResult {
   readonly messages: ReadonlyArray<AgentMessage>;
   readonly report: import('./contracts.js').MessageCompactionReport;
+  readonly usage?: AgentUsage;
+}
+
+export interface ModelCompactionResult {
+  readonly text: string;
+  readonly usage: AgentUsage;
+}
+
+export interface ModelCompactor {
+  readonly modelCall: ModelCallConfiguration;
+  /**
+   * 使用主模型请求的稳定配置和缓存前缀压缩结构化消息。
+   *
+   * Args:
+   * - `input`: 待压缩消息、context compact 提示词和取消信号。
+   *
+   * Returns:
+   * - 返回 checkpoint 文本及独立模型调用的 usage。
+   */
+  compact(input: {
+    readonly messages: ReadonlyArray<AgentMessage>;
+    readonly prompt: string;
+    readonly signal: AbortSignal;
+  }): MaybePromise<ModelCompactionResult>;
 }
 
 export interface MessageCompactor {
@@ -282,6 +338,11 @@ export interface MessageCompactor {
     readonly messages: ReadonlyArray<AgentMessage>;
     readonly contextWindow: number;
     readonly signal: AbortSignal;
+    readonly compact: ModelCompactor['compact'];
+    readonly onStart?: (input: {
+      readonly beforeMessageCount: number;
+      readonly tokensBefore: number;
+    }) => MaybePromise<void>;
   }): MaybePromise<MessageCompactionResult | null>;
 }
 
@@ -315,6 +376,15 @@ export interface AgentEventRecorder<TContext = unknown> {
 export class AgentEventDispatcher {
   private readonly observerToolCalls = new Map<string, AgentToolCall>();
   private sequence = 0;
+  /**
+   * 串行化 emit 的尾指针。
+   *
+   * sequence 在 enrich 中同步分配，但 observer 与 recorder 都是异步的：并发
+   * emit（同一 turn 内并行执行的工具各自发事件）会让分配顺序与落盘顺序脱钩，
+   * 产出序号非递增的事件流。把「分配序号 + 交付下游」整体串进一条链，使
+   * 「sequence 递增即交付顺序」成为不依赖调用方并发模式的不变量。
+   */
+  private tail: Promise<void> = Promise.resolve();
 
   /**
    * 创建 `AgentEventDispatcher`，由该实例独占 产品 Agent Agent engine 事件 模块 中声明的可变状态和资源生命周期。
@@ -340,11 +410,22 @@ export class AgentEventDispatcher {
    * - Promise 在 产品 Agent Agent engine 事件 模块 的异步副作用完整提交后兑现，不返回业务值。
    */
   async emit(input: AgentEventInput): Promise<void> {
-    const event = this.enrich(input);
-    this.recordTrace(event);
-    this.stream.emit(event);
-    await this.emitObserverEvent(event);
-    await this.config.eventRecorder?.record(event, this.ctx);
+    // 整个临界区（含 enrich 的序号分配）排在前一次 emit 之后，因此并发调用者
+    // 拿到的序号顺序与下游看到的交付顺序始终一致。
+    const delivered = this.tail.then(async () => {
+      const event = this.enrich(input);
+      this.recordTrace(event);
+      this.stream.emit(event);
+      await this.emitObserverEvent(event);
+      await this.config.eventRecorder?.record(event, this.ctx);
+    });
+    // 尾指针吸收失败，避免一次 emit 出错后续 emit 全部连带拒绝；失败本身仍
+    // 通过 delivered 抛给发起该次 emit 的调用方。
+    this.tail = delivered.then(
+      () => undefined,
+      () => undefined,
+    );
+    await delivered;
   }
 
   /**
@@ -380,15 +461,24 @@ export class AgentEventDispatcher {
   async fail(
     event: Extract<AgentEventInput, { type: 'run.failed' }>,
   ): Promise<Extract<EngineEvent, { type: 'run.failed' }>> {
-    const emitted = this.enrich(event);
-    if (emitted.type !== 'run.failed') {
-      throw new Error(`Expected run.failed event, received ${emitted.type}.`);
-    }
-    this.recordTrace(emitted);
-    await this.emitObserverEvent(emitted);
-    await this.config.eventRecorder?.record(emitted, this.ctx);
-    await this.config.eventRecorder?.flush?.(this.ctx);
-    return emitted;
+    // 与 emit 共用尾指针：run.failed 也参与序号分配，必须排在尚未落盘的事件
+    // 之后，否则终局事件会插到并发工具事件中间。
+    const delivered = this.tail.then(async () => {
+      const emitted = this.enrich(event);
+      if (emitted.type !== 'run.failed') {
+        throw new Error(`Expected run.failed event, received ${emitted.type}.`);
+      }
+      this.recordTrace(emitted);
+      await this.emitObserverEvent(emitted);
+      await this.config.eventRecorder?.record(emitted, this.ctx);
+      await this.config.eventRecorder?.flush?.(this.ctx);
+      return emitted;
+    });
+    this.tail = delivered.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await delivered;
   }
 
   private enrich(input: AgentEventInput): EngineEvent {
@@ -448,7 +538,10 @@ function toTraceEvent(
         sequence: event.sequence,
         occurredAt: event.occurredAt,
         toolCallId: event.toolCallId,
-        name: event.name,
+        name: event.invocation?.logicalName ?? event.name,
+        ...(event.invocation === undefined
+          ? {}
+          : { telemetryTag: event.invocation.telemetryTag }),
       };
     case 'tool.approval_requested':
       return {
@@ -503,6 +596,7 @@ function toTraceEvent(
         errorName: event.error.name,
         errorMessage: event.error.message,
       };
+    case 'context.compaction.started':
     case 'context.compaction':
     case 'model.started':
     case 'model.first_token':
@@ -511,6 +605,9 @@ function toTraceEvent(
     case 'queue.drained':
     case 'message.started':
     case 'message.delta':
+    case 'reasoning.started':
+    case 'reasoning.delta':
+    case 'reasoning.completed':
       return null;
     default:
       event satisfies never;
@@ -564,6 +661,9 @@ async function emitSingleObserverEvent(
     case 'queue.drained':
     case 'message.started':
     case 'message.delta':
+    case 'reasoning.started':
+    case 'reasoning.delta':
+    case 'reasoning.completed':
     case 'model.started':
     case 'model.first_token':
     case 'model.completed':
@@ -571,6 +671,7 @@ async function emitSingleObserverEvent(
     case 'tool.approval_requested':
     case 'tool.deferred':
     case 'tool.failed':
+    case 'context.compaction.started':
     case 'context.compaction':
     case 'run.interrupted':
     case 'run.completed':
@@ -579,22 +680,4 @@ async function emitSingleObserverEvent(
       event satisfies never;
       throw new Error(`Unhandled observer event: ${String(event)}`);
   }
-}
-
-/**
- * 执行 产品 Agent Agent engine 事件 模块 定义的 `closeAgentResources` 领域操作，输入和副作用均受该边界约束。
- *
- * Args:
- * - `environment`: 调用方拥有的运行上下文；本函数仅在调用生命周期内读取或调用其公开能力。
- *
- * Returns:
- * - Promise 在 产品 Agent Agent engine 事件 模块 的异步副作用完整提交后兑现，不返回业务值。
- *
- * Throws:
- * - 当 产品 Agent Agent engine 事件 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
- */
-export async function closeAgentResources(
-  environment: AgentEnvironment,
-): Promise<void> {
-  await environment.close?.();
 }
