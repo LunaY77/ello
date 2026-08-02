@@ -117,6 +117,7 @@ export async function selectAttempt(options: {
       configHash: options.suite.configHash,
       jobId: options.job.jobId,
       attempt,
+      runRoot: options.suite.runRoot,
     }),
   ).slice(0, 24);
   const attemptRoot = path.join(

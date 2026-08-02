@@ -16,6 +16,44 @@ import {
 import { EXAMPLE_CONFIG_PATH } from './example-config.js';
 
 describe('run state', () => {
+  it('isolates attempt identities across run roots', async () => {
+    const config = await loadBenchmarkConfig(EXAMPLE_CONFIG_PATH);
+    const plan = createPlan(config, selectAll(config));
+    const firstRoot = await mkdtemp(path.join(tmpdir(), 'ello-bench-state-a-'));
+    const secondRoot = await mkdtemp(
+      path.join(tmpdir(), 'ello-bench-state-b-'),
+    );
+    const firstSuite = await openSuiteManifest({
+      runRoot: firstRoot,
+      config,
+      plan,
+    });
+    const secondSuite = await openSuiteManifest({
+      runRoot: secondRoot,
+      config,
+      plan,
+    });
+    const job = plan.jobs[0];
+    if (job === undefined) throw new Error('Missing planned job.');
+
+    const first = await selectAttempt({
+      suitePath: firstSuite.path,
+      suite: firstSuite.manifest,
+      job,
+      maxInfrastructureRetries: 1,
+    });
+    const second = await selectAttempt({
+      suitePath: secondSuite.path,
+      suite: secondSuite.manifest,
+      job,
+      maxInfrastructureRetries: 1,
+    });
+
+    expect(first.run?.attemptId).toBeDefined();
+    expect(second.run?.attemptId).toBeDefined();
+    expect(first.run?.attemptId).not.toBe(second.run?.attemptId);
+  });
+
   it('records explicit retry lineage for an infrastructure failure', async () => {
     const runRoot = await mkdtemp(path.join(tmpdir(), 'ello-bench-state-'));
     const config = await loadBenchmarkConfig(EXAMPLE_CONFIG_PATH);
