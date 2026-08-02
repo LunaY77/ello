@@ -18,7 +18,9 @@ const roots: string[] = [];
 const adapters: Environments[] = [];
 
 afterEach(async () => {
-  await Promise.allSettled(adapters.splice(0).map((adapter) => adapter.close()));
+  await Promise.allSettled(
+    adapters.splice(0).map((adapter) => adapter.close()),
+  );
   await Promise.all(
     roots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
@@ -39,8 +41,9 @@ describe.sequential('Local Environment', () => {
       workingDirectory: workspace,
       grant: { isolation: 'none' },
     });
-    await expect(handle.fileSystem.readText('../external/context.ts')).resolves
-      .toBe('external\n');
+    await expect(
+      handle.fileSystem.readText('../external/context.ts'),
+    ).resolves.toBe('external\n');
     await expect(handle.getInstructions()).resolves.toContain(
       '<isolation>none</isolation>',
     );
@@ -67,10 +70,7 @@ describe.sequential('Local Environment', () => {
     const { handle } = await attach(root);
     const result = await handle.processes.exec({
       command: process.execPath,
-      args: [
-        '-e',
-        'process.stdout.write("out"); process.stderr.write("err")',
-      ],
+      args: ['-e', 'process.stdout.write("out"); process.stderr.write("err")'],
       maxRuntimeMs: 10_000,
     });
     expect(result).toMatchObject({
@@ -223,7 +223,10 @@ async function temporaryRoot(): Promise<string> {
 async function attach(
   workingDirectory: string,
   options: { readonly processOutputLimitBytes?: number } = {},
-): Promise<{ readonly adapter: Environments; readonly handle: EnvironmentHandle }> {
+): Promise<{
+  readonly adapter: Environments;
+  readonly handle: EnvironmentHandle;
+}> {
   const adapter = createLocalEnvironments(options);
   adapters.push(adapter);
   const handle = await adapter.attach(

@@ -115,9 +115,7 @@ export class ContextSnapshot {
 async function loadEnvironmentSource(
   config: CodingAgentConfig,
 ): Promise<ContextSourceLoadResult> {
-  const authorized = [config.cwd, ...config.allowed_paths]
-    .sort()
-    .join('\n');
+  const authorized = [config.cwd, ...config.allowed_paths].sort().join('\n');
   const delegation = config.subagents.enabled
     ? [
         '<delegation>',

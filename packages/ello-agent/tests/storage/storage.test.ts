@@ -5,7 +5,14 @@
  * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
  */
 import { createHash } from 'node:crypto';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -211,7 +218,10 @@ describe('global coding storage', () => {
       .run('2026-01-01T00:00:00.000Z');
     database.close();
 
-    const storage = createTestStores({ databasePath, artifactsDir: artifactRoot });
+    const storage = createTestStores({
+      databasePath,
+      artifactsDir: artifactRoot,
+    });
     try {
       expect(
         storage.db.$client

@@ -151,7 +151,9 @@ export function createOpenAiProviderSettings(
     name: descriptor.protocol,
     baseURL: descriptor.baseURL,
     apiKey: descriptor.apiKey,
-    ...(descriptor.headers === undefined ? {} : { headers: descriptor.headers }),
+    ...(descriptor.headers === undefined
+      ? {}
+      : { headers: descriptor.headers }),
   };
 }
 

@@ -4,7 +4,11 @@
  * Container adapter 用它承接 Docker CLI 或 Fake Container 的真实子进程；超时、输出保留与
  * Environment Process Reference 仍由上层 Environment registry 管理。
  */
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import {
+  spawn,
+  spawnSync,
+  type ChildProcessWithoutNullStreams,
+} from 'node:child_process';
 
 import type {
   ContainerProcess,
@@ -12,8 +16,10 @@ import type {
   ContainerSpawnOptions,
 } from '../ports/container.js';
 
-export interface SpawnManagedProcessOptions
-  extends Omit<ContainerSpawnOptions, 'env'> {
+export interface SpawnManagedProcessOptions extends Omit<
+  ContainerSpawnOptions,
+  'env'
+> {
   readonly env?: NodeJS.ProcessEnv;
 }
 

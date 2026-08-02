@@ -416,9 +416,7 @@ async function applySettings(
   settings: TurnSettings | undefined,
 ): Promise<void> {
   if (settings === undefined) return;
-  if (
-    settings.mode === undefined
-  ) {
+  if (settings.mode === undefined) {
     return;
   }
   const snapshot = input.snapshot();

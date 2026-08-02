@@ -41,8 +41,7 @@ export function createTestEnvironmentHandle(
     spawn: () => Promise.reject(unsupportedError('processes.spawn')),
     inspect: () => Promise.reject(unsupportedError('processes.inspect')),
     write: () => Promise.reject(unsupportedError('processes.write')),
-    closeStdin: () =>
-      Promise.reject(unsupportedError('processes.closeStdin')),
+    closeStdin: () => Promise.reject(unsupportedError('processes.closeStdin')),
     wait: () => Promise.reject(unsupportedError('processes.wait')),
     signal: () => Promise.reject(unsupportedError('processes.signal')),
   };

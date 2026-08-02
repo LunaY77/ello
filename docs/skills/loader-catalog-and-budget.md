@@ -48,7 +48,10 @@ flowchart LR
 系统提示中的 `skillIndexContext()` 按模型 context window 的 1% 计算预算，最低 400 字符：
 
 ```ts
-const budget = Math.max(400, Math.floor((contextWindow ?? 1_000_000) * 4 * 0.01));
+const budget = Math.max(
+  400,
+  Math.floor((contextWindow ?? 1_000_000) * 4 * 0.01),
+);
 ```
 
 超出预算的条目只保留 `- name`，不把完整 description 塞进 system prompt。索引还写入四条固定约束：使用 `activate_skill`、`$name` 是显式请求、不要直接读 `SKILL.md`、同一 user message 后不要重复激活。

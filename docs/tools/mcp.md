@@ -1,7 +1,8 @@
 ---
 title: 'MCP：外部工具与资源接入'
 description: '说明 Ello 如何加载 MCP 配置、连接 stdio 或 Streamable HTTP 服务器、注册工具与资源，并复用现有权限和调度机制。'
-keywords: ['MCP', 'Model Context Protocol', 'stdio', 'Streamable HTTP', '工具扩展']
+keywords:
+  ['MCP', 'Model Context Protocol', 'stdio', 'Streamable HTTP', '工具扩展']
 ---
 
 # MCP：外部工具与资源接入
@@ -78,11 +79,11 @@ mcp__<服务器名>__read_resource
 
 Ello 读取 MCP `annotations`：
 
-| MCP 注解 | Ello 行为 |
-| --- | --- |
-| `readOnlyHint: true` 且 `destructiveHint` 不为 `true` | 只读调用，可与其他安全读取并发 |
-| 其他情况 | 按可能修改外部状态处理，使用独占锁 |
-| `destructiveHint: true` | 明确标记为可能修改数据，使用独占锁 |
+| MCP 注解                                              | Ello 行为                          |
+| ----------------------------------------------------- | ---------------------------------- |
+| `readOnlyHint: true` 且 `destructiveHint` 不为 `true` | 只读调用，可与其他安全读取并发     |
+| 其他情况                                              | 按可能修改外部状态处理，使用独占锁 |
+| `destructiveHint: true`                               | 明确标记为可能修改数据，使用独占锁 |
 
 工具参数先按服务器提供的 JSON Schema 校验，再进入权限审批。只读 MCP 工具使用 Ello 的
 `read` 权限；其他 MCP 工具使用 `mcp` 权限。Plan 模式拒绝可能修改外部状态的 MCP 工具，

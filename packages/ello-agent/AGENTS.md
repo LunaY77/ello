@@ -44,17 +44,17 @@ src/
 
 ## WHERE TO LOOK
 
-| Task | Location | Notes |
-|------|----------|-------|
-| Start a server instance | `src/app.ts` → `createApp()` | Returns `AgentServer`; wires all features |
-| Process entry point | `src/main.ts` → `runAppServer()` | Parses `--listen`, `--root`, `--auth-token-env` |
-| Add a new tool | `src/features/tool/internal/production.ts` | Add to tool array in `createProductionToolRuntime()` |
-| Add a new RPC route | Feature `routes.ts` → merge in `src/app.ts` | Route must satisfy `RpcApplicationRouteTable` |
-| Modify system prompts | `src/features/agent/context/prompts/*.md` | Nunjucks templates, injected as context sections |
-| Add a bundled subagent | `src/features/agent/subagents/bundled/*.md` | Markdown definitions loaded at runtime |
-| Database schema | `src/infra/database/schema.ts` + `migrations/` | Drizzle ORM table definitions + SQL migrations |
-| Add a new feature | `src/features/<name>/` | Must have `index.ts` (public API), `routes.ts` (RPC routes) |
-| Config file location | `src/features/config/paths.ts` | `ELLO_HOME` env var (default `~/.ello`) |
+| Task                    | Location                                       | Notes                                                       |
+| ----------------------- | ---------------------------------------------- | ----------------------------------------------------------- |
+| Start a server instance | `src/app.ts` → `createApp()`                   | Returns `AgentServer`; wires all features                   |
+| Process entry point     | `src/main.ts` → `runAppServer()`               | Parses `--listen`, `--root`, `--auth-token-env`             |
+| Add a new tool          | `src/features/tool/internal/production.ts`     | Add to tool array in `createProductionToolRuntime()`        |
+| Add a new RPC route     | Feature `routes.ts` → merge in `src/app.ts`    | Route must satisfy `RpcApplicationRouteTable`               |
+| Modify system prompts   | `src/features/agent/context/prompts/*.md`      | Nunjucks templates, injected as context sections            |
+| Add a bundled subagent  | `src/features/agent/subagents/bundled/*.md`    | Markdown definitions loaded at runtime                      |
+| Database schema         | `src/infra/database/schema.ts` + `migrations/` | Drizzle ORM table definitions + SQL migrations              |
+| Add a new feature       | `src/features/<name>/`                         | Must have `index.ts` (public API), `routes.ts` (RPC routes) |
+| Config file location    | `src/features/config/paths.ts`                 | `ELLO_HOME` env var (default `~/.ello`)                     |
 
 ## CONVENTIONS
 

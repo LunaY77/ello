@@ -251,10 +251,7 @@ export function Composer(props: ComposerProps) {
         return;
       }
       if (key.downArrow) {
-        if (
-          props.suggestions !== undefined &&
-          props.suggestions.length > 0
-        ) {
+        if (props.suggestions !== undefined && props.suggestions.length > 0) {
           moveSuggestion(1);
         } else if (visualLineCount(current, wrapWidth) > 1) {
           const moved = moveDownVisual(current, wrapWidth);
@@ -427,9 +424,7 @@ function ComposerLine({
     ? line.slice(cursorOffset, cursorEnd) || ' '
     : '';
   const afterCursor =
-    isCursorLine && cursorOffset < line.length
-      ? line.slice(cursorEnd)
-      : '';
+    isCursorLine && cursorOffset < line.length ? line.slice(cursorEnd) : '';
   return (
     <Box gap={1}>
       <Text color={theme.accent}>{prompt}</Text>

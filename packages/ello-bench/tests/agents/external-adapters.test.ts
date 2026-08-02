@@ -14,8 +14,8 @@ import {
   claudeCodeBaseUrlIssue,
   requireClaudeCodeBaseUrl,
 } from '../../src/infra/agent/claude-code/base-url.js';
-import { externalProcessEnvironment } from '../../src/infra/agent/external.js';
 import { CONTAINER_AGENT_STATE_ROOT } from '../../src/infra/agent/container-paths.js';
+import { externalProcessEnvironment } from '../../src/infra/agent/external.js';
 import { createAgentAdapter } from '../../src/infra/agent/factory.js';
 import type {
   AgentProcessExecution,

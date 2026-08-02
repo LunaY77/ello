@@ -6,10 +6,7 @@ import {
   saveLocalUiConfig,
 } from '../../config/local-ui-config.js';
 import type { OverlayState } from '../component/OverlayHost.js';
-import {
-  loadSettings,
-  updatedLocalUiConfig,
-} from '../settings/config.js';
+import { loadSettings, updatedLocalUiConfig } from '../settings/config.js';
 import type { SettingUpdate } from '../settings/types.js';
 import type { ThemeName } from '../theme/index.js';
 

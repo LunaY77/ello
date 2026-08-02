@@ -299,14 +299,14 @@ sequenceDiagram
 
 ## 源码阅读入口
 
-| 文件                                                                                      | 内容                                       |
-| ----------------------------------------------------------------------------------------- | ------------------------------------------ |
-| [`tool-scheduler.ts`](../../packages/ello-agent/src/features/agent/engine/tool-scheduler.ts) | 调度主流程、审批分支、立即执行与批次预检 |
-| [`tool-execution-gate.ts`](../../packages/ello-agent/src/features/agent/engine/tool-execution-gate.ts) | 环境级读写锁与取消处理 |
-| [`run-state.ts`](../../packages/ello-agent/src/features/agent/engine/run-state.ts) | 调度器装配、回合结算与停止条件 |
-| [`run-control.ts`](../../packages/ello-agent/src/features/agent/engine/run-control.ts) | 挂起状态和恢复消息配对 |
-| [`tools.ts`](../../packages/ello-agent/src/features/agent/engine/tools.ts) | 工具调用与结果消息编码 |
-| [`tool-scheduler.test.ts`](../../packages/ello-agent/tests/engine/tool-scheduler.test.ts) | 输入复验、审批异常、延迟工具和混合批次测试 |
+| 文件                                                                                                   | 内容                                       |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| [`tool-scheduler.ts`](../../packages/ello-agent/src/features/agent/engine/tool-scheduler.ts)           | 调度主流程、审批分支、立即执行与批次预检   |
+| [`tool-execution-gate.ts`](../../packages/ello-agent/src/features/agent/engine/tool-execution-gate.ts) | 环境级读写锁与取消处理                     |
+| [`run-state.ts`](../../packages/ello-agent/src/features/agent/engine/run-state.ts)                     | 调度器装配、回合结算与停止条件             |
+| [`run-control.ts`](../../packages/ello-agent/src/features/agent/engine/run-control.ts)                 | 挂起状态和恢复消息配对                     |
+| [`tools.ts`](../../packages/ello-agent/src/features/agent/engine/tools.ts)                             | 工具调用与结果消息编码                     |
+| [`tool-scheduler.test.ts`](../../packages/ello-agent/tests/engine/tool-scheduler.test.ts)              | 输入复验、审批异常、延迟工具和混合批次测试 |
 
 相关架构说明：
 

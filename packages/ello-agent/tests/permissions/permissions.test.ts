@@ -101,9 +101,9 @@ describe('permission policy', () => {
       metadata: { kind: 'read' as const, path: target },
     });
 
-    expect(decide(descriptor(path.join(sibling, 'README.md')), {} as never)).toBe(
-      'auto',
-    );
+    expect(
+      decide(descriptor(path.join(sibling, 'README.md')), {} as never),
+    ).toBe('auto');
     expect(
       decide(descriptor(path.join(root, 'outside', 'README.md')), {} as never),
     ).toMatchObject({

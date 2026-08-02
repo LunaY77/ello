@@ -1,6 +1,10 @@
 import type { ThreadClient } from '../../client/thread-client.js';
 import type { LocalUiConfig } from '../../config/local-ui-config.js';
-import { defaultThemeName, themeNames, type ThemeName } from '../theme/index.js';
+import {
+  defaultThemeName,
+  themeNames,
+  type ThemeName,
+} from '../theme/index.js';
 
 import type { SettingUpdate, TuiSetting } from './types.js';
 

@@ -461,8 +461,7 @@ describe('createAgent', () => {
           name: 'read_note',
           description: 'Read note file',
           input: z.object({ path: z.string() }),
-          execute: ({ path }, ctx) =>
-            ctx.environment.fileSystem.readText(path),
+          execute: ({ path }, ctx) => ctx.environment.fileSystem.readText(path),
         }),
       ],
     });
@@ -535,7 +534,7 @@ describe('createAgent', () => {
     const environment = {
       ...attached,
       close: async () => {
-      events.push('close');
+        events.push('close');
         await attached.close();
       },
     };

@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { CodexAgentSpec } from '../../../domain/contract/index.js';
 import type { AgentRunContext } from '../../../ports/agent.js';
 import { writeJsonAtomic } from '../../io.js';
+import { CONTAINER_AGENT_STATE_ROOT } from '../container-paths.js';
 import {
   containerExternalProcessEnvironment,
   externalAgentContainerExecutable,
@@ -10,7 +11,6 @@ import {
   prepareCodexHome,
   requiredEnvironment,
 } from '../external.js';
-import { CONTAINER_AGENT_STATE_ROOT } from '../container-paths.js';
 
 const BENCHMARK_PROVIDER_ID = 'ello_benchmark';
 

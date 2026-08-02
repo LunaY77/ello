@@ -7,14 +7,14 @@ import type { PreparedWorkspace } from '../ports/attempt.js';
 import type { ContainerMount, PullPolicy } from '../ports/container.js';
 import type { ResolvedTaskFiles } from '../ports/corpus.js';
 
-import { DockerContainerRuntime } from './container/docker.js';
-import { CONTAINER_HOME, hostContainerIdentity } from './container-user.js';
-import { externalAgentRuntimeMount } from './agent/external.js';
 import {
   CONTAINER_AGENT_STATE_ROOT,
   CONTAINER_ELLO_RUNTIME_ROOT,
   CONTAINER_RAW_AGENT_ROOT,
 } from './agent/container-paths.js';
+import { externalAgentRuntimeMount } from './agent/external.js';
+import { DockerContainerRuntime } from './container/docker.js';
+import { CONTAINER_HOME, hostContainerIdentity } from './container-user.js';
 import { getBenchmarkSuiteForTask } from './corpus/suite.js';
 import { extractImageWorkspace } from './docker-image.js';
 import { assertGitHead, captureBaselineTree } from './git-workspace.js';

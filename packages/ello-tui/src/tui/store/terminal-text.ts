@@ -32,10 +32,7 @@ export function terminalGraphemes(text: string): readonly TerminalGrapheme[] {
   }));
 }
 
-export function previousGraphemeBoundary(
-  text: string,
-  offset: number,
-): number {
+export function previousGraphemeBoundary(text: string, offset: number): number {
   let previous = 0;
   for (const grapheme of terminalGraphemes(text)) {
     if (grapheme.endOffset >= offset) return grapheme.startOffset;
@@ -144,10 +141,7 @@ function wrapTerminalLine(
   let endOffset = startOffset;
   let displayWidth = 0;
   for (const grapheme of graphemes) {
-    if (
-      displayWidth > 0 &&
-      displayWidth + grapheme.displayWidth > width
-    ) {
+    if (displayWidth > 0 && displayWidth + grapheme.displayWidth > width) {
       rows.push({ logicalLine, startOffset, endOffset, displayWidth });
       startOffset = grapheme.startOffset;
       displayWidth = 0;
@@ -167,8 +161,7 @@ function displayWidthBetween(
   return terminalGraphemes(text)
     .filter(
       (grapheme) =>
-        grapheme.startOffset >= startOffset &&
-        grapheme.endOffset <= endOffset,
+        grapheme.startOffset >= startOffset && grapheme.endOffset <= endOffset,
     )
     .reduce((total, grapheme) => total + grapheme.displayWidth, 0);
 }

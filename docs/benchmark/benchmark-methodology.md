@@ -17,11 +17,11 @@
 
 比较的主单位是完整的已配置 Agent 系统。当前两配置矩阵联合评估结果和资源度量；它不估计孤立运行时组件的效应。
 
-| 分析问题 | 主要 estimand | 必要控制或限定 |
-|---|---|---|
-| 配置结果 | 各子集通过比例 | 报告分子、分母、任务 revision、replicate 数量、模型、推理强度和重试策略 |
-| 资源分配 | 观测 token、round、和工具调用记录 | token 组分保持分离；round 在不同运行时之间语义不等价 |
-| 轨迹形状与工具可靠性 | 工具调用数量、失败模式、缓存命中率 | 同一 adapter 内解释 round；跨系统用工具调用和 elapsed time |
+| 分析问题             | 主要 estimand                      | 必要控制或限定                                                          |
+| -------------------- | ---------------------------------- | ----------------------------------------------------------------------- |
+| 配置结果             | 各子集通过比例                     | 报告分子、分母、任务 revision、replicate 数量、模型、推理强度和重试策略 |
+| 资源分配             | 观测 token、round、和工具调用记录  | token 组分保持分离；round 在不同运行时之间语义不等价                    |
+| 轨迹形状与工具可靠性 | 工具调用数量、失败模式、缓存命中率 | 同一 adapter 内解释 round；跨系统用工具调用和 elapsed time              |
 
 Ello 配置实现完整的 agent loop 和工具面。Codex 配置使用固定版本的 CLI binary。它们的标签标识的是已配置策略，而不是成功标准。每次比较都报告 harness 结果、观测模型 token、模型 round、以及相关的不确定性或识别限界。
 
@@ -96,13 +96,13 @@ Ello 的 round 是完整的内部 agent loop 迭代（观察 → 行动 → 验�
 
 上游 DeepSWE v1.1 任务仓库和官方 trial 数据按 revision 固定。任务 membership 不可变——官方 trial 更新可以刷新记录的 pass rate 和排名，但不能静默更改比较队列。
 
-| 项目 | 值 |
-|---|---|
-| 来源 | [DeepSWE v1.1](https://deepswe.datacurve.ai/)，任务仓库 `datacurve-ai/deep-swe` |
-| 固定 revision | `a40d7298b18999c2d9b0ded7d6928e3ee26b5524` |
-| 上游任务数 | 113 |
-| 选择任务数 | 20 |
-| task set hash | `c6cb3ef8b90ca30bd266178ff64291a22dd7a2536a83f1dfbe59e35bebadbb37` |
+| 项目          | 值                                                                              |
+| ------------- | ------------------------------------------------------------------------------- |
+| 来源          | [DeepSWE v1.1](https://deepswe.datacurve.ai/)，任务仓库 `datacurve-ai/deep-swe` |
+| 固定 revision | `a40d7298b18999c2d9b0ded7d6928e3ee26b5524`                                      |
+| 上游任务数    | 113                                                                             |
+| 选择任务数    | 20                                                                              |
+| task set hash | `c6cb3ef8b90ca30bd266178ff64291a22dd7a2536a83f1dfbe59e35bebadbb37`              |
 
 ### 4.2 分层抽样规则
 
@@ -120,13 +120,13 @@ Ello 的 round 是完整的内部 agent loop 迭代（观察 → 行动 → 验�
 
 选取的各语言官方完成率范围（hard 到 easy）：
 
-| 语言 | 选定官方完成率，hard → easy |
-|---|---|
-| Go | 44%, 59%, 70%, 80% |
-| Python | 36%, 51%, 60%, 87% |
-| TypeScript | 26%, 36%, 69%, 91% |
-| Rust | 13%, 44%, 59%, 61% |
-| JavaScript | 25%, 30%, 66%, 73% |
+| 语言       | 选定官方完成率，hard → easy |
+| ---------- | --------------------------- |
+| Go         | 44%, 59%, 70%, 80%          |
+| Python     | 36%, 51%, 60%, 87%          |
+| TypeScript | 26%, 36%, 69%, 91%          |
+| Rust       | 13%, 44%, 59%, 61%          |
+| JavaScript | 25%, 30%, 66%, 73%          |
 
 此摘要中的通过率四舍五入到最近的百分点以便阅读。选择和审计使用未舍入的值。
 
@@ -134,28 +134,28 @@ Ello 的 round 是完整的内部 agent loop 迭代（观察 → 行动 → 验�
 
 ### 4.4 完整 DeepSWE 任务清单
 
-| 语言 | 难度 band | 官方通过率 | Task | 要求行为 |
-|---|---|---|---|---|
-| Go | Easy | 79.88% | `actionlint-action-pinning-lint` | 为 action 和 reusable workflow 增加 pinning lint |
-| Go | Medium-easy | 70.12% | `abs-stepped-slices` | 为数组和字符串增加 stepped slices |
-| Go | Medium-hard | 59.15% | `yaegi-go-embed-directives` | 为解释器包增加 `go:embed` 指令支持 |
-| Go | Hard | 44.38% | `dasel-html-document-format` | 为 Dasel 增加 HTML document-format 处理 |
-| Python | Easy | 87.20% | `narwhals-rolling-window-suite` | 增加 rolling minimum、maximum、median、quantile 方法 |
-| Python | Medium-easy | 59.88% | `numba-stencil-boundary-modes` | 为 `@stencil` 增加 boundary modes |
-| Python | Medium-hard | 50.61% | `bandit-incremental-cache-control` | 为 Bandit 增加增量缓存控制 |
-| Python | Hard | 35.58% | `langchain-request-coalescing` | 为 `Runnable` 增加 request coalescing |
-| TypeScript | Easy | 91.46% | `happy-dom-abort-pending-body-reads` | 在 shutdown 时取消 pending body reads |
-| TypeScript | Medium-easy | 69.14% | `dynamodb-toolbox-conditional-attribute-requirements` | 为 schema 增加条件必填属性 |
-| TypeScript | Medium-hard | 35.63% | `awilix-async-container-initialization` | 增加依赖感知的异步容器初始化 |
-| TypeScript | Hard | 25.77% | `quill-shared-toolbar-focus` | 在多个 Quill editor 之间共享一个 toolbar |
-| Rust | Easy | 60.98% | `wasmi-trap-coredumps` | 为 wasmi 增加 trap coredump 生成 |
-| Rust | Medium-easy | 59.26% | `fd-deterministic-multi-key-sorting` | 为 fd 增加确定性多关键字排序 |
-| Rust | Medium-hard | 44.03% | `boa-hierarchical-evaluation-cancellation` | 为 Boa 增加分层 evaluation cancellation |
-| Rust | Hard | 12.80% | `pest-character-class-coalescing` | 将符合条件的 choices 合并为 character classes |
-| JavaScript | Easy | 73.17% | `yjs-map-conflict-detection` | 为 `Y.Map` 写入增加确定性冲突检测 |
-| JavaScript | Medium-easy | 65.64% | `testem-per-launcher-reports` | 按 launcher 分割报告并扩展报告模板 |
-| JavaScript | Medium-hard | 29.81% | `csstree-shorthand-expansion-compression` | 为 lexer 增加 shorthand 展开和压缩 |
-| JavaScript | Hard | 24.54% | `katex-multicolumn-array-spans` | 为 array-like 环境增加 `\multicolumn` 列跨度 |
+| 语言       | 难度 band   | 官方通过率 | Task                                                  | 要求行为                                             |
+| ---------- | ----------- | ---------- | ----------------------------------------------------- | ---------------------------------------------------- |
+| Go         | Easy        | 79.88%     | `actionlint-action-pinning-lint`                      | 为 action 和 reusable workflow 增加 pinning lint     |
+| Go         | Medium-easy | 70.12%     | `abs-stepped-slices`                                  | 为数组和字符串增加 stepped slices                    |
+| Go         | Medium-hard | 59.15%     | `yaegi-go-embed-directives`                           | 为解释器包增加 `go:embed` 指令支持                   |
+| Go         | Hard        | 44.38%     | `dasel-html-document-format`                          | 为 Dasel 增加 HTML document-format 处理              |
+| Python     | Easy        | 87.20%     | `narwhals-rolling-window-suite`                       | 增加 rolling minimum、maximum、median、quantile 方法 |
+| Python     | Medium-easy | 59.88%     | `numba-stencil-boundary-modes`                        | 为 `@stencil` 增加 boundary modes                    |
+| Python     | Medium-hard | 50.61%     | `bandit-incremental-cache-control`                    | 为 Bandit 增加增量缓存控制                           |
+| Python     | Hard        | 35.58%     | `langchain-request-coalescing`                        | 为 `Runnable` 增加 request coalescing                |
+| TypeScript | Easy        | 91.46%     | `happy-dom-abort-pending-body-reads`                  | 在 shutdown 时取消 pending body reads                |
+| TypeScript | Medium-easy | 69.14%     | `dynamodb-toolbox-conditional-attribute-requirements` | 为 schema 增加条件必填属性                           |
+| TypeScript | Medium-hard | 35.63%     | `awilix-async-container-initialization`               | 增加依赖感知的异步容器初始化                         |
+| TypeScript | Hard        | 25.77%     | `quill-shared-toolbar-focus`                          | 在多个 Quill editor 之间共享一个 toolbar             |
+| Rust       | Easy        | 60.98%     | `wasmi-trap-coredumps`                                | 为 wasmi 增加 trap coredump 生成                     |
+| Rust       | Medium-easy | 59.26%     | `fd-deterministic-multi-key-sorting`                  | 为 fd 增加确定性多关键字排序                         |
+| Rust       | Medium-hard | 44.03%     | `boa-hierarchical-evaluation-cancellation`            | 为 Boa 增加分层 evaluation cancellation              |
+| Rust       | Hard        | 12.80%     | `pest-character-class-coalescing`                     | 将符合条件的 choices 合并为 character classes        |
+| JavaScript | Easy        | 73.17%     | `yjs-map-conflict-detection`                          | 为 `Y.Map` 写入增加确定性冲突检测                    |
+| JavaScript | Medium-easy | 65.64%     | `testem-per-launcher-reports`                         | 按 launcher 分割报告并扩展报告模板                   |
+| JavaScript | Medium-hard | 29.81%     | `csstree-shorthand-expansion-compression`             | 为 lexer 增加 shorthand 展开和压缩                   |
+| JavaScript | Hard        | 24.54%     | `katex-multicolumn-array-spans`                       | 为 array-like 环境增加 `\multicolumn` 列跨度         |
 
 在捕获的 v1.1 数据中，每个选定任务有 159 到 164 个合格的官方 trial。选择 artifact 记录了这 20 个任务在应用合格过滤器后的零官方 error trial。
 
@@ -175,13 +175,13 @@ Ello 的 round 是完整的内部 agent loop 迭代（观察 → 行动 → 验�
 
 上游 SWE-bench Pro 任务仓库按 revision 固定。任务 membership 不可变。
 
-| 项目 | 值 |
-|---|---|
-| 来源 | [SWE-bench Pro](https://github.com/scaleapi/SWE-bench_Pro-os)，任务仓库 `scaleapi/SWE-bench_Pro-os` |
-| 固定 revision | `ca10a60a5fcae51e6948ffe1485d4153d421e6c5` |
-| 上游任务数 | 731 |
-| 选择任务数 | 30 |
-| 评分 | binary reward |
+| 项目          | 值                                                                                                  |
+| ------------- | --------------------------------------------------------------------------------------------------- |
+| 来源          | [SWE-bench Pro](https://github.com/scaleapi/SWE-bench_Pro-os)，任务仓库 `scaleapi/SWE-bench_Pro-os` |
+| 固定 revision | `ca10a60a5fcae51e6948ffe1485d4153d421e6c5`                                                          |
+| 上游任务数    | 731                                                                                                 |
+| 选择任务数    | 30                                                                                                  |
+| 评分          | binary reward                                                                                       |
 
 ### 5.2 选择规则
 

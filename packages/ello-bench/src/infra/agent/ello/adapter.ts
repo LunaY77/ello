@@ -24,6 +24,10 @@ import {
 import { validateEventEvidence } from '../../event-evidence.js';
 import { writeJsonAtomic, writeJsonLines } from '../../io.js';
 import { normalizeEventCapture } from '../../rounds.js';
+import {
+  CONTAINER_AGENT_STATE_ROOT,
+  CONTAINER_RAW_AGENT_ROOT,
+} from '../container-paths.js';
 import { AgentAdapterError } from '../error.js';
 import {
   aggregateUsage,
@@ -36,10 +40,6 @@ import {
 } from '../evidence.js';
 
 import { findElloProviderRecoveryTarget } from './provider-recovery.js';
-import {
-  CONTAINER_AGENT_STATE_ROOT,
-  CONTAINER_RAW_AGENT_ROOT,
-} from '../container-paths.js';
 
 const PROVIDER_RECOVERY_PROMPT = `The previous turn ended because the model provider connection failed after bounded retries. Continue the original task from the current thread and workspace. Inspect the existing progress, finish the implementation, run the relevant tests, and report the result. Do not restart from scratch.`;
 

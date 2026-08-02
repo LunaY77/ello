@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ClaudeCodeAgentSpec } from '../../../domain/contract/index.js';
 import type { AgentRunContext } from '../../../ports/agent.js';
 import { writeJsonAtomic } from '../../io.js';
+import { CONTAINER_AGENT_STATE_ROOT } from '../container-paths.js';
 import {
   containerExternalProcessEnvironment,
   externalAgentContainerExecutable,
@@ -10,8 +11,8 @@ import {
   prepareClaudeHome,
   requiredEnvironment,
 } from '../external.js';
+
 import { requireClaudeCodeBaseUrl } from './base-url.js';
-import { CONTAINER_AGENT_STATE_ROOT } from '../container-paths.js';
 
 export interface ClaudeCodeInvocation {
   readonly command: string;

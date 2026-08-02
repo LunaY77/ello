@@ -24,15 +24,8 @@ export function useComposerSuggestions(input: {
   }): void;
   onError(error: unknown): void;
 }) {
-  const {
-    thread,
-    draft,
-    cursor,
-    fileSearch,
-    skills,
-    setFileSearch,
-    onError,
-  } = input;
+  const { thread, draft, cursor, fileSearch, skills, setFileSearch, onError } =
+    input;
   const activeTrigger = detectTrigger(currentLineBeforeCursor(draft, cursor));
   useEffect(() => {
     if (activeTrigger?.kind !== 'file') return;
@@ -73,13 +66,7 @@ export function useComposerSuggestions(input: {
       ? fileSearch.suggestions
       : NO_FILE_SUGGESTIONS;
   return useMemo(
-    () =>
-      completeInput(
-        draft,
-        fileSuggestions,
-        skills,
-        cursor,
-      ),
+    () => completeInput(draft, fileSuggestions, skills, cursor),
     [fileSuggestions, cursor, draft, skills],
   );
 }

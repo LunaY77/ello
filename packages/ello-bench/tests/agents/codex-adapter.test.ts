@@ -17,8 +17,8 @@ import type {
   ResolvedTask,
 } from '../../src/domain/contract/index.js';
 import { sha256, stableJson } from '../../src/domain/hash.js';
-import { createAgentAdapter } from '../../src/infra/agent/factory.js';
 import { CONTAINER_AGENT_STATE_ROOT } from '../../src/infra/agent/container-paths.js';
+import { createAgentAdapter } from '../../src/infra/agent/factory.js';
 import type {
   AgentProcessExecution,
   AgentRunContext,

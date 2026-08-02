@@ -61,10 +61,7 @@ async function validateCapture(
   const complete = EventCaptureCompleteSchema.parse(
     JSON.parse(await readFile(completePath, 'utf8')) as unknown,
   );
-  const expectedName = path.basename(
-    completePath,
-    '.complete.json',
-  );
+  const expectedName = path.basename(completePath, '.complete.json');
   if (path.basename(complete.eventLogPath) !== expectedName) {
     throw new Error(
       `Event capture marker path does not match its log: ${complete.eventLogPath}`,

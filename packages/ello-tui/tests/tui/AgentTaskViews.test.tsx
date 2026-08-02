@@ -97,10 +97,7 @@ function renderTranscript(
 ): string {
   return renderAtColumns(
     <ThemeProvider theme={resolveTheme('tokyo-night')}>
-      <AgentTranscript
-        task={task}
-        detail={detail}
-      />
+      <AgentTranscript task={task} detail={detail} />
     </ThemeProvider>,
     columns,
   );

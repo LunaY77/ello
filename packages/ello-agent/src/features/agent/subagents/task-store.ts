@@ -778,9 +778,7 @@ function parseTaskRow(row: AgentTaskRow): AgentTask {
     ...(currentTool === undefined ? {} : { currentTool }),
     toolCount: row.toolCount,
     recentTools,
-    ...(row.resultPreview === null
-      ? {}
-      : { resultPreview: row.resultPreview }),
+    ...(row.resultPreview === null ? {} : { resultPreview: row.resultPreview }),
     ...(row.errorPreview === null ? {} : { errorPreview: row.errorPreview }),
     ...(row.output === null ? {} : { output: row.output }),
     ...(row.errorMessage === null ? {} : { errorMessage: row.errorMessage }),
@@ -805,9 +803,7 @@ function boundedPreview(value: string | undefined): string | null {
     .join('\n')
     .trim();
   if (normalized === '') return null;
-  return normalized.length <= 480
-    ? normalized
-    : `${normalized.slice(0, 479)}…`;
+  return normalized.length <= 480 ? normalized : `${normalized.slice(0, 479)}…`;
 }
 
 function parseEventRow(row: AgentTaskEventRow): AgentTaskEvent {

@@ -18,18 +18,18 @@ ello/
 
 ## WHERE TO LOOK
 
-| Task | Location | Notes |
-|------|----------|-------|
-| Agent features | `packages/ello-agent/src/features/` | 11 feature modules (agent, artifact, config, fs, memory, model, skill, task, thread, tool, workspace) |
-| App composition | `packages/ello-agent/src/app.ts` | Single composition root — creates all features, wires routes |
-| Server entry | `packages/ello-agent/src/main.ts` | Process entry for child-process spawning (`@ello/agent/server-entry`) |
-| Protocol schemas | `packages/ello-agent/src/protocol/v1/` | Zod-validated JSON-RPC requests/responses/notifications |
-| CLI entry | `packages/ello-tui/src/cli/main.ts` | Commander.js; binary `ello` |
-| TUI app | `packages/ello-tui/src/tui/App.tsx` | Ink render entry |
-| Client API | `packages/ello-tui/src/client/` | ThreadClient, TurnClient, event-reducer |
-| Build system | `packages/*/scripts/build.mjs` | Custom atomic-swap tsc builds |
-| Lint rules | `eslint.config.js` | Feature-boundary zones, TUI import restrictions |
-| Database | `packages/ello-agent/src/infra/database/` | SQLite via better-sqlite3 + drizzle-orm |
+| Task             | Location                                  | Notes                                                                                                 |
+| ---------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Agent features   | `packages/ello-agent/src/features/`       | 11 feature modules (agent, artifact, config, fs, memory, model, skill, task, thread, tool, workspace) |
+| App composition  | `packages/ello-agent/src/app.ts`          | Single composition root — creates all features, wires routes                                          |
+| Server entry     | `packages/ello-agent/src/main.ts`         | Process entry for child-process spawning (`@ello/agent/server-entry`)                                 |
+| Protocol schemas | `packages/ello-agent/src/protocol/v1/`    | Zod-validated JSON-RPC requests/responses/notifications                                               |
+| CLI entry        | `packages/ello-tui/src/cli/main.ts`       | Commander.js; binary `ello`                                                                           |
+| TUI app          | `packages/ello-tui/src/tui/App.tsx`       | Ink render entry                                                                                      |
+| Client API       | `packages/ello-tui/src/client/`           | ThreadClient, TurnClient, event-reducer                                                               |
+| Build system     | `packages/*/scripts/build.mjs`            | Custom atomic-swap tsc builds                                                                         |
+| Lint rules       | `eslint.config.js`                        | Feature-boundary zones, TUI import restrictions                                                       |
+| Database         | `packages/ello-agent/src/infra/database/` | SQLite via better-sqlite3 + drizzle-orm                                                               |
 
 ## CONVENTIONS
 

@@ -373,9 +373,7 @@ export type Goal = z.infer<typeof GoalSchema>;
 export type Plan = z.infer<typeof PlanSchema>;
 export type ThreadSettings = z.infer<typeof ThreadSettingsSchema>;
 export type AgentTaskStatus = z.infer<typeof AgentTaskStatusSchema>;
-export type AgentTaskToolSummary = z.infer<
-  typeof AgentTaskToolSummarySchema
->;
+export type AgentTaskToolSummary = z.infer<typeof AgentTaskToolSummarySchema>;
 export type AgentTaskSummary = z.infer<typeof AgentTaskSummarySchema>;
 export type AgentTaskEvent = z.infer<typeof AgentTaskEventSchema>;
 export type AgentTaskTreeSnapshot = z.infer<typeof AgentTaskTreeSnapshotSchema>;

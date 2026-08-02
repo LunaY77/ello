@@ -52,19 +52,19 @@ src/
 
 ## WHERE TO LOOK
 
-| Task | Location | Notes |
-|------|----------|-------|
-| CLI entry point | `src/cli/main.ts` | Commander.js; binary `ello` |
-| Add a CLI command | `src/cli/commands/` | Register in `main.ts` |
-| TUI render entry | `src/tui/App.tsx` | Root Ink component; orchestrates event loop |
-| Add a TUI component | `src/tui/component/` | PascalCase filenames (`.tsx`) |
-| Add a custom hook | `src/tui/hooks/` | kebab-case filenames |
-| State management | `src/tui/store/` | Timeline store, event-reducer, composer buffer |
-| JSON-RPC protocol | `src/api/protocol-types.ts` | Re-exports from `@ello/agent/protocol` |
-| Server connection | `src/client/connection.ts` | `connectClient()` — local (child process) or remote |
-| In-TUI slash commands | `src/tui/slash-commands.ts` + `src/tui/commands/registry.ts` | Registered at TUI init |
-| Design system | `src/tui/ui/` | tokens.ts, surfaces.ts, Typography.tsx, Layout.tsx |
-| Theme switching | `src/tui/theme/` | ThemeProvider, theme definitions |
+| Task                  | Location                                                     | Notes                                               |
+| --------------------- | ------------------------------------------------------------ | --------------------------------------------------- |
+| CLI entry point       | `src/cli/main.ts`                                            | Commander.js; binary `ello`                         |
+| Add a CLI command     | `src/cli/commands/`                                          | Register in `main.ts`                               |
+| TUI render entry      | `src/tui/App.tsx`                                            | Root Ink component; orchestrates event loop         |
+| Add a TUI component   | `src/tui/component/`                                         | PascalCase filenames (`.tsx`)                       |
+| Add a custom hook     | `src/tui/hooks/`                                             | kebab-case filenames                                |
+| State management      | `src/tui/store/`                                             | Timeline store, event-reducer, composer buffer      |
+| JSON-RPC protocol     | `src/api/protocol-types.ts`                                  | Re-exports from `@ello/agent/protocol`              |
+| Server connection     | `src/client/connection.ts`                                   | `connectClient()` — local (child process) or remote |
+| In-TUI slash commands | `src/tui/slash-commands.ts` + `src/tui/commands/registry.ts` | Registered at TUI init                              |
+| Design system         | `src/tui/ui/`                                                | tokens.ts, surfaces.ts, Typography.tsx, Layout.tsx  |
+| Theme switching       | `src/tui/theme/`                                             | ThemeProvider, theme definitions                    |
 
 ## CONVENTIONS
 

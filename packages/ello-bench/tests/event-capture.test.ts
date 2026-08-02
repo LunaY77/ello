@@ -251,7 +251,8 @@ describe('event capture', () => {
       completePath,
       JSON.stringify({
         ...marker,
-        eventLogPath: '/tmp/ello-bench/raw-agent/adapter/engine-events-thr_main.jsonl',
+        eventLogPath:
+          '/tmp/ello-bench/raw-agent/adapter/engine-events-thr_main.jsonl',
       }),
       'utf8',
     );
