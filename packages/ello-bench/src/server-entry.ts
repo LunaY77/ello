@@ -19,7 +19,7 @@ const { values } = parseArgs({
 
 const root = required(values.root, '--root');
 const socketPath = required(values.socket, '--socket');
-const workspace = required(values.workspace, '--workspace');
+required(values.workspace, '--workspace');
 const rawRoot = required(values['raw-root'], '--raw-root');
 await mkdir(rawRoot, { recursive: true });
 const server = await startBenchmarkServer({
