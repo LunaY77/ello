@@ -2,6 +2,12 @@ import type { ProcessResult } from '../domain/contract/index.js';
 
 export type PullPolicy = 'if-absent' | 'always' | 'never';
 
+export interface ContainerMount {
+  readonly host: string;
+  readonly container: string;
+  readonly readOnly?: boolean;
+}
+
 export interface ContainerSpec {
   readonly image: string;
   readonly name: string;
@@ -9,6 +15,7 @@ export interface ContainerSpec {
     readonly host: string;
     readonly container: '/app';
   };
+  readonly additionalMounts?: readonly ContainerMount[];
   readonly network: 'none' | 'bridge';
   readonly cpus: number;
   readonly memoryMb: number;

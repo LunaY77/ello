@@ -4,7 +4,7 @@ import type { ClaudeCodeAgentSpec } from '../../../domain/contract/index.js';
 import type { AgentRunContext } from '../../../ports/agent.js';
 import { writeJsonAtomic } from '../../io.js';
 import {
-  externalProcessEnvironment,
+  containerProcessEnvironment,
   inspectExternalRuntime,
   installExternalExecutable,
   prepareContainerAgentHome,
@@ -70,7 +70,7 @@ export async function createClaudeCodeInvocation(
     runtimeBoundary,
   ] as const;
   const customHeaders = agent.connection.httpHeaders;
-  const env = externalProcessEnvironment({
+  const env = containerProcessEnvironment({
     HOME: isolated.home,
     USERPROFILE: isolated.home,
     CLAUDE_CONFIG_DIR: isolated.configDirectory,

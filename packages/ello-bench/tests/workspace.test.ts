@@ -4,6 +4,7 @@ import {
   dockerContainerUserInitArgs,
   dockerRunArgs,
 } from '../src/infra/container/docker.js';
+import { CONTAINER_HOME } from '../src/infra/container-user.js';
 import { runChecked } from '../src/infra/process.js';
 import { CONTAINER_RUNTIME_PROBE_COMMAND } from '../src/infra/workspace.js';
 import type { ContainerSpec } from '../src/ports/container.js';
@@ -17,7 +18,7 @@ const PROCESS_OPTIONS = {
 describe('task container Docker arguments', () => {
   it('renders the runtime probe as three lines', async () => {
     const [command, ...args] = CONTAINER_RUNTIME_PROBE_COMMAND;
-    const home = '/tmp/ello-bench-home';
+    const home = CONTAINER_HOME;
     const probe = await runChecked(command, args, {
       cwd: process.cwd(),
       env: { ...process.env, HOME: home },
@@ -42,7 +43,10 @@ describe('task container Docker arguments', () => {
     expect(option(args, '--user')).toBe('1000:1000');
     expect(option(args, '--workdir')).toBe('/app');
     expect(args).toContain('type=bind,source=/runs/job/workspace,target=/app');
-    expect(args).toContain('HOME=/tmp/ello-bench-home');
+    expect(args).toContain(
+      'type=bind,source=/runs/job/tests,target=/tests,readonly',
+    );
+    expect(args).toContain(`HOME=${CONTAINER_HOME}`);
   });
 
   it('exposes storage as a bind-workspace watchdog policy', () => {
@@ -60,11 +64,11 @@ describe('task container Docker arguments', () => {
     ]);
   });
 
-  it('initializes image-owned toolchains without changing task uid', () => {
+  it('adopts arbitrary image HOME state without changing task uid', () => {
     const args = dockerContainerUserInitArgs(
       'ello-bench-job-agent',
       '1000:1000',
-      '/tmp/ello-bench-home',
+      CONTAINER_HOME,
     );
 
     expect(args.slice(0, 6)).toEqual([
@@ -75,10 +79,11 @@ describe('task container Docker arguments', () => {
       '/',
       'ello-bench-job-agent',
     ]);
-    expect(args.at(-4)).toContain('chmod o+x /root');
-    expect(args.at(-4)).toContain('ln -s /root/.rustup');
-    expect(args.at(-4)).toContain('ln -s "/root/.cargo/$name"');
-    expect(args.at(-2)).toBe('/tmp/ello-bench-home');
+    expect(args.at(-4)).toContain('find "$home" -xdev -type d');
+    expect(args.at(-4)).toContain('! -perm -004');
+    expect(args.at(-4)).not.toContain('.rustup');
+    expect(args.at(-4)).not.toContain('.cargo');
+    expect(args.at(-2)).toBe(CONTAINER_HOME);
     expect(args.at(-1)).toBe('1000:1000');
   });
 
@@ -97,11 +102,14 @@ function containerSpec(): ContainerSpec {
       host: '/runs/job/workspace',
       container: '/app',
     },
+    additionalMounts: [
+      { host: '/runs/job/tests', container: '/tests', readOnly: true },
+    ],
     network: 'none',
     cpus: 2,
     memoryMb: 8192,
     storageMb: 20480,
-    env: { HOME: '/tmp/ello-bench-home' },
+    env: { HOME: CONTAINER_HOME },
     user: { uid: 1000, gid: 1000 },
     entrypoint: '/bin/bash',
     command: ['sleep infinity'],

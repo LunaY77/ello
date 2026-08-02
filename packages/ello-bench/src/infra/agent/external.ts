@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { AgentSpec } from '../../domain/contract/index.js';
 import { sha256 } from '../../domain/hash.js';
 import type { AgentRunContext } from '../../ports/agent.js';
+import { CONTAINER_HOME } from '../container-user.js';
 import { runProcess } from '../process.js';
 
 import { AgentAdapterError } from './error.js';
@@ -65,11 +66,10 @@ export async function prepareContainerAgentHome(
   readonly configDirectory: string;
 }> {
   const root = `/tmp/ello-bench/${context.attemptId}/${kind}`;
-  const home = `${root}/home`;
   const configDirectory =
-    kind === 'codex' ? `${root}/codex-home` : `${home}/.claude`;
+    kind === 'codex' ? `${root}/codex-home` : `${root}/claude-home`;
   const prepared = await context.container.exec(
-    ['mkdir', '-p', home, configDirectory],
+    ['mkdir', '-p', configDirectory],
     { cwd: context.container.workspace, timeoutMs: 30_000 },
   );
   if (prepared.process.exitCode !== 0 || prepared.process.timedOut) {
@@ -78,7 +78,7 @@ export async function prepareContainerAgentHome(
       `Cannot prepare Agent home in container: ${prepared.stderr ?? ''}`,
     );
   }
-  return { home, configDirectory };
+  return { home: CONTAINER_HOME, configDirectory };
 }
 
 export async function inspectExternalRuntime(
@@ -108,7 +108,7 @@ export async function inspectExternalRuntime(
   }
   const versionExecution = await runProcess(executablePath, ['--version'], {
     cwd: process.cwd(),
-    env: externalProcessEnvironment({}),
+    env: hostProcessEnvironment({}),
     timeoutMs: 15_000,
     killGraceMs: 2_000,
     capture: true,
@@ -161,7 +161,13 @@ export async function prepareCodexHome(options: {
   return { home, codexHome };
 }
 
-export function externalProcessEnvironment(
+export function containerProcessEnvironment(
+  overrides: Readonly<Record<string, string>>,
+): NodeJS.ProcessEnv {
+  return { ...overrides };
+}
+
+function hostProcessEnvironment(
   overrides: Readonly<Record<string, string>>,
 ): NodeJS.ProcessEnv {
   const names = [

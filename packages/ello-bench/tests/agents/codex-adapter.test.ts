@@ -116,6 +116,7 @@ describe('Codex Agent adapter', () => {
       'model_providers.ello_benchmark=',
     );
     expect(invocation.environment.API_KEY_ENV).toBe('ELLO_TEST_CODEX_API_KEY');
+    expect(invocation.environment.HOME).toBe('/root');
     expect(JSON.stringify(invocation)).not.toContain('codex-test-key');
   });
 
@@ -374,6 +375,7 @@ if (args[0] !== 'exec' || !args.includes('--json') || !args.includes('--strict-c
 const selectedModel = args[args.indexOf('-m') + 1];
 const prompt = fs.readFileSync(0, 'utf8');
 if (!prompt.includes('Run repository commands directly; do not invoke Docker') || selectedModel !== 'gpt-codex-test') process.exit(62);
+if (process.env.HOME !== '/root') process.exit(66);
 if (!process.env.CODEX_HOME?.endsWith('/codex/codex-home')) process.exit(63);
 if (process.env.ELLO_TEST_CODEX_API_KEY !== 'codex-test-key') process.exit(64);
 if (!args.some((value) => value.includes('base_url=\\"https://example.test/openai/v1\\"'))) process.exit(65);

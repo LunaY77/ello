@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { ResolvedTask } from '../src/domain/contract/index.js';
 import {
   parseVerifierTestResults,
-  verifierDockerArgs,
-  verifierExecArgs,
+  verifierCommand,
+  verifierContainerSpec,
 } from '../src/infra/verifier/process.js';
 import { auditVerifierPatchOverlap } from '../src/infra/verifier-audit.js';
 
@@ -36,7 +36,7 @@ describe('verifier patch audit', () => {
   });
 });
 
-describe('verifier container Docker arguments', () => {
+describe('verifier container contract', () => {
   const options = {
     workspace: '/runs/job/raw/harness/workspace',
     tests: '/runs/job/raw/harness/tests',
@@ -54,42 +54,31 @@ describe('verifier container Docker arguments', () => {
   };
 
   it('starts as the host user so its workspace and logs stay removable', () => {
-    const args = verifierDockerArgs(
-      options,
-      'ello-bench-abc-verify',
-      '1000:1000',
-    );
+    const spec = verifierContainerSpec(options, 'ello-bench-abc-verify');
 
-    expect(args[args.indexOf('--user') + 1]).toBe('1000:1000');
+    expect(spec.user).toEqual({ uid: process.getuid(), gid: process.getgid() });
   });
 
-  it('redirects HOME to a writable path before test.sh runs', () => {
-    const args = verifierDockerArgs(
-      options,
-      'ello-bench-abc-verify',
-      '1000:1000',
-    );
+  it('uses the adopted image HOME and shared mount contract', () => {
+    const spec = verifierContainerSpec(options, 'ello-bench-abc-verify');
 
-    expect(args[args.indexOf('--env') + 1]).toBe('HOME=/tmp/ello-bench-home');
-    expect(args.at(-4)).toBe('/bin/sh');
-    expect(args.at(-3)).toBe('example.invalid/swe-bench:task');
-    expect(args.at(-2)).toBe('-c');
-    expect(args.at(-1)).toBe('sleep infinity');
+    expect(spec.env.HOME).toBe('/root');
+    expect(spec.entrypoint).toBe('/bin/sh');
+    expect(spec.command).toEqual(['-c', 'sleep infinity']);
+    expect(spec.additionalMounts).toEqual([
+      { host: options.tests, container: '/tests', readOnly: true },
+      { host: options.logs, container: '/logs' },
+    ]);
   });
 
   it('enforces task network and resource limits', () => {
-    const args = verifierDockerArgs(
-      options,
-      'ello-bench-abc-verify',
-      '1000:1000',
-    );
+    const spec = verifierContainerSpec(options, 'ello-bench-abc-verify');
 
-    expect(args[args.indexOf('--network') + 1]).toBe('none');
-    expect(args[args.indexOf('--cpus') + 1]).toBe('2');
-    expect(args[args.indexOf('--memory') + 1]).toBe('8192m');
-    expect(args[args.indexOf('--workdir') + 1]).toBe('/app');
-    expect(args).not.toContain('--storage-opt');
-    expect(args).toContain('example.invalid/swe-bench:task');
+    expect(spec.network).toBe('none');
+    expect(spec.cpus).toBe(2);
+    expect(spec.memoryMb).toBe(8192);
+    expect(spec.storageMb).toBe(20480);
+    expect(spec.image).toBe('example.invalid/swe-bench:task');
   });
 
   it('runs the verifier command with the task user without resetting image PATH', () => {
@@ -97,28 +86,10 @@ describe('verifier container Docker arguments', () => {
       ...options.task,
       benchmark: 'swe-bench-pro',
     } as ResolvedTask;
-    const args = verifierDockerArgs(
-      { ...options, task },
-      'ello-bench-abc-verify',
-      '1000:1000',
-    );
-
-    expect(args.slice(-4)).toEqual([
-      '/bin/sh',
-      options.task.environment.image,
-      '-c',
-      'sleep infinity',
-    ]);
-    expect(verifierExecArgs({ task }, 'ello-bench-abc-verify', '1000:1000')).toEqual([
-      'exec',
-      '--user',
-      '1000:1000',
-      '--workdir',
-      '/app',
-      'ello-bench-abc-verify',
+    expect(verifierCommand(task)).toEqual([
       '/bin/bash',
       '-c',
-      'mkdir -p /tmp/ello-bench-home && exec python /tests/verifier.py',
+      'mkdir -p /root && exec python /tests/verifier.py',
     ]);
   });
 });

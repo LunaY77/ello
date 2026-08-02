@@ -4,6 +4,7 @@ import path from 'node:path';
 import type {
   ContainerExecOptions,
   ContainerHandle,
+  ContainerMount,
   ContainerProcess,
   ContainerProcessExit,
   ContainerProcessSignal,
@@ -150,7 +151,9 @@ export class DockerContainerRuntime implements ContainerRuntime {
 }
 
 // Benchmark images are built for root, while task commands use the host uid so
-// bind-mounted Git workspaces remain writable outside Docker.
+// bind-mounted Git workspaces remain writable outside Docker. Adopt directories
+// instead of recursively copying/chowning files: package managers can create or
+// atomically replace state without inflating the writable layer with toolchains.
 const CONTAINER_USER_INIT_SCRIPT = String.raw`
 home=$1
 owner=$2
@@ -158,22 +161,8 @@ if [ -z "$home" ]; then
   exit 0
 fi
 mkdir -p -- "$home"
-chown "$owner" "$home"
-if [ -d /root ]; then
-  chmod o+x /root
-fi
-if [ -d /root/.rustup ] && [ ! -e "$home/.rustup" ] && [ ! -L "$home/.rustup" ]; then
-  ln -s /root/.rustup "$home/.rustup"
-fi
-if [ -d /root/.cargo ]; then
-  mkdir -p -- "$home/.cargo"
-  chown "$owner" "$home/.cargo"
-  for name in registry git; do
-    if [ -e "/root/.cargo/$name" ] && [ ! -e "$home/.cargo/$name" ] && [ ! -L "$home/.cargo/$name" ]; then
-      ln -s "/root/.cargo/$name" "$home/.cargo/$name"
-    fi
-  done
-fi
+find "$home" -xdev -type d -exec chown "$owner" {} +
+find "$home" -xdev -type f ! -perm -004 -exec chown "$owner" {} +
 `.trim();
 
 export function dockerContainerUserInitArgs(
@@ -515,6 +504,10 @@ export function attachDockerContainer(
 }
 
 export function dockerRunArgs(spec: ContainerSpec): string[] {
+  const mounts: readonly ContainerMount[] = [
+    spec.workspaceMount,
+    ...(spec.additionalMounts ?? []),
+  ];
   const args = [
     'run',
     '-d',
@@ -529,8 +522,10 @@ export function dockerRunArgs(spec: ContainerSpec): string[] {
     String(spec.cpus),
     '--memory',
     `${spec.memoryMb}m`,
-    '--mount',
-    `type=bind,source=${path.resolve(spec.workspaceMount.host)},target=${spec.workspaceMount.container}`,
+    ...mounts.flatMap((mount) => [
+      '--mount',
+      dockerBindMount(mount.host, mount.container, mount.readOnly === true),
+    ]),
     '--workdir',
     spec.workspaceMount.container,
     ...Object.entries(spec.env).flatMap(([key, value]) => [
@@ -543,6 +538,21 @@ export function dockerRunArgs(spec: ContainerSpec): string[] {
   }
   args.push(spec.image, ...spec.command);
   return args;
+}
+
+function dockerBindMount(
+  hostPath: string,
+  containerPath: string,
+  readOnly: boolean,
+): string {
+  const source = path.resolve(hostPath);
+  if (source.includes(',') || containerPath.includes(',')) {
+    throw new Error(`Docker bind path cannot contain a comma: ${source}.`);
+  }
+  if (!containerPath.startsWith('/')) {
+    throw new Error(`Docker bind target must be absolute: ${containerPath}.`);
+  }
+  return `type=bind,source=${source},target=${containerPath}${readOnly ? ',readonly' : ''}`;
 }
 
 export async function removeDockerContainer(name: string): Promise<void> {

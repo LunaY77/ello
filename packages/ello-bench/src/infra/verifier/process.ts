@@ -5,22 +5,15 @@ import {
   ArtifactReferenceSchema,
   VerifierProcessArtifactSchema,
   type ArtifactReference,
+  type ProcessResult,
   type ResolvedTask,
 } from '../../domain/contract/index.js';
 import { sha256 } from '../../domain/hash.js';
-import {
-  dockerContainerWritableBytes,
-  initializeDockerContainer,
-} from '../container/docker.js';
-import { CONTAINER_HOME, hostContainerUser } from '../container-user.js';
+import type { ContainerHandle, ContainerSpec } from '../../ports/container.js';
+import { DockerContainerRuntime } from '../container/docker.js';
+import { CONTAINER_HOME, hostContainerIdentity } from '../container-user.js';
 import { getBenchmarkSuiteForTask } from '../corpus/suite.js';
-import { removeContainer } from '../docker-image.js';
 import { errorMessage, writeJsonAtomic } from '../io.js';
-import { runChecked, runProcess } from '../process.js';
-import {
-  STORAGE_WATCHDOG_INTERVAL_MS,
-  WorkspaceStorageWatchdog,
-} from '../workspace-storage.js';
 
 export class VerifierExecutionError extends Error {
   readonly processEvidence: ArtifactReference;
@@ -45,61 +38,41 @@ export async function executeVerifierProcess(options: {
   readonly newTestsExitCode: number;
 }> {
   const verifierName = `ello-bench-${options.attemptId}-verify`;
-  await removeContainer(verifierName);
   const stdoutPath = path.join(options.harnessRoot, 'stdout.log');
   const stderrPath = path.join(options.harnessRoot, 'stderr.log');
   const startedAt = new Date().toISOString();
-  let execution: Awaited<ReturnType<typeof runProcess>> | undefined;
+  let execution: ProcessResult | undefined;
+  let storagePolicy: ContainerHandle['storagePolicy'] | undefined;
   let cleanupError: unknown;
   let storageError: unknown;
-  const storage = new WorkspaceStorageWatchdog(
-    options.workspace,
-    options.task.environment.storageMb * 1024 * 1024,
-    STORAGE_WATCHDOG_INTERVAL_MS,
-    () => removeContainer(verifierName),
-    () => dockerContainerWritableBytes(verifierName),
-  );
-  await storage.start();
+  const runtime = new DockerContainerRuntime();
+  let container: ContainerHandle | undefined;
   try {
-    const containerUser = hostContainerUser();
-    await runChecked(
-      'docker',
-      verifierDockerArgs(options, verifierName, containerUser),
-      {
-        cwd: options.harnessRoot,
-        timeoutMs: 120_000,
-        killGraceMs: 10_000,
-        maxOutputBytes: 16 * 1024 * 1024,
-      },
+    container = await runtime.start(
+      verifierContainerSpec(options, verifierName),
     );
-    await initializeDockerContainer(
-      verifierName,
-      containerUser,
-      CONTAINER_HOME,
-    );
-    execution = await runProcess(
-      'docker',
-      verifierExecArgs(options, verifierName, containerUser),
-      {
-        cwd: options.harnessRoot,
+    storagePolicy = container.storagePolicy;
+    execution = (
+      await container.exec(verifierCommand(options.task), {
+        cwd: container.workspace,
         timeoutMs: options.task.verifierTimeoutMs,
         killGraceMs: 10_000,
-        capture: false,
         stdoutPath,
         stderrPath,
-      },
-    );
+      })
+    ).process;
   } finally {
-    try {
-      await storage.assertWithinLimit();
-    } catch (error) {
-      storageError = error;
-    }
-    await storage.stop();
-    try {
-      await removeContainer(verifierName);
-    } catch (error) {
-      cleanupError = error;
+    if (container !== undefined) {
+      try {
+        await container.assertStorageLimit();
+      } catch (error) {
+        storageError = error;
+      }
+      try {
+        await container.remove();
+      } catch (error) {
+        cleanupError = error;
+      }
     }
   }
   if (execution === undefined) {
@@ -109,15 +82,10 @@ export async function executeVerifierProcess(options: {
     harnessRoot: options.harnessRoot,
     startedAt,
     completedAt: new Date().toISOString(),
-    execution: execution.result,
+    execution,
     stdoutPath,
     stderrPath,
-    storagePolicy: {
-      enforcement: 'workspace-and-writable-layer-watchdog',
-      accounting: ['bind-workspace-apparent-bytes', 'container-size-rw'],
-      limitBytes: options.task.environment.storageMb * 1024 * 1024,
-      intervalMs: STORAGE_WATCHDOG_INTERVAL_MS,
-    },
+    storagePolicy: requiredStoragePolicy(storagePolicy),
   });
   if (cleanupError !== undefined) {
     throw new VerifierExecutionError(
@@ -131,12 +99,12 @@ export async function executeVerifierProcess(options: {
       evidence.reference,
     );
   }
-  if (execution.result.timedOut) {
+  if (execution.timedOut) {
     throw new VerifierExecutionError('Verifier timed out.', evidence.reference);
   }
-  if (execution.result.exitCode !== 0) {
+  if (execution.exitCode !== 0) {
     throw new VerifierExecutionError(
-      `Verifier exited with code ${String(execution.result.exitCode)}.`,
+      `Verifier exited with code ${String(execution.exitCode)}.`,
       evidence.reference,
     );
   }
@@ -150,7 +118,7 @@ export async function executeVerifierProcess(options: {
   return { reference: evidence.reference, baselineExitCode, newTestsExitCode };
 }
 
-export function verifierDockerArgs(
+export function verifierContainerSpec(
   options: {
     readonly workspace: string;
     readonly tests: string;
@@ -158,71 +126,39 @@ export function verifierDockerArgs(
     readonly task: ResolvedTask;
   },
   verifierName: string,
-  containerUser: string,
-): string[] {
+): ContainerSpec {
   const task = options.task;
-  const args = [
-    'run',
-    '-d',
-    '--init',
-    '--name',
-    verifierName,
-    '--user',
-    containerUser,
-    '--workdir',
-    '/app',
-    // 任务进程仍以宿主 uid 运行；启动后再由 root 初始化镜像工具链路径。
-    '--env',
-    `HOME=${CONTAINER_HOME}`,
-    '--network',
-    task.environment.allowInternet ? 'bridge' : 'none',
-    '--cpus',
-    String(task.environment.cpus),
-    '--memory',
-    `${task.environment.memoryMb}m`,
-    '--mount',
-    `type=bind,source=${options.workspace},target=/app`,
-    '--mount',
-    `type=bind,source=${options.tests},target=/tests,readonly`,
-    '--mount',
-    `type=bind,source=${options.logs},target=/logs`,
-    '--entrypoint',
-    '/bin/sh',
-    task.environment.image,
-    '-c',
-    'sleep infinity',
-  ];
-  return args;
+  return {
+    image: task.environment.image,
+    name: verifierName,
+    workspaceMount: { host: options.workspace, container: '/app' },
+    additionalMounts: [
+      { host: options.tests, container: '/tests', readOnly: true },
+      { host: options.logs, container: '/logs' },
+    ],
+    network: task.environment.allowInternet ? 'bridge' : 'none',
+    cpus: task.environment.cpus,
+    memoryMb: task.environment.memoryMb,
+    storageMb: task.environment.storageMb,
+    env: { HOME: CONTAINER_HOME },
+    user: hostContainerIdentity(),
+    entrypoint: '/bin/sh',
+    command: ['-c', 'sleep infinity'],
+  };
 }
 
-export function verifierExecArgs(
-  options: {
-    readonly task: ResolvedTask;
-  },
-  verifierName: string,
-  containerUser: string,
-): string[] {
-  const suite = getBenchmarkSuiteForTask(options.task.benchmark);
-  const command =
-    suite.verifierContainer.entrypoint === undefined
-      ? [...suite.verifierContainer.command]
-      : [suite.verifierContainer.entrypoint, ...suite.verifierContainer.command];
-  return [
-    'exec',
-    '--user',
-    containerUser,
-    '--workdir',
-    '/app',
-    verifierName,
-    ...command,
-  ];
+export function verifierCommand(task: ResolvedTask): readonly string[] {
+  const suite = getBenchmarkSuiteForTask(task.benchmark);
+  return suite.verifierContainer.entrypoint === undefined
+    ? [...suite.verifierContainer.command]
+    : [suite.verifierContainer.entrypoint, ...suite.verifierContainer.command];
 }
 
 async function writeProcessEvidence(options: {
   readonly harnessRoot: string;
   readonly startedAt: string;
   readonly completedAt: string;
-  readonly execution: Awaited<ReturnType<typeof runProcess>>['result'];
+  readonly execution: ProcessResult;
   readonly stdoutPath: string;
   readonly stderrPath: string;
   readonly storagePolicy: {
@@ -266,6 +202,14 @@ async function writeProcessEvidence(options: {
     }),
     testResults: artifact.testResults,
   };
+}
+
+function requiredStoragePolicy(
+  value: ContainerHandle['storagePolicy'] | undefined,
+): NonNullable<typeof value> {
+  if (value === undefined)
+    throw new Error('Verifier storage policy is missing.');
+  return value;
 }
 
 export function parseVerifierTestResults(stdout: string): {

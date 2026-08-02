@@ -4,7 +4,7 @@ import type { CodexAgentSpec } from '../../../domain/contract/index.js';
 import type { AgentRunContext } from '../../../ports/agent.js';
 import { writeJsonAtomic } from '../../io.js';
 import {
-  externalProcessEnvironment,
+  containerProcessEnvironment,
   inspectExternalRuntime,
   prepareContainerAgentHome,
   requiredEnvironment,
@@ -72,7 +72,7 @@ export async function createCodexInvocation(
     `model_providers.${BENCHMARK_PROVIDER_ID}=${provider}`,
     '-',
   ] as const;
-  const env = externalProcessEnvironment({
+  const env = containerProcessEnvironment({
     ...(agent.environment ?? {}),
     HOME: isolated.home,
     USERPROFILE: isolated.home,

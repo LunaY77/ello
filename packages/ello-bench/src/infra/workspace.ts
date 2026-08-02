@@ -6,7 +6,7 @@ import type { PullPolicy } from '../ports/container.js';
 import type { ResolvedTaskFiles } from '../ports/corpus.js';
 
 import { DockerContainerRuntime } from './container/docker.js';
-import { CONTAINER_HOME } from './container-user.js';
+import { CONTAINER_HOME, hostContainerIdentity } from './container-user.js';
 import { getBenchmarkSuiteForTask } from './corpus/suite.js';
 import { extractImageWorkspace } from './docker-image.js';
 import { assertGitHead, captureBaselineTree } from './git-workspace.js';
@@ -127,16 +127,6 @@ function containerName(attemptId: string, kind: 'seed' | 'agent'): string {
     throw new Error(`Invalid attempt id for Docker container: ${attemptId}`);
   }
   return `ello-bench-${attemptId}-${kind}`;
-}
-
-function hostContainerIdentity(): {
-  readonly uid: number;
-  readonly gid: number;
-} {
-  if (process.getuid === undefined || process.getgid === undefined) {
-    throw new Error('Benchmark containers require a POSIX host uid and gid.');
-  }
-  return { uid: process.getuid(), gid: process.getgid() };
 }
 
 function requireContainerSuccess(

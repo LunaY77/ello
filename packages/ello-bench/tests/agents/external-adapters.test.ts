@@ -14,6 +14,7 @@ import {
   claudeCodeBaseUrlIssue,
   requireClaudeCodeBaseUrl,
 } from '../../src/infra/agent/claude-code/base-url.js';
+import { containerProcessEnvironment } from '../../src/infra/agent/external.js';
 import { createAgentAdapter } from '../../src/infra/agent/factory.js';
 import type {
   AgentProcessExecution,
@@ -33,6 +34,14 @@ afterEach(() => {
 });
 
 describe('Claude Code Agent adapter', () => {
+  it('does not replace the task image PATH with the host PATH', () => {
+    setEnvironment('PATH', '/host-only/bin');
+
+    expect(containerProcessEnvironment({ HOME: '/root' })).toEqual({
+      HOME: '/root',
+    });
+  });
+
   it('rejects a base URL that already contains the version segment', () => {
     expect(() =>
       requireClaudeCodeBaseUrl('https://example.test/anthropic/v1'),
@@ -69,6 +78,7 @@ describe('Claude Code Agent adapter', () => {
     expect(invocation).not.toContain('claude-test-key');
     expect(JSON.parse(invocation)).toMatchObject({
       environment: {
+        HOME: '/root',
         ANTHROPIC_BASE_URL: 'https://example.test/anthropic',
         ANTHROPIC_AUTH_TOKEN_ENV: 'ELLO_TEST_CLAUDE_API_KEY',
       },
@@ -309,6 +319,7 @@ const selectedModel = args[args.indexOf('--model') + 1];
 const boundary = args[args.indexOf('--append-system-prompt') + 1];
 fs.readFileSync(0, 'utf8');
 if (!boundary.includes('Run repository commands directly; do not invoke Docker')) process.exit(65);
+if (process.env.HOME !== '/root') process.exit(66);
 if (process.env.ANTHROPIC_BASE_URL !== 'https://example.test/anthropic') process.exit(67);
 if (process.env.ANTHROPIC_AUTH_TOKEN !== 'claude-test-key') process.exit(68);
 const tools = mode === 'reordered-tools'
