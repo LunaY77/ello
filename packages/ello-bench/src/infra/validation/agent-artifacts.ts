@@ -327,7 +327,8 @@ function validateAgentRuntime(
   switch (agent.kind) {
     case 'ello':
       if (
-        ('enabledTools' in runtime) !== (evidence.effectiveTools !== undefined)
+        'enabledTools' in runtime !==
+        (evidence.effectiveTools !== undefined)
       ) {
         throw new Error(
           `Ello tool provenance generation mismatch: ${run.attemptId}`,

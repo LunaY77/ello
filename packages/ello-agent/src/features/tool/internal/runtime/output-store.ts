@@ -136,9 +136,7 @@ function previewOutput(value: string, limits: CommandOutputLimits): string {
   const lines = value.split(/\r?\n/u);
   let preview = value;
   if (lines.length > limits.previewLines) {
-    const headLines = Math.floor(
-      limits.previewLines * TRUNCATION_HEAD_RATIO,
-    );
+    const headLines = Math.floor(limits.previewLines * TRUNCATION_HEAD_RATIO);
     const tailLines = limits.previewLines - headLines;
     const omitted = lines.slice(headLines, lines.length - tailLines);
     const omittedBytes = Buffer.byteLength(omitted.join('\n'), 'utf8');

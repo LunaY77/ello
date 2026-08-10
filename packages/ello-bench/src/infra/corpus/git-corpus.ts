@@ -61,8 +61,8 @@ export async function ensureTaskCorpus(options: {
     );
   }
 
-    const head = await readHead(corpusRoot);
-    if (head !== options.source.revision) {
+  const head = await readHead(corpusRoot);
+  if (head !== options.source.revision) {
     await runChecked(
       'git',
       [
@@ -83,7 +83,7 @@ export async function ensureTaskCorpus(options: {
       { cwd: corpusRoot, ...PROCESS_OPTIONS },
     );
   }
-    const verifiedHead = await readHead(corpusRoot);
+  const verifiedHead = await readHead(corpusRoot);
   if (verifiedHead !== options.source.revision) {
     throw new Error(
       `Corpus revision mismatch: expected ${options.source.revision}, received ${verifiedHead}.`,

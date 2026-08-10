@@ -166,11 +166,12 @@ class RunningAgent implements AgentRun {
   }
 
   acknowledgeCompaction(compactionId: string, error?: unknown): void {
-    const acknowledgement = this.pendingCompactionAcknowledgements.get(
-      compactionId,
-    );
+    const acknowledgement =
+      this.pendingCompactionAcknowledgements.get(compactionId);
     if (acknowledgement === undefined) {
-      throw new Error(`Unknown Context Checkpoint acknowledgement ${compactionId}.`);
+      throw new Error(
+        `Unknown Context Checkpoint acknowledgement ${compactionId}.`,
+      );
     }
     this.pendingCompactionAcknowledgements.delete(compactionId);
     if (error === undefined) acknowledgement.resolve();

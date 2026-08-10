@@ -189,7 +189,9 @@ describe('Agent run event ordering', () => {
     const completed = events.findIndex(
       (event) => event.type === 'contextCompacted',
     );
-    const message = events.findIndex((event) => event.type === 'messageStarted');
+    const message = events.findIndex(
+      (event) => event.type === 'messageStarted',
+    );
     expect(inputCommitted).toBeGreaterThanOrEqual(0);
     expect(started).toBeGreaterThan(inputCommitted);
     expect(started).toBeGreaterThanOrEqual(0);

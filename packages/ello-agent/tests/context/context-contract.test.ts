@@ -113,16 +113,17 @@ describe('context source contract', () => {
     const prompt = await section(promptRunContext());
 
     expect(prompt).toContain('`command_run` is the only model-visible Tool');
-    expect(prompt).toContain('Use `step` as a dependency group');
     expect(prompt).toContain(
-      'A one-frame batch is appropriate only when exactly one action remains',
+      'Commands in the same `step` must be independent; dependent Commands use a later `step`',
     );
     expect(prompt).toContain(
-      'Prefer the registered `search` Command for repository text and path search',
+      'Include all currently known actions whose inputs are available',
     );
-    expect(prompt).toContain('Ello determines safe concurrency');
     expect(prompt).toContain(
-      'Never borrow names or calling conventions from another agent environment',
+      'Prefer the registered `search` Command for repository search',
+    );
+    expect(prompt).toContain(
+      'Treat the current Command Catalog as authoritative. Do not invent Commands, fields, arguments, or calling conventions',
     );
     expect(prompt).not.toContain(
       'Use `read`, `search`, `write`, `apply_patch`, and `bash` for direct environment operations',

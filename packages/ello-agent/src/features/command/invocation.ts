@@ -458,9 +458,7 @@ function mustProvide(
   root: JsonSchemaNode,
   field: string,
 ): boolean {
-  return (
-    (root.required ?? []).includes(field) && schema.default === undefined
-  );
+  return (root.required ?? []).includes(field) && schema.default === undefined;
 }
 
 function describeField(schema: JsonSchemaNode, required: boolean): string {
@@ -480,7 +478,10 @@ function describeField(schema: JsonSchemaNode, required: boolean): string {
 }
 
 /** 忽略 JS 安全整数边界：它是编码上限而不是领域约束。 */
-function boundLabel(label: string, value: number | undefined): string | undefined {
+function boundLabel(
+  label: string,
+  value: number | undefined,
+): string | undefined {
   if (value === undefined) return undefined;
   return Math.abs(value) >= Number.MAX_SAFE_INTEGER
     ? undefined

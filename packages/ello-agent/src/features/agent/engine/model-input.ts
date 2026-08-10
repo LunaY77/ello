@@ -387,7 +387,8 @@ export async function buildModelInput(
       appliedMessageTransforms: prepared.diagnostics.appliedMessageTransforms,
     }),
   };
-  if (options.skipBudget !== true) assertModelInputWithinBudget(finalInput, run);
+  if (options.skipBudget !== true)
+    assertModelInputWithinBudget(finalInput, run);
   return finalInput;
 }
 

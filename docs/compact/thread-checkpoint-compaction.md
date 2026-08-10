@@ -60,14 +60,14 @@ call。只有取消、checkpoint 写入失败或重建后仍超预算会阻止�
 
 `compaction` record 的核心字段为：
 
-| 字段 | 含义 |
-| --- | --- |
-| `summary` | checkpoint 内容；生成策略由当前 compactor 提供 |
-| `firstKeptSeq` | 第一条继续原样 replay 的 transcript record seq |
-| `tokensBefore` | checkpoint 前的估算输入量 |
-| `beforeMessageCount` | checkpoint 前消息数 |
-| `afterMessageCount` | checkpoint message 加近期尾部后的消息数 |
-| `keptMessageCount` | 继续原样保留的近期消息数 |
+| 字段                 | 含义                                           |
+| -------------------- | ---------------------------------------------- |
+| `summary`            | checkpoint 内容；生成策略由当前 compactor 提供 |
+| `firstKeptSeq`       | 第一条继续原样 replay 的 transcript record seq |
+| `tokensBefore`       | checkpoint 前的估算输入量                      |
+| `beforeMessageCount` | checkpoint 前消息数                            |
+| `afterMessageCount`  | checkpoint message 加近期尾部后的消息数        |
+| `keptMessageCount`   | 继续原样保留的近期消息数                       |
 
 运行内 `compactionId` 只关联 started/completed TUI events，不是 durable identity。当前设计不增加
 独立 checkpoint id 或 `sourceThroughSeq`。
@@ -93,13 +93,13 @@ checkpoint 后的 Provider Context 仍遵守 provider wire contract：
 
 ## 失败语义
 
-| 条件 | 结果 |
-| --- | --- |
-| checkpoint 不需要或没有合法切点 | 返回 `null`，继续 admission |
-| checkpoint commit 成功且 run active | 重建并调用 provider |
-| checkpoint 前后取消 | `interrupted`，不发新请求 |
-| checkpoint/record 写入失败 | run 明确 `failed` |
-| 重建后仍超过预算 | 明确 context budget error |
+| 条件                                | 结果                        |
+| ----------------------------------- | --------------------------- |
+| checkpoint 不需要或没有合法切点     | 返回 `null`，继续 admission |
+| checkpoint commit 成功且 run active | 重建并调用 provider         |
+| checkpoint 前后取消                 | `interrupted`，不发新请求   |
+| checkpoint/record 写入失败          | run 明确 `failed`           |
+| 重建后仍超过预算                    | 明确 context budget error   |
 
 ## 源码入口
 

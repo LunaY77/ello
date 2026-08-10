@@ -552,7 +552,9 @@ describe('Command 输出预算', () => {
       store: {
         writeLargeOutput(input) {
           persisted = input.content;
-          return Promise.resolve({ outputPath: '/workspace/artifacts/bash.txt' });
+          return Promise.resolve({
+            outputPath: '/workspace/artifacts/bash.txt',
+          });
         },
       },
       sessionId: 'session',

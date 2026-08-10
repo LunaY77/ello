@@ -15,23 +15,23 @@ describe('prompt composition', () => {
     });
 
     for (const marker of [
-      '# General',
-      'The user would prefer that you make mistakes rather than over-explore.',
-      'You are good at backwardthinking.',
-      '## Engineering judgment',
-      '## Build Together As You Go',
-      'STRICT ONE_SHOT MODE',
-      '## Validation Behavior',
-      'NEVER review code you have written.',
-      '# Command Run',
+      '## 1. General',
+      'The user collaborates with you synchronously and values low latency.',
+      "Treat the user's request, issue description, failing test, stack trace, documentation, and proposed fix as **evidence**",
+      '## 3. Rapid Working Mode',
+      'Optimize for **minimum sufficient investigation and validation**.',
+      '## 4. Engineering Judgment',
+      '## 5. Editing and Workspace Safety',
+      '## 6. Validation',
+      'Rapid mode means **cheap targeted validation**, not no validation.',
+      '## Command Run',
       '`command_run` is the only model-visible Tool.',
-      'Emit at most one `command_run` Tool Call in a model response.',
-      'A Command Frame accepts only `step`, `command`, `args`, `body`, `input`, and `onFailure`.',
-      'every `--name <value>` option must appear as separate',
-      'Treat the Command Catalog supplied with the current model request as the complete capability list.',
-      '# Skills',
-      'PTC is not a separate Tool or Command.',
-      'Use `write` followed by `bash` for a longer reusable script.',
+      'Emit at most one `command_run` per model response.',
+      'Frames may use only `step`, `command`, `args`, `body`, `input`, and `onFailure`',
+      'Put positional arguments and options in `args` as separate strings',
+      'Treat the current Command Catalog as authoritative.',
+      '## Skills',
+      'Use `write` plus `bash` for reusable scripts.',
     ]) {
       expect(prompt).toContain(marker);
     }
@@ -66,12 +66,18 @@ describe('prompt composition', () => {
     const rapid = renderPromptTemplate('rapid');
     const thorough = renderPromptTemplate('thorough');
 
-    expect(rapid).toContain('STRICT ONE_SHOT MODE');
-    expect(thorough).not.toContain('STRICT ONE_SHOT MODE');
+    expect(rapid).toContain('## 3. Rapid Working Mode');
+    expect(rapid).toContain(
+      'Optimize for **minimum sufficient investigation and validation**.',
+    );
+    expect(rapid).not.toContain('## 3. Thorough Investigation');
+    expect(thorough).toContain('## 3. Thorough Investigation');
+    expect(thorough).not.toContain('## 3. Rapid Working Mode');
     for (const marker of [
-      'run the relevant targeted verification',
-      'fix the cause and rerun the affected verification',
-      'completion audit',
+      'Optimize for **high confidence within materially relevant scope**.',
+      'Verification depth must scale with change risk.',
+      'rerun the affected verification;',
+      'Before declaring completion, compare the actual resulting state',
     ]) {
       expect(thorough).toContain(marker);
     }
@@ -80,7 +86,7 @@ describe('prompt composition', () => {
       expect(prompt).toContain('# Command Run');
       expect(prompt).toContain('`command_run` is the only model-visible Tool.');
       expect(prompt).toContain(
-        'Treat the Command Catalog supplied with the current model request as the complete capability list.',
+        'Treat the current Command Catalog as authoritative.',
       );
       expect(prompt).not.toContain(
         'Put a `command_invoke` invocation entirely in `input: { name, arguments }`',

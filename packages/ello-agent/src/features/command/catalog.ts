@@ -208,7 +208,9 @@ function renderFrameExamples(
     .map((example, index) => frameJson(index + 1, example));
   const structured = selectExample(definitions, 'input');
   const lines = [
-    ...(batch.length === 0 ? [] : [`  Batch: {"commands":[${batch.join(',')}]}`]),
+    ...(batch.length === 0
+      ? []
+      : [`  Batch: {"commands":[${batch.join(',')}]}`]),
     ...(structured === undefined
       ? []
       : [`  Object arguments: ${frameJson(1, structured)}`]),

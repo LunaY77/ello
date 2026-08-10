@@ -8,12 +8,11 @@ import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { buildToolSet } from '../../src/features/agent/engine/tools.js';
-
 import type {
   AgentModelEvent,
   AgentModelRequest,
 } from '../../src/features/agent/engine/model.js';
+import { buildToolSet } from '../../src/features/agent/engine/tools.js';
 import { createAiSdkModelAdapter } from '../../src/features/model/providers/ai-sdk/ai-sdk.js';
 
 describe('AI SDK model adapter', () => {
