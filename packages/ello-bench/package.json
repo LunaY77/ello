@@ -19,7 +19,7 @@
     "dist",
     "config",
     "README.md",
-    "README-zh.md"
+    "README-en.md"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",

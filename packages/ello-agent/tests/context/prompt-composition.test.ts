@@ -8,37 +8,42 @@ import { describe, expect, it } from 'vitest';
 import { renderPromptTemplate } from '../../src/features/agent/index.js';
 
 describe('prompt composition', () => {
-  it('主代理组合全部共享规则且不泄漏模板语法', () => {
-    const prompt = renderPromptTemplate('coding', {
+  it('rapid 保留当前 Direct 行为与 Ello 工具协议', () => {
+    const prompt = renderPromptTemplate('rapid', {
       model: 'test-model',
-      subagents_enabled: true,
+      subagents_enabled: false,
     });
 
     for (const marker of [
-      '# Verification',
-      '# Investigation',
-      '# Scope and Action',
-      'Implement changes rather than only proposing them.',
-      '# Reporting',
-      '# Tool Discipline',
-      'Before overwriting an existing file with `write`',
+      '# General',
+      'The user would prefer that you make mistakes rather than over-explore.',
+      'You are good at backwardthinking.',
+      '## Engineering judgment',
+      '## Build Together As You Go',
+      'STRICT ONE_SHOT MODE',
+      '## Validation Behavior',
+      'NEVER review code you have written.',
+      '# Command Run',
+      '`command_run` is the only model-visible Tool.',
+      'Emit at most one `command_run` Tool Call in a model response.',
+      'A Command Frame accepts only `step`, `command`, `args`, `body`, `input`, and `onFailure`.',
+      'every `--name <value>` option must appear as separate',
+      'Treat the Command Catalog supplied with the current model request as the complete capability list.',
       '# Skills',
-      '# File Changes',
-      '# Code Quality',
-      '# Safety',
-      '# Programmatic Orchestration',
-      'PTC is not a separate tool or DSL.',
-      'Use one program when later steps depend on earlier results',
-      'Keep independent lookups as separate calls in the same model response',
-      'Use `write` followed by `bash` for a multi-line, reusable, or debuggable script.',
+      'PTC is not a separate Tool or Command.',
+      'Use `write` followed by `bash` for a longer reusable script.',
     ]) {
       expect(prompt).toContain(marker);
     }
     expect(prompt).not.toContain('run_program');
-    expect(prompt).toContain(
-      'Do not invent an SDK, DSL, or hidden Agent tool API.',
+    expect(prompt).not.toContain('expectedContent');
+    expect(prompt).not.toContain('# Balanced');
+    expect(prompt).not.toContain('.tura/script');
+    expect(prompt).not.toContain('task_status');
+    expect(prompt).not.toContain('command_type');
+    expect(prompt).not.toContain(
+      'Before overwriting an existing file with `write`',
     );
-    expect(prompt).toContain('# Primary Agent Role');
     expect(prompt).not.toContain('{%');
     expect(prompt).not.toContain('{{');
   });
@@ -47,21 +52,51 @@ describe('prompt composition', () => {
     const prompt = renderPromptTemplate('subagent', { model: 'test-model' });
 
     expect(prompt).toContain('# Subagent Worker Role');
+    expect(prompt).toContain('# Command Run');
     expect(prompt).toContain('# Investigation');
     expect(prompt).not.toContain('# Delegation');
     expect(prompt).not.toContain('# Primary Agent Role');
-    expect(prompt).not.toContain('apply_patch');
+    expect(prompt).toContain('apply_patch');
     expect(prompt).not.toContain('# Code Quality');
     expect(prompt).not.toContain('{%');
     expect(prompt).not.toContain('{{');
   });
 
+  it('rapid 与 thorough 是两种独立且完整的 primary 策略', () => {
+    const rapid = renderPromptTemplate('rapid');
+    const thorough = renderPromptTemplate('thorough');
+
+    expect(rapid).toContain('STRICT ONE_SHOT MODE');
+    expect(thorough).not.toContain('STRICT ONE_SHOT MODE');
+    for (const marker of [
+      'run the relevant targeted verification',
+      'fix the cause and rerun the affected verification',
+      'completion audit',
+    ]) {
+      expect(thorough).toContain(marker);
+    }
+    expect(sha256(rapid)).not.toBe(sha256(thorough));
+    for (const prompt of [rapid, thorough]) {
+      expect(prompt).toContain('# Command Run');
+      expect(prompt).toContain('`command_run` is the only model-visible Tool.');
+      expect(prompt).toContain(
+        'Treat the Command Catalog supplied with the current model request as the complete capability list.',
+      );
+      expect(prompt).not.toContain(
+        'Put a `command_invoke` invocation entirely in `input: { name, arguments }`',
+      );
+      expect(prompt).not.toContain(
+        'Start every `apply_patch` body with `*** Begin Patch`',
+      );
+    }
+  });
+
   it('subagent 开关同时改变委派段落和稳定提示词指纹输入', () => {
-    const enabled = renderPromptTemplate('coding', {
+    const enabled = renderPromptTemplate('rapid', {
       model: 'test-model',
       subagents_enabled: true,
     });
-    const disabled = renderPromptTemplate('coding', {
+    const disabled = renderPromptTemplate('rapid', {
       model: 'test-model',
       subagents_enabled: false,
     });

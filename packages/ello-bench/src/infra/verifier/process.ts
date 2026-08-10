@@ -31,6 +31,7 @@ export async function executeVerifierProcess(options: {
   readonly workspace: string;
   readonly tests: string;
   readonly logs: string;
+  readonly inputPatchPath: string;
   readonly task: ResolvedTask;
 }): Promise<{
   readonly reference: ArtifactReference;
@@ -123,6 +124,7 @@ export function verifierContainerSpec(
     readonly workspace: string;
     readonly tests: string;
     readonly logs: string;
+    readonly inputPatchPath?: string;
     readonly task: ResolvedTask;
   },
   verifierName: string,
@@ -135,6 +137,15 @@ export function verifierContainerSpec(
     additionalMounts: [
       { host: options.tests, container: '/tests', readOnly: true },
       { host: options.logs, container: '/logs' },
+      ...(options.inputPatchPath === undefined
+        ? []
+        : [
+            {
+              host: options.inputPatchPath,
+              container: '/logs/input/model.patch',
+              readOnly: true,
+            },
+          ]),
     ],
     network: 'bridge',
     cpus: task.environment.cpus,
@@ -147,11 +158,117 @@ export function verifierContainerSpec(
   };
 }
 
+export async function executeBaselineVerifierProcess(options: {
+  readonly attemptId: string;
+  readonly harnessRoot: string;
+  readonly workspace: string;
+  readonly tests: string;
+  readonly logs: string;
+  readonly task: ResolvedTask;
+}): Promise<{
+  readonly reference: ArtifactReference;
+  readonly baselineExitCode: number;
+}> {
+  const verifierName = `ello-bench-${options.attemptId}-baseline`;
+  const stdoutPath = path.join(options.harnessRoot, 'stdout.log');
+  const stderrPath = path.join(options.harnessRoot, 'stderr.log');
+  const startedAt = new Date().toISOString();
+  let execution: ProcessResult | undefined;
+  let storagePolicy: ContainerHandle['storagePolicy'] | undefined;
+  let cleanupError: unknown;
+  let storageError: unknown;
+  const runtime = new DockerContainerRuntime();
+  let container: ContainerHandle | undefined;
+  try {
+    container = await runtime.start(
+      verifierContainerSpec(options, verifierName),
+    );
+    storagePolicy = container.storagePolicy;
+    execution = (
+      await container.exec(baselineVerifierCommand(options.task), {
+        cwd: container.workspace,
+        timeoutMs: options.task.verifierTimeoutMs,
+        killGraceMs: 10_000,
+        stdoutPath,
+        stderrPath,
+      })
+    ).process;
+  } finally {
+    if (container !== undefined) {
+      try {
+        await container.assertStorageLimit();
+      } catch (error) {
+        storageError = error;
+      }
+      try {
+        await container.remove();
+      } catch (error) {
+        cleanupError = error;
+      }
+    }
+  }
+  if (execution === undefined) {
+    throw new Error('Baseline verifier process result is missing.');
+  }
+  const evidence = await writeProcessEvidence({
+    harnessRoot: options.harnessRoot,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    execution,
+    stdoutPath,
+    stderrPath,
+    storagePolicy: requiredStoragePolicy(storagePolicy),
+  });
+  if (cleanupError !== undefined) {
+    throw new VerifierExecutionError(
+      `Baseline verifier runtime cleanup failed: ${errorMessage(cleanupError)}`,
+      evidence.reference,
+    );
+  }
+  if (storageError !== undefined) {
+    throw new VerifierExecutionError(
+      `Baseline verifier storage enforcement failed: ${errorMessage(storageError)}`,
+      evidence.reference,
+    );
+  }
+  if (execution.timedOut) {
+    throw new VerifierExecutionError(
+      'Baseline verifier timed out.',
+      evidence.reference,
+    );
+  }
+  if (execution.exitCode !== 0) {
+    throw new VerifierExecutionError(
+      `Baseline verifier exited with code ${String(execution.exitCode)}.`,
+      evidence.reference,
+    );
+  }
+  const { baselineExitCode } = evidence.testResults;
+  if (baselineExitCode === null) {
+    throw new VerifierExecutionError(
+      'Baseline verifier exit-code marker is missing.',
+      evidence.reference,
+    );
+  }
+  return { reference: evidence.reference, baselineExitCode };
+}
+
 export function verifierCommand(task: ResolvedTask): readonly string[] {
   const suite = getBenchmarkSuiteForTask(task.benchmark);
-  return suite.verifierContainer.entrypoint === undefined
-    ? [...suite.verifierContainer.command]
-    : [suite.verifierContainer.entrypoint, ...suite.verifierContainer.command];
+  return containerProcessCommand(suite.verifierContainer);
+}
+
+export function baselineVerifierCommand(task: ResolvedTask): readonly string[] {
+  const suite = getBenchmarkSuiteForTask(task.benchmark);
+  return containerProcessCommand(suite.baselineVerifierContainer);
+}
+
+function containerProcessCommand(
+  process: import('../corpus/suite.js').SuiteContainerProcess,
+): readonly string[] {
+  return process.entrypoint === undefined
+    ? [...process.command]
+    : [process.entrypoint, ...process.command];
 }
 
 async function writeProcessEvidence(options: {

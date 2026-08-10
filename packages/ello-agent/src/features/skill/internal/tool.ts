@@ -6,10 +6,16 @@
  */
 import { z } from 'zod';
 
-import { defineTool, type AgentTool } from '../../agent/engine/index.js';
+import {
+  cliInput,
+  commandInput,
+  defineCommand,
+  immediate,
+  type CommandDefinition,
+} from '../../command/index.js';
 
 import {
-  ACTIVATE_SKILL_TOOL_NAME,
+  ACTIVATE_SKILL_COMMAND_NAME,
   SkillActivationService,
   type SkillActivatedData,
 } from './activation.js';
@@ -28,37 +34,49 @@ type ActivateSkillInput = { name: string; arguments?: string | undefined };
  * Throws:
  * - 当 Skill `tool` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
-export function createActivateSkillTool(options: {
+export function createActivateSkillCommand(options: {
   readonly service: SkillActivationService;
   readonly onActivated?: (data: SkillActivatedData) => void;
-}): AgentTool<ActivateSkillInput, string> {
-  return defineTool({
-    name: ACTIVATE_SKILL_TOOL_NAME,
-    description:
+}): CommandDefinition {
+  const input = z
+    .object({
+      name: z.string().trim().min(1).describe('Skill name to activate'),
+      arguments: z
+        .string()
+        .optional()
+        .describe('Optional arguments passed to the Skill'),
+    })
+    .strict();
+  return defineCommand({
+    name: ACTIVATE_SKILL_COMMAND_NAME,
+    summary:
       'Load the complete instructions for a named Skill before responding.',
-    discovery: { aliases: ['load skill'], risk: 'readonly' },
-    input: z
-      .object({
-        name: z.string().trim().min(1).describe('Skill name to activate'),
-        arguments: z
-          .string()
-          .optional()
-          .describe('Optional arguments passed to the skill'),
-      })
-      .strict(),
-    execute: (input, context) => {
+    aliases: ['load skill'],
+    risk: 'readonly',
+    invocation: cliInput(commandInput(input), {
+      positionals: [{ field: 'name' }],
+      options: ['arguments'],
+    }),
+    effects: {
+      concurrencySafe: true,
+      readOnly: true,
+      destructive: false,
+      interruptible: true,
+      telemetryTag: 'skill.activate',
+    },
+    execution: immediate((input: ActivateSkillInput, context) => {
       const activated = options.service.activate({
         ...input,
         runId: context.runId,
       });
       options.onActivated?.({
-        toolCallId: context.toolCallId,
+        toolCallId: context.commandId,
         name: activated.skill.name,
         source: activated.skill.source,
         trigger: 'model',
         contentHash: activated.skill.contentHash,
       });
       return activated.output;
-    },
+    }),
   });
 }

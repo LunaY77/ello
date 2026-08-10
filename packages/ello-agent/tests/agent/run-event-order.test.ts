@@ -11,24 +11,23 @@ import type {
 } from '../../src/features/agent/contracts.js';
 import {
   createAgent,
-  defineTool,
   z,
   type AgentMessage,
   type AgentModelRequest,
   type AgentModelResponse,
 } from '../../src/features/agent/engine/index.js';
 import { startAgentRun } from '../../src/features/agent/run.js';
+import { createTestCommandRun, defineTestCommand } from '../support/command.js';
 import { createTestEnvironmentHandle } from '../support/environment.js';
 
 describe('Agent run event ordering', () => {
   it('commits each model message before the tools requested by that model call', async () => {
     let modelCalls = 0;
-    const inspect = defineTool({
+    const inspect = defineTestCommand({
       name: 'inspect',
-      description: 'Inspect one step.',
-      discovery: { aliases: [], risk: 'readonly' },
-      input: z.object({ step: z.number().int() }).strict(),
-      execute: ({ step }) => ({ inspected: step }),
+      summary: 'Inspect one step.',
+      schema: z.object({ step: z.number().int() }).strict(),
+      run: ({ step }) => ({ inspected: step }),
     });
     const engine = createAgent({
       model: 'test:model',
@@ -54,8 +53,7 @@ describe('Agent run event ordering', () => {
         },
       },
       environment: createTestEnvironmentHandle(),
-      executionTools: [inspect],
-      modelTools: [inspect],
+      commandRun: createTestCommandRun([inspect]),
     });
     const built: BuiltAgent = {
       engine,
@@ -79,18 +77,124 @@ describe('Agent run event ordering', () => {
     });
     const events: AgentRunEvent[] = [];
 
-    for await (const event of run.events) events.push(event);
+    for await (const event of run.events) {
+      events.push(event);
+      if (event.type === 'contextCompacted') {
+        run.acknowledgeCompaction(event.compactionId);
+      }
+    }
     await expect(run.result).resolves.toMatchObject({ status: 'completed' });
 
     expect(events.flatMap(orderingLabel)).toEqual([
       'message:before tool 1',
-      'tool:start:call-1',
-      'tool:complete:call-1',
+      'command:start:command-run:call-1:0',
+      'command:complete:command-run:call-1:0',
       'message:before tool 2',
-      'tool:start:call-2',
-      'tool:complete:call-2',
+      'command:start:command-run:call-2:0',
+      'command:complete:command-run:call-2:0',
       'message:done',
     ]);
+  });
+
+  it('publishes a completed Context Checkpoint before the next model message', async () => {
+    const inspect = defineTestCommand({
+      name: 'inspect',
+      summary: 'Inspect one step.',
+      schema: z.object({}).strict(),
+      run: () => ({ inspected: true }),
+    });
+    const engine = createAgent({
+      model: 'test:model',
+      modelCall: {
+        agentName: 'test-agent',
+        modelSelector: 'primary_model',
+        configuredModel: 'test-model',
+        protocol: 'openai',
+        apiModel: 'model',
+      },
+      modelAdapter: {
+        generate: async () => {
+          throw new Error('This compactor does not require a model call.');
+        },
+        async *stream(request) {
+          yield { type: 'text-delta', text: 'after checkpoint' };
+          yield {
+            type: 'final',
+            response: finalResponseWithText(request, 'after checkpoint'),
+          };
+        },
+      },
+      environment: createTestEnvironmentHandle(),
+      commandRun: createTestCommandRun([inspect]),
+      modelInputBudget: { maxInputTokens: 1_000 },
+      compactor: {
+        name: 'test-compactor',
+        async compact(input) {
+          return {
+            messages: input.messages,
+            report: {
+              compactor: 'test-compactor',
+              beforeMessageCount: input.messages.length,
+              afterMessageCount: input.messages.length,
+              summary: 'checkpoint',
+              keptMessageCount: input.messages.length,
+              tokensBefore: 2,
+            },
+          };
+        },
+      },
+    });
+    const built: BuiltAgent = {
+      engine,
+      maxTurns: undefined,
+      modelCompactor: () => undefined,
+      setMode: () => undefined,
+      close: () => engine.close(),
+    };
+    const run = startAgentRun(built, {
+      threadId: 'thread-checkpoint-order',
+      turnId: 'turn-checkpoint-order',
+      executionLocation: {
+        environmentRef: 'test',
+        workingDirectory: '/workspace',
+      },
+      selection: { mode: 'ask-before-changes', agent: 'test-agent' },
+      history: [],
+      input: 'continue after compaction',
+      goal: null,
+      permission: { rules: () => [], externalPaths: () => [] },
+    });
+    const events: AgentRunEvent[] = [];
+
+    for await (const event of run.events) {
+      events.push(event);
+      if (event.type === 'contextCompacted') {
+        run.acknowledgeCompaction(event.compactionId);
+      }
+    }
+    await expect(run.result).resolves.toMatchObject({ status: 'completed' });
+
+    const started = events.findIndex(
+      (event) => event.type === 'contextCompactionStarted',
+    );
+    const inputCommitted = events.findIndex(
+      (event) =>
+        event.type === 'messagesAppended' &&
+        event.messages.some(
+          (message) =>
+            message.role === 'user' &&
+            message.content === 'continue after compaction',
+        ),
+    );
+    const completed = events.findIndex(
+      (event) => event.type === 'contextCompacted',
+    );
+    const message = events.findIndex((event) => event.type === 'messageStarted');
+    expect(inputCommitted).toBeGreaterThanOrEqual(0);
+    expect(started).toBeGreaterThan(inputCommitted);
+    expect(started).toBeGreaterThanOrEqual(0);
+    expect(completed).toBeGreaterThan(started);
+    expect(message).toBeGreaterThan(completed);
   });
 
   it('publishes a correlated event only when the engine consumes steering', async () => {
@@ -98,12 +202,11 @@ describe('Agent run event ordering', () => {
     const releaseFirstModel = deferred<void>();
     let modelCalls = 0;
     let secondRequest: AgentModelRequest | undefined;
-    const inspect = defineTool({
+    const inspect = defineTestCommand({
       name: 'inspect',
-      description: 'Inspect one step.',
-      discovery: { aliases: [], risk: 'readonly' },
-      input: z.object({}).strict(),
-      execute: () => ({ inspected: true }),
+      summary: 'Inspect one step.',
+      schema: z.object({}).strict(),
+      run: () => ({ inspected: true }),
     });
     const engine = createAgent({
       model: 'test:model',
@@ -131,8 +234,7 @@ describe('Agent run event ordering', () => {
         },
       },
       environment: createTestEnvironmentHandle(),
-      executionTools: [inspect],
-      modelTools: [inspect],
+      commandRun: createTestCommandRun([inspect]),
     });
     const built: BuiltAgent = {
       engine,
@@ -198,12 +300,11 @@ describe('Agent run event ordering', () => {
   it('continues the same run when a background task finishes after a natural answer', async () => {
     const notification = deferred<string | undefined>();
     const requests: AgentModelRequest[] = [];
-    const inspect = defineTool({
+    const inspect = defineTestCommand({
       name: 'inspect',
-      description: 'Inspect one step.',
-      discovery: { aliases: [], risk: 'readonly' },
-      input: z.object({}).strict(),
-      execute: () => ({ inspected: true }),
+      summary: 'Inspect one step.',
+      schema: z.object({}).strict(),
+      run: () => ({ inspected: true }),
     });
     const engine = createAgent({
       model: 'test:model',
@@ -228,8 +329,7 @@ describe('Agent run event ordering', () => {
         },
       },
       environment: createTestEnvironmentHandle(),
-      executionTools: [inspect],
-      modelTools: [inspect],
+      commandRun: createTestCommandRun([inspect]),
     });
     let notificationWaits = 0;
     const built: BuiltAgent = {
@@ -288,12 +388,11 @@ describe('Agent run event ordering', () => {
   it('accepts user steering while waiting for a background task notification', async () => {
     const waitingNotification = deferred<string | undefined>();
     const requests: AgentModelRequest[] = [];
-    const inspect = defineTool({
+    const inspect = defineTestCommand({
       name: 'inspect',
-      description: 'Inspect one step.',
-      discovery: { aliases: [], risk: 'readonly' },
-      input: z.object({}).strict(),
-      execute: () => ({ inspected: true }),
+      summary: 'Inspect one step.',
+      schema: z.object({}).strict(),
+      run: () => ({ inspected: true }),
     });
     const engine = createAgent({
       model: 'test:model',
@@ -320,8 +419,7 @@ describe('Agent run event ordering', () => {
         },
       },
       environment: createTestEnvironmentHandle(),
-      executionTools: [inspect],
-      modelTools: [inspect],
+      commandRun: createTestCommandRun([inspect]),
     });
     let notificationWaits = 0;
     const built: BuiltAgent = {
@@ -373,12 +471,11 @@ describe('Agent run event ordering', () => {
   });
 
   it('fails when maxTurns is reached before a final answer', async () => {
-    const inspect = defineTool({
+    const inspect = defineTestCommand({
       name: 'inspect',
-      description: 'Inspect one step.',
-      discovery: { aliases: [], risk: 'readonly' },
-      input: z.object({}).strict(),
-      execute: () => ({ inspected: true }),
+      summary: 'Inspect one step.',
+      schema: z.object({}).strict(),
+      run: () => ({ inspected: true }),
     });
     const engine = createAgent({
       model: 'test:model',
@@ -396,8 +493,7 @@ describe('Agent run event ordering', () => {
         },
       },
       environment: createTestEnvironmentHandle(),
-      executionTools: [inspect],
-      modelTools: [inspect],
+      commandRun: createTestCommandRun([inspect]),
     });
     const built: BuiltAgent = {
       engine,
@@ -443,8 +539,16 @@ function toolResponse(request: AgentModelRequest): AgentModelResponse {
       {
         type: 'tool-call',
         toolCallId: 'call-steer',
-        toolName: 'inspect',
-        input: {},
+        toolName: 'command_run',
+        input: {
+          commands: [
+            {
+              step: 1,
+              command: 'command_invoke',
+              input: { name: 'inspect', arguments: {} },
+            },
+          ],
+        },
       },
     ],
   };
@@ -452,7 +556,21 @@ function toolResponse(request: AgentModelRequest): AgentModelResponse {
     text: '',
     messages: [...request.messages, message],
     newMessages: [message],
-    toolCalls: [{ id: 'call-steer', name: 'inspect', input: {} }],
+    toolCalls: [
+      {
+        id: 'call-steer',
+        name: 'command_run',
+        input: {
+          commands: [
+            {
+              step: 1,
+              command: 'command_invoke',
+              input: { name: 'inspect', arguments: {} },
+            },
+          ],
+        },
+      },
+    ],
     usage: testUsage(),
     finishReason: 'tool-calls',
     provider: null,
@@ -530,8 +648,8 @@ function responseForCall(
       {
         type: 'tool-call',
         toolCallId: id,
-        toolName: 'inspect',
-        input: { step: call },
+        toolName: 'command_run',
+        input: commandRunInspectInput({ step: call }),
       },
     ],
   };
@@ -539,7 +657,13 @@ function responseForCall(
     text: `before tool ${call}`,
     messages: [...request.messages, message],
     newMessages: [message],
-    toolCalls: [{ id, name: 'inspect', input: { step: call } }],
+    toolCalls: [
+      {
+        id,
+        name: 'command_run',
+        input: commandRunInspectInput({ step: call }),
+      },
+    ],
     usage,
     finishReason: 'tool-calls',
     provider: null,
@@ -550,11 +674,25 @@ function orderingLabel(event: AgentRunEvent): string[] {
   switch (event.type) {
     case 'messageCompleted':
       return [`message:${event.text}`];
-    case 'toolStarted':
-      return [`tool:start:${event.toolCallId}`];
-    case 'toolCompleted':
-      return [`tool:complete:${event.toolCallId}`];
+    case 'commandRunEvent':
+      return event.event.type === 'command.started'
+        ? [`command:start:${event.event.record.commandId}`]
+        : event.event.type === 'command.completed'
+          ? [`command:complete:${event.event.record.commandId}`]
+          : [];
     default:
       return [];
   }
+}
+
+function commandRunInspectInput(arguments_: Record<string, unknown>) {
+  return {
+    commands: [
+      {
+        step: 1,
+        command: 'command_invoke',
+        input: { name: 'inspect', arguments: arguments_ },
+      },
+    ],
+  };
 }

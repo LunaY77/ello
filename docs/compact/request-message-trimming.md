@@ -1,124 +1,100 @@
-# 请求级消息裁剪
+# 请求级 Context Admission
 
-## 为什么需要这个？
+> 文件名保留历史名称。当前实现不再执行请求级历史裁剪；唯一历史缩减语义是持久
+> Context Checkpoint。
 
-`RunSession.state.messages` 包含载入的 Thread 投影和当前 run 新增的消息。模型与
-工具继续交互时，这个数组会持续增长。provider 对输入长度有硬限制，工具调用和
-工具结果还需要保持配对。
+## 目标
 
-请求级消息裁剪在每次模型调用前生成一个受限的消息数组。完整 run state、Thread
-JSONL 和 TUI 历史保持原值，下一次模型调用会基于当时的完整 run state 重新执行
-裁剪。
+每次 provider call 前，Agent Engine 从当前 Thread 投影构造完整 `ModelInput`，修复 outer
+tool call/result 配对，执行 provider prepare，然后做硬 admission。该阶段不会移动历史
+锚点、删除旧消息或修改 durable Thread Log。
 
-## 裁剪范围
+这样 provider 输入失败只有两个明确结果：先尝试一次 Context Checkpoint；checkpoint 后
+仍无法容纳时返回 budget error。系统不会通过不可审计的前缀漂移掩盖超限。
 
-裁剪入口是 `buildModelInput()`，输入为当前会话消息，输出写入
-`ModelInput.messages`。系统先估算 `system` 提示和工具定义的固定开销，再把剩余预算
-交给消息裁剪；最终诊断和预算断言覆盖三者。
+## 输入预算
+
+Model Catalog 提供总窗口和默认最大输出；产品配置可以进一步收紧输入：
+
+```text
+total = totalContextTokens
+requestedOutput = request.maxOutputTokens ?? maxOutputTokens
+inputFromTotal = max(0, total - requestedOutput)
+availableInput = min(product.maxInputTokens, inputFromTotal)
+```
+
+最终估算覆盖 instructions、唯一 `command_run` schema 和 messages。`modelInput.prepare`
+完成后会重新计算诊断，因此 provider Adapter 添加的内容也必须落入同一预算。
+
+DeepSeek 一类 provider 的约束是 `input + output <= total context`。例如总窗口
+1,048,576、请求输出 393,216 时，输入最多只有 655,360 tokens；还未计入估算误差。
+
+## 执行顺序
 
 ```mermaid
 flowchart LR
-  S[Run state] --> B[Message token budget]
-  B --> P[Tool pair repair]
+  T[Thread provider projection] --> B[Build complete ModelInput]
+  B --> P[Repair outer call/result pairs]
   P --> U[Custom transforms]
-  U --> R[Prepare hook]
-  R --> M[Model input]
-  S --> H[Thread history]
+  U --> A[Provider prepare]
+  A --> C{Admission}
+  C -->|fits| M[Provider call]
+  C -->|over budget| K[Force Context Checkpoint once]
+  K --> R[Rebuild ModelInput]
+  R --> C2{Admission again}
+  C2 -->|fits| M
+  C2 -->|still too large| E[Explicit budget error]
 ```
 
-`modelInput.messageTransforms` 在内置配对修复后运行，`modelInput.prepare` 再对完整
-`ModelInput` 做最终改写。自定义变换和 `prepare` 需要自行维护预算与工具配对约束。
+Agent loop 首次构建时可以跳过 assertion，以便正常阈值 compaction 先运行。如果没有触发
+checkpoint，再执行 admission；budget error 会强制尝试一次 checkpoint。checkpoint 改写
+messages 后才重新构建 tools、instructions 和 provider options，普通回合不会无意义地构建
+两次输入。
 
-## 内置变换顺序
+## 单条消息
 
-生产执行器配置了以下参数：
+系统单独检查 newest message，用于区分“历史总量超限”和“单个不可分割输入超限”。
 
-```text
-modelInputBudget(
-  availableInputTokens=min(
-    model.context_window - model.max_output_tokens,
-    context.max_input_tokens - context.reserved_output_tokens
-  ),
-  reservedOutputTokens=context.reserved_output_tokens
-)
-→ preserveToolCallPairs
-→ modelInput.messageTransforms
-→ modelInput.prepare
-```
+- 用户输入不会被静默转换成 artifact；过大时明确失败。
+- Command 原始输出不会直接进入 provider context。Command Module 把每条 observation
+  限制为 12,000 UTF-8 bytes，并把整个 `command_run` result 限制为 65,536 bytes。
+- 大 Command 输出的完整内容写入 Environment 可定位的 artifact；observation 只保留
+  头尾、截断标记和路径。
 
-`compactMessages()` 使用跨回合共享的前缀锚点。只有当前后缀超预算时才前移锚点，
-并一次推进到可用消息预算的 60%，为随后多个回合留下余量，避免 provider cache
-断点每轮漂移。
+因此 benchmark 中数 MB tool result 的主因应在 Command projection 处消除，而不是依赖
+Context Checkpoint 拆分一条已经过大的消息。
 
-```text
-configured_available = context.max_input_tokens - context.reserved_output_tokens
-model_available = model.context_window - model.max_output_tokens
-fixed = estimated(system instructions) + estimated(tool definitions)
-available_messages = min(configured_available, model_available) - fixed
-```
+## Outer replay 配对
 
-`max_input_tokens` 和 `reserved_output_tokens` 的默认值分别为 1000000 和 64000。
-配置 schema 要求预留量小于输入上限；`compactMessages()` 构造时也校验相同约束，
-覆盖直接调用该函数的路径。
+`preserveToolCallPairs()` 只处理 provider-visible outer call/result。内部 Command 永远不会
+伪造成 provider tool call。
 
-`compactMessages()` 返回前和默认流水线末尾都会执行工具配对修复，保证裁剪不会留下
-孤立的 tool call/result。
+- assistant `command_run` call 与 tool result 使用同一 `toolCallId`。
+- 孤立 call 或 result 不进入 provider request。
+- Context Checkpoint 的近期尾部必须保留合法 pair。
+- replay result 使用模型 observation，不包含 `inputDigest`、timestamps 或 runtime metadata。
 
-## Token 预算如何执行
+## 已删除机制
 
-`compactMessages()` 使用确定性的 O(n) suffix cost。未超预算时保持锚点不动；超预算
-时推进到 60% 水位：
+当前实现已经删除：
 
-```ts
-if (suffixCost(anchor.index) > available) {
-  const target = available * 0.6;
-  while (suffixCost(anchor.index) > target) anchor.index += 1;
-}
-return preserveToolCallPairs(messages.slice(anchor.index));
-```
+- `compactMessages()`；
+- `MessageBudgetAnchor`；
+- 60% suffix 水位推进；
+- budget 超限时静默删除 provider history 前缀。
 
-单条消息的估算值为 `ceil(chars / 4)`。字符串内容直接计数，结构化 content 先经过
-`JSON.stringify()`。system 和工具定义也按相同口径计入固定开销。若最新单条消息本身
-无法放入窗口，或者 `prepare` 后最终输入再次超预算，系统会在调用 provider 前明确
-失败，不会发送空消息或已知超限请求。账单与实际 token usage 仍取自 provider response。
+这些语义不会在 provider Adapter、Engine caller 或自定义 transform 中重新实现。
 
-Thread checkpoint 为早期目标和决策提供持久摘要。两层机制共同启用时，旧历史先
-投影为 `<compact-checkpoint>`，请求级裁剪再处理 checkpoint 和近期消息。
+## 诊断
 
-## 工具调用如何配对
-
-按条数或 token 删除消息可能留下孤立的 assistant tool-call 或 tool-result。部分
-provider 会拒绝这种输入。
-
-`preserveToolCallPairs()` 分两遍处理消息：
-
-- 收集 assistant content 中的 tool-call id。
-- 收集 tool message content 中的 tool-result id。
-- 删除找不到对侧 id 的 assistant 或 tool message。
-- 保留普通 user、assistant 和 tool 文本消息。
-
-实现同时读取 `toolCallId` 和 `toolInvocationId`。过滤粒度是整条消息；一条
-assistant message 包含多个 tool-call 时，只要其中一个 id 有对应结果，整条消息
-都会保留。严格的逐 part 配对需要在后续实现中细化 content 重写。
-
-## 诊断信息
-
-`buildModelInput()` 记录以下信息：
-
-- `messageCount` 和 `estimatedInputTokens`
-- 已应用的 message transform 名称
-- system、toolset 和 message prefix fingerprint
-- `compactionBoundary`
-
-`modelInput.prepare` 运行后，系统重新计算消息数、token 估算和 fingerprint。
-`prepare` 需要保留 `diagnostics` 字段；字段缺失会抛出
-`PrepareModelInput must preserve model input diagnostics.`。
-
-`prepare` 之后会重新计算诊断并执行最终预算断言。`prepare` 增加的大段 system、消息
-或工具定义若导致超预算，请求会在 provider 调用前失败。
+`ModelInput.diagnostics` 记录 message 数、估算输入 tokens、已应用 transforms、system/toolset/
+message-prefix fingerprint 和是否存在 compaction boundary。硬 admission 使用 prepare 后的最终
+diagnostics；provider response 的真实 usage 仍是账单和 benchmark 的事实来源。
 
 ## 源码入口
 
 - [`model-input.ts`](../../packages/ello-agent/src/features/agent/engine/model-input.ts)
-- [`build.ts`](../../packages/ello-agent/src/features/agent/build.ts)
+- [`agent.ts`](../../packages/ello-agent/src/features/agent/engine/agent.ts)
+- [`run-state.ts`](../../packages/ello-agent/src/features/agent/engine/run-state.ts)
+- [`result-projector.ts`](../../packages/ello-agent/src/features/command/result-projector.ts)
 - [`transforms.ts`](../../packages/ello-agent/src/features/model/providers/catalog/transforms.ts)

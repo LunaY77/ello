@@ -1,11 +1,19 @@
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import type { ResolvedTask } from '../src/domain/contract/index.js';
+import { sha256 } from '../src/domain/hash.js';
+import { DEEP_SWE_BASELINE_VERIFIER } from '../src/infra/deep-swe-baseline-verifier.js';
 import {
+  baselineVerifierCommand,
   parseVerifierTestResults,
   verifierCommand,
   verifierContainerSpec,
 } from '../src/infra/verifier/process.js';
+import { sealVerifierPatchArtifact } from '../src/infra/verifier/workspace.js';
 import { auditVerifierPatchOverlap } from '../src/infra/verifier-audit.js';
 
 describe('verifier patch audit', () => {
@@ -71,6 +79,20 @@ describe('verifier container contract', () => {
     ]);
   });
 
+  it('mounts the frozen model patch read-only over the writable logs tree', () => {
+    const inputPatchPath = '/runs/job/raw/model.patch';
+    const spec = verifierContainerSpec(
+      { ...options, inputPatchPath },
+      'ello-bench-abc-verify',
+    );
+
+    expect(spec.additionalMounts).toContainEqual({
+      host: inputPatchPath,
+      container: '/logs/input/model.patch',
+      readOnly: true,
+    });
+  });
+
   it('keeps verifier dependency resolution online and enforces resource limits', () => {
     const spec = verifierContainerSpec(options, 'ello-bench-abc-verify');
 
@@ -91,5 +113,42 @@ describe('verifier container contract', () => {
       '-c',
       'mkdir -p /root && exec python /tests/verifier.py',
     ]);
+  });
+
+  it('uses suite-owned baseline-only verifier commands', () => {
+    expect(baselineVerifierCommand(options.task)).toEqual([
+      '/bin/bash',
+      '-c',
+      'mkdir -p /root && exec /bin/bash /tests/baseline.sh',
+    ]);
+    expect(
+      baselineVerifierCommand({
+        ...options.task,
+        benchmark: 'swe-bench-pro',
+      } as ResolvedTask),
+    ).toEqual([
+      '/bin/bash',
+      '-c',
+      'mkdir -p /root && exec python /tests/baseline.py',
+    ]);
+    expect(DEEP_SWE_BASELINE_VERIFIER).not.toContain('git checkout HEAD');
+  });
+
+  it('seals the verifier artifact from the frozen host input', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'ello-patch-seal-'));
+    const input = path.join(directory, 'input.patch');
+    const artifact = path.join(directory, 'artifact.patch');
+    const patch = 'diff --git a/a.ts b/a.ts\n';
+    await writeFile(input, patch, 'utf8');
+    await writeFile(artifact, 'verifier rebuilt the wrong patch\n', 'utf8');
+
+    const captured = await sealVerifierPatchArtifact({
+      inputPatchPath: input,
+      artifactPatchPath: artifact,
+      expectedSha256: sha256(patch),
+    });
+
+    expect(captured).toBe(sha256(patch));
+    expect(await readFile(artifact, 'utf8')).toBe(patch);
   });
 });

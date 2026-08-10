@@ -28,8 +28,10 @@ import type {
   SweBenchProTaskFiles,
 } from '../../ports/corpus.js';
 import { CONTAINER_HOME } from '../container-user.js';
+import { DEEP_SWE_BASELINE_VERIFIER } from '../deep-swe-baseline-verifier.js';
 import { writeJsonAtomic } from '../io.js';
 import { runChecked } from '../process.js';
+import { SWE_BENCH_PRO_BASELINE_VERIFIER } from '../swe-bench-pro-baseline-verifier.js';
 import { SWE_BENCH_PRO_VERIFIER } from '../swe-bench-pro-verifier.js';
 import {
   auditVerifierPatchOverlap,
@@ -56,6 +58,7 @@ export interface BenchmarkSuiteAdapter {
   readonly shellMode: 'login' | 'preserve-environment';
   readonly agentContainer: SuiteContainerProcess;
   readonly verifierContainer: SuiteContainerProcess;
+  readonly baselineVerifierContainer: SuiteContainerProcess;
   loadTask(
     corpusRoot: string,
     declaration: TaskDeclaration,
@@ -109,6 +112,13 @@ const DEEP_SWE: BenchmarkSuiteAdapter = {
       `mkdir -p ${CONTAINER_HOME} && exec /bin/bash /tests/test.sh`,
     ],
   },
+  baselineVerifierContainer: {
+    command: [
+      '/bin/bash',
+      '-c',
+      `mkdir -p ${CONTAINER_HOME} && exec /bin/bash /tests/baseline.sh`,
+    ],
+  },
   async loadTask(corpusRoot, declaration) {
     return loadDeepSweTask(
       corpusRoot,
@@ -139,6 +149,11 @@ const DEEP_SWE: BenchmarkSuiteAdapter = {
       copyNormalized(
         files.verifierPatchPath,
         path.join(testsDirectory, 'test.patch'),
+      ),
+      writeFile(
+        path.join(testsDirectory, 'baseline.sh'),
+        DEEP_SWE_BASELINE_VERIFIER,
+        { encoding: 'utf8', mode: 0o755 },
       ),
     ]);
   },
@@ -195,6 +210,13 @@ function sweBenchProSuite(options: {
       command: [
         '-c',
         `mkdir -p ${CONTAINER_HOME} && exec python /tests/verifier.py`,
+      ],
+    },
+    baselineVerifierContainer: {
+      entrypoint: '/bin/bash',
+      command: [
+        '-c',
+        `mkdir -p ${CONTAINER_HOME} && exec python /tests/baseline.py`,
       ],
     },
     async loadTask(corpusRoot, declaration) {
@@ -255,9 +277,10 @@ function sweBenchProSuite(options: {
     async stageVerifier(taskFiles, testsDirectory) {
       const files = requireSweBenchProFiles(taskFiles);
       await Promise.all([
-        copyNormalized(
-          files.runScriptPath,
+        writeFile(
           path.join(testsDirectory, 'run_script.sh'),
+          files.runScript,
+          'utf8',
         ),
         copyNormalized(
           files.parserPath,
@@ -266,6 +289,11 @@ function sweBenchProSuite(options: {
         writeFile(
           path.join(testsDirectory, 'verifier.py'),
           SWE_BENCH_PRO_VERIFIER,
+          'utf8',
+        ),
+        writeFile(
+          path.join(testsDirectory, 'baseline.py'),
+          SWE_BENCH_PRO_BASELINE_VERIFIER,
           'utf8',
         ),
         writeJsonAtomic(path.join(testsDirectory, 'spec.json'), files.testSpec),

@@ -165,116 +165,11 @@ export function skillIndexContext(options: {
   };
 }
 
-export interface CompactMessagesOptions {
-  readonly maxInputTokens: number;
-  readonly reservedOutputTokens?: number;
-}
-
-/**
- * 返回预算中真正可供完整模型输入使用的 token 数。
- *
- * Args:
- * - `options`: 已校验的输入上限与可选输出预留量。
- *
- * Returns:
- * - 返回扣除输出预留后的输入容量。
- */
-export function availableModelInputTokens(
-  options: CompactMessagesOptions,
-): number {
-  return options.maxInputTokens - (options.reservedOutputTokens ?? 0);
-}
-
-/** 锚点前移的目标水位：砍到预算的这个比例，留出余量供后续回合追加。 */
-const BUDGET_ADVANCE_RATIO = 0.6;
-
 /** 前缀指纹覆盖的消息条数，用于观测锚点是否漂移。 */
 const PREFIX_FINGERPRINT_MESSAGE_COUNT = 4;
 
-/**
- * 跨回合共享的前缀锚点。
- *
- * `index` 是当前保留窗口在完整历史里的起点下标。它只在超预算时前移，
- * 两次前移之间逐字节不动 —— provider 侧缓存断点按下标放置，锚点漂移会让
- * 所有断点指向不同消息，缓存整体失效。
- */
-export interface MessageBudgetAnchor {
-  index: number;
-}
-
-/**
- * 创建按 token 预算前移前缀锚点的 transform。
- *
- * 超预算时一次性把锚点推进到 {@link BUDGET_ADVANCE_RATIO} 的余量水位，
- * 而不是逐条 shift 到刚好不超 —— 后者会让锚点几乎每轮都动。
- *
- * Args:
- * - `options.maxInputTokens`: 模型输入上限，单位为 token。
- * - `options.reservedOutputTokens`: 为输出预留的 token 数。
- * - `anchor`: 跨回合复用的锚点；同一个 run 内必须传同一个对象。
- *
- * Returns:
- * - 返回保持工具调用/结果配对的消息 transform。
- */
-export function compactMessages(
-  options: CompactMessagesOptions,
-  anchor: MessageBudgetAnchor,
-): MessageTransform {
-  if (
-    !Number.isSafeInteger(options.maxInputTokens) ||
-    options.maxInputTokens < 1
-  ) {
-    throw new Error('maxInputTokens must be a positive safe integer.');
-  }
-  const reserved = options.reservedOutputTokens ?? 0;
-  if (
-    !Number.isSafeInteger(reserved) ||
-    reserved < 0 ||
-    reserved >= options.maxInputTokens
-  ) {
-    throw new Error(
-      'reservedOutputTokens must be a non-negative safe integer below maxInputTokens.',
-    );
-  }
-  return async (messages) => applyTokenBudget(messages, options, anchor);
-}
-
-/**
- * 执行 产品 Agent Agent engine 模型输入 模块 定义的 `defaultMessageTransforms` 领域操作，输入和副作用均受该边界约束。
- *
- * Args:
- * - `run`: `defaultMessageTransforms` 所需的业务值；函数按声明读取，不补造缺失内容。
- *
- * Returns:
- * - 返回按领域顺序排列的快照集合；调用方不能借此修改内部状态。
- */
-export function defaultMessageTransforms(
-  run: RunState,
-  fixedInputTokens = 0,
-): MessageTransform[] {
-  const transforms: MessageTransform[] = [];
-  if (run.config.modelInputBudget !== undefined) {
-    const adjustedMaxInputTokens =
-      run.config.modelInputBudget.maxInputTokens - fixedInputTokens;
-    const reservedOutputTokens =
-      run.config.modelInputBudget.reservedOutputTokens ?? 0;
-    if (adjustedMaxInputTokens <= reservedOutputTokens) {
-      throw new Error(
-        `Fixed model input context (${fixedInputTokens} estimated tokens) leaves no message budget within maxInputTokens=${run.config.modelInputBudget.maxInputTokens}.`,
-      );
-    }
-    transforms.push(
-      compactMessages(
-        {
-          maxInputTokens: adjustedMaxInputTokens,
-          reservedOutputTokens,
-        },
-        run.messageBudgetAnchor,
-      ),
-    );
-  }
-  transforms.push(async (messages) => preserveToolCallPairs(messages));
-  return transforms;
+function defaultMessageTransforms(): MessageTransform[] {
+  return [async (messages) => preserveToolCallPairs(messages)];
 }
 
 /**
@@ -446,13 +341,13 @@ export function hasCompactionBoundary(
  * Throws:
  * - 当 产品 Agent Agent engine 模型输入 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
-export async function buildModelInput(run: RunState): Promise<ModelInput> {
+export async function buildModelInput(
+  run: RunState,
+  options: { readonly skipBudget?: boolean } = {},
+): Promise<ModelInput> {
   const instructionsResult = await buildInstructions(run);
   const tools = buildTools(run);
-  const fixedInputTokens =
-    estimateInstructionsTokens(instructionsResult.instructions) +
-    estimateToolsTokens(tools);
-  const messagesResult = await buildFinalMessages(run, fixedInputTokens);
+  const messagesResult = await buildFinalMessages(run);
   const providerOptions = await buildProviderOptions(run);
   const input: ModelInput = {
     ...(instructionsResult.instructions !== undefined
@@ -492,7 +387,7 @@ export async function buildModelInput(run: RunState): Promise<ModelInput> {
       appliedMessageTransforms: prepared.diagnostics.appliedMessageTransforms,
     }),
   };
-  assertModelInputWithinBudget(finalInput, run);
+  if (options.skipBudget !== true) assertModelInputWithinBudget(finalInput, run);
   return finalInput;
 }
 
@@ -533,21 +428,18 @@ async function buildInstructions(
 /**
  * 跑完消息变换流水线，得到最终发给模型的消息序列。
  *
- * 以当前会话历史为初值，先依次应用默认变换（窗口裁剪、token 预算、
- * 工具对配对修复等），再应用用户在 `modelInput.messageTransforms`
+ * 以当前会话历史为初值，先应用 outer tool-call/result 配对修复，再应用
+ * 用户在 `modelInput.messageTransforms`
  * 中注册的变换。同时记录每个变换的名字，供诊断回溯。
  */
-async function buildFinalMessages(
-  run: RunState,
-  fixedInputTokens: number,
-): Promise<{
+async function buildFinalMessages(run: RunState): Promise<{
   readonly messages: ConversationMessage[];
   readonly appliedTransforms: readonly string[];
 }> {
   let messages: readonly AgentMessage[] = [...run.state.messages];
   const appliedTransforms: string[] = [];
   // 默认变换：内核根据配置自动装配。
-  for (const transform of defaultMessageTransforms(run, fixedInputTokens)) {
+  for (const transform of defaultMessageTransforms()) {
     messages = await transform(messages, run.ctx);
     appliedTransforms.push(transform.name || 'default-message-transform');
   }
@@ -631,7 +523,23 @@ function createModelInputDiagnostics(options: {
   };
 }
 
-function assertModelInputWithinBudget(input: ModelInput, run: RunState): void {
+/**
+ * 对已经完成 provider prepare 的模型输入执行硬 admission。
+ *
+ * Args:
+ * - `input`: 最终 provider 输入及其估算诊断。
+ * - `run`: 当前运行的总窗口、产品上限和本次输出保留。
+ *
+ * Returns:
+ * - 输入可接纳时返回，不修改消息或诊断。
+ *
+ * Throws:
+ * - 最新单条消息或完整请求超过有效输入预算时抛出明确错误。
+ */
+export function assertModelInputWithinBudget(
+  input: ModelInput,
+  run: RunState,
+): void {
   const budget = run.config.modelInputBudget;
   if (budget === undefined) return;
   const diagnostics = input.diagnostics;
@@ -644,7 +552,16 @@ function assertModelInputWithinBudget(input: ModelInput, run: RunState): void {
       'Estimated model input tokens are required for budget checks.',
     );
   }
-  const available = budget.maxInputTokens - (budget.reservedOutputTokens ?? 0);
+  const available = effectiveModelInputLimit(run);
+  const newest = input.messages.at(-1);
+  if (
+    newest !== undefined &&
+    estimateTextTokens(messageText(newest)) > available
+  ) {
+    throw new Error(
+      `Newest model input message exceeds the available context budget of ${available} estimated tokens.`,
+    );
+  }
   if (estimatedInputTokens > available) {
     throw new Error(
       `Prepared model input exceeds the effective context budget: estimated ${estimatedInputTokens} tokens, available ${available}.`,
@@ -652,40 +569,21 @@ function assertModelInputWithinBudget(input: ModelInput, run: RunState): void {
   }
 }
 
-function applyTokenBudget(
-  messages: ReadonlyArray<AgentMessage>,
-  options: CompactMessagesOptions,
-  anchor: MessageBudgetAnchor,
-): ReadonlyArray<AgentMessage> {
-  const available = Math.max(0, availableModelInputTokens(options));
-  // 历史被压缩或替换后会变短，此时旧下标已无意义：归零后由下面的预算判断重新推进，
-  // 否则会切掉全部消息，发出一个空的 messages 请求。
-  if (anchor.index > messages.length) {
-    anchor.index = 0;
-  }
-  // suffixCosts[i] 是从下标 i 到末尾的估算 token 总量，末位补 0 便于取空后缀。
-  const suffixCosts = new Array<number>(messages.length + 1).fill(0);
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    suffixCosts[index] =
-      suffixCosts[index + 1]! +
-      estimateTextTokens(messageText(messages[index]!));
-  }
-  const suffixCost = (from: number): number => suffixCosts[from]!;
-  if (suffixCost(anchor.index) > available) {
-    // 一次推进到目标水位，让锚点在随后多个回合里保持不动。
-    const target = available * BUDGET_ADVANCE_RATIO;
-    let next = anchor.index;
-    while (next < messages.length && suffixCost(next) > target) {
-      next += 1;
-    }
-    if (next === messages.length && messages.length > 0) {
-      throw new Error(
-        `Newest model input message exceeds the available context budget of ${available} estimated tokens.`,
-      );
-    }
-    anchor.index = next;
-  }
-  return preserveToolCallPairs(messages.slice(anchor.index));
+/**
+ * 计算本次请求真正可用于输入的 token 上限。
+ *
+ * `maxInputTokens` 是产品上限；当 catalog 同时提供总窗口与输出保留时，
+ * 请求输入还必须给 provider 留出本次最大输出空间。运行级设置可以收紧输出，
+ * 但不能突破产品上限或总窗口。
+ */
+export function effectiveModelInputLimit(run: RunState): number {
+  const budget = run.config.modelInputBudget;
+  if (budget === undefined) return Number.MAX_SAFE_INTEGER;
+  const total = budget.totalContextTokens ?? budget.maxInputTokens;
+  const requestedOutput =
+    run.options.modelSettings?.maxOutputTokens ?? budget.maxOutputTokens ?? 0;
+  const inputFromTotal = Math.max(0, total - Math.max(0, requestedOutput));
+  return Math.max(0, Math.min(budget.maxInputTokens, inputFromTotal));
 }
 
 function readPartIds(message: AgentMessage, type: string): string[] {

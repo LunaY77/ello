@@ -16,7 +16,8 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "README-en.md"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",

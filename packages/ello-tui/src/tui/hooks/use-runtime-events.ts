@@ -9,6 +9,7 @@ import {
   type TuiEventInput,
   type TuiEventState,
 } from '../store/tui-event-store.js';
+import { clearTerminalScrollback } from '../terminal-screen.js';
 
 export function useRuntimeEvents(thread: ThreadClient): {
   readonly state: TuiEventState;
@@ -31,6 +32,7 @@ export function useRuntimeEvents(thread: ThreadClient): {
   useEffect(
     () =>
       thread.subscribe((event) => {
+        // snapshot 替换会重挂 Static 并重放全部历史，先清 scrollback 才不会留两份。
         if (event.type === 'snapshot') clearTerminalScrollback();
         dispatch(event);
       }),
@@ -78,9 +80,4 @@ export function useRuntimeEvents(thread: ThreadClient): {
     queueSteer,
     resolveInteraction,
   };
-}
-
-export function clearTerminalScrollback(): void {
-  if (process.stdout.isTTY !== true) return;
-  process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
 }

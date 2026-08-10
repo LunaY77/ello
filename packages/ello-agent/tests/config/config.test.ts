@@ -67,7 +67,8 @@ describe('loadCodingAgentConfig', () => {
       expect(config.auxiliary_model).toBe('openai-gpt-5.4');
       expect(config.context).toMatchObject({
         max_input_tokens: 1_000_000,
-        reserved_output_tokens: 64_000,
+        prompt_mode: 'rapid',
+        compaction: { threshold_percent: 90 },
       });
       expect(registry.listModels().map((model) => model.name)).toEqual([
         'openai-gpt-5.4',
@@ -116,23 +117,67 @@ describe('loadCodingAgentConfig', () => {
     });
   });
 
-  it('rejects context reservations that exceed a selected model window', async () => {
+  it('defaults automatic compaction to ninety percent', async () => {
     await writeGlobalConfig({
-      models: {
-        small: {
-          ...model('openai', 'small', 'responses'),
-          context_window: 8_000,
-          max_output_tokens: 4_000,
-        },
-      },
-      primary_model: 'small',
-      auxiliary_model: 'small',
+      models: { defaulted: model('openai', 'defaulted', 'responses') },
+      primary_model: 'defaulted',
+      auxiliary_model: 'defaulted',
+    });
+
+    await expect(loadCodingAgentConfig({ cwd })).resolves.toMatchObject({
+      context: { compaction: { threshold_percent: 90 } },
+    });
+  });
+
+  it.each(['rapid', 'thorough'] as const)(
+    'accepts primary prompt mode %s',
+    async (promptMode) => {
+      await writeGlobalConfig({
+        models: { selected: model('openai', 'selected', 'responses') },
+        primary_model: 'selected',
+        auxiliary_model: 'selected',
+        context: { prompt_mode: promptMode },
+      });
+
+      await expect(loadCodingAgentConfig({ cwd })).resolves.toMatchObject({
+        context: { prompt_mode: promptMode },
+      });
+    },
+  );
+
+  it.each([
+    { system_prompt_profile: 'coding' },
+    { context: { system_prompt_profile: 'balanced' } },
+  ])('rejects removed prompt profile configuration %#', async (removed) => {
+    await writeGlobalConfig({
+      models: { selected: model('openai', 'selected', 'responses') },
+      primary_model: 'selected',
+      auxiliary_model: 'selected',
+      ...removed,
     });
 
     await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
-      "reserved_tokens: must be below effective input capacity 4000 for model 'small'",
+      'system_prompt_profile',
     );
   });
+
+  it.each([0, 101])(
+    'rejects automatic compaction threshold percent %s',
+    async (thresholdPercent) => {
+      await writeGlobalConfig({
+        models: { invalid: model('openai', 'invalid', 'responses') },
+        primary_model: 'invalid',
+        auxiliary_model: 'invalid',
+        context: {
+          compaction: { threshold_percent: thresholdPercent },
+        },
+      });
+
+      await expect(loadCodingAgentConfig({ cwd })).rejects.toThrow(
+        'threshold_percent',
+      );
+    },
+  );
 
   it('round-trips named models without provider or profile suites', () => {
     const pro = {

@@ -17,6 +17,8 @@ import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 
+import { ELLO_PROTOCOL_VERSION } from '../../src/protocol/v1/index.js';
+
 const packageDir = fileURLToPath(new URL('../../', import.meta.url));
 const entryPath = path.join(packageDir, 'dist/main.js');
 const execFile = promisify((await import('node:child_process')).execFile);
@@ -48,7 +50,10 @@ describe.sequential('actual App Server process', () => {
 
     await initialize(processPeer);
     const read = await rpc(processPeer, 2, 'server/read', {});
-    expect(read.result).toMatchObject({ state: 'ready', protocolVersion: 2 });
+    expect(read.result).toMatchObject({
+      state: 'ready',
+      protocolVersion: ELLO_PROTOCOL_VERSION,
+    });
 
     processPeer.endInput();
     const [code, signal] = await processPeer.exited();
@@ -150,10 +155,14 @@ describe.sequential('actual App Server process', () => {
     const cwd = path.join(root, 'workspace');
     await mkdir(cwd, { recursive: true });
     const modelServer = await MockChatServer.start([
-      toolStep('call_pending', 'bash', {
-        command: 'printf pending',
-        timeoutMs: 1_000,
-      }),
+      commandRunStep('call_pending', [
+        {
+          step: 1,
+          command: 'bash',
+          args: ['--timeout-ms', '1000'],
+          body: 'printf pending',
+        },
+      ]),
     ]);
     await writeConfig(root, modelServer.baseUrl);
     const firstPort = await freePort();
@@ -227,18 +236,41 @@ describe.sequential('actual App Server process', () => {
     await mkdir(cwd, { recursive: true });
     const planContent = '# Implementation\n\n1. Create the approved file.';
     const modelServer = await MockChatServer.start([
-      toolStep('call_plan_write', 'write_plan', { content: planContent }),
-      toolStep('call_plan_exit', 'request_plan_exit', {}),
-      toolStep('call_approved_write', 'write', {
-        filePath: 'approved.txt',
-        content: 'executed approved plan\n',
-        reason: 'execute approved plan',
-      }),
+      commandRunStep('call_plan_write', [
+        {
+          step: 1,
+          command: 'write_plan',
+          body: planContent,
+        },
+      ]),
+      commandRunStep('call_plan_exit', [
+        {
+          step: 1,
+          command: 'request_plan_exit',
+        },
+      ]),
+      commandRunStep('call_approved_write', [
+        {
+          step: 1,
+          command: 'write',
+          args: ['approved.txt', '--reason', 'execute approved plan'],
+          body: 'executed approved plan\n',
+        },
+      ]),
       { type: 'text', deltas: ['plan ', 'executed'] },
-      toolStep('call_stale_plan_write', 'write_plan', {
-        content: '# Stale plan\n\n1. This content must not execute.',
-      }),
-      toolStep('call_stale_plan_exit', 'request_plan_exit', {}),
+      commandRunStep('call_stale_plan_write', [
+        {
+          step: 1,
+          command: 'write_plan',
+          body: '# Stale plan\n\n1. This content must not execute.',
+        },
+      ]),
+      commandRunStep('call_stale_plan_exit', [
+        {
+          step: 1,
+          command: 'request_plan_exit',
+        },
+      ]),
     ]);
     await writeConfig(root, modelServer.baseUrl);
     const port = await freePort();
@@ -387,33 +419,51 @@ describe.sequential('actual App Server process', () => {
     const externalFile = path.join(root, 'external-context.txt');
     await writeFile(externalFile, 'external context from approval\n', 'utf8');
     const modelServer = await MockChatServer.start([
-      toolStep('call_bash', 'bash', {
-        command: 'printf command-ok',
-        timeoutMs: 1_000,
-      }),
-      toolStep('call_write', 'write', {
-        filePath: 'e2e.txt',
-        content: 'written by process e2e\n',
-        reason: 'verify file change',
-      }),
-      toolStep('call_external_read', 'read', { filePath: externalFile }),
-      toolStep('call_external_read_again', 'read', {
-        filePath: externalFile,
-      }),
-      toolStep('call_input', 'request_user_input', {
-        questions: [
-          {
-            id: 'continue_choice',
-            header: 'Continue',
-            question: 'Continue the process E2E turn?',
-            options: [
-              { label: 'Proceed', description: 'Finish the test turn.' },
-              { label: 'Stop', description: 'Stop before completion.' },
-            ],
-            multiSelect: false,
+      commandRunStep('call_bash', [
+        {
+          step: 1,
+          command: 'bash',
+          args: ['--timeout-ms', '1000'],
+          body: 'printf command-ok',
+        },
+      ]),
+      commandRunStep('call_write', [
+        {
+          step: 1,
+          command: 'write',
+          args: ['e2e.txt', '--reason', 'verify file change'],
+          body: 'written by process e2e\n',
+        },
+      ]),
+      commandRunStep('call_external_read', [
+        { step: 1, command: 'read', args: [externalFile] },
+      ]),
+      commandRunStep('call_external_read_again', [
+        { step: 1, command: 'read', args: [externalFile] },
+      ]),
+      commandRunStep('call_input', [
+        {
+          step: 1,
+          command: 'command_invoke',
+          input: {
+            name: 'request_user_input',
+            arguments: {
+              questions: [
+                {
+                  id: 'continue_choice',
+                  header: 'Continue',
+                  question: 'Continue the process E2E turn?',
+                  options: [
+                    { label: 'Proceed', description: 'Finish the test turn.' },
+                    { label: 'Stop', description: 'Stop before completion.' },
+                  ],
+                  multiSelect: false,
+                },
+              ],
+            },
           },
-        ],
-      }),
+        },
+      ]),
       { type: 'text', deltas: ['process ', 'complete'] },
     ]);
     await writeConfig(root, modelServer.baseUrl);
@@ -606,9 +656,10 @@ describe.sequential('actual App Server process', () => {
           typeof message.params?.delta === 'string',
       ),
     ).toBe(true);
-    expect(
-      turnTrace.some((message) => completedFileChangeHasChanges(message)),
-    ).toBe(true);
+    expect(turnTrace.some((message) => commandRunHasFileChanges(message))).toBe(
+      true,
+    );
+    expect(turnTrace.some((message) => isLegacyToolItem(message))).toBe(false);
     expect(await readFile(path.join(cwd, 'e2e.txt'), 'utf8')).toBe(
       'written by process e2e\n',
     );
@@ -638,7 +689,7 @@ describe.sequential('actual App Server process', () => {
             outputTokens: 24,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
-            toolCalls: 2,
+            toolCalls: 5,
           },
         },
       ],
@@ -648,7 +699,7 @@ describe.sequential('actual App Server process', () => {
         outputTokens: 24,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        toolCalls: 2,
+        toolCalls: 5,
       },
       pendingServerRequests: [],
     });
@@ -723,7 +774,10 @@ describe.sequential('actual App Server process', () => {
       (request) => !isTitleModelRequest(request),
     );
     expect(primaryRequests).toHaveLength(6);
-    expect(requestExposesTool(primaryRequests[0], 'bash')).toBe(true);
+    for (const request of primaryRequests) {
+      expect(requestToolNames(request)).toEqual(['command_run']);
+      expect(hasPairedOuterCommandRuns(request)).toBe(true);
+    }
     expect(JSON.stringify(modelServer.requests)).toContain(
       'external context from approval',
     );
@@ -1032,6 +1086,10 @@ function toolStep(
   return { type: 'tool', id, name, arguments: argumentsValue };
 }
 
+function commandRunStep(id: string, commands: JsonObject[]): ModelStep {
+  return toolStep(id, 'command_run', { commands });
+}
+
 function chatChunks(step: ModelStep, index: number): JsonObject[] {
   const base = {
     id: `chatcmpl_${index}`,
@@ -1107,7 +1165,7 @@ function chatChunks(step: ModelStep, index: number): JsonObject[] {
 async function initialize(peer: RpcPeer): Promise<void> {
   const response = await rpc(peer, 1, 'initialize', {
     clientInfo: { name: 'process-e2e', title: 'Process E2E', version: '1.0.0' },
-    protocolVersion: 2,
+    protocolVersion: ELLO_PROTOCOL_VERSION,
     capabilities: {
       experimentalApi: false,
       supportsServerRequests: true,
@@ -1116,11 +1174,13 @@ async function initialize(peer: RpcPeer): Promise<void> {
       platform: 'automation',
     },
   });
-  expect(response.result).toMatchObject({ protocolVersion: 2 });
+  expect(response.result).toMatchObject({
+    protocolVersion: ELLO_PROTOCOL_VERSION,
+  });
   await peer.send({ jsonrpc: '2.0', method: 'initialized', params: {} });
   expect(await peer.next()).toMatchObject({
     method: 'server/ready',
-    params: { protocolVersion: 2 },
+    params: { protocolVersion: ELLO_PROTOCOL_VERSION },
   });
 }
 
@@ -1296,27 +1356,80 @@ function firstTurnStatus(message: RpcMessage): unknown {
   return Array.isArray(turns) ? readObject(turns[0])?.status : undefined;
 }
 
-function completedFileChangeHasChanges(message: RpcMessage): boolean {
-  if (message.method !== 'item/completed') return false;
+function commandRunHasFileChanges(message: RpcMessage): boolean {
+  if (
+    message.method !== 'item/updated' &&
+    message.method !== 'item/completed'
+  ) {
+    return false;
+  }
   const item = readObject(message.params?.item);
-  return (
-    item?.type === 'fileChange' &&
-    Array.isArray(item.changes) &&
-    item.changes.length > 0
-  );
+  if (item?.type !== 'commandRun' || !Array.isArray(item.commands))
+    return false;
+  return item.commands.some((commandValue) => {
+    const command = readObject(commandValue);
+    const output = readObject(command?.output);
+    const metadata = readObject(output?.metadata);
+    const changes = metadata?.fileChanges;
+    return (
+      Array.isArray(changes) &&
+      changes.some((changeValue) => {
+        const change = readObject(changeValue);
+        return (
+          typeof change?.path === 'string' &&
+          ['add', 'modify', 'delete', 'rename'].includes(String(change.kind)) &&
+          typeof change.diff === 'string'
+        );
+      })
+    );
+  });
 }
 
-function requestExposesTool(
-  request: JsonObject | undefined,
-  toolName: string,
-): boolean {
-  const tools = request?.tools;
-  return (
-    Array.isArray(tools) &&
-    tools.some(
-      (tool) => readObject(readObject(tool)?.function)?.name === toolName,
+function isLegacyToolItem(message: RpcMessage): boolean {
+  if (
+    !['item/started', 'item/updated', 'item/completed'].includes(
+      message.method ?? '',
     )
-  );
+  ) {
+    return false;
+  }
+  const type = readObject(message.params?.item)?.type;
+  return type === 'toolCall' || type === 'fileChange';
+}
+
+function requestToolNames(request: JsonObject | undefined): string[] {
+  const tools = request?.tools;
+  if (!Array.isArray(tools)) return [];
+  return tools.flatMap((tool) => {
+    const name = readObject(readObject(tool)?.function)?.name;
+    return typeof name === 'string' ? [name] : [];
+  });
+}
+
+function hasPairedOuterCommandRuns(request: JsonObject): boolean {
+  const messages = request.messages;
+  if (!Array.isArray(messages)) return false;
+  const pending = new Set<string>();
+  for (const messageValue of messages) {
+    const message = readObject(messageValue);
+    if (message?.role === 'assistant' && Array.isArray(message.tool_calls)) {
+      for (const callValue of message.tool_calls) {
+        const call = readObject(callValue);
+        const name = readObject(call?.function)?.name;
+        if (typeof call?.id === 'string' && name === 'command_run') {
+          pending.add(call.id);
+        }
+      }
+    }
+    if (
+      message?.role === 'tool' &&
+      typeof message.tool_call_id === 'string' &&
+      pending.has(message.tool_call_id)
+    ) {
+      pending.delete(message.tool_call_id);
+    }
+  }
+  return pending.size === 0;
 }
 
 function isTitleModelRequest(request: JsonObject): boolean {

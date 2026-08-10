@@ -1,10 +1,10 @@
 import path from 'node:path';
 
 import {
-  RunManifestSchema,
-  SuiteManifestSchema,
-  type RunManifest,
-  type SuiteManifest,
+  RunArtifactManifestSchema,
+  SuiteArtifactManifestSchema,
+  type RunArtifactManifest,
+  type SuiteArtifactManifest,
 } from '../../domain/contract/index.js';
 import { stableJson } from '../../domain/hash.js';
 import { readJsonFile } from '../io.js';
@@ -23,7 +23,7 @@ export async function validateRunRoot(runRootInput: string): Promise<{
   const runRoot = path.resolve(runRootInput);
   const suite = await readJsonFile(
     path.join(runRoot, 'suite-manifest.json'),
-    SuiteManifestSchema,
+    SuiteArtifactManifestSchema,
   );
   if (suite.runRoot !== runRoot) {
     throw new Error(
@@ -44,7 +44,7 @@ export async function validateRunRoot(runRootInput: string): Promise<{
   const attempts = await Promise.all(
     attemptEntries.map(async ({ jobId, attemptPath }) => {
       assertInside(runRoot, attemptPath);
-      const run = await readJsonFile(attemptPath, RunManifestSchema);
+      const run = await readJsonFile(attemptPath, RunArtifactManifestSchema);
       validateAttemptIdentity(suite, jobId, attemptPath, run);
       await validateAttempt(run, attemptPath, runRoot);
       return run;
@@ -80,10 +80,10 @@ function validateAttemptMatrix(
 }
 
 function validateAttemptIdentity(
-  suite: SuiteManifest,
+  suite: SuiteArtifactManifest,
   jobId: string,
   attemptPath: string,
-  run: RunManifest,
+  run: RunArtifactManifest,
 ): void {
   if (run.job.jobId !== jobId) {
     throw new Error(`Attempt job mismatch: ${attemptPath}`);
@@ -116,9 +116,9 @@ function validateAttemptIdentity(
 function validateRetryLineage(
   attemptsByJob: Readonly<Record<string, readonly string[]>>,
   entries: ReadonlyArray<{ readonly attemptPath: string }>,
-  attempts: readonly RunManifest[],
+  attempts: readonly RunArtifactManifest[],
 ): void {
-  const byPath = new Map<string, RunManifest>();
+  const byPath = new Map<string, RunArtifactManifest>();
   for (const [index, entry] of entries.entries()) {
     const run = attempts[index];
     if (run === undefined) {
@@ -127,7 +127,7 @@ function validateRetryLineage(
     byPath.set(path.resolve(entry.attemptPath), run);
   }
   for (const attemptPaths of Object.values(attemptsByJob)) {
-    let previous: RunManifest | undefined;
+    let previous: RunArtifactManifest | undefined;
     for (const [index, attemptPath] of attemptPaths.entries()) {
       const run = byPath.get(path.resolve(attemptPath));
       if (run === undefined) throw new Error(`Missing attempt: ${attemptPath}`);
@@ -135,12 +135,17 @@ function validateRetryLineage(
         throw new Error(`Attempt number mismatch: ${attemptPath}`);
       }
       if (previous !== undefined) {
-        if (previous.status !== 'invalid_infrastructure') {
+        // Repair may salvage an interrupted verdict after its retry exists.
+        if (
+          previous.status === 'completed' &&
+          !isRetryOfSalvagedAttempt(run, previous)
+        ) {
           throw new Error(`Attempt follows a completed run: ${attemptPath}`);
         }
         if (
-          run.retryOf !== previous.attemptId ||
-          stableJson(run.retryReason) !== stableJson(previous.failure)
+          previous.status === 'invalid_infrastructure' &&
+          (run.retryOf !== previous.attemptId ||
+            stableJson(run.retryReason) !== stableJson(previous.failure))
         ) {
           throw new Error(`Retry lineage mismatch: ${attemptPath}`);
         }
@@ -148,4 +153,15 @@ function validateRetryLineage(
       previous = run;
     }
   }
+}
+
+function isRetryOfSalvagedAttempt(
+  run: RunArtifactManifest,
+  previous: RunArtifactManifest,
+): boolean {
+  return (
+    run.retryOf === previous.attemptId &&
+    run.retryReason?.kind === 'runner' &&
+    run.retryReason.phase === 'resume-interrupted-run'
+  );
 }

@@ -2,6 +2,7 @@
  * 验证产品 Agent 装配只使用 model resolution 产生的有效输入预算，不会回退到更宽的原始 config。
  */
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { buildAgent } from '../../src/features/agent/build.js';
 import type {
@@ -9,26 +10,31 @@ import type {
   CreateAgentFeatureInput,
 } from '../../src/features/agent/contracts.js';
 import {
-  defineTool,
-  z,
   type AgentModelRequest,
   type AgentModelResponse,
 } from '../../src/features/agent/engine/index.js';
 import type { AgentRegistry } from '../../src/features/agent/subagents/index.js';
 import type { CodingAgentDefinition } from '../../src/features/agent/subagents/schema.js';
+import {
+  cliInput,
+  commandInput,
+  defineCommand,
+} from '../../src/features/command/index.js';
 import { CodingAgentConfigSchema } from '../../src/features/config/index.js';
+import { createTestCommandRun } from '../support/command.js';
 import { createTestEnvironmentHandle } from '../support/environment.js';
 
-const tool = defineTool({
+const command = defineCommand({
   name: 'noop',
-  description: 'No-op.',
-  discovery: { aliases: [], risk: 'readonly' },
-  input: z.object({}).strict(),
-  execute: () => null,
+  summary: 'No-op.',
+  aliases: [],
+  risk: 'readonly',
+  invocation: cliInput(commandInput(z.object({}).strict())),
+  execution: { kind: 'immediate', run: () => null },
 });
 
 describe('buildAgent model input budget', () => {
-  it('uses the model-resolution budget for request trimming and compaction', async () => {
+  it('uses the model-resolution total window for checkpoint and fails admission explicitly', async () => {
     const config = CodingAgentConfigSchema.parse({
       cwd: '/workspace',
       initial_mode: 'ask-before-changes',
@@ -48,12 +54,11 @@ describe('buildAgent model input budget', () => {
       auxiliary_model: 'test',
       context: {
         max_input_tokens: 1_000,
-        reserved_output_tokens: 1,
         compaction: {
           auto: true,
           tail_turns: 1,
           preserve_recent_tokens: 2,
-          reserved_tokens: 5,
+          threshold_percent: 90,
           prune_tool_output: false,
           tool_output_max_chars: 2_000,
           split_turns: true,
@@ -77,6 +82,7 @@ describe('buildAgent model input budget', () => {
     let requestSeen: AgentModelRequest | undefined;
     let factoryContextWindow: number | undefined;
     let runtimeContextWindow: number | undefined;
+    let compactorCalls = 0;
     const response = (request: AgentModelRequest): AgentModelResponse => ({
       text: 'done',
       messages: [...request.messages, { role: 'assistant', content: 'done' }],
@@ -119,22 +125,22 @@ describe('buildAgent model input budget', () => {
         },
         modelSettings: { maxOutputTokens: 100 },
         modelInputBudget: {
-          maxInputTokens: 60,
-          reservedOutputTokens: 1,
+          maxInputTokens: 900,
+          totalContextTokens: 1_000,
+          maxOutputTokens: 100,
         },
-        contextWindow: 59,
+        contextWindow: 1_000,
         providerOptions: () => undefined,
         prepareModelInput: async (input) => input,
       }),
       loadContext: async () => ({
         skills: [],
-        activationTool: tool,
+        activationCommand: command,
         readRoots: () => [],
         createSystemSections: () => [],
       }),
-      createTools: async () => ({
-        executionTools: [tool],
-        modelTools: [tool],
+      createCommands: async () => ({
+        commandRun: createTestCommandRun([command]),
         goalSystemSection: () => null,
         mode: () => 'ask-before-changes',
         setMode: () => undefined,
@@ -144,6 +150,7 @@ describe('buildAgent model input budget', () => {
         return {
           name: 'test-compactor',
           compact(compactionInput) {
+            compactorCalls += 1;
             runtimeContextWindow = compactionInput.contextWindow;
             return null;
           },
@@ -179,13 +186,18 @@ describe('buildAgent model input budget', () => {
 
     const built = await buildAgent(runRequest, dependencies);
     try {
-      await built.engine.run({ messages: history, prompt: runRequest.input });
+      await expect(
+        built.engine.run({ messages: history, prompt: runRequest.input }),
+      ).rejects.toThrow(
+        'Prepared model input exceeds the effective context budget',
+      );
     } finally {
       await built.close();
     }
 
-    expect(factoryContextWindow).toBe(59);
-    expect(runtimeContextWindow).toBe(59);
-    expect(requestSeen?.messages.length).toBeLessThan(history.length + 1);
+    expect(factoryContextWindow).toBe(1_000);
+    expect(runtimeContextWindow).toBe(1_000);
+    expect(compactorCalls).toBe(2);
+    expect(requestSeen).toBeUndefined();
   });
 });

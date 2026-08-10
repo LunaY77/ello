@@ -1,0 +1,222 @@
+# Benchmark report
+
+- benchmark: `ello.benchmark.deepswe.v1.1` (DeepSWE v1.1 curated)
+- task selection: 20 selected / 113 upstream (curated)
+- runRoot: `packages/ello-bench/raw/deep-swe-0809-03`
+- configHash: `fc271cae81f03702891c781b8e3a9a6110a86ca456a5266b5587b1ac84b4d36b`
+- planHash: `57469551f63b0d5e82d19a1905899672758325343484034d7c19f40094ce03a5`
+- reportGeneratedAt: `2026-08-09T21:18:40.370Z`
+- plannedJobs: 60, scoredJobs: 60, invalidJobs: 0
+- publishable: **false**
+
+## Agents
+
+| agent | valid | passed | pass rate | 95% CI | invalid | task macro |
+| --- | ---: | ---: | ---: | --- | ---: | ---: |
+| ello-ds-rapid | 20 | 13 | 65.0% | 43.3% - 81.9% | 0 | 65.0% |
+| ello-ds | 20 | 13 | 65.0% | 43.3% - 81.9% | 0 | 65.0% |
+| claude-code | 20 | 9 | 45.0% | 25.8% - 65.8% | 0 | 45.0% |
+
+## Resources
+
+Only completed runs with normalized evidence contribute resource values. Mean is the arithmetic mean across measured runs; cache hit rate is averaged per run.
+
+### Aggregate (median)
+
+| agent | elapsed | rounds | tools | input | non-cache input | cache read | cache write | cache hit rate | output | reasoning | main input | subagent input |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ello-ds-rapid | 1,223 s | 146 | 129 | 11,616,705 | 111,617 | 11,505,088 | 0 | 99.1% | 99,329 | n/a | 11,616,705 | 0 |
+| ello-ds | 1,555 s | 162 | 143 | 20,985,356 | 138,415 | 20,838,592 | 0 | 99.3% | 111,444 | n/a | 20,985,356 | 0 |
+| claude-code | 5,400 s | 259 | 273 | 27,686,409 | 316,469 | 27,355,776 | 0 | 98.9% | 262,551 | n/a | 27,686,409 | 0 |
+
+### Aggregate (mean)
+
+| agent | elapsed | rounds | tools | input | non-cache input | cache read | cache write | cache hit rate | output | reasoning | main input | subagent input |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ello-ds-rapid | 1,299 s | 140 | 133 | 15,765,153 | 116,632 | 15,648,521 | 0 | 99.1% | 105,919 | n/a | 15,765,153 | 0 |
+| ello-ds | 1,894 s | 157 | 151 | 21,842,794 | 138,017 | 21,704,777 | 0 | 99.3% | 117,992 | n/a | 21,842,794 | 0 |
+| claude-code | 4,610 s | 492 | 514 | 32,394,152 | 301,672 | 32,092,480 | 0 | 98.9% | 276,073 | n/a | 32,394,152 | 0 |
+
+### Resource coverage
+
+| agent | elapsed | rounds | tools | input / output | cache hit |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ello-ds-rapid | 18 | 18 | 18 | 14 / 14 | 14 |
+| ello-ds | 18 | 18 | 18 | 14 / 14 | 14 |
+| claude-code | 19 | 19 | 19 | 8 / 8 | 8 |
+
+### By task: outcome / elapsed / rounds / tools
+
+Task resource values are medians across measured replicates.
+
+| task | ello-ds-rapid | ello-ds | claude-code |
+| --- | --- | --- | --- |
+| actionlint-action-pinning-lint | pass / 833 s / 104 / 107 | pass / 1,288 s / 160 / 146 | pass / 1,285 s / 189 / 207 |
+| abs-stepped-slices | pass / 725 s / 100 / 93 | pass / 831 s / 121 / 114 | pass / 2,201 s / 155 / 159 |
+| yaegi-go-embed-directives | pass / 2,147 s / 251 / 217 | pass / 2,540 s / 224 / 204 | fail / 5,400 s / 1,389 / 1,405 |
+| dasel-html-document-format | fail / 582 s / 82 / 77 | fail / 761 s / 84 / 82 | fail / 1,852 s / 271 / 278 |
+| cattrs-partial-structuring-recovery | fail / 1,804 s / 202 / 191 | pass / 1,581 s / 153 / 139 | pass / 9,173 s / 228 / 258 |
+| numba-stencil-boundary-modes | fail / 1,674 s / 168 / 128 | fail / 1,056 s / 121 / 79 | fail / 5,400 s / 261 / 275 |
+| bandit-incremental-cache-control | fail / 526 s / 56 / 48 | fail / 1,099 s / 131 / 133 | fail / 2,134 s / 213 / 231 |
+| httpx-streaming-json-iteration | pass / 733 s / 82 / 68 | fail / 8,293 s / 95 / 101 | pass / 8,202 s / 98 / 104 |
+| happy-dom-abort-pending-body-reads | fail / 1,300 s / 192 / 179 | pass / 1,599 s / 187 / 184 | fail / 5,400 s / 1,074 / 1,073 |
+| dynamodb-toolbox-conditional-attribute-requirements | pass / 1,969 s / 189 / 246 | pass / 2,617 s / 269 / 376 | pass / 5,400 s / 888 / 1,019 |
+| awilix-async-container-initialization | pass / 953 s / 82 / 80 | pass / 482 s / 86 / 82 | fail / 4,847 s / 259 / 273 |
+| quill-shared-toolbar-focus | pass / 1,940 s / 199 / 180 | fail / 1,993 s / 186 / 162 | fail / 5,400 s / 102 / 131 |
+| wasmi-trap-coredumps | fail / n/a / n/a / n/a | fail / n/a / n/a / n/a | pass / 5,400 s / 219 / 253 |
+| fd-deterministic-multi-key-sorting | pass / 769 s / 88 / 90 | pass / 794 s / 79 / 93 | pass / 3,359 s / 269 / 281 |
+| boa-hierarchical-evaluation-cancellation | pass / 2,453 s / 161 / 173 | pass / 2,523 s / 194 / 171 | fail / 5,400 s / 1,502 / 1,506 |
+| pest-character-class-coalescing | fail / 1,299 s / 159 / 149 | fail / 1,395 s / 163 / 152 | fail / n/a / n/a / n/a |
+| yjs-map-conflict-detection | pass / n/a / n/a / n/a | pass / n/a / n/a / n/a | pass / 5,400 s / 217 / 237 |
+| testem-per-launcher-reports | pass / 857 s / 132 / 129 | pass / 1,599 s / 171 / 127 | fail / 3,052 s / 179 / 206 |
+| csstree-shorthand-expansion-compression | pass / 1,147 s / 94 / 85 | pass / 1,528 s / 171 / 168 | pass / 2,888 s / 493 / 506 |
+| katex-multicolumn-array-spans | pass / 1,663 s / 186 / 161 | pass / 2,111 s / 238 / 204 | fail / 5,400 s / 1,349 / 1,358 |
+
+### By task: input / non-cache input / cache read / cache hit / output
+
+| task | ello-ds-rapid | ello-ds | claude-code |
+| --- | --- | --- | --- |
+| actionlint-action-pinning-lint | 10,105,721 / 102,137 / 10,003,584 / 99.0% / 83,301 | 21,720,350 / 148,766 / 21,571,584 / 99.3% / 120,205 | 30,085,271 / 433,047 / 29,652,224 / 98.6% / 111,452 |
+| abs-stepped-slices | 7,569,142 / 92,278 / 7,476,864 / 98.8% / 72,671 | 10,497,664 / 97,536 / 10,400,128 / 99.1% / 82,204 | 22,968,881 / 216,497 / 22,752,384 / 99.1% / 270,973 |
+| yaegi-go-embed-directives | 34,624,220 / 171,868 / 34,452,352 / 99.5% / 146,945 | 31,771,552 / 154,784 / 31,616,768 / 99.5% / 137,882 | n/a / n/a / n/a / -- / n/a |
+| dasel-html-document-format | 5,275,162 / 75,546 / 5,199,616 / 98.6% / 62,737 | 6,436,849 / 93,425 / 6,343,424 / 98.5% / 76,715 | 25,859,283 / 314,067 / 25,545,216 / 98.8% / 188,270 |
+| cattrs-partial-structuring-recovery | 26,034,692 / 137,988 / 25,896,704 / 99.5% / 138,738 | 17,936,805 / 129,061 / 17,807,744 / 99.3% / 114,901 | n/a / n/a / n/a / -- / n/a |
+| numba-stencil-boundary-modes | 20,359,352 / 121,144 / 20,238,208 / 99.4% / 140,056 | 11,152,036 / 81,316 / 11,070,720 / 99.3% / 92,799 | n/a / n/a / n/a / -- / n/a |
+| bandit-incremental-cache-control | n/a / n/a / n/a / -- / n/a | n/a / n/a / n/a / -- / n/a | 24,917,472 / 178,528 / 24,738,944 / 99.3% / 207,268 |
+| httpx-streaming-json-iteration | 4,861,248 / 68,032 / 4,793,216 / 98.6% / 67,550 | n/a / n/a / n/a / -- / n/a | n/a / n/a / n/a / -- / n/a |
+| happy-dom-abort-pending-body-reads | n/a / n/a / n/a / -- / n/a | 28,704,662 / 204,822 / 28,499,840 / 99.3% / 107,987 | n/a / n/a / n/a / -- / n/a |
+| dynamodb-toolbox-conditional-attribute-requirements | 28,884,498 / 157,074 / 28,727,424 / 99.5% / 157,708 | 49,172,775 / 215,335 / 48,957,440 / 99.6% / 175,722 | n/a / n/a / n/a / -- / n/a |
+| awilix-async-container-initialization | 7,691,619 / 88,163 / 7,603,456 / 98.9% / 95,285 | n/a / n/a / n/a / -- / n/a | 30,129,580 / 209,964 / 29,919,616 / 99.3% / 545,498 |
+| quill-shared-toolbar-focus | n/a / n/a / n/a / -- / n/a | 27,337,552 / 146,000 / 27,191,552 / 99.5% / 175,890 | n/a / n/a / n/a / -- / n/a |
+| wasmi-trap-coredumps | n/a / n/a / n/a / -- / n/a | n/a / n/a / n/a / -- / n/a | n/a / n/a / n/a / -- / n/a |
+| fd-deterministic-multi-key-sorting | 7,424,217 / 103,641 / 7,320,576 / 98.6% / 73,643 | 8,760,819 / 116,467 / 8,644,352 / 98.7% / 75,641 | 29,513,534 / 347,198 / 29,166,336 / 98.8% / 360,017 |
+| boa-hierarchical-evaluation-cancellation | n/a / n/a / n/a / -- / n/a | 27,623,376 / 135,504 / 27,487,872 / 99.5% / 138,310 | n/a / n/a / n/a / -- / n/a |
+| pest-character-class-coalescing | 16,880,199 / 121,159 / 16,759,040 / 99.3% / 103,372 | 20,250,362 / 144,762 / 20,105,600 / 99.3% / 105,869 | n/a / n/a / n/a / -- / n/a |
+| yjs-map-conflict-detection | n/a / n/a / n/a / -- / n/a | n/a / n/a / n/a / -- / n/a | n/a / n/a / n/a / -- / n/a |
+| testem-per-launcher-reports | 12,866,146 / 108,258 / 12,757,888 / 99.2% / 70,714 | 18,404,862 / 123,134 / 18,281,728 / 99.3% / 93,213 | 19,430,980 / 395,204 / 19,035,776 / 98.0% / 267,468 |
+| csstree-shorthand-expansion-compression | 10,367,264 / 114,976 / 10,252,288 / 98.9% / 123,764 | 26,029,454 / 141,326 / 25,888,128 / 99.5% / 154,553 | 76,248,215 / 318,871 / 75,929,344 / 99.6% / 257,634 |
+| katex-multicolumn-array-spans | 27,768,668 / 170,588 / 27,598,080 / 99.4% / 146,379 | n/a / n/a / n/a / -- / n/a | n/a / n/a / n/a / -- / n/a |
+
+## Comparisons
+
+| pair | matched | excluded | wins | ties | losses | paired delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ello-ds-rapid vs ello-ds | 20 | 0 | 2 | 16 | 2 | 0.0% |
+| ello-ds-rapid vs claude-code | 20 | 0 | 6 | 12 | 2 | 20.0% |
+| ello-ds vs claude-code | 20 | 0 | 6 | 12 | 2 | 20.0% |
+
+## Infrastructure-invalid attempts
+
+| task | agent | kind / phase | diagnostic |
+| --- | --- | --- | --- |
+| actionlint-action-pinning-lint | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| abs-stepped-slices | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| yaegi-go-embed-directives | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| yaegi-go-embed-directives | ello-ds | agent_process / prepare-agent | Benchmark server exited before readiness: code=1 signal=null. |
+| yaegi-go-embed-directives | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| yaegi-go-embed-directives | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| yaegi-go-embed-directives | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state verifying. |
+| yaegi-go-embed-directives | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| dasel-html-document-format | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| dasel-html-document-format | ello-ds | agent_process / prepare-agent | Benchmark server exited before readiness: code=1 signal=null. |
+| dasel-html-document-format | claude-code | provider / agent-model-call | Claude Code provider error error_during_execution. |
+| dasel-html-document-format | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| dasel-html-document-format | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| cattrs-partial-structuring-recovery | ello-ds-rapid | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| cattrs-partial-structuring-recovery | ello-ds-rapid | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| cattrs-partial-structuring-recovery | ello-ds-rapid | agent_process / prepare-agent | Benchmark server exited before readiness: code=1 signal=null. |
+| cattrs-partial-structuring-recovery | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| cattrs-partial-structuring-recovery | ello-ds | agent_process / prepare-agent | Benchmark server exited before readiness: code=1 signal=null. |
+| cattrs-partial-structuring-recovery | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| cattrs-partial-structuring-recovery | claude-code | provider / agent-model-call | Claude Code provider error unknown: API Error: JSON Parse error: Unexpected identifier "event" |
+| cattrs-partial-structuring-recovery | claude-code | provider / agent-model-call | Claude Code provider error unknown: API Error: JSON Parse error: Unable to parse JSON string |
+| numba-stencil-boundary-modes | ello-ds-rapid | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| numba-stencil-boundary-modes | ello-ds-rapid | agent_process / prepare-agent | Benchmark server exited before readiness: code=1 signal=null. |
+| numba-stencil-boundary-modes | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| numba-stencil-boundary-modes | ello-ds | agent_process / prepare-agent | Benchmark server exited before readiness: code=1 signal=null. |
+| numba-stencil-boundary-modes | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state verifying. |
+| numba-stencil-boundary-modes | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| bandit-incremental-cache-control | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state verifying. |
+| bandit-incremental-cache-control | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| happy-dom-abort-pending-body-reads | ello-ds-rapid | runner / resume-interrupted-run | Runner stopped while attempt was in state verifying. |
+| happy-dom-abort-pending-body-reads | ello-ds-rapid | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| happy-dom-abort-pending-body-reads | ello-ds-rapid | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| happy-dom-abort-pending-body-reads | ello-ds-rapid | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| happy-dom-abort-pending-body-reads | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state verifying. |
+| happy-dom-abort-pending-body-reads | ello-ds | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| happy-dom-abort-pending-body-reads | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| happy-dom-abort-pending-body-reads | ello-ds | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| happy-dom-abort-pending-body-reads | ello-ds | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| happy-dom-abort-pending-body-reads | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| happy-dom-abort-pending-body-reads | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds-rapid | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds-rapid | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds-rapid | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds-rapid | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| dynamodb-toolbox-conditional-attribute-requirements | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| dynamodb-toolbox-conditional-attribute-requirements | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| awilix-async-container-initialization | ello-ds-rapid | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| awilix-async-container-initialization | ello-ds-rapid | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| awilix-async-container-initialization | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state preparing. |
+| awilix-async-container-initialization | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| awilix-async-container-initialization | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| quill-shared-toolbar-focus | ello-ds-rapid | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| quill-shared-toolbar-focus | ello-ds-rapid | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| quill-shared-toolbar-focus | ello-ds | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| quill-shared-toolbar-focus | ello-ds | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| quill-shared-toolbar-focus | ello-ds | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| quill-shared-toolbar-focus | ello-ds | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| quill-shared-toolbar-focus | claude-code | runner / resume-interrupted-run | Runner stopped while attempt was in state running. |
+| quill-shared-toolbar-focus | claude-code | provider / agent-model-call | Claude Code provider error error_during_execution. |
+| quill-shared-toolbar-focus | claude-code | provider / agent-model-call | Claude Code provider error error_during_execution. |
+| wasmi-trap-coredumps | ello-ds-rapid | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| wasmi-trap-coredumps | ello-ds-rapid | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| wasmi-trap-coredumps | ello-ds-rapid | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| wasmi-trap-coredumps | ello-ds | provider / agent-model-call | Ello provider error: AI_RetryError: Failed after 3 attempts. Last error: AI_APICallError: 当前使用的是公共模型服务, 并发有限; 当前的限流为: 100/min |
+| wasmi-trap-coredumps | ello-ds | provider / agent-model-call | Ello provider error: AI_JSONParseError: JSON parsing failed: Text: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":" Update"}} {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":" Update"}}. Error message: SyntaxError: Unexpected non-whitespace character after JSON at position 102 (line 1 column 103) |
+| fd-deterministic-multi-key-sorting | claude-code | provider / agent-model-call | Claude Code provider error error_during_execution. |
+| boa-hierarchical-evaluation-cancellation | claude-code | provider / agent-model-call | Claude Code provider error error_during_execution. |
+| boa-hierarchical-evaluation-cancellation | claude-code | provider / agent-model-call | Claude Code provider error unknown: API Error: JSON Parse error: Unable to parse JSON string |
+
+### Partial observations (excluded from scores)
+
+| task | agent | attempt | elapsed | rounds (completed / failed) | tools (failed) | observed input | observed output | usage coverage |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| happy-dom-abort-pending-body-reads | ello-ds-rapid | 0ce2db1ac39e664a6b789671 | 7,777 s | 85 (84 / 0) | 78 (4) | 5,133,032 | 29,815 | 84/85 rounds |
+| happy-dom-abort-pending-body-reads | ello-ds-rapid | d3870c3fd532c39767e59988 | 1,338 s | 142 (140 / 2) | 112 (1) | 18,318,238 | 107,635 | 140/142 rounds |
+| happy-dom-abort-pending-body-reads | ello-ds-rapid | fe7b8d19309a6bc24812d890 | 25 s | 7 (5 / 2) | 5 (0) | 38,617 | 638 | 5/7 rounds |
+| happy-dom-abort-pending-body-reads | ello-ds | 84f3ff74861e90f74d5b078b | 7,364 s | 26 (25 / 0) | 25 (0) | 491,517 | 3,159 | 25/26 rounds |
+| happy-dom-abort-pending-body-reads | ello-ds | 68e9b040ead8fc4225d457ff | 679 s | 109 (107 / 2) | 95 (3) | 9,201,948 | 67,870 | 107/109 rounds |
+| happy-dom-abort-pending-body-reads | ello-ds | ed1ec1c5616c547c407714b5 | 1,308 s | 153 (151 / 2) | 131 (8) | 17,482,248 | 82,291 | 151/153 rounds |
+| happy-dom-abort-pending-body-reads | ello-ds | bfb00cd6ff61cd6297b915b8 | 49 s | 13 (11 / 2) | 13 (0) | 122,774 | 2,234 | 11/13 rounds |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds-rapid | babcf6b650a0585209c3709b | 919 s | 122 (120 / 2) | 140 (4) | 12,824,642 | 85,384 | 120/122 rounds |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds-rapid | 375bb955538a13e2e2478b5c | 1,107 s | 149 (147 / 2) | 144 (7) | 14,496,788 | 90,499 | 147/149 rounds |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds | 588a21a8b967002a4d497595 | 1,098 s | 133 (131 / 2) | 150 (7) | 14,366,223 | 87,311 | 131/133 rounds |
+| dynamodb-toolbox-conditional-attribute-requirements | ello-ds | 332b35ba101bf69671e19fc9 | 263 s | 75 (73 / 2) | 131 (2) | 3,277,893 | 15,730 | 73/75 rounds |
+| quill-shared-toolbar-focus | ello-ds-rapid | 901d6888061d47c4718fb7dc | 1,052 s | 92 (90 / 2) | 94 (11) | 9,250,028 | 105,974 | 90/92 rounds |
+| quill-shared-toolbar-focus | ello-ds | 22776eadd082c039af39fe94 | 735 s | 70 (68 / 2) | 70 (1) | 3,721,534 | 68,583 | 68/70 rounds |
+| quill-shared-toolbar-focus | ello-ds | 46d5bb9beefc572051b2a7d8 | 503 s | 52 (50 / 2) | 51 (1) | 2,176,823 | 48,489 | 50/52 rounds |
+| quill-shared-toolbar-focus | ello-ds | ae593e72da33321896e7cd11 | 22 s | 5 (3 / 2) | 1 (0) | 18,847 | 326 | 3/5 rounds |
+| wasmi-trap-coredumps | ello-ds-rapid | 7e2dee04c2c7572274d8d55c | 977 s | 127 (125 / 2) | 117 (4) | 11,353,953 | 84,053 | 125/127 rounds |
+| wasmi-trap-coredumps | ello-ds-rapid | c6a6f3bf493cffbfb2dfe396 | 451 s | 87 (85 / 2) | 76 (3) | 4,784,985 | 34,085 | 85/87 rounds |
+| wasmi-trap-coredumps | ello-ds-rapid | 2445f591bc5ff6f46ad2267a | 312 s | 53 (51 / 2) | 55 (2) | 2,505,545 | 27,559 | 51/53 rounds |
+| wasmi-trap-coredumps | ello-ds | 1c3c9471197c355a2b299fa8 | 976 s | 101 (99 / 2) | 95 (1) | 8,993,984 | 109,999 | 99/101 rounds |
+| wasmi-trap-coredumps | ello-ds | 35779bf773db7299c31db4da | 1,568 s | 202 (200 / 2) | 165 (5) | 29,643,014 | 130,482 | 200/202 rounds |
+
+## Charts
+
+- `charts/pass-rate-by-agent.svg`
+- `charts/paired-outcomes.svg`
+- `charts/pass-rate-by-task.svg`
+- `charts/resource-tradeoff.svg`
+- `charts/round-timeline.svg`
+- `charts/token-breakdown.svg`
+- `charts/tool-failure-pareto.svg`
+
+---
+
+<sub>runRoot=packages/ello-bench/raw/deep-swe-0809-03 configHash=fc271cae81f0 reportGeneratedAt=2026-08-09T21:18:40.370Z renderedAt=2026-08-09T21:18:56.402Z</sub>

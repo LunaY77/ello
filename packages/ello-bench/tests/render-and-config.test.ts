@@ -62,12 +62,66 @@ describe('TypeScript report renderer', () => {
     expect(markdown).toContain('cache hit rate');
     expect(markdown).toContain('8.3%');
     expect(markdown).toContain('reasoning');
+    expect(markdown).toContain('### Aggregate (mean)');
+    expect(markdown).toContain('| ello | 12 s | 5 | 9 |');
+    expect(markdown).toContain(
+      '### By task: outcome / elapsed / rounds / tools',
+    );
+    expect(markdown).toContain('| task-a | pass / 10 s / 4 / 8 |');
     expect(markdown).toContain('`charts/token-breakdown.svg`');
     expect(first['token-breakdown.svg']).toContain('ello non-cache input');
     expect(first['token-breakdown.svg']).toContain('ello cache read');
     expect(first['token-breakdown.svg']).toContain('ello cache write');
     expect(first['token-breakdown.svg']).toContain('ello output');
     expect(first['token-breakdown.svg']).toContain('ello reasoning');
+  });
+
+  it('labels partial invalid-attempt evidence as excluded from scores', () => {
+    const report = SuiteReportSchema.parse({
+      ...reportFixture(),
+      invalidJobs: 1,
+      publishable: false,
+      invalidLedger: [
+        {
+          attemptId: '1'.repeat(24),
+          jobId: '2'.repeat(16),
+          taskId: 'task-a',
+          agentId: 'ello',
+          failure: {
+            kind: 'provider',
+            phase: 'agent-model-call',
+            message: 'reasoning item not found',
+          },
+          partialEvidence: {
+            elapsedMs: 12_000,
+            rounds: {
+              observed: 4,
+              completed: 3,
+              failed: 1,
+              incomplete: 0,
+            },
+            tools: { observed: 8, failed: 2 },
+            usage: {
+              completeRounds: 3,
+              unavailableRounds: 1,
+              inputTokens: 1200,
+              outputTokens: 200,
+              cacheReadTokens: 100,
+              cacheWriteTokens: 0,
+            },
+          },
+        },
+      ],
+    });
+
+    const markdown = renderMarkdown(report, '/runs/example', 'fixture');
+    expect(markdown).toContain(
+      '### Partial observations (excluded from scores)',
+    );
+    expect(markdown).toContain('| task-a | ello |');
+    expect(markdown).toContain(
+      '| 12 s | 4 (3 / 1) | 8 (2) | 1,200 | 200 | 3/4 rounds |',
+    );
   });
 });
 
@@ -100,7 +154,12 @@ describe('semantic config hash', () => {
 });
 
 function reportFixture() {
-  const summary = (value: number) => ({ count: 3, median: value, p95: value });
+  const summary = (value: number, mean = value) => ({
+    count: 3,
+    mean,
+    median: value,
+    p95: value,
+  });
   return SuiteReportSchema.parse({
     schema: 'ello.benchmark.suite.v3',
     suite: {
@@ -143,8 +202,8 @@ function reportFixture() {
         passRate: 2 / 3,
         taskMacroAverage: 2 / 3,
         resources: {
-          elapsedMs: summary(10_000),
-          rounds: summary(4),
+          elapsedMs: summary(10_000, 12_000),
+          rounds: summary(4, 5),
           inputTokens: summary(1200),
           nonCachedInputTokens: summary(1100),
           outputTokens: summary(200),
@@ -152,7 +211,7 @@ function reportFixture() {
           cacheWriteTokens: summary(20),
           cacheHitRate: summary(1 / 12),
           reasoningTokens: summary(40),
-          toolCalls: summary(8),
+          toolCalls: summary(8, 9),
           threadUsage: {
             mainInputTokens: summary(900),
             subagentInputTokens: summary(300),
@@ -171,7 +230,27 @@ function reportFixture() {
           usageUnavailableRuns: 0,
           toolAuditPassedRuns: 3,
         },
-        tasks: [],
+        tasks: [
+          {
+            taskId: 'task-a',
+            agentId: 'ello',
+            validRuns: 1,
+            passedRuns: 1,
+            passRate: 1,
+            resources: {
+              elapsedMs: summary(10_000),
+              rounds: summary(4),
+              toolCalls: summary(8),
+              inputTokens: summary(1200),
+              nonCachedInputTokens: summary(1100),
+              outputTokens: summary(200),
+              cacheReadTokens: summary(100),
+              cacheWriteTokens: summary(20),
+              cacheHitRate: summary(1 / 12),
+              reasoningTokens: summary(40),
+            },
+          },
+        ],
       },
     ],
     comparisons: [],

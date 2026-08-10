@@ -31,7 +31,7 @@ export {
   type AgentTaskSnapshot,
   type CreateAgentTask,
 } from './task-store.js';
-export { createSubagentTools } from './tools.js';
+export { createSubagentCommands } from './tools.js';
 export { AgentTaskRpcFeature } from './task-routes.js';
 export {
   agentTaskDetail,

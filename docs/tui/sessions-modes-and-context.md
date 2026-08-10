@@ -158,7 +158,7 @@ stateDiagram-v2
   Error --> Connected: Resume thread
 ```
 
-snapshot 加载成功后，TUI 清理旧 scrollback 并重放当前 Thread。运行中的工具、未完成的
+snapshot 加载成功后，TUI 通过 Ink 重建当前历史投影，不直接清空终端 scrollback。运行中的工具、未完成的
 审批和用户问题也从 snapshot 恢复。
 
 自动恢复持续失败时，可以退出 TUI 后重新连接：

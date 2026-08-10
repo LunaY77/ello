@@ -91,7 +91,8 @@ function ToolCard({
             ? { fileChanges: model.fileChanges }
             : {})}
         />
-      ) : call.output !== undefined ? (
+      ) : model.presentationError !== undefined ? null : call.output !==
+        undefined ? (
         presenter.renderResult(call.input, call.output)
       ) : (
         presenter.renderCall(call.input)

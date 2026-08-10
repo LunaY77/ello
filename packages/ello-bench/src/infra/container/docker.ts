@@ -21,11 +21,42 @@ import {
   WorkspaceStorageWatchdog,
 } from '../workspace-storage.js';
 
+import { DockerWritableLayerInspector } from './docker-size-inspector.js';
+
 const DOCKER_TIMEOUT = {
   timeoutMs: 10 * 60_000,
   killGraceMs: 5_000,
   maxOutputBytes: 128 * 1024 * 1024,
 } as const;
+
+const dockerWritableLayerInspector = new DockerWritableLayerInspector(
+  async (containerName) => {
+    const inspected = await runProcess(
+      'docker',
+      [
+        'container',
+        'inspect',
+        '--size',
+        '--format',
+        '{{.SizeRw}}',
+        containerName,
+      ],
+      {
+        cwd: process.cwd(),
+        capture: true,
+        timeoutMs: 30_000,
+        killGraceMs: 5_000,
+        maxOutputBytes: 1024 * 1024,
+      },
+    );
+    return {
+      exitCode: inspected.result.exitCode,
+      timedOut: inspected.result.timedOut,
+      ...(inspected.stdout === undefined ? {} : { stdout: inspected.stdout }),
+      ...(inspected.stderr === undefined ? {} : { stderr: inspected.stderr }),
+    };
+  },
+);
 
 const CONTAINER_PROCESS_WRAPPER = String.raw`
 pid_file=$1
@@ -159,6 +190,22 @@ home=$1
 owner=$2
 if [ -z "$home" ]; then
   exit 0
+fi
+old_ifs=$IFS
+IFS=:
+read -r task_uid task_gid <<EOF
+$owner
+EOF
+IFS=$old_ifs
+case "$task_uid:$task_gid" in
+  *[!0-9:]*|:*|*:) exit 64 ;;
+esac
+if ! awk -F: -v id="$task_gid" '$3 == id { found=1 } END { exit !found }' /etc/group; then
+  printf 'ello-bench-g%s:x:%s:\n' "$task_gid" "$task_gid" >> /etc/group
+fi
+if ! awk -F: -v id="$task_uid" '$3 == id { found=1 } END { exit !found }' /etc/passwd; then
+  printf 'ello-bench-u%s:x:%s:%s:Ello Bench User:%s:/bin/sh\n' \
+    "$task_uid" "$task_uid" "$task_gid" "$home" >> /etc/passwd
 fi
 mkdir -p -- "$home"
 find "$home" -xdev -type d -exec chown "$owner" {} +
@@ -585,35 +632,7 @@ export async function removeDockerContainer(name: string): Promise<void> {
 export async function dockerContainerWritableBytes(
   name: string,
 ): Promise<number> {
-  const inspected = await runProcess(
-    'docker',
-    ['container', 'inspect', '--size', '--format', '{{.SizeRw}}', name],
-    {
-      cwd: process.cwd(),
-      capture: true,
-      timeoutMs: 30_000,
-      killGraceMs: 5_000,
-      maxOutputBytes: 1024 * 1024,
-    },
-  );
-  if (inspected.result.exitCode !== 0 || inspected.result.timedOut) {
-    if (
-      !inspected.result.timedOut &&
-      inspected.stderr?.includes('No such container')
-    ) {
-      return 0;
-    }
-    throw new Error(
-      `Docker container size inspect failed: ${inspected.stderr ?? ''}`,
-    );
-  }
-  const bytes = Number(inspected.stdout?.trim());
-  if (!Number.isSafeInteger(bytes) || bytes < 0) {
-    throw new Error(
-      `Docker container size inspect returned an invalid value: ${inspected.stdout ?? ''}`,
-    );
-  }
-  return bytes;
+  return dockerWritableLayerInspector.writableBytes(name);
 }
 
 function requiredPath(value: string | undefined, name: string): string {

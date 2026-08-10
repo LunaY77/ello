@@ -28,10 +28,10 @@ export const DEEP_SWE_TASKS: ReadonlyArray<DeepSweTaskDeclaration> = [
   task('abs-stepped-slices', 'go', 'medium-easy'),
   task('yaegi-go-embed-directives', 'go', 'medium-hard'),
   task('dasel-html-document-format', 'go', 'hard'),
-  task('narwhals-rolling-window-suite', 'python', 'easy'),
+  task('cattrs-partial-structuring-recovery', 'python', 'easy'),
   task('numba-stencil-boundary-modes', 'python', 'medium-easy'),
   task('bandit-incremental-cache-control', 'python', 'medium-hard'),
-  task('langchain-request-coalescing', 'python', 'hard'),
+  task('httpx-streaming-json-iteration', 'python', 'hard'),
   task('happy-dom-abort-pending-body-reads', 'typescript', 'easy'),
   task(
     'dynamodb-toolbox-conditional-attribute-requirements',

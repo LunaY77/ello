@@ -169,7 +169,7 @@ describe('permission policy', () => {
     const item: DeferredApprovalItem = {
       kind: 'approval',
       toolCallId: 'call_1',
-      toolName: 'external_api',
+      commandName: 'external_api',
       input: { url: 'https://example.com/a' },
       metadata: {
         permission: 'external_api',
@@ -221,7 +221,7 @@ describe('permission policy', () => {
     const item: DeferredApprovalItem = {
       kind: 'approval',
       toolCallId: 'call_failed_write',
-      toolName: 'bash',
+      commandName: 'bash',
       input: { command: 'pnpm test' },
       metadata: {
         permission: 'bash',

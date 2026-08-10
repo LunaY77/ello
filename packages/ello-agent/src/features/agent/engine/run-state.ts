@@ -29,10 +29,6 @@ import {
   type ModelCompactor,
 } from './events.js';
 import { normalizeInput } from './messages.js';
-import {
-  availableModelInputTokens,
-  type MessageBudgetAnchor,
-} from './model-input.js';
 import type {
   AgentMessage,
   AgentModelResponse,
@@ -52,7 +48,6 @@ import {
   AgentEventStream,
   DEFAULT_AGENT_STREAM_BUFFER_CAPACITY,
 } from './stream.js';
-import { ToolScheduler } from './tool-scheduler.js';
 import { buildToolSet } from './tools.js';
 import type { AgentToolCall } from './tools.js';
 
@@ -199,7 +194,6 @@ export interface RunState {
   readonly ctx: InternalAgentRunContext;
   readonly runControl: AgentRunControl;
   readonly tools: ReturnType<typeof buildToolSet>;
-  readonly toolScheduler: ToolScheduler;
   readonly events: AgentEventDispatcher;
   readonly maxTurns: number | undefined;
   readonly newMessages: AgentMessage[];
@@ -212,8 +206,6 @@ export interface RunState {
   stopReason: LoopStopReason;
   lastTurnNewMessages: AgentMessage[];
   lastTurnResponse: AgentModelResponse | undefined;
-  /** 跨回合共享的前缀锚点，保证 provider 缓存断点下标稳定。 */
-  readonly messageBudgetAnchor: MessageBudgetAnchor;
   readonly compactorState: {
     current: ModelCompactor | undefined;
   };
@@ -288,22 +280,7 @@ export function createRunState(options: {
     state,
     trace,
   };
-  validateToolCollections(
-    options.config.executionTools,
-    options.config.modelTools,
-  );
-  const tools = buildToolSet({ tools: options.config.modelTools });
-  const toolScheduler = new ToolScheduler({
-    runId,
-    turnIndex: () => state.turn,
-    tools: options.config.executionTools,
-    callableToolNames: new Set(
-      options.config.modelTools.map((tool) => tool.name),
-    ),
-    environment: options.environment,
-    metadata,
-    signal: abortController.signal,
-  });
+  const tools = buildToolSet({ tools: [options.config.commandRun.modelTool] });
   const events = new AgentEventDispatcher(options.config, stream, ctx);
   return {
     config: options.config,
@@ -321,7 +298,6 @@ export function createRunState(options: {
     ctx,
     runControl,
     tools,
-    toolScheduler,
     events,
     maxTurns,
     newMessages: [],
@@ -334,7 +310,6 @@ export function createRunState(options: {
     stopReason: 'no-progress',
     lastTurnNewMessages: [],
     lastTurnResponse: undefined,
-    messageBudgetAnchor: { index: 0 },
     compactorState: options.compactorState,
   };
 }
@@ -413,7 +388,8 @@ export async function beginRunTurn(run: RunState): Promise<RunTurn> {
   const sessionCount =
     drained.diagnostics.find((diagnostic) => diagnostic.queue === 'session')
       ?.count ?? 0;
-  run.newMessages.push(...drained.messages.slice(sessionCount));
+  const newMessages = drained.messages.slice(sessionCount);
+  run.newMessages.push(...newMessages);
   run.state.queueDiagnostics.push(...drained.diagnostics);
   run.state.messages.push(...drained.messages);
   for (const diagnostic of drained.diagnostics) {
@@ -422,6 +398,13 @@ export async function beginRunTurn(run: RunState): Promise<RunTurn> {
       runId: run.runId,
       queue: diagnostic.queue,
       count: diagnostic.count,
+    });
+  }
+  if (newMessages.length > 0) {
+    await run.events.emit({
+      type: 'messages.appended',
+      turnIndex,
+      messages: [...newMessages],
     });
   }
   return {
@@ -488,6 +471,13 @@ export async function completeRunTurn(
       newMessageCount: allNewMessages.length,
     }),
   );
+  if (allNewMessages.length > 0) {
+    await run.events.emit({
+      type: 'messages.appended',
+      turnIndex: turn.index,
+      messages: [...allNewMessages],
+    });
+  }
   await run.events.emit({ type: 'turn.completed', turnIndex: turn.index });
 }
 
@@ -648,7 +638,10 @@ function bridgeAbortSignal(
  * Throws:
  * - 压缩预算缺失、报告归属错误或压缩器执行失败时直接抛错。
  */
-export async function compactRunMessages(run: RunState): Promise<boolean> {
+export async function compactRunMessages(
+  run: RunState,
+  force = false,
+): Promise<boolean> {
   const compactor = run.config.compactor;
   if (compactor === undefined) return false;
   const modelInputBudget = run.config.modelInputBudget;
@@ -657,7 +650,8 @@ export async function compactRunMessages(run: RunState): Promise<boolean> {
       'Message compaction requires modelInputBudget.maxInputTokens.',
     );
   }
-  const contextWindow = availableModelInputTokens(modelInputBudget);
+  const contextWindow =
+    modelInputBudget.totalContextTokens ?? modelInputBudget.maxInputTokens;
   const modelCompactor = run.compactorState.current;
   const compactionId = randomUUID();
   let started = false;
@@ -665,6 +659,7 @@ export async function compactRunMessages(run: RunState): Promise<boolean> {
     messages: [...run.state.messages],
     contextWindow,
     signal: run.signal,
+    ...(force ? { force: true } : {}),
     compact: (input) => {
       if (modelCompactor === undefined) {
         throw new Error(
@@ -706,6 +701,7 @@ export async function compactRunMessages(run: RunState): Promise<boolean> {
   if (compacted.usage !== undefined) {
     run.usage = addUsage(run.usage, compacted.usage);
   }
+  const commit = run.options.waitForContextCompactionCommit?.(compactionId);
   await run.events.emit({
     type: 'context.compaction',
     compactionId,
@@ -719,45 +715,8 @@ export async function compactRunMessages(run: RunState): Promise<boolean> {
       ? {}
       : { metadata: compacted.report.metadata }),
   });
+  await commit;
   return true;
-}
-
-function validateToolCollections(
-  executionTools: ReadonlyArray<{ readonly name: string }>,
-  modelTools: ReadonlyArray<{ readonly name: string }>,
-): void {
-  if (executionTools.length === 0 || modelTools.length === 0) {
-    throw new Error('executionTools and modelTools must both be non-empty.');
-  }
-  const executionNames = validateUniqueToolNames(
-    executionTools,
-    'executionTools',
-  );
-  validateUniqueToolNames(modelTools, 'modelTools');
-  for (const tool of modelTools) {
-    if (!executionNames.has(tool.name)) {
-      throw new Error(
-        `Model tool '${tool.name}' is not registered in executionTools.`,
-      );
-    }
-  }
-}
-
-function validateUniqueToolNames(
-  tools: ReadonlyArray<{ readonly name: string }>,
-  collection: string,
-): Set<string> {
-  const names = new Set<string>();
-  for (const tool of tools) {
-    if (tool.name.trim() === '') {
-      throw new Error(`${collection} contains an empty tool name.`);
-    }
-    if (names.has(tool.name)) {
-      throw new Error(`Duplicate tool '${tool.name}' in ${collection}.`);
-    }
-    names.add(tool.name);
-  }
-  return names;
 }
 
 function hasAssistantFinalAnswer(

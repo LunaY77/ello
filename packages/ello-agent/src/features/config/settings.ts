@@ -240,7 +240,8 @@ function writableScopesFor(root: string): readonly ('global' | 'project')[] {
 
 function groupFor(root: string): string {
   if (root === 'agent') return 'Agents';
-  if (root === 'tools' || root === 'tool_output') return 'Tools';
+  if (root === 'commands') return 'Commands';
+  if (root === 'tool_output') return 'Tools';
   if (root === 'context') return 'Context';
   if (root === 'goal') return 'Goal';
   if (root === 'observability') return 'Observability';

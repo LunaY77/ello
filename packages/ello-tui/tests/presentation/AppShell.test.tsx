@@ -5,6 +5,7 @@ import { createFileChange } from '../../src/testing/protocol-fixtures.js';
 import { AppShell } from '../../src/tui/component/AppShell.js';
 import { OverlayHost } from '../../src/tui/component/OverlayHost.js';
 import { TerminalHistoryOutput } from '../../src/tui/component/TerminalHistoryOutput.js';
+import { ToolActivityList } from '../../src/tui/component/ToolActivityList.js';
 import { presenterFor } from '../../src/tui/presenters/index.js';
 import { overlayCallbacks } from '../support/overlay-fixture.js';
 
@@ -214,6 +215,81 @@ describe('TerminalHistoryOutput', () => {
     );
   });
 
+  it('keeps rendering when legacy Command Run history has invalid file changes', () => {
+    const output = renderToString(
+      <TerminalHistoryOutput
+        cwd="/workspace"
+        resetKey={0}
+        settings={DISPLAY_SETTINGS}
+        entries={[
+          {
+            kind: 'command_run',
+            id: 'command-run:legacy-edit',
+            run: {
+              id: 'command-run:legacy-edit',
+              status: 'ok',
+              commands: [
+                {
+                  id: 'command-run:legacy-edit:0',
+                  index: 0,
+                  step: 1,
+                  name: 'apply_patch',
+                  input: { patch: '*** Begin Patch' },
+                  commandStatus: 'completed',
+                  status: 'ok',
+                  output: {
+                    metadata: {
+                      kind: 'edit',
+                      path: 'tool-test.txt',
+                      fileChanges: [
+                        {
+                          kind: 'modified',
+                          path: 'tool-test.txt',
+                          unifiedDiff: '@@ -1 +1 @@\n-old\n+new',
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ]}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('Command Run · ok');
+    expect(output).toContain('Invalid file change metadata; diff unavailable.');
+  });
+
+  it('keeps live tool activity rendering when file changes are invalid', () => {
+    const output = renderToString(
+      <ToolActivityList
+        cwd="/workspace"
+        expanded
+        tools={[
+          {
+            id: 'legacy-edit',
+            name: 'apply_patch',
+            input: { patch: '*** Begin Patch' },
+            status: 'ok',
+            output: {
+              metadata: {
+                kind: 'edit',
+                path: 'tool-test.txt',
+                fileChanges: [{ kind: 'modified', path: 'tool-test.txt' }],
+              },
+            },
+          },
+        ]}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output).toContain('Invalid file change metadata; diff unavailable.');
+  });
+
   it('renders truncated output with one compact artifact line', () => {
     const fullPath =
       '/home/alice/.ello/sessions/31ad2cbd-ebe6-456b-95a0-ae0766c40a2f/artifacts/877233fd-fb27-4dcb-adc3-5918b6a9f7b2/877233fd-fb27-4dcb-adc3-5918b6a9f7b2/read.txt';
@@ -371,7 +447,9 @@ describe('AppShell', () => {
     );
   });
 
-  it('preserves line breaks in live reasoning', () => {
+  it('把多行 reasoning 折叠成单行尾部预览', () => {
+    // 设计稿 §5：reasoning 只在 live 区留单行尾部预览，完整内容进静态历史。
+    // 多行展开会让 dynamic frame 涨到终端高度，触发 Ink 的整屏重绘（闪屏）。
     const output = renderToString(
       <AppShell
         cwd="/workspace"
@@ -388,7 +466,8 @@ describe('AppShell', () => {
       { columns: 100 },
     );
 
-    expect(output).toContain('Thinking: first line\n           second line');
+    expect(output).toContain('Thinking: first line second line');
+    expect(output).not.toContain('\n           second line');
   });
 
   it('does not render blank assistant stream chunks as empty message lines', () => {

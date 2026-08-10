@@ -35,14 +35,14 @@ describe('Langfuse observability config', () => {
     ).toThrow();
   });
 
-  it('rejects an invalid explicit routing switch', () => {
+  it('rejects an invalid tool search result limit', () => {
     expect(() =>
       CodingAgentConfigSchema.parse({
         initial_mode: 'ask-before-changes',
         ...modelConfig(),
-        tools: { routing_enabled: 'yes' },
+        commands: { search: { result_limit: 'many' } },
       }),
-    ).toThrow('expected boolean');
+    ).toThrow('expected number');
   });
 });
 

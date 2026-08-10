@@ -4,6 +4,16 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
+import { z } from 'zod';
+
+import {
+  cliInput,
+  commandInput,
+  createCommandRegistrySnapshot,
+  createCommandRunRuntime,
+  defineCommand,
+  defineCommandModule,
+} from '../../command/index.js';
 import type { CodingAgentConfig } from '../../config/index.js';
 import type { EnvironmentHandle } from '../../environment/index.js';
 import {
@@ -15,10 +25,8 @@ import {
 } from '../../model/index.js';
 import {
   createAgent,
-  defineTool,
   type ModelAdapter,
   type ModelInput,
-  z,
 } from '../engine/index.js';
 
 import type { CodingAgentDefinition } from './schema.js';
@@ -49,14 +57,19 @@ export async function runInternalAgent(input: {
     model,
     input.config.context,
   );
-  const complete = defineTool({
+  const completeInput = z
+    .object({ output: z.string().describe('Completed response payload') })
+    .strict();
+  const complete = defineCommand({
     name: 'internal_complete',
-    description: 'Return a completed internal-agent response payload.',
-    discovery: { aliases: ['complete response'], risk: 'readonly' },
-    input: z
-      .object({ output: z.string().describe('Completed response payload') })
-      .strict(),
-    execute: ({ output }) => output,
+    summary: 'Return a completed internal-agent response payload.',
+    aliases: ['complete response'],
+    risk: 'readonly',
+    invocation: cliInput(commandInput(completeInput), { body: 'output' }),
+    execution: {
+      kind: 'immediate',
+      run: ({ output }) => output,
+    },
   });
   let agent: ReturnType<typeof createAgent> | undefined;
   try {
@@ -74,8 +87,17 @@ export async function runInternalAgent(input: {
       environment: input.environment,
       modelSettings: modelSettingsFromRuntimeModel(model),
       modelInputBudget,
-      executionTools: [complete],
-      modelTools: [complete],
+      commandRun: createCommandRunRuntime(
+        createCommandRegistrySnapshot({
+          modules: [
+            defineCommandModule({
+              id: 'internal',
+              commands: [complete],
+            }),
+          ],
+          search: { resultLimit: 6, maxResultBytes: 24_000 },
+        }),
+      ),
       ...(input.definition.prompt === undefined
         ? {}
         : { instructions: input.definition.prompt }),

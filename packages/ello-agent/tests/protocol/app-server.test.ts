@@ -7,6 +7,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Writable } from 'node:stream';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -41,6 +42,7 @@ describe('AgentServer JSON-RPC processor', () => {
   let configRead: TestConfigReadRoute;
   let transport: TestTransport;
   let connectionTask: Promise<void>;
+  let serverLog: LogSink;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'ello-app-server-'));
@@ -69,10 +71,12 @@ describe('AgentServer JSON-RPC processor', () => {
       // @ts-expect-error -- malformed result is required to exercise wire response validation.
       'config/read': route('read', () => configRead.run()),
     } satisfies RpcApplicationRouteTable;
+    serverLog = new LogSink();
     server = new AgentServer({
       version: '1.0.0',
       transports: ['stdio'],
       routes,
+      stderr: serverLog,
       initialize: async () => {
         await services.initialize();
         await threads.initialize();
@@ -287,7 +291,76 @@ describe('AgentServer JSON-RPC processor', () => {
     });
     await initialize(transport);
   });
+
+  it('连接失败上报致命原因，而不是强制关闭引发的次生错误', async () => {
+    // 强制关闭会 destroy transport 输入，reader 随后以 stream 的 Premature close 结束。
+    // 这条次生错误不能盖掉真正让连接失败的写入错误，否则日志无法定位原因。
+    const failing = new FatalWriteTransport();
+    const failingTask = server.acceptTransport(failing, ['read']);
+
+    await failing.clientSend(request(1, 'initialize', initializeParams()));
+    await failingTask;
+
+    expect(serverLog.entry('connection.failed')?.message).toBe(
+      'Client pipe refused the outbound message.',
+    );
+  });
 });
+
+/** 收集 Server 结构化日志，避免测试把连接失败写到真实 stderr。 */
+class LogSink extends Writable {
+  private readonly lines: string[] = [];
+
+  override _write(
+    chunk: Buffer | string,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.lines.push(chunk.toString());
+    callback();
+  }
+
+  entry(event: string): { readonly message?: string } | undefined {
+    for (const line of this.lines) {
+      const parsed = JSON.parse(line) as {
+        readonly event?: string;
+        readonly message?: string;
+      };
+      if (parsed.event === event) return parsed;
+    }
+    return undefined;
+  }
+}
+
+/** 写入立即失败，随后 messages() 以 stream 次生错误结束，用来观察失败归因。 */
+class FatalWriteTransport implements AppServerTransport {
+  readonly kind = 'stdio' as const;
+  readonly connectionId = 'connection_fatal';
+  private readonly incoming = new MessageQueue();
+  private closed = false;
+
+  async *messages(): AsyncIterable<Uint8Array> {
+    for await (const bytes of this.incoming) yield bytes;
+    if (this.closed) throw new Error('Premature close');
+  }
+
+  send(): Promise<void> {
+    return Promise.reject(
+      new Error('Client pipe refused the outbound message.'),
+    );
+  }
+
+  close(): Promise<void> {
+    this.closed = true;
+    this.incoming.end();
+    return Promise.resolve();
+  }
+
+  clientSend(message: Readonly<Record<string, unknown>>): Promise<void> {
+    this.incoming.push(encoder.encode(JSON.stringify(message)));
+    return Promise.resolve();
+  }
+}
 
 /**
  * 初始化 测试夹具的 `app-server.test` 模块 所需的目录、连接或缓存；完成前不得使用依赖这些资源的操作。

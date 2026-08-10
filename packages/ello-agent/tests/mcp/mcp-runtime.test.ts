@@ -11,10 +11,18 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  createCommandRegistrySnapshot,
+  createCommandRunRuntime,
+  defineCommandModule,
+  type CommandContext,
+  type CommandDefinition,
+  type CommandRunResult,
+} from '../../src/features/command/index.js';
+import {
   McpManager,
   resolveMcpConfigPath,
 } from '../../src/features/mcp/index.js';
-import type { CodingToolContext } from '../../src/features/tool/index.js';
+import type { CommandResult } from '../../src/features/tool/index.js';
 import { createTestEnvironmentHandle } from '../support/environment.js';
 
 const temporaryDirectories: string[] = [];
@@ -57,55 +65,62 @@ describe('MCP 运行时', () => {
     const manager = new McpManager();
     managers.push(manager);
 
-    const tools = await manager.toolsForConfig({
+    const commands = await manager.commandsForConfig({
       cwd: root,
       mcp_config_path: configPath,
     });
-    const secondTools = await manager.toolsForConfig({
+    const secondCommands = await manager.commandsForConfig({
       cwd: root,
       mcp_config_path: configPath,
     });
-    expect(secondTools.map((tool) => tool.name).sort()).toEqual(
-      tools.map((tool) => tool.name).sort(),
+    expect(secondCommands.map((command) => command.name).sort()).toEqual(
+      commands.map((command) => command.name).sort(),
     );
     expect((await readFile(startFile, 'utf8')).trim().split('\n')).toEqual([
       'started',
     ]);
-    expect(tools.map((tool) => tool.name).sort()).toEqual([
+    expect(commands.map((command) => command.name).sort()).toEqual([
       'mcp__local__echo',
       'mcp__local__list_resources',
       'mcp__local__mutate',
       'mcp__local__read_resource',
     ]);
 
-    const echo = requiredTool(tools, 'mcp__local__echo');
-    expect(echo.inputJsonSchema).toMatchObject({
+    const echo = requiredCommand(commands, 'mcp__local__echo');
+    expect(echo.invocation.input.jsonSchema).toMatchObject({
       type: 'object',
       properties: { message: { type: 'string' } },
       required: ['message'],
     });
     await expect(
-      invoke(() =>
-        echo.validateInput?.({ message: 'hello' }, toolContext(root)),
-      ),
-    ).resolves.toBeUndefined();
-    await expect(
-      invoke(() => echo.validateInput?.({}, toolContext(root))),
-    ).rejects.toThrow('Invalid arguments for MCP tool');
-    await expect(
-      invoke(() =>
-        echo.capabilities?.({ message: 'hello' }, toolContext(root)),
-      ),
+      commandEffects(echo, { message: 'hello' }, commandContext(root)),
     ).resolves.toMatchObject({
       concurrencySafe: true,
       readOnly: true,
       destructive: false,
       enabled: true,
     });
-    await expect(
-      echo.execute({ message: 'hello' }, toolContext(root)),
-    ).resolves.toMatchObject({
-      kind: 'coding-tool-result',
+    const invalid = await invokeCommand(commands, 'mcp__local__echo', {}, root);
+    expect(invalid).toMatchObject({
+      status: 'failed',
+      commands: [
+        {
+          name: 'mcp__local__echo',
+          status: 'failed',
+          error: expect.stringContaining('Invalid arguments for MCP tool'),
+        },
+      ],
+    });
+    const echoed = commandOutput(
+      await invokeCommand(
+        commands,
+        'mcp__local__echo',
+        { message: 'hello' },
+        root,
+      ),
+    );
+    expect(echoed).toMatchObject({
+      kind: 'command-result',
       output: `echo:hello:${root}`,
       metadata: {
         kind: 'network',
@@ -114,31 +129,33 @@ describe('MCP 运行时', () => {
       },
     });
 
-    const mutate = requiredTool(tools, 'mcp__local__mutate');
+    const mutate = requiredCommand(commands, 'mcp__local__mutate');
     await expect(
-      invoke(() => mutate.capabilities?.({ value: 'x' }, toolContext(root))),
+      commandEffects(mutate, { value: 'x' }, commandContext(root)),
     ).resolves.toMatchObject({
       concurrencySafe: false,
       readOnly: false,
       destructive: true,
     });
 
-    const listResources = requiredTool(tools, 'mcp__local__list_resources');
-    const listed = await listResources.execute({}, toolContext(root));
+    const listed = commandOutput(
+      await invokeCommand(commands, 'mcp__local__list_resources', {}, root),
+    );
     expect(listed.output).toContain('memo://guide');
 
-    const readResource = requiredTool(tools, 'mcp__local__read_resource');
-    const resource = await readResource.execute(
-      { uri: 'memo://guide' },
-      toolContext(root),
+    const resource = commandOutput(
+      await invokeCommand(
+        commands,
+        'mcp__local__read_resource',
+        { uri: 'memo://guide' },
+        root,
+      ),
     );
     expect(resource.output).toContain('MCP integration guide.');
 
     await manager.close();
     await expect(
-      invoke(() =>
-        echo.capabilities?.({ message: 'hello' }, toolContext(root)),
-      ),
+      commandEffects(echo, { message: 'hello' }, commandContext(root)),
     ).resolves.toMatchObject({ enabled: false });
   });
 
@@ -165,7 +182,7 @@ describe('MCP 运行时', () => {
     const manager = new McpManager();
     managers.push(manager);
     await expect(
-      manager.toolsForConfig({
+      manager.commandsForConfig({
         cwd: root,
         mcp_config_path: relativePath,
       }),
@@ -179,32 +196,93 @@ async function temporaryDirectory(): Promise<string> {
   return directory;
 }
 
-function requiredTool(
-  tools: Awaited<ReturnType<McpManager['toolsForConfig']>>,
+function requiredCommand(
+  commands: Awaited<ReturnType<McpManager['commandsForConfig']>>,
   name: string,
-) {
-  const tool = tools.find((candidate) => candidate.name === name);
-  if (tool === undefined) throw new Error(`Missing MCP tool '${name}'.`);
-  return tool;
+): CommandDefinition {
+  const command = commands.find((candidate) => candidate.name === name);
+  if (command === undefined) throw new Error(`Missing MCP Command '${name}'.`);
+  return command;
 }
 
-function toolContext(root: string): CodingToolContext {
+function commandContext(root: string): CommandContext {
   return {
-    cwd: root,
-    sessionId: 'mcp-session',
     runId: 'mcp-run',
-    callId: 'mcp-call',
-    agent: {
-      runId: 'mcp-run',
-      turnIndex: 0,
-      toolCallId: 'mcp-call',
-      environment: createTestEnvironmentHandle(),
-      metadata: {},
-      signal: new AbortController().signal,
-    },
+    turnIndex: 0,
+    commandId: 'mcp-command',
+    environment: createTestEnvironmentHandle(),
+    metadata: { cwd: root, sessionId: 'mcp-session' },
+    signal: new AbortController().signal,
   };
 }
 
-function invoke<T>(operation: () => T | Promise<T>): Promise<T> {
-  return Promise.resolve().then(operation);
+async function commandEffects(
+  command: CommandDefinition,
+  input: unknown,
+  context: CommandContext,
+) {
+  return typeof command.effects === 'function'
+    ? command.effects(input, context)
+    : command.effects;
+}
+
+async function invokeCommand(
+  commands: readonly CommandDefinition[],
+  name: string,
+  argumentsValue: Record<string, unknown>,
+  root: string,
+): Promise<CommandRunResult> {
+  const runtime = createCommandRunRuntime(
+    createCommandRegistrySnapshot({
+      modules: [defineCommandModule({ id: 'mcp-test', commands })],
+      search: { resultLimit: 10, maxResultBytes: 64_000 },
+    }),
+  );
+  const execution = runtime.start({
+    providerToolCallId: `mcp-${name}`,
+    input: {
+      commands: [
+        {
+          step: 1,
+          command: 'command_invoke',
+          input: { name, arguments: argumentsValue },
+        },
+      ],
+    },
+    context: {
+      runId: 'mcp-run',
+      turnIndex: 0,
+      environment: createTestEnvironmentHandle(),
+      metadata: { cwd: root, sessionId: 'mcp-session' },
+      signal: new AbortController().signal,
+    },
+  });
+  for await (const _event of execution) {
+    // Drain the execution so the result settles.
+  }
+  const transition = await execution.result;
+  if (transition.type !== 'completed') {
+    throw new Error(`MCP Command '${name}' unexpectedly suspended.`);
+  }
+  return transition.result;
+}
+
+function commandOutput(result: CommandRunResult): CommandResult {
+  const output = result.commands[0]?.output;
+  if (!isCommandResult(output)) {
+    throw new Error('MCP Command did not return a CommandResult.');
+  }
+  return output;
+}
+
+function isCommandResult(value: unknown): value is CommandResult {
+  if (typeof value !== 'object' || value === null) return false;
+  const metadata = Reflect.get(value, 'metadata');
+  return (
+    Reflect.get(value, 'kind') === 'command-result' &&
+    typeof Reflect.get(value, 'title') === 'string' &&
+    typeof Reflect.get(value, 'output') === 'string' &&
+    typeof metadata === 'object' &&
+    metadata !== null
+  );
 }

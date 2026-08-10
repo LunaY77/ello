@@ -85,6 +85,8 @@ describe('task container Docker arguments', () => {
     ]);
     expect(args.at(-4)).toContain('find "$home" -xdev -type d');
     expect(args.at(-4)).toContain('! -perm -004');
+    expect(args.at(-4)).toContain('/etc/passwd');
+    expect(args.at(-4)).toContain('/etc/group');
     expect(args.at(-4)).not.toContain('.rustup');
     expect(args.at(-4)).not.toContain('.cargo');
     expect(args.at(-2)).toBe(CONTAINER_HOME);

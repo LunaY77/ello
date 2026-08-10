@@ -4,6 +4,10 @@
  * engine 只依赖本文件中的小型能力接口，不知道 Thread、JSON-RPC、产品配置或持久化实现。
  * 每次 run 拥有独立 context、取消信号和 stream；Environment Handle 由调用方 attach 并由 Agent 关闭。
  */
+import type {
+  CommandRunCheckpoint,
+  CommandRunRuntime,
+} from '../../command/index.js';
 import type { EnvironmentHandle } from '../../environment/index.js';
 
 import type {
@@ -25,7 +29,7 @@ import type {
   ProviderOptionsResolver,
   SystemSection,
 } from './model.js';
-import type { AgentToolCall, AnyAgentTool } from './tools.js';
+import type { AgentToolCall } from './tools.js';
 
 export type AgentInput =
   | string
@@ -47,6 +51,18 @@ export interface AgentRunOptions {
   /** 仅参与当前 run 的 system 输入，不写入 transcript 或后续 session history。 */
   readonly ephemeralInstructions?: string;
   readonly resume?: DeferredRunResults;
+  /**
+   * 等待产品层持久化已完成的 Context Checkpoint；未提供时 engine 只发布事件。
+   *
+   * Args:
+   * - `compactionId`: 当前 run 内唯一的 Context Checkpoint 标识。
+   *
+   * Returns:
+   * - Promise 在产品层 durable commit 完成后兑现；拒绝时禁止下一次 provider call。
+   */
+  readonly waitForContextCompactionCommit?: (
+    compactionId: string,
+  ) => Promise<void>;
 }
 
 export interface Agent {
@@ -223,17 +239,19 @@ export type DeferredRunItem =
 export interface DeferredApprovalItem {
   readonly kind: 'approval';
   readonly toolCallId: string;
-  readonly toolName: string;
+  readonly commandName: string;
   readonly input?: unknown;
   readonly reason?: string;
   readonly metadata?: Record<string, unknown>;
+  readonly commandRunCheckpoint?: CommandRunCheckpoint;
 }
 
 export interface DeferredToolCallItem {
   readonly kind: 'tool-call';
   readonly toolCallId: string;
-  readonly toolName: string;
+  readonly commandName: string;
   readonly input?: unknown;
+  readonly commandRunCheckpoint?: CommandRunCheckpoint;
 }
 
 export interface InterruptedRunItem {
@@ -293,10 +311,8 @@ export interface CreateAgentOptions<TContext = unknown> {
   readonly modelAdapter: ModelAdapter;
   /** 当前 Agent 独占的运行环境；无外部能力时调用方也必须显式传入空环境。 */
   readonly environment: EnvironmentHandle;
-  /** 完整执行注册表；超过直连上限时同时包含目标工具和路由工具。 */
-  readonly executionTools: readonly AnyAgentTool[];
-  /** 模型可见工具集；由产品层决定直接暴露或切换为 tool_search/call_tool。 */
-  readonly modelTools: readonly AnyAgentTool[];
+  /** Agent 唯一执行 seam；provider-visible toolset 固定为其 command_run。 */
+  readonly commandRun: CommandRunRuntime;
   readonly observers?: readonly AgentObserver<TContext>[];
   readonly eventRecorder?: AgentEventRecorder<TContext>;
   readonly stream?: { readonly maxBufferedEvents: number };
@@ -304,8 +320,12 @@ export interface CreateAgentOptions<TContext = unknown> {
   readonly modelCompactor?: ModelCompactor;
   readonly metadata?: Record<string, unknown>;
   readonly modelInputBudget?: {
+    /** 产品可配置的输入上限，已经不超过总窗口减去默认输出保留。 */
     readonly maxInputTokens: number;
-    readonly reservedOutputTokens?: number;
+    /** provider 声明的总上下文窗口。 */
+    readonly totalContextTokens?: number;
+    /** 默认请求保留的最大输出 token。 */
+    readonly maxOutputTokens?: number;
   };
   readonly modelInput?: {
     readonly systemSections?: readonly SystemSection<TContext>[];

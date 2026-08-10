@@ -174,24 +174,21 @@ auxiliary_model: team-anthropic
 
 默认值：
 
-| 配置路径                                    | 默认值    | 用途                      |
-| ------------------------------------------- | --------- | ------------------------- |
-| `context.max_input_tokens`                  | `1000000` | 配置侧输入窗口上限        |
-| `context.reserved_output_tokens`            | `64000`   | 配置侧为输出预留的容量    |
-| `context.compaction.reserved_tokens`        | `16384`   | checkpoint 自动压缩预留量 |
-| `context.compaction.preserve_recent_tokens` | `20000`   | 压缩后近期消息目标量      |
+| 配置路径                                    | 默认值    | 用途                    |
+| ------------------------------------------- | --------- | ----------------------- |
+| `context.max_input_tokens`                  | `1000000` | 配置侧输入窗口上限      |
+| `context.compaction.threshold_percent`      | `90`      | checkpoint 自动压缩水位 |
+| `context.compaction.preserve_recent_tokens` | `20000`   | 压缩后近期消息目标量    |
 
 运行时可用输入容量同时受 model 和 context 配置限制：
 
 ```text
-configured_available = context.max_input_tokens - context.reserved_output_tokens
-model_available = model.context_window - model.max_output_tokens
-available_input = min(configured_available, model_available)
+available_input = min(context.max_input_tokens, model.context_window)
 ```
 
-system prompt、工具定义和消息历史共同消耗 `available_input`。如果 model 的
-`max_output_tokens` 占满 `context_window`，或者 compaction 预留超过有效输入容量，
-配置加载会直接失败。详细裁剪和 checkpoint 行为见
+system prompt、工具定义和消息历史共同消耗 `available_input`。消息历史估算达到
+`available_input * threshold_percent / 100` 时自动生成 checkpoint。
+`max_output_tokens` 只控制生成输出，不参与输入容量或压缩水位计算。详细裁剪和 checkpoint 行为见
 [Compact](../compact/README.md)。
 
 ## 配置文件与作用域
@@ -259,11 +256,9 @@ tools:
     - web_fetch
   need_approval:
     - bash
-  routing_enabled: false
 
 context:
   max_input_tokens: 1000000
-  reserved_output_tokens: 64000
   instructions:
     project:
       - AGENTS.md
@@ -320,8 +315,8 @@ Config RPC 会先构造候选配置并完成校验，再通过同目录临时文
 | `Project config must not define models`         | 把模型目录移到全局 `~/.ello/config.yaml`                |
 | `references unknown model`                      | 两个 model 引用必须匹配 `models` 下的名称               |
 | `Required model credential is missing or empty` | App Server 环境中存在 `api_key_env` 指定的变量          |
-| `max_output_tokens` 校验失败                    | 该值不能超过 `context_window`，并且必须留下正输入容量   |
-| compaction `reserved_tokens` 校验失败           | 该值必须小于选中 model 的有效输入容量                   |
+| `max_output_tokens` 校验失败                    | 该值不能超过 `context_window`                           |
+| compaction `threshold_percent` 校验失败         | 该值必须大于 `0` 且不超过 `100`                         |
 | `bypass_enabled must be true`                   | 开启安全闸门，或改用其他 `initial_mode`                 |
 
 `~/.ello/mcp.json` 单独保存 MCP Server 配置。配置格式、工具命名、资源读取和连接生命周期见

@@ -5,12 +5,12 @@ import {
   NormalizedAgentEvidenceSchema,
   PhaseTimingsArtifactSchema,
   RoundSchema,
-  RunManifestSchema,
-  SuiteManifestSchema,
+  RunArtifactManifestSchema,
+  SuiteArtifactManifestSchema,
   ToolAuditSchema,
   type CompleteUsageEvidence,
   type NormalizedAgentEvidence,
-  type RunManifest,
+  type RunArtifactManifest,
   type SuiteReport,
   type UsageEvidence,
 } from '../../domain/contract/index.js';
@@ -22,6 +22,7 @@ import {
 import { claudeCodeBaseUrlIssue } from '../agent/claude-code/base-url.js';
 import { diagnoseClaudeCodeProviderFailure } from '../agent/claude-code/parser.js';
 import { readJsonFile, writeJsonAtomic } from '../io.js';
+import { normalizeEventCaptureSource } from '../rounds.js';
 
 export async function generateSuiteReport(
   runRootInput: string,
@@ -71,7 +72,7 @@ export async function calculateSuiteReport(
   const runRoot = path.resolve(runRootInput);
   const suite = await readJsonFile(
     path.join(runRoot, 'suite-manifest.json'),
-    SuiteManifestSchema,
+    SuiteArtifactManifestSchema,
   );
   const { allAttempts, finalAttempts } = await readAttempts(suite.attempts);
   const completed = finalAttempts.filter(
@@ -87,6 +88,7 @@ export async function calculateSuiteReport(
         taskId: attempt.job.taskId,
         agentId: attempt.job.agentId,
         failure: await reportedFailure(attempt),
+        ...(await loadInvalidPartialEvidence(attempt)),
       })),
   );
   return buildSuiteReport({
@@ -98,9 +100,93 @@ export async function calculateSuiteReport(
   });
 }
 
+async function loadInvalidPartialEvidence(
+  attempt: RunArtifactManifest,
+): Promise<Pick<SuiteReport['invalidLedger'][number], 'partialEvidence'>> {
+  if (attempt.agent?.kind !== 'ello' || attempt.agentEvidence === undefined) {
+    return {};
+  }
+  const evidenceContent = await readFile(attempt.agentEvidence.path);
+  if (sha256(evidenceContent) !== attempt.agentEvidence.sha256) {
+    throw new Error(`Agent evidence checksum mismatch: ${attempt.attemptId}`);
+  }
+  const evidence = NormalizedAgentEvidenceSchema.parse(
+    JSON.parse(evidenceContent.toString('utf8')) as unknown,
+  );
+  const rawContent = await readFile(evidence.rawSource.path);
+  if (sha256(rawContent) !== evidence.rawSource.sha256) {
+    throw new Error(
+      `Agent raw evidence checksum mismatch: ${attempt.attemptId}`,
+    );
+  }
+  const normalized = normalizeEventCaptureSource(
+    rawContent.toString('utf8'),
+    true,
+  );
+  const completeRounds = normalized.rounds.filter(
+    (round) => round.usage.status === 'complete',
+  );
+  const usage = completeRounds.reduce(
+    (total, round) => {
+      if (round.usage.status !== 'complete') return total;
+      return {
+        inputTokens: total.inputTokens + round.usage.inputTokens,
+        outputTokens: total.outputTokens + round.usage.outputTokens,
+        cacheReadTokens: addPartialTokens(
+          total.cacheReadTokens,
+          round.usage.cacheReadTokens,
+        ),
+        cacheWriteTokens: addPartialTokens(
+          total.cacheWriteTokens,
+          round.usage.cacheWriteTokens,
+        ),
+      };
+    },
+    {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0 as number | null,
+      cacheWriteTokens: 0 as number | null,
+    },
+  );
+  return {
+    partialEvidence: {
+      elapsedMs: requiredClient(attempt).durationMs,
+      rounds: {
+        observed: normalized.rounds.length,
+        completed: normalized.rounds.filter(
+          (round) => round.status === 'completed',
+        ).length,
+        failed: normalized.rounds.filter((round) => round.status === 'failed')
+          .length,
+        incomplete: normalized.rounds.filter(
+          (round) => round.status === 'incomplete',
+        ).length,
+      },
+      tools: {
+        observed: normalized.tools.length,
+        failed: normalized.tools.filter((tool) => tool.status === 'failed')
+          .length,
+      },
+      usage: {
+        completeRounds: completeRounds.length,
+        unavailableRounds: normalized.rounds.length - completeRounds.length,
+        ...usage,
+      },
+    },
+  };
+}
+
+function addPartialTokens(
+  total: number | null,
+  value: number | null,
+): number | null {
+  return total === null || value === null ? null : total + value;
+}
+
 async function reportedFailure(
-  run: RunManifest,
-): Promise<NonNullable<RunManifest['failure']>> {
+  run: RunArtifactManifest,
+): Promise<NonNullable<RunArtifactManifest['failure']>> {
   const failure = requiredFailure(run);
   if (failure.kind !== 'provider') return failure;
   if (run.agent?.kind !== 'claude-code') return failure;
@@ -122,7 +208,7 @@ async function reportedFailure(
 }
 
 async function loadMetrics(
-  attempts: readonly RunManifest[],
+  attempts: readonly RunArtifactManifest[],
 ): Promise<Map<string, AttemptMetrics>> {
   const metrics = new Map<string, AttemptMetrics>();
   for (const attempt of attempts) {
@@ -350,19 +436,36 @@ function isOptionalNonnegativeInteger(
   return value === undefined || isNonnegativeInteger(value);
 }
 
+/**
+ * 一个 job 的权威判决是「最后一个 completed 的 attempt」，而不是数组末位。
+ *
+ * 被中断的 attempt 事后被收割成 completed 时，它会排在后来那些 invalid 的重试
+ * 前面；只看末位会把明明已经有判决的 job 记成 infra 失败，把 reward 丢掉。取
+ * 最后一个 completed 同时保住「后面的完整重跑覆盖前面的」语义。
+ */
+export function selectAuthoritativeAttempt<
+  T extends { readonly status: string },
+>(attempts: readonly T[]): T | undefined {
+  for (let index = attempts.length - 1; index >= 0; index -= 1) {
+    const attempt = attempts[index];
+    if (attempt?.status === 'completed') return attempt;
+  }
+  return attempts.at(-1);
+}
+
 async function readAttempts(
   attemptsByJob: Readonly<Record<string, readonly string[]>>,
 ): Promise<{
-  readonly allAttempts: RunManifest[];
-  readonly finalAttempts: RunManifest[];
+  readonly allAttempts: RunArtifactManifest[];
+  readonly finalAttempts: RunArtifactManifest[];
 }> {
-  const allAttempts: RunManifest[] = [];
-  const finalAttempts: RunManifest[] = [];
+  const allAttempts: RunArtifactManifest[] = [];
+  const finalAttempts: RunArtifactManifest[] = [];
   for (const attemptPaths of Object.values(attemptsByJob)) {
     if (attemptPaths.length === 0) continue;
     const attempts = await Promise.all(
       attemptPaths.map((attemptPath) =>
-        readJsonFile(attemptPath, RunManifestSchema),
+        readJsonFile(attemptPath, RunArtifactManifestSchema),
       ),
     );
     for (const attempt of attempts) {
@@ -374,7 +477,7 @@ async function readAttempts(
       }
     }
     allAttempts.push(...attempts);
-    const finalAttempt = attempts.at(-1);
+    const finalAttempt = selectAuthoritativeAttempt(attempts);
     if (finalAttempt === undefined) {
       throw new Error('Final attempt is missing.');
     }
@@ -390,7 +493,9 @@ function parseRoundLines(source: string) {
     .map((line) => RoundSchema.parse(JSON.parse(line) as unknown));
 }
 
-function requiredClient(run: RunManifest): NonNullable<RunManifest['client']> {
+function requiredClient(
+  run: RunArtifactManifest,
+): NonNullable<RunArtifactManifest['client']> {
   if (run.client === undefined) {
     throw new Error(`Missing client: ${run.attemptId}`);
   }
@@ -398,8 +503,8 @@ function requiredClient(run: RunManifest): NonNullable<RunManifest['client']> {
 }
 
 function requiredFailure(
-  run: RunManifest,
-): NonNullable<RunManifest['failure']> {
+  run: RunArtifactManifest,
+): NonNullable<RunArtifactManifest['failure']> {
   if (run.failure === undefined) {
     throw new Error(`Missing failure: ${run.attemptId}`);
   }
@@ -409,7 +514,7 @@ function requiredFailure(
 function requiredPath(
   value: string | undefined,
   subject: string,
-  run: RunManifest,
+  run: RunArtifactManifest,
 ): string {
   if (value === undefined) {
     throw new Error(`Missing ${subject}: ${run.attemptId}`);
@@ -420,7 +525,7 @@ function requiredPath(
 function requiredReference(
   value: { readonly path: string; readonly sha256: string } | undefined,
   subject: string,
-  run: RunManifest,
+  run: RunArtifactManifest,
 ): { readonly path: string; readonly sha256: string } {
   if (value === undefined) {
     throw new Error(`Missing ${subject}: ${run.attemptId}`);

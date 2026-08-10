@@ -132,6 +132,148 @@ export const ToolCallItemSchema = z
   })
   .strict();
 
+export const CommandRunCommandSchema = z
+  .object({
+    commandId: OpaqueIdSchema,
+    index: NonNegativeIntegerSchema,
+    step: z.number().int().positive(),
+    name: z.string().min(1),
+    input: JsonValueSchema,
+    inputDigest: z.string().regex(/^[a-f\d]{64}$/u),
+    status: z.enum([
+      'pending',
+      'running',
+      'completed',
+      'failed',
+      'denied',
+      'blocked',
+      'deferred',
+      'interrupted',
+    ]),
+    output: JsonValueSchema.optional(),
+    error: z.string().min(1).optional(),
+    blockedBy: OpaqueIdSchema.optional(),
+    startedAt: IsoDateTimeSchema.optional(),
+    completedAt: IsoDateTimeSchema.optional(),
+    metadata: z.record(z.string(), JsonValueSchema).optional(),
+    approval: z
+      .object({
+        status: z.enum(['required', 'approved', 'denied']),
+        reason: z.string().optional(),
+        metadata: z.record(z.string(), JsonValueSchema).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export const CommandRunCheckpointSchema = z
+  .object({
+    schema: z.literal(1),
+    commandRunId: OpaqueIdSchema,
+    providerToolCallId: OpaqueIdSchema,
+    inputDigest: z.string().regex(/^[a-f\d]{64}$/u),
+    catalogRevision: z.string().regex(/^[a-f\d]{64}$/u),
+    compiledFrames: z
+      .array(
+        z
+          .object({
+            index: NonNegativeIntegerSchema,
+            step: z.number().int().positive(),
+            command: z.string().min(1),
+            input: JsonValueSchema,
+            inputDigest: z.string().regex(/^[a-f\d]{64}$/u),
+            commandId: OpaqueIdSchema,
+            onFailure: z.enum(['stop', 'diagnose', 'continue']),
+          })
+          .strict(),
+      )
+      .readonly(),
+    results: z
+      .array(
+        z
+          .object({
+            commandRunId: OpaqueIdSchema,
+            commandId: OpaqueIdSchema,
+            index: NonNegativeIntegerSchema,
+            step: z.number().int().positive(),
+            name: z.string().min(1),
+            input: JsonValueSchema,
+            inputDigest: z.string().regex(/^[a-f\d]{64}$/u),
+            status: z.enum([
+              'pending',
+              'running',
+              'completed',
+              'failed',
+              'denied',
+              'blocked',
+              'deferred',
+              'interrupted',
+            ]),
+            output: JsonValueSchema.optional(),
+            error: z.string().min(1).optional(),
+            blockedBy: OpaqueIdSchema.optional(),
+            startedAt: IsoDateTimeSchema.optional(),
+            completedAt: IsoDateTimeSchema.optional(),
+            metadata: z.record(z.string(), JsonValueSchema).optional(),
+            approval: z
+              .object({
+                status: z.enum(['approved', 'denied']),
+                reason: z.string().optional(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict(),
+      )
+      .readonly(),
+    phaseCursor: NonNegativeIntegerSchema,
+    barrier: z
+      .object({
+        step: z.number().int().positive(),
+        commandId: OpaqueIdSchema,
+        commandName: z.string().min(1),
+        status: z.enum(['failed', 'denied']),
+      })
+      .strict()
+      .optional(),
+    approvals: z
+      .array(
+        z
+          .object({
+            commandId: OpaqueIdSchema,
+            command: z.string().min(1),
+            inputDigest: z.string().regex(/^[a-f\d]{64}$/u),
+            catalogRevision: z.string().regex(/^[a-f\d]{64}$/u),
+            decision: z.enum(['approved', 'denied']),
+            reason: z.string().optional(),
+          })
+          .strict(),
+      )
+      .readonly(),
+    pendingCommandIds: z.array(OpaqueIdSchema).readonly(),
+    pendingKind: z.enum(['approval', 'deferred']),
+  })
+  .strict();
+
+export const CommandRunItemSchema = z
+  .object({
+    ...ItemBaseShape,
+    type: z.literal('commandRun'),
+    providerToolCallId: OpaqueIdSchema,
+    status: z.enum([
+      'inProgress',
+      'completed',
+      'failed',
+      'denied',
+      'interrupted',
+    ]),
+    commands: z.array(CommandRunCommandSchema).readonly(),
+    checkpoint: CommandRunCheckpointSchema.optional(),
+    error: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const SubagentItemSchema = z
   .object({
     ...ItemBaseShape,
@@ -183,6 +325,7 @@ export const ThreadItemSchema = z.discriminatedUnion('type', [
   CommandExecutionItemSchema,
   FileChangeItemSchema,
   ToolCallItemSchema,
+  CommandRunItemSchema,
   SubagentItemSchema,
   ContextCompactionItemSchema,
   NoticeItemSchema,
@@ -224,6 +367,7 @@ export const PendingServerRequestSchema = z
     threadId: OpaqueIdSchema,
     turnId: OpaqueIdSchema,
     itemId: OpaqueIdSchema,
+    commandId: OpaqueIdSchema.optional(),
     params: z.record(z.string(), JsonValueSchema),
     createdAt: IsoDateTimeSchema,
   })

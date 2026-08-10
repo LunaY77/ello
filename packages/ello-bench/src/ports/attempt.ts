@@ -19,6 +19,7 @@ export interface AttemptPaths {
   readonly taskInstruction: string;
   readonly resolvedTask: string;
   readonly harnessRoot: string;
+  readonly baselineHarnessRoot: string;
   readonly phaseTimings: string;
   readonly patch: string;
   readonly gitStatus: string;
@@ -52,6 +53,10 @@ export interface WorkspaceRuntime {
     readonly taskFiles: ResolvedTaskFiles;
     readonly pullPolicy: PullPolicy;
   }): Promise<PreparedWorkspace>;
+  cleanup(options: {
+    readonly attemptRoot: string;
+    readonly workspace: string;
+  }): Promise<void>;
 }
 
 export interface PatchCapture {

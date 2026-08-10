@@ -1,4 +1,4 @@
-import { copyFile } from 'node:fs/promises';
+import { copyFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { PatchArtifact } from '../../domain/contract/index.js';
@@ -23,10 +23,56 @@ export interface PreparedVerifierWorkspace {
   readonly logs: string;
   readonly artifacts: string;
   readonly verifierOutput: string;
+  readonly inputPatchPath: string;
   readonly appliedPatchSha256: string;
   readonly hiddenPatchChangedFiles: readonly string[];
   readonly patchConflictFiles: readonly string[];
   readonly imageId: string;
+}
+
+export interface PreparedBaselineVerifierWorkspace {
+  readonly harnessRoot: string;
+  readonly workspace: string;
+  readonly tests: string;
+  readonly logs: string;
+  readonly imageId: string;
+}
+
+export async function prepareBaselineVerifierWorkspace(options: {
+  readonly attemptId: string;
+  readonly harnessRoot: string;
+  readonly taskFiles: ResolvedTaskFiles;
+  readonly baselineTree: string;
+}): Promise<PreparedBaselineVerifierWorkspace> {
+  const task = options.taskFiles.task;
+  const harnessRoot = path.resolve(options.harnessRoot);
+  const workspace = path.join(harnessRoot, 'workspace');
+  const tests = path.join(harnessRoot, 'tests');
+  const logs = path.join(harnessRoot, 'logs');
+  await Promise.all(
+    [tests, path.join(logs, 'verifier')].map(ensureEmptyDirectory),
+  );
+  const suite = getBenchmarkSuiteForTask(task.benchmark);
+  await suite.stageVerifier(options.taskFiles, tests);
+  const imageId = await extractImageWorkspace({
+    containerName: `ello-bench-${options.attemptId}-baseline-seed`,
+    image: task.environment.image,
+    workspace,
+    timeoutMs: task.environment.buildTimeoutMs,
+  });
+  await suite.prepareWorkspace(workspace, options.taskFiles, 'image');
+  await assertGitHead(
+    workspace,
+    task.baseCommitHash,
+    'Baseline verifier image',
+  );
+  const baselineTree = await captureBaselineTree(workspace);
+  if (baselineTree !== options.baselineTree) {
+    throw new Error(
+      `Baseline preflight tree mismatch: ${baselineTree} versus ${options.baselineTree}.`,
+    );
+  }
+  return { harnessRoot, workspace, tests, logs, imageId };
 }
 
 export async function prepareVerifierWorkspace(options: {
@@ -111,9 +157,32 @@ export async function prepareVerifierWorkspace(options: {
     logs,
     artifacts,
     verifierOutput,
+    inputPatchPath,
     appliedPatchSha256,
     hiddenPatchChangedFiles,
     patchConflictFiles,
     imageId,
   } as const;
+}
+
+export async function sealVerifierPatchArtifact(options: {
+  readonly inputPatchPath: string;
+  readonly artifactPatchPath: string;
+  readonly expectedSha256: string;
+}): Promise<string> {
+  const input = await readFile(options.inputPatchPath);
+  const inputSha256 = sha256(input);
+  if (inputSha256 !== options.expectedSha256) {
+    throw new Error(
+      `Frozen model patch checksum mismatch: ${inputSha256} versus ${options.expectedSha256}.`,
+    );
+  }
+  await copyFile(options.inputPatchPath, options.artifactPatchPath);
+  const capturedSha256 = sha256(await readFile(options.artifactPatchPath));
+  if (capturedSha256 !== options.expectedSha256) {
+    throw new Error(
+      `Sealed model patch checksum mismatch: ${capturedSha256} versus ${options.expectedSha256}.`,
+    );
+  }
+  return capturedSha256;
 }

@@ -45,7 +45,7 @@ ello --root /path/to/project
 
 ello 会启动本地 App Server 并创建一个 Thread。Provider、Model 和 Profile 的配置方式见
 [配置系统](../config/README.md)。源码仓库的完整安装命令见
-[项目快速开始](../../README-zh.md#快速开始)。
+[项目快速开始](../../README.md#快速开始)。
 
 TUI 需要交互式终端。标准输入或标准输出连接到管道时，`ello` 显示 CLI 帮助；自动化场景
 可以使用 `ello --no-tui run "<prompt>"`。

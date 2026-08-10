@@ -4,10 +4,9 @@ description: Fast read-only codebase exploration — locate files, trace call pa
 mode: subagent
 model: auxiliary_model
 max-turns: -1
-tools:
+commands:
   - read
-  - grep
-  - glob
+  - search
   - bash
 ---
 

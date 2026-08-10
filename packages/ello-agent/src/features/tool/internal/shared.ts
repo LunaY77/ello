@@ -4,7 +4,7 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
-import type { AgentToolContext } from '../../agent/engine/index.js';
+import type { CommandContext } from '../../command/index.js';
 import type {
   EnvironmentFileStat,
   EnvironmentFileSystem,
@@ -86,7 +86,7 @@ export function truncationMarker(omittedBytes: number): string {
  * - 返回 `requireFs` 计算出的声明结果；返回值不包含未声明的兜底状态。
  *
  */
-export function requireFs(ctx: AgentToolContext): EnvironmentFileSystem {
+export function requireFs(ctx: CommandContext): EnvironmentFileSystem {
   return ctx.environment.fileSystem;
 }
 
@@ -100,7 +100,7 @@ export function requireFs(ctx: AgentToolContext): EnvironmentFileSystem {
  * - 返回统一的前台与受管进程接口。
  *
  */
-export function requireProcesses(ctx: AgentToolContext): EnvironmentProcesses {
+export function requireProcesses(ctx: CommandContext): EnvironmentProcesses {
   return ctx.environment.processes;
 }
 

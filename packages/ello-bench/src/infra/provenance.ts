@@ -27,7 +27,6 @@ const GIT_OPTIONS = {
 interface BuildInputs {
   readonly revision: string;
   readonly sourceTree: string;
-  readonly status: string;
   readonly lockfileSha256: string;
   readonly pnpmVersion: string;
   readonly packageVersions: {
@@ -41,9 +40,6 @@ export async function collectRunProvenance(
   requireEllo: boolean,
 ): Promise<RunProvenance> {
   const inputs = await readBuildInputs();
-  if (inputs.status !== '') {
-    throw new Error('Benchmark execution requires a clean Ello worktree.');
-  }
   return RunProvenanceSchema.parse({
     elloRevision: inputs.revision,
     sourceTree: inputs.sourceTree,
@@ -60,7 +56,7 @@ export async function collectRunProvenance(
 }
 
 async function readBuildInputs(): Promise<BuildInputs> {
-  const [revision, sourceTree, pnpm, lockfile, agent, tui, bench, status] =
+  const [revision, sourceTree, pnpm, lockfile, agent, tui, bench] =
     await Promise.all([
       runChecked('git', ['rev-parse', 'HEAD'], {
         cwd: REPOSITORY_ROOT,
@@ -78,10 +74,6 @@ async function readBuildInputs(): Promise<BuildInputs> {
       readPackageVersion('ello-agent'),
       readPackageVersion('ello-tui'),
       readPackageVersion('ello-bench'),
-      runChecked('git', ['status', '--porcelain'], {
-        cwd: REPOSITORY_ROOT,
-        ...GIT_OPTIONS,
-      }),
     ]);
   return {
     revision: revision.stdout.trim(),
@@ -89,7 +81,6 @@ async function readBuildInputs(): Promise<BuildInputs> {
     lockfileSha256: sha256(lockfile),
     pnpmVersion: pnpm.stdout.trim(),
     packageVersions: { agent, tui, bench },
-    status: status.stdout,
   };
 }
 

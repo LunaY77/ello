@@ -18,12 +18,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
 
 import {
-  defineTool,
-  type AgentToolContext,
-} from '../../src/features/agent/engine/index.js';
+  createCommandRegistrySnapshot,
+  createCommandRunRuntime,
+  defineCommandModule,
+  type CommandContext,
+  type CommandDefinition,
+} from '../../src/features/command/index.js';
 import {
   CodingAgentConfigSchema,
   type CodingAgentConfig,
@@ -31,33 +33,25 @@ import {
 import type {
   EnvironmentFileSystem,
   EnvironmentProcesses,
-  ExecResult,
 } from '../../src/features/environment/index.js';
+import { createTaskService } from '../../src/features/task/index.js';
 import {
-  AgentWorkflowState,
-  CodingToolExecutionError,
-  createCodingToolResult,
-  ToolFailureTracker,
+  CommandExecutionError,
+  CommandFailureTracker,
 } from '../../src/features/tool/index.js';
 import {
   parseApplyPatch,
   prepareApplyPatch,
 } from '../../src/features/tool/internal/apply-patch.js';
-import { projectToolEvent } from '../../src/features/tool/internal/event-projection.js';
-import { createFsTools } from '../../src/features/tool/internal/fs.js';
-import {
-  createCallTool,
-  createMetaToolRuntime,
-  createToolSearchTool,
-} from '../../src/features/tool/internal/meta-tools.js';
-import { createProductionToolRuntime } from '../../src/features/tool/internal/production.js';
-import type { CodingToolContext } from '../../src/features/tool/internal/runtime/coding-tool.js';
+import { createFsCommands } from '../../src/features/tool/internal/fs.js';
+import { createProductionCommandRuntime } from '../../src/features/tool/internal/production.js';
+import type { CommandResult } from '../../src/features/tool/internal/runtime/command-result.js';
 import { SessionFileState } from '../../src/features/tool/internal/runtime/file-state.js';
-import { createToolSearchIndex } from '../../src/features/tool/internal/search-index.js';
+import { persistLargeOutput } from '../../src/features/tool/internal/runtime/output-store.js';
 import type { SearchProvider } from '../../src/features/tool/internal/search-provider.js';
-import { createSearchTools } from '../../src/features/tool/internal/search.js';
-import { createShellTools } from '../../src/features/tool/internal/shell.js';
-import { createWorkspaceSnapshotTools } from '../../src/features/tool/internal/workspace-snapshot.js';
+import { createSearchCommands } from '../../src/features/tool/internal/search.js';
+import { createShellCommands } from '../../src/features/tool/internal/shell.js';
+import { createTaskCommands } from '../../src/features/tool/internal/task.js';
 import { makeApprovalPolicy } from '../../src/features/tool/permissions/policy.js';
 import { createTestEnvironmentHandle } from '../support/environment.js';
 import { createTestStores } from '../support/stores.js';
@@ -105,7 +99,7 @@ describe('Environment 进程能力边界', () => {
     });
     const stores = createTestStores({ databasePath: ':memory:' });
     try {
-      const runtime = createProductionToolRuntime({
+      const runtime = createProductionCommandRuntime({
         config,
         taskBoards: stores.taskBoards,
         taskBoardScope: { type: 'session', sessionId: 'process-boundary' },
@@ -116,11 +110,106 @@ describe('Environment 进程能力边界', () => {
           changedAt: '2026-08-01T00:00:00.000Z',
         }),
       });
-      const toolNames = runtime.tools.map((tool) => tool.name);
+      const toolNames = runtime.module.commands.map((command) => command.name);
 
       expect(toolNames).toContain('bash');
-      expect(toolNames).toContain('test');
+      expect(toolNames).not.toContain('test');
+      expect(toolNames).not.toContain('workspace_snapshot');
       expect(toolNames).not.toContain('process');
+    } finally {
+      stores.close();
+    }
+  });
+});
+
+describe('Command Run 工具说明', () => {
+  it('从生产 Command 定义自动渲染可直接调用的 Frame 示例', () => {
+    const commands = [
+      ...createFsCommands({} as CodingAgentConfig, () => 'auto'),
+      ...createSearchCommands({} as CodingAgentConfig, () => 'auto'),
+      ...createShellCommands({} as CodingAgentConfig, () => 'auto'),
+    ];
+    const runtime = createCommandRunRuntime(
+      createCommandRegistrySnapshot({
+        modules: [defineCommandModule({ id: 'example-test', commands })],
+        search: { resultLimit: 6, maxResultBytes: 24_000 },
+      }),
+    );
+
+    expect(runtime.modelTool.description).toContain(
+      '  Batch: {"commands":[{"step":1,"command":"read","args":["README.md","--limit","80"]},{"step":2,"command":"write","args":["notes.txt"],"body":"First line\\n"}]}',
+    );
+    expect(runtime.modelTool.description).toContain(
+      '  Object arguments: {"step":1,"command":"command_invoke","input":{"name":"<command_search result>","arguments":{}}}',
+    );
+    expect(
+      runtime.modelTool.input.safeParse({
+        commands: [
+          { step: 1, command: 'read', args: ['README.md', '--limit', '80'] },
+          {
+            step: 2,
+            command: 'write',
+            args: ['notes.txt'],
+            body: 'First line\n',
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('核心命令不再引用已移除的直接工具或旧的模型响应并发语义', () => {
+    const descriptions = new Map(
+      [
+        ...createFsCommands({} as CodingAgentConfig, () => 'auto'),
+        ...createSearchCommands({} as CodingAgentConfig, () => 'auto'),
+        ...createShellCommands({} as CodingAgentConfig, () => 'auto'),
+      ].map((command) => [
+        command.name,
+        [command.summary, command.details]
+          .filter((value): value is string => value !== undefined)
+          .join(' '),
+      ]),
+    );
+
+    for (const name of ['read', 'write', 'apply_patch', 'bash']) {
+      const description = descriptions.get(name);
+      if (description === undefined) throw new Error(`Missing ${name} tool.`);
+      expect(description).not.toContain('edit');
+      expect(description).not.toContain('grep');
+      expect(description).not.toContain('glob');
+      expect(description).not.toContain('model response');
+    }
+    expect(descriptions.get('write')).toContain('STALE_WRITE');
+    expect(descriptions.get('apply_patch')).toContain('*** Begin Patch');
+    expect(descriptions.get('search')).toContain('Unicode regular expression');
+    expect(descriptions.get('search')).not.toContain('model response');
+  });
+});
+
+describe('Task Command 命名空间', () => {
+  it('持久任务 Command 收到子代理 job id 时指向正确的控制 Command', async () => {
+    const root = await temporaryDirectory('ello-task-command-namespace-');
+    const stores = createTestStores({ databasePath: ':memory:' });
+    try {
+      const taskGet = codingCommand(
+        createTaskCommands(
+          () => () => 'auto',
+          createTaskService(stores.taskBoards, {
+            type: 'session',
+            sessionId: 'namespace-test',
+          }),
+        ),
+        'task_get',
+      );
+
+      await expect(
+        taskGet.execute(
+          { id: 'job_c260a350714844dd9d65d353d0c13b37' },
+          toolContext(root, noNativeProcesses()),
+        ),
+      ).rejects.toThrow(
+        'This is a subagent task ID; use task_output to read it or task_stop to stop it.',
+      );
     } finally {
       stores.close();
     }
@@ -401,19 +490,14 @@ describe('读取工具契约', () => {
     await writeFile(targetPath, 'first\nsecond\n', 'utf8');
     const initialVersion = await stat(targetPath);
     const fileState = new SessionFileState();
-    const read = createFsTools(
-      {} as CodingAgentConfig,
-      () => 'auto',
-      fileState,
-    ).find((candidate) => candidate.name === 'read');
-    if (read === undefined) throw new Error('read tool missing');
-    const nextRunRead = createFsTools(
-      {} as CodingAgentConfig,
-      () => 'auto',
-      fileState,
-    ).find((candidate) => candidate.name === 'read');
-    if (nextRunRead === undefined)
-      throw new Error('next run read tool missing');
+    const read = codingCommand(
+      createFsCommands({} as CodingAgentConfig, () => 'auto', fileState),
+      'read',
+    );
+    const nextRunRead = codingCommand(
+      createFsCommands({} as CodingAgentConfig, () => 'auto', fileState),
+      'read',
+    );
     const context = searchContext(root);
     const input = { filePath: 'a.txt', offset: 1, limit: 10 };
 
@@ -442,10 +526,10 @@ describe('读取工具契约', () => {
       (_, index) => `${String(index).padStart(4, '0')} ${'x'.repeat(40)}`,
     ).join('\n');
     await writeFile(path.join(root, 'large.txt'), source, 'utf8');
-    const read = createFsTools({} as CodingAgentConfig, () => 'auto').find(
-      (candidate) => candidate.name === 'read',
+    const read = codingCommand(
+      createFsCommands({} as CodingAgentConfig, () => 'auto'),
+      'read',
     );
-    if (read === undefined) throw new Error('read tool missing');
 
     const result = await read.execute(
       { filePath: 'large.txt', offset: 1, limit: 500 },
@@ -454,6 +538,35 @@ describe('读取工具契约', () => {
 
     expect(result.output.length).toBeGreaterThan(12_000);
     expect(result.output).toContain('[Read lines 1-500 of 500.]');
+  });
+});
+
+describe('Command 输出预算', () => {
+  it('按 byte budget 截断超长单行并把完整输出写入 artifact', async () => {
+    const output = 'x'.repeat(64 * 1024);
+    let persisted = '';
+
+    const result = await persistLargeOutput({
+      output,
+      limits: { maxBytes: 1_024, maxLines: 100, previewLines: 20 },
+      store: {
+        writeLargeOutput(input) {
+          persisted = input.content;
+          return Promise.resolve({ outputPath: '/workspace/artifacts/bash.txt' });
+        },
+      },
+      sessionId: 'session',
+      runId: 'run',
+      callId: 'call',
+      preferredName: 'bash.txt',
+    });
+
+    expect(result.truncated).toBe(true);
+    if (!result.truncated) throw new Error('Expected a truncated output.');
+    expect(Buffer.byteLength(result.output, 'utf8')).toBeLessThanOrEqual(1_024);
+    expect(result.output).toContain('truncated');
+    expect(result.outputPath).toBe('/workspace/artifacts/bash.txt');
+    expect(persisted).toBe(output);
   });
 });
 
@@ -496,22 +609,16 @@ describe('文件写入审批边界', () => {
         Promise.reject(new Error('approval performed filesystem I/O')),
       );
       const environment = createTestEnvironmentHandle('/workspace');
-      const context: CodingToolContext = {
-        cwd: '/workspace',
-        sessionId: 'session',
+      const context: CommandContext = {
         runId: 'run',
-        callId: 'call',
-        agent: {
-          runId: 'run',
-          turnIndex: 0,
-          toolCallId: 'call',
-          environment: {
-            ...environment,
-            fileSystem: { ...environment.fileSystem, readText },
-          },
-          metadata: {},
-          signal: new AbortController().signal,
+        turnIndex: 0,
+        commandId: 'call',
+        environment: {
+          ...environment,
+          fileSystem: { ...environment.fileSystem, readText },
         },
+        metadata: {},
+        signal: new AbortController().signal,
       };
       const config = CodingAgentConfigSchema.parse({
         cwd: '/workspace',
@@ -541,10 +648,8 @@ describe('文件写入审批边界', () => {
           changedAt: '2026-07-31T00:00:00.000Z',
         }),
       );
-      const tool = createFsTools(config, decide).find(
-        (candidate) => candidate.name === name,
-      );
-      if (tool?.approval === undefined) {
+      const tool = codingCommand(createFsCommands(config, decide), name);
+      if (tool.approval === undefined) {
         throw new Error(`${name} approval missing`);
       }
 
@@ -561,6 +666,41 @@ describe('文件写入审批边界', () => {
 });
 
 describe('文件写入执行契约', () => {
+  it('使用 read 返回的 digest 覆写并拒绝 stale digest', async () => {
+    const root = await temporaryDirectory('ello-write-digest-');
+    await writeFile(path.join(root, 'existing.txt'), 'before\n', 'utf8');
+    const commands = createFsCommands({} as CodingAgentConfig, () => 'auto');
+    const read = codingCommand(commands, 'read');
+    const write = codingCommand(commands, 'write');
+    const context = searchContext(root);
+    const observed = await read.execute(
+      { filePath: 'existing.txt', offset: 1, limit: 10 },
+      context,
+    );
+    const expectedDigest = observed.metadata.sha256;
+    expect(expectedDigest).toMatch(/^[a-f\d]{64}$/u);
+
+    await expect(
+      write.execute(
+        { filePath: 'existing.txt', content: 'after\n', expectedDigest },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      metadata: { before: 'before\n', after: 'after\n' },
+    });
+
+    await writeFile(path.join(root, 'existing.txt'), 'other\n', 'utf8');
+    await expect(
+      write.execute(
+        { filePath: 'existing.txt', content: 'stale\n', expectedDigest },
+        context,
+      ),
+    ).rejects.toThrow('STALE_WRITE');
+    await expect(
+      readFile(path.join(root, 'existing.txt'), 'utf8'),
+    ).resolves.toBe('other\n');
+  });
+
   it('在 Environment 报告 ENOENT 时创建新文件', async () => {
     const root = await temporaryDirectory('ello-write-missing-');
     const writeText = vi.fn(async (targetPath: string, content: string) => {
@@ -577,27 +717,21 @@ describe('文件写入执行契约', () => {
       ),
       writeText,
     };
-    const tool = createFsTools({} as CodingAgentConfig, () => 'auto').find(
-      (candidate) => candidate.name === 'write',
+    const tool = codingCommand(
+      createFsCommands({} as CodingAgentConfig, () => 'auto'),
+      'write',
     );
-    if (tool === undefined) throw new Error('write tool missing');
 
     await expect(
       tool.execute(
         { filePath: 'nested/new.txt', content: 'created\n' },
         {
-          cwd: root,
-          sessionId: 'session',
           runId: 'run',
-          callId: 'call',
-          agent: {
-            runId: 'run',
-            turnIndex: 0,
-            toolCallId: 'call',
-            environment: { ...environment, fileSystem },
-            metadata: {},
-            signal: new AbortController().signal,
-          },
+          turnIndex: 0,
+          commandId: 'call',
+          environment: { ...environment, fileSystem },
+          metadata: {},
+          signal: new AbortController().signal,
         },
       ),
     ).resolves.toMatchObject({
@@ -610,289 +744,9 @@ describe('文件写入执行契约', () => {
   });
 });
 
-describe('Meta Tool 路由契约', () => {
-  const tools = [
-    targetTool('read', 'Read a file or directory.', 'cat file'),
-    targetTool('grep', 'Search file contents with a regex.', 'search text'),
-    targetTool('write', 'Write a complete file.', 'create file'),
-  ];
-  const config = {
-    routing_enabled: true,
-    search: { result_limit: 6, max_result_bytes: 24_000 },
-  };
-
-  it('路由关闭时直接暴露目标，开启时模型只看到两个 meta tools', () => {
-    const direct = createMetaToolRuntime(tools, [], {
-      ...config,
-      routing_enabled: false,
-    });
-    expect(direct.usesToolRouting).toBe(false);
-    expect(direct.modelTools.map((tool) => tool.name)).toEqual([
-      'read',
-      'grep',
-      'write',
-    ]);
-
-    const routed = createMetaToolRuntime(tools, [], config);
-    expect(routed.usesToolRouting).toBe(true);
-    expect(routed.executionTools.map((tool) => tool.name)).toEqual([
-      'read',
-      'grep',
-      'write',
-      'tool_search',
-      'call_tool',
-    ]);
-    expect(routed.modelTools.map((tool) => tool.name)).toEqual([
-      'tool_search',
-      'call_tool',
-    ]);
-  });
-
-  it('保留 core tools 的定义顺序，只把非 core tools 放入懒加载索引', async () => {
-    const coreRead = {
-      ...tools[0]!,
-      discovery: { ...tools[0]!.discovery, core: true },
-    };
-    const runtime = createMetaToolRuntime(
-      [coreRead, tools[1]!, tools[2]!],
-      [],
-      config,
-    );
-
-    expect(runtime.modelTools.map((tool) => tool.name)).toEqual([
-      'read',
-      'tool_search',
-      'call_tool',
-    ]);
-    const search = runtime.modelTools.find(
-      (tool) => tool.name === 'tool_search',
-    );
-    if (search === undefined || search.execution !== 'immediate') {
-      throw new Error('tool_search missing');
-    }
-    const result = (await search.execute(
-      { query: 'file', limit: 6 },
-      agentToolContext,
-    )) as { readonly results: readonly { readonly name: string }[] };
-    expect(result.results.map(({ name }) => name)).not.toContain('read');
-  });
-
-  it('全部目标都是 core 时不启用工具路由', () => {
-    const coreTools = tools.map((tool) => ({
-      ...tool,
-      discovery: { ...tool.discovery, core: true },
-    }));
-    const runtime = createMetaToolRuntime(coreTools, [], config);
-
-    expect(runtime.usesToolRouting).toBe(false);
-    expect(runtime.executionTools.map((tool) => tool.name)).toEqual([
-      'read',
-      'grep',
-      'write',
-    ]);
-    expect(runtime.modelTools.map((tool) => tool.name)).toEqual([
-      'read',
-      'grep',
-      'write',
-    ]);
-    expect(
-      runtime.modelTools.every((tool) => tool.discovery.core === true),
-    ).toBe(true);
-  });
-
-  it('库存分页不泄露 schema，精确搜索可返回当前模式的 Plan 工具', async () => {
-    const planTools = [
-      defineTool({
-        name: 'write_plan',
-        description: 'Write the complete plan.',
-        discovery: { aliases: ['save plan'], risk: 'workspace-write' },
-        input: z.object({ content: z.string() }).strict(),
-        execute: async () => 'written',
-      }),
-      defineTool({
-        name: 'request_plan_exit',
-        description: 'Request approval for the complete plan.',
-        discovery: { aliases: ['approve plan'], risk: 'workspace-write' },
-        input: z.object({}).strict(),
-        execute: async () => 'requested',
-      }),
-    ];
-    const runtime = createMetaToolRuntime([...tools, ...planTools], [], config);
-    const search = runtime.modelTools.find(
-      (tool) => tool.name === 'tool_search',
-    );
-    if (search === undefined || search.execution !== 'immediate') {
-      throw new Error('tool_search missing');
-    }
-
-    const inventory = (await search.execute(
-      { limit: 2 },
-      agentToolContext,
-    )) as {
-      readonly results: readonly Record<string, unknown>[];
-      readonly truncated: boolean;
-      readonly nextOffset?: number;
-    };
-    expect(inventory.truncated).toBe(true);
-    expect(inventory.nextOffset).toBe(2);
-    expect(
-      inventory.results.every((result) => !('inputSchema' in result)),
-    ).toBe(true);
-
-    const planSearch = (await search.execute(
-      { query: 'plan', limit: 6 },
-      agentToolContext,
-    )) as { readonly results: readonly { readonly name: string }[] };
-    expect(planSearch.results.map((result) => result.name)).toEqual(
-      expect.arrayContaining(['write_plan', 'request_plan_exit']),
-    );
-  });
-
-  it('搜索支持 exact、prefix、fuzzy、多词且结果排序稳定', () => {
-    const index = createToolSearchIndex(tools);
-
-    expect(index.search('read', 8)[0]?.name).toBe('read');
-    expect(index.search('rea', 8)[0]?.name).toBe('read');
-    expect(index.search('reed', 8)[0]?.name).toBe('read');
-    expect(index.search('search regex', 8)[0]?.name).toBe('grep');
-    expect(index.search('unrelated-capability', 8)).toEqual([]);
-    expect(index.search('file', 8)).toEqual(index.search('file', 8));
-  });
-
-  it('搜索拒绝空查询、非法 limit、非法 offset 和超大结果', async () => {
-    const index = createToolSearchIndex(tools);
-    expect(() => index.search(' ', 2)).toThrow('searchable text');
-    expect(() => index.search('read', 9)).toThrow('1 to 8');
-    expect(() => index.list(1, -1)).toThrow('non-negative integer');
-
-    const search = createToolSearchTool({
-      index,
-      resultLimit: 6,
-      maxResultBytes: 10,
-    });
-    expect(() =>
-      search.execute({ query: 'read', limit: 1 }, agentToolContext),
-    ).toThrow('exceeding');
-  });
-
-  it('call_tool 复用目标 schema 与审批策略并原样保留输出', async () => {
-    const output = { value: 42 };
-    const execute = vi.fn(() => output);
-    const approval = vi.fn(() => ({
-      action: 'required' as const,
-      metadata: {
-        permission: 'edit',
-        patterns: ['a.txt'],
-        always: ['a.txt'],
-      },
-    }));
-    const write = defineTool({
-      name: 'write',
-      description: 'Write a file.',
-      discovery: { aliases: ['save file'], risk: 'workspace-write' },
-      input: z.object({ path: z.string() }).strict(),
-      approval,
-      execute,
-    });
-    const proxy = createCallTool([write]);
-    const input = { name: 'write', arguments: { path: 'a.txt' } };
-
-    await expect(
-      proxy.approval?.(input, agentToolContext),
-    ).resolves.toMatchObject({
-      action: 'required',
-      metadata: { proxiedTool: 'write' },
-    });
-    await expect(proxy.execute(input, agentToolContext)).resolves.toBe(output);
-    expect(approval).toHaveBeenCalledOnce();
-    expect(execute).toHaveBeenCalledOnce();
-  });
-
-  it('call_tool 拒绝未知、递归、重复和 schema 非法的目标调用', async () => {
-    const proxy = createCallTool([
-      targetTool('read', 'Read a file.', 'cat file'),
-    ]);
-    await expect(
-      proxy.execute({ name: 'missing', arguments: {} }, agentToolContext),
-    ).rejects.toThrow('Unknown or disabled');
-    await expect(
-      proxy.execute({ name: 'call_tool', arguments: {} }, agentToolContext),
-    ).rejects.toThrow('recursively');
-    await expect(
-      proxy.execute({ name: 'read', arguments: {} }, agentToolContext),
-    ).rejects.toThrow(
-      "Invalid arguments for tool 'read': 'path' is invalid: Invalid input: expected string, received undefined",
-    );
-    expect(() => createCallTool([tools[0]!, tools[0]!])).toThrow(
-      'Duplicate call_tool target',
-    );
-  });
-
-  it('call_tool 代理目标的动态能力、启用状态和领域校验', async () => {
-    const validateInput = vi.fn((input: { readonly path: string }) => {
-      if (input.path.endsWith('.secret')) {
-        throw new Error('Secret files are disabled.');
-      }
-    });
-    const read = defineTool({
-      name: 'read_extra',
-      description: 'Read an extra file.',
-      discovery: { aliases: ['extra file'], risk: 'readonly' },
-      input: z.object({ path: z.string() }).strict(),
-      capabilities: ({ path }) => ({
-        concurrencySafe: true,
-        readOnly: true,
-        destructive: false,
-        enabled: path !== 'disabled.txt',
-        telemetryTag: 'extension.read',
-      }),
-      validateInput,
-      execute: ({ path }) => path,
-    });
-    const proxy = createCallTool([read]);
-    const input = { name: 'read_extra', arguments: { path: 'a.txt' } };
-
-    await expect(
-      proxy.capabilities?.(input, agentToolContext),
-    ).resolves.toMatchObject({
-      logicalName: 'read_extra',
-      concurrencySafe: true,
-      readOnly: true,
-      destructive: false,
-      enabled: true,
-      telemetryTag: 'extension.read',
-    });
-    await expect(
-      proxy.validateInput?.(input, agentToolContext),
-    ).resolves.toBeUndefined();
-    await expect(
-      proxy.validateInput?.(
-        { name: 'read_extra', arguments: { path: 'token.secret' } },
-        agentToolContext,
-      ),
-    ).rejects.toThrow('Secret files are disabled.');
-    expect(validateInput).toHaveBeenCalledTimes(2);
-  });
-
-  it('事件投影向观察者呈现真实目标而非 wrapper', () => {
-    expect(
-      projectToolEvent({
-        type: 'tool.started',
-        runId: 'run-1',
-        sequence: 1,
-        occurredAt: new Date().toISOString(),
-        turnIndex: 0,
-        toolCallId: 'call-1',
-        name: 'call_tool',
-        input: { name: 'read', arguments: { path: 'a.txt' } },
-      }),
-    ).toMatchObject({ name: 'read', input: { path: 'a.txt' } });
-  });
-});
-
-describe('工具恢复与阶段化验证契约', () => {
+describe('工具失败恢复契约', () => {
   it('相同错误生成稳定指纹，并在第二次失败后要求切换策略', () => {
-    const tracker = new ToolFailureTracker();
+    const tracker = new CommandFailureTracker();
     const first = tracker.create(
       'read',
       new Error('No such file at line 12: missing-123.txt'),
@@ -902,7 +756,7 @@ describe('工具恢复与阶段化验证契约', () => {
       new Error('No such file at line 99: missing-456.txt'),
     );
 
-    expect(first).toBeInstanceOf(CodingToolExecutionError);
+    expect(first).toBeInstanceOf(CommandExecutionError);
     expect(first.diagnostic).toMatchObject({
       code: 'PATH_NOT_FOUND',
       attempt: 1,
@@ -918,232 +772,75 @@ describe('工具恢复与阶段化验证契约', () => {
       strategy: 'switch_strategy',
     });
   });
-
-  it('真实工具结果驱动 explore、implement、verify 和 recover 阶段切换', () => {
-    const workflow = new AgentWorkflowState();
-    expect(workflow.instructions()).toContain('phase="explore"');
-
-    workflow.observeResult(
-      createCodingToolResult({
-        title: 'Edit file',
-        output: 'updated',
-        metadata: { kind: 'edit' },
-      }),
-    );
-    expect(workflow.instructions()).toContain('phase="implement"');
-
-    workflow.observeResult(
-      createCodingToolResult({
-        title: 'Targeted verification',
-        output: 'passed',
-        metadata: { kind: 'shell', phase: 'targeted' },
-      }),
-    );
-    expect(workflow.instructions()).toContain('phase="verify"');
-
-    workflow.observeFailure();
-    expect(workflow.instructions()).toContain('phase="recover"');
-    workflow.observeResult(
-      createCodingToolResult({
-        title: 'Read evidence',
-        output: 'fact',
-        metadata: { kind: 'read' },
-      }),
-    );
-    expect(workflow.instructions()).toContain('phase="explore"');
-  });
-
-  it('workspace_snapshot 一次返回 Git、根目录、依赖和验证命令', async () => {
-    const root = await temporaryDirectory('ello-workspace-snapshot-');
-    await Promise.all([
-      mkdir(path.join(root, 'src')),
-      writeFile(path.join(root, 'package.json'), '{}\n', 'utf8'),
-      writeFile(
-        path.join(root, 'pnpm-lock.yaml'),
-        'lockfileVersion: 9\n',
-        'utf8',
-      ),
-    ]);
-    const commands: string[] = [];
-    const processes = testProcesses(async ({ command }) => {
-      commands.push(command);
-      if (command === 'git rev-parse HEAD') {
-        return execResult({ stdout: `${'a'.repeat(40)}\n` });
-      }
-      if (command === 'git branch --show-current') {
-        return execResult({ stdout: 'main\n' });
-      }
-      return execResult({ stdout: '## main\n M src/index.ts\n' });
-    });
-    const tool = createWorkspaceSnapshotTools(
-      { cwd: root } as CodingAgentConfig,
-      () => 'auto',
-    )[0]!;
-
-    const result = await tool.execute(
-      { include_untracked: true },
-      toolContext(root, processes),
-    );
-    const snapshot = JSON.parse(result.output) as Record<string, unknown>;
-    expect(snapshot).toMatchObject({
-      schema: 'ello.workspace-snapshot.v1',
-      cwd: root,
-      git: {
-        available: true,
-        head: 'a'.repeat(40),
-        branch: 'main',
-        status: ['## main', ' M src/index.ts'],
-      },
-      manifests: ['package.json'],
-      lockfiles: ['pnpm-lock.yaml'],
-      verificationCommands: ['pnpm test', 'pnpm typecheck', 'pnpm lint'],
-    });
-    expect(commands).toEqual([
-      'git rev-parse HEAD',
-      'git branch --show-current',
-      'git status --short --branch',
-    ]);
-    expect(result.metadata).toMatchObject({
-      kind: 'workspace',
-      dirty: true,
-    });
-  });
-
-  it('test 工具在模型可见输出和元数据中保留验证阶段与退出状态', async () => {
-    const root = await temporaryDirectory('ello-test-tool-');
-    const testTool = createShellTools(
-      { cwd: root } as CodingAgentConfig,
-      () => 'auto',
-    ).find((tool) => tool.name === 'test');
-    if (testTool === undefined) throw new Error('缺少 test 工具。');
-    const processes = testProcesses(() =>
-      Promise.resolve(
-        execResult({
-          exitCode: 1,
-          stdout: '1 test failed\n',
-          stderr: 'assertion error\n',
-        }),
-      ),
-    );
-
-    const result = await testTool.execute(
-      {
-        phase: 'targeted',
-        command: 'pnpm vitest src/example.test.ts',
-        timeoutMs: 5_000,
-      },
-      toolContext(root, processes),
-    );
-    const summary = JSON.parse(result.output.split('\n')[0]!) as Record<
-      string,
-      unknown
-    >;
-    expect(summary).toMatchObject({
-      phase: 'targeted',
-      command: 'pnpm vitest src/example.test.ts',
-      cwd: root,
-      exitCode: 1,
-      timedOut: false,
-    });
-    expect(result.output).toContain('stderr:\nassertion error');
-    expect(result.metadata).toMatchObject({
-      kind: 'shell',
-      phase: 'targeted',
-      exitCode: 1,
-    });
-  });
 });
 
-const agentToolContext: AgentToolContext = {
-  runId: 'run-1',
-  turnIndex: 0,
-  toolCallId: 'call-1',
-  environment: createTestEnvironmentHandle(),
-  metadata: {},
-  signal: new AbortController().signal,
-};
-
-function targetTool(name: string, description: string, alias: string) {
-  return defineTool({
-    name,
-    description,
-    discovery: { aliases: [alias], risk: 'readonly' },
-    input: z
-      .object({ path: z.string().describe('Workspace file path') })
-      .strict(),
-    execute: ({ path: targetPath }) => ({ name, path: targetPath }),
-  });
+function codingCommand(commands: readonly CommandDefinition[], name: string) {
+  const command = commands.find((candidate) => candidate.name === name);
+  if (command === undefined || command.execution.kind !== 'immediate') {
+    throw new Error(`Missing immediate Command ${name}.`);
+  }
+  const execution = command.execution;
+  const parse = (input: unknown) =>
+    command.invocation.input.schema.parse(input);
+  return {
+    approval:
+      command.approval === undefined
+        ? undefined
+        : async (input: unknown, context: CommandContext) =>
+            command.approval?.(parse(input), context),
+    execute: async (
+      input: unknown,
+      context: CommandContext,
+    ): Promise<CommandResult> =>
+      (await execution.run(
+        input === undefined ? input : parse(input),
+        context,
+      )) as CommandResult,
+  };
 }
 
 function searchTool(name: 'grep' | 'glob', provider?: SearchProvider) {
-  const tool = createSearchTools(
-    {} as CodingAgentConfig,
-    () => 'auto',
-    provider,
-  ).find((candidate) => candidate.name === name);
-  if (tool === undefined) {
-    throw new Error(`${name} tool missing`);
-  }
-  return tool;
+  const command = codingCommand(
+    createSearchCommands({} as CodingAgentConfig, () => 'auto', provider),
+    'search',
+  );
+  return {
+    execute: (input: unknown, context: CommandContext) =>
+      command.execute(
+        {
+          kind: name === 'grep' ? 'text' : 'files',
+          ...(input as Record<string, unknown>),
+        },
+        context,
+      ),
+  };
 }
 
-function searchContext(root: string): CodingToolContext {
+function searchContext(root: string): CommandContext {
   const fileSystem = testFileSystem(root);
   const environment = createTestEnvironmentHandle(root);
   return {
-    cwd: root,
-    sessionId: 'session',
     runId: 'run',
-    callId: 'call',
-    agent: {
-      runId: 'run',
-      turnIndex: 0,
-      toolCallId: 'call',
-      environment: {
-        ...environment,
-        fileSystem,
-        processes: noNativeProcesses(),
-      },
-      metadata: {},
-      signal: new AbortController().signal,
+    turnIndex: 0,
+    commandId: 'call',
+    environment: {
+      ...environment,
+      fileSystem,
+      processes: noNativeProcesses(),
     },
+    metadata: {},
+    signal: new AbortController().signal,
   };
 }
 
 function toolContext(
   root: string,
   processes: EnvironmentProcesses,
-): CodingToolContext {
+): CommandContext {
   const context = searchContext(root);
   return {
     ...context,
-    agent: {
-      ...context.agent,
-      environment: { ...context.agent.environment, processes },
-    },
-  };
-}
-
-function execResult(
-  overrides: Partial<{
-    readonly exitCode: number | null;
-    readonly stdout: string;
-    readonly stderr: string;
-    readonly timedOut: boolean;
-    readonly signal: string | null;
-    readonly durationMs: number;
-  }> = {},
-): ExecResult {
-  const stdout = overrides.stdout ?? '';
-  const stderr = overrides.stderr ?? '';
-  return {
-    exitCode: 0,
-    signal: null,
-    timedOut: false,
-    durationMs: 1,
-    ...overrides,
-    stdout: outputSnapshot(stdout),
-    stderr: outputSnapshot(stderr),
+    environment: { ...context.environment, processes },
   };
 }
 
@@ -1199,9 +896,4 @@ function noNativeProcesses(): EnvironmentProcesses {
       }),
     ),
   );
-}
-
-function outputSnapshot(text: string) {
-  const data = Buffer.from(text);
-  return { data, totalBytes: data.byteLength, truncatedBytes: 0 };
 }

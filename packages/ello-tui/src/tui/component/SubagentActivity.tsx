@@ -1,7 +1,7 @@
 import { Box, Text, useStdout } from 'ink';
 
 import type { SubagentRunView } from '../store/history-entry.js';
-import { layoutTerminalText } from '../store/terminal-text.js';
+import { headVisualRows } from '../store/terminal-text.js';
 import { buildToolCardModel } from '../store/tool-card.js';
 import { useTheme } from '../theme/index.js';
 
@@ -139,21 +139,13 @@ function previewLines(
     .join('\n')
     .slice(0, 480);
   if (normalized === '') return [];
-  const lines = normalized.split('\n');
-  const cursor = {
-    line: lines.length - 1,
-    column: lines.at(-1)?.length ?? 0,
-  };
-  const rows = layoutTerminalText(lines, cursor, width).rows;
-  const truncated = rows.length > RESULT_LINE_LIMIT;
-  const visible = rows
-    .slice(0, RESULT_LINE_LIMIT)
-    .map((row) =>
-      (lines[row.logicalLine] ?? '').slice(row.startOffset, row.endOffset),
-    );
-  if (!truncated || visible.length === 0) return visible;
-  visible[visible.length - 1] = `${visible.at(-1) ?? ''}…`;
-  return visible;
+  const { rows, truncated } = headVisualRows(
+    normalized,
+    width,
+    RESULT_LINE_LIMIT,
+  );
+  if (!truncated || rows.length === 0) return rows;
+  return [...rows.slice(0, -1), `${rows.at(-1) ?? ''}…`];
 }
 
 function elapsed(run: SubagentRunView): string | undefined {

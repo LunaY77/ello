@@ -7,8 +7,7 @@ import type {
 } from '../../api/protocol-types.js';
 import type { AgentTaskClient } from '../../client/agent-task-client.js';
 import type { ThreadClient } from '../../client/thread-client.js';
-
-import { clearTerminalScrollback } from './use-runtime-events.js';
+import { clearTerminalScrollback } from '../terminal-screen.js';
 
 export type ActiveAgentView =
   | { readonly kind: 'main'; readonly threadId: string }
@@ -105,6 +104,7 @@ export function useAgentTasks(
         setActiveView({ kind: 'main', threadId: thread.threadId });
         setHighlightedTaskId('main');
         setFocus('composer');
+        // viewEpoch 会重挂 Static；不清 scrollback 就会在终端里叠一份历史。
         clearTerminalScrollback();
         setViewEpoch((current) => current + 1);
         return;

@@ -1,315 +1,132 @@
 ---
-title: 'ToolScheduler — 工具调度、审批与恢复'
-description: '讲解 ello ToolScheduler 的架构边界、立即与延迟执行模型、事件投影、错误归一化和挂起恢复流程。'
+title: 'Command Run 调度、审批与恢复'
+description: '说明 CommandRunRuntime 如何编译 Command Frame、调度 phase、暂停审批并恢复 checkpoint。'
 keywords:
-  ['ToolScheduler', '工具调度', '审批', 'deferred tool', 'tool-result', '恢复']
+  ['Command Run', 'CommandRunRuntime', '调度', '审批', 'deferred', 'checkpoint']
 ---
 
-# ToolScheduler：工具执行边界
+# Command Run：统一执行模块
 
-## 为什么需要这个？
+> 本页保留原文档路径以维持站内链接；旧 provider Tool 批次调度器已经删除。
 
-模型只会生成工具名称、调用 ID 和参数。真正执行工具时，还要处理一组与模型供应商无关的约束：
-
-- 工具是否允许由模型直接调用；
-- 参数是否满足工具的 Zod schema；
-- 权限策略选择自动执行、请求批准还是拒绝；
-- 调用如何取得文件系统、Shell、中断信号等运行环境；
-- 成功、失败和拒绝如何转换为模型可读取的 `tool-result`；
-- 需要用户批准或宿主执行的调用如何暂停并恢复。
-
-**ToolScheduler** 是这些约束的统一执行边界。模型适配器负责把不同供应商的响应归一化为 `AgentToolCall`，调度器负责验证、审批、执行和结果归一化。工具实现不直接交给 provider SDK 执行。
-
-```mermaid
-flowchart LR
-  Model[Model response] --> Adapter[Model adapter]
-  Adapter --> Calls[AgentToolCall list]
-  Calls --> Scheduler[ToolScheduler]
-  Registry[Execution tools] --> Scheduler
-  Policy[Approval policy] --> Scheduler
-  Runtime[Run context] --> Scheduler
-  Scheduler --> Tool[Tool implementation]
-  Scheduler --> Messages[Tool-result messages]
-  Scheduler --> Pending[Deferred items]
-  Scheduler --> Events[Runtime events]
-  Messages --> NextTurn[Next model turn]
-```
-
-执行权集中在 core 后，所有 provider 使用相同的审批时机、事件顺序和错误格式。新 provider 只需生成标准工具调用，无需复制权限与恢复逻辑。
-
-## 调度器在运行时中的位置
-
-一次 `RunSession` 同时持有两组工具：
-
-| 集合             | 内容                                           | 使用方                                       |
-| ---------------- | ---------------------------------------------- | -------------------------------------------- |
-| `modelTools`     | 名称、描述和输入 schema                        | `buildToolSet()`，用于构建模型可见的工具定义 |
-| `executionTools` | 完整工具定义，包括 `approval()` 和 `execute()` | `ToolScheduler`，用于审批和执行              |
-
-`modelTools` 必须是 `executionTools` 的子集。`RunSession` 还会把 `modelTools` 的名称保存为 `callableToolNames`。调度器同时检查执行注册表和可调用名称集合；存在于执行注册表但未暴露给模型的工具，不能由模型直接点名调用。
-
-```mermaid
-flowchart TD
-  Run[RunSession] --> ModelTools[modelTools]
-  Run --> ExecutionTools[executionTools]
-  ModelTools --> ToolSet[AI SDK ToolSet]
-  ModelTools --> Callable[callableToolNames]
-  ExecutionTools --> Registry[Tool registry]
-  Callable --> Scheduler[ToolScheduler]
-  Registry --> Scheduler
-  Scheduler --> Sink[ToolSchedulerEventSink]
-  Sink --> Dispatcher[AgentEventDispatcher]
-  Scheduler --> Result[ToolScheduleResult]
-  Result --> History[Run message history]
-  Result --> Control[AgentRunControl]
-```
-
-各层的职责保持单一：
-
-| 组件                 | 职责                                                              |
-| -------------------- | ----------------------------------------------------------------- |
-| `buildToolSet()`     | 向模型提供描述和 schema，不携带 `execute()`                       |
-| `executeToolCalls()` | 把模型调用交给调度器，并把回调转换为运行事件                      |
-| `ToolScheduler`      | 校验可调用性和输入，执行审批策略与工具，归一化结果                |
-| `AgentRunControl`    | 保存挂起项，维护 `waiting_approval` 与 `waiting_tool_result` 状态 |
-| `prepareResume()`    | 执行已获批准的立即工具，把结果交给恢复消息构造逻辑                |
-
-## 输入与输出契约
-
-### 构造参数
-
-`ToolSchedulerOptions` 把一次运行所需的稳定依赖注入调度器。
-
-| 参数                | 用途                               |
-| ------------------- | ---------------------------------- |
-| `runId`             | 标识当前 run                       |
-| `turnIndex()`       | 在创建工具上下文时读取当前回合序号 |
-| `tools`             | 建立工具名到执行定义的索引         |
-| `callableToolNames` | 限制模型可直接发起的工具名称       |
-| `environment`       | 提供文件系统、Shell 和其他宿主能力 |
-| `metadata`          | 向每次调用传递运行元数据           |
-| `signal`            | 向工具传递取消信号                 |
-
-调度器为每次立即工具调用创建 `AgentToolContext`：
+模型只生成一个 outer `command_run` call。`CommandRunRuntime` 隐藏 Frame codec、Command
+Catalog、Command compiler、Environment Gate、审批、deferred 和恢复逻辑，Agent engine 只依赖：
 
 ```ts
-{
-  runId,
-  turnIndex: turnIndex(),
-  toolCallId,
-  environment,
-  metadata: { ...metadata },
-  signal,
+interface CommandRunRuntime {
+  readonly modelTool: CommandRunModelTool;
+  readonly catalogRevision: string;
+  start(request: StartCommandRun): CommandRunExecution;
+  resume(request: ResumeCommandRun): CommandRunExecution;
 }
 ```
 
-`turnIndex()` 在调用发生时求值，批准后的执行会取得恢复 run 的当前回合序号。`metadata` 使用浅拷贝，工具可以读取本次调用的元数据，而不会替换运行级 metadata 对象。工具实现通过 `signal` 响应取消。
+该 interface 是调用方和测试共同使用的 seam。内部实现位于 `features/command/catalog.ts` 与
+`runtime.ts`，不会把 registry、scheduler 或 provider 细节扩散到 Agent。
 
-### 调度结果
+## 编译边界
 
-`schedule()` 返回 `ToolScheduleResult`，三个字段分别服务于模型历史、运行观测和挂起控制。
+`start()` 在执行任何 Command 前严格校验整个请求：
 
-| 字段        | 内容                                                          | 后续用途                       |
-| ----------- | ------------------------------------------------------------- | ------------------------------ |
-| `messages`  | 已结束调用对应的 `tool-result` 消息                           | 追加到会话历史，供下一回合读取 |
-| `toolCalls` | 成功、失败、拒绝和延迟调用的记录；待批准调用由 `pending` 表示 | 汇总到运行结果和观测数据       |
-| `pending`   | `DeferredApprovalItem` 或 `DeferredToolCallItem`              | 进入 deferred queue，等待恢复  |
+- 1 至 32 个 Frame，序列化输入不超过 1 MiB；
+- `step` 是正整数并按输入顺序非递减；
+- 未知字段失败，不接受别名、JSON fence 或顺序修复；
+- `input` 与 `args/body` 互斥，且 v1 只给 `command_invoke`；
+- Command 必须存在于当前 Catalog，参数按准确 codec 和领域 schema 解析；
+- 每条 Frame 获得稳定 `commandId` 和类型化 input digest。
 
-请求批准和延迟执行仍在等待结果，当前回合不会生成 `tool-result`。成功、执行失败、输入失败、未知工具和策略拒绝都已结束，调度器会为它们生成结果消息。
+任一 Frame 失败都会拒绝全批，错误包含 frame index、command 与 usage。已经通过编译的前缀
+也不会运行，因此无“部分校验、部分副作用”的状态。
 
-## 两种执行模型
+## Scheduling Phase
 
-**立即工具**（`execution: 'immediate'`）在 Agent 进程内运行。它可以声明 `approval()`，并通过 `execute()` 使用运行环境。
+相同 `step` 属于同一 Scheduling Phase；前一 phase 结束后才开始后一 phase。运行时根据
+Command 的动态 capability 与 Environment Gate 决定真正执行方式：
 
-**延迟工具**（`execution: 'deferred'`）由宿主处理。它只有输入 schema，没有 `execute()` 和 `approval()`。调度器验证输入后生成 `DeferredToolCallItem`，run 以 `waiting-tool-result` 结束，宿主在后续 `resume` 中按调用 ID 回填结果。
-
-| 执行模式                 | 执行位置            | 调度器当前 run 的产物  | 停止原因              |
-| ------------------------ | ------------------- | ---------------------- | --------------------- |
-| `immediate` + `auto`     | Agent 进程          | `tool-result`          | 继续下一回合          |
-| `immediate` + `required` | 批准后由新 run 执行 | `DeferredApprovalItem` | `waiting-approval`    |
-| `immediate` + `denied`   | 不执行              | denied `tool-result`   | 继续下一回合          |
-| `deferred`               | 宿主                | `DeferredToolCallItem` | `waiting-tool-result` |
-
-### 延迟工具的批次约束
-
-一次模型响应只允许包含一个延迟工具调用。只要可调用的延迟工具与其他调用同时出现，调度器就在任何工具产生副作用前拒绝整批调用，并为每个调用生成 error `tool-result`。
-
-批次级预检保留单一提交边界。立即工具若已执行，延迟工具又等待宿主结果，同一批调用会跨越两个 run；整批拒绝让模型在下一回合重新组织调用顺序。
-
-```mermaid
-flowchart TD
-  Batch[Tool-call batch] --> Scan[Scan deferred calls]
-  Scan -->|Mixed batch| Reject[Fail every call]
-  Scan -->|Single deferred call| ValidateDeferred[Validate input]
-  ValidateDeferred -->|Valid| QueueDeferred[Queue deferred item]
-  ValidateDeferred -->|Invalid| FailedResult[Create error result]
-  Scan -->|Immediate calls only| Prepare[Prepare each call]
-  Prepare --> Lock[Read/write lock]
-  Lock --> Immediate[Immediate call pipeline]
+```text
+safe shared reads -> concurrent
+write/shell/external/unknown effect -> exclusive
+next step -> strict barrier
 ```
 
-## `schedule()` 的执行流程
+模型表达依赖阶段，不声明底层锁。只有明确 `readOnly && concurrencySafe && !destructive` 的
+Command 才可并发；其余情况保守串行。Environment generation 共享同一 Gate，因此不同
+Handle 上的冲突修改也不会交错。结果按 Frame 顺序保存，事件按实际发生时间发布。
 
-### 批次预检
+## 失败语义
 
-调度器先扫描可调用的延迟工具，再处理单个调用：
+Command Run 默认使用 step 级失败屏障且不自动回滚：
 
-- 混合批次：所有调用依次发出 `started`、`failed` 回调，整批不执行；
-- 单个延迟调用：校验输入，成功后进入 `pending` 并发出 `onToolDeferred`；
-- 仅含立即调用：先解析全部参数和调用能力，再在并发上限内调度。
+- 同一 step 的 immediate Command 相互独立，一个失败或拒绝不阻止同 step 的后续 wave；
+- step 完成后，`failed` 或 `denied` 会阻止后续 step 的普通 Command；
+- 未执行 Frame 记录 `blocked` 与 `blockedBy`；
+- 显式 `onFailure: 'continue'` 的 Frame 失败后继续执行后续 Frame，但整批结果仍为失败；
+- 只有显式 `onFailure: 'diagnose'` 且运行时证明安全只读的 Command 可以继续；
+- `denied` 和 `interrupted` 不受 `onFailure: 'continue'` 影响；
+- Shell 非零退出是失败，除非 Shell 程序自己显式吸收该退出码；
+- 中断停止新工作，并取消声明为 interruptible 的在途工作。
 
-调度器按模型调用顺序返回结果。确认安全的只读调用可以并发执行；写入、未知调用或能力声明不完整的调用使用独占锁，因此不会与任何其他工具交错。某个立即工具失败后，后续调用仍会继续处理。混合延迟批次是批次级失败，不进入逐调用执行阶段。
+文件、进程和远端系统没有统一事务，因此 runtime 不伪装原子回滚。
 
-### 并发与读写锁
+## Command Catalog 与 Registry
 
-参数结构校验和能力判断在真正执行前完成。只有工具明确声明为可并发、只读且不会修改数据时，
-调度器才为它取得共享锁；其余调用一律取得独占锁。锁按 `AgentEnvironment` 共享，因此即使
-不同 Agent 运行同时使用同一环境，写操作也不会越过正在执行或已经排队的读取操作。
+核心 Catalog 提供 `read`、`search`、`write`、`apply_patch` 和 `bash`。`search` definition
+直接拥有 content/file 两种搜索；文件 version/digest、diff、artifact、进程管理等领域语义仍由
+对应 Command 实现。
 
-模型不需要调用批处理或并行包装工具。只要将相互独立的原生工具调用放在同一条模型响应中，
-调度器会根据以上规则安排执行。
+discoverable Ello/MCP 能力由 `command_search` 和 `command_invoke` 使用。Registry 直接复用目标的
+schema、Effect、validation、approval 与 immediate/deferred 定义，不合成内部 provider Tool Call，
+也不能递归调用三个内部入口。核心写入与 Shell 不是 `command_invoke` target，Plan mode 和权限判定
+因此只有一条执行路径。
 
-### 立即工具路径
+## Phase 审批
 
-每个立即调用依次经过可调用性检查、输入校验、审批判定和执行：
-
-```mermaid
-flowchart TD
-  Call[AgentToolCall] --> Lookup{Callable and registered?}
-  Lookup -->|No| Unknown[Unknown-tool result]
-  Lookup -->|Yes| Parse{Input valid?}
-  Parse -->|No| InputError[Input-error result]
-  Parse -->|Yes| Approval[Run approval policy]
-  Approval -->|Throws| PolicyError[Policy-error result]
-  Approval -->|Denied| Denied[Denied result]
-  Approval -->|Required| ApprovalPending[Queue approval item]
-  Approval -->|Auto| Execute[Execute tool]
-  Execute -->|Returns| Success[Success result]
-  Execute -->|Throws| ExecutionError[Execution-error result]
-```
-
-输入校验位于审批与执行之前。审批界面读取的是 schema 校验后的输入，工具实现也只接收校验后的值。Zod 默认值和转换会传给 `approval()`；后续分支把同一输入交给 `execute()`、挂起项或已结束调用记录。请求批准的调用由 `pending` 保存，不进入当前 `toolCalls`。
-
-审批函数可以返回字符串，也可以返回带原因和 metadata 的对象：
-
-```ts
-type AgentApprovalDecision =
-  | 'auto'
-  | 'required'
-  | 'denied'
-  | {
-      action: 'auto' | 'required' | 'denied';
-      reason?: string;
-      metadata?: Record<string, unknown>;
-    };
-```
-
-未声明 `approval()` 的立即工具按 `auto` 处理。审批函数抛出的异常会转换为本次工具失败；该调用不会进入 `execute()`。
-
-### 结果归一化
-
-调度器捕获非 `Error` 异常并转换为 `Error`，再通过 `normalizeAgentError()` 写入 `AgentToolCall.error`。`createToolResultMessage()` 负责生成 AI SDK v7 兼容消息。
-
-| 状态                      | `tool-result` 输出类型 | 模型收到的内容       |
-| ------------------------- | ---------------------- | -------------------- |
-| 成功字符串                | `text`                 | 工具返回的文本       |
-| `coding-tool-result` 对象 | `text`                 | 对象的 `output` 字段 |
-| 其他成功值                | `json`                 | JSON 兼容值          |
-| 失败                      | `error-text`           | 归一化后的错误信息   |
-| 拒绝                      | `execution-denied`     | 可选的拒绝原因       |
-
-单个失败被收敛为工具结果，回合循环仍可把其他结果一起交给模型。调度器内部一致性错误会直接抛出，例如延迟工具绕过批次预检，交由 run 的兜底错误处理结束运行。
-
-## 事件与状态投影
-
-`ToolSchedulerEventSink` 隔离调度决策与运行事件系统。调度器只调用语义回调，`executeToolCalls()` 再把它们转换为 `EngineEvent`，并维护 deferred queue。
-
-| 调用结果             | 调度器回调                             | 运行时处理                                |
-| -------------------- | -------------------------------------- | ----------------------------------------- |
-| 成功                 | `onToolStarted` → `onToolCompleted`    | 发出 `tool.started`、`tool.completed`     |
-| 输入、策略或执行失败 | `onToolStarted` → `onToolFailed`       | 发出 `tool.started`、`tool.failed`        |
-| 策略拒绝             | `onToolStarted` → `onToolFailed`       | 发出失败事件，消息状态为 denied           |
-| 请求批准             | `onToolStarted` → `onApprovalRequired` | 发出审批事件，加入 deferred queue         |
-| 延迟执行             | `onToolDeferred`                       | 发出 `tool.deferred`，加入 deferred queue |
-
-`tool.started` 表示调用进入可观测的处理路径。输入校验或审批策略已经可能在该事件前完成，工具的 `execute()` 只在 `auto` 分支中运行。延迟工具由 `tool.deferred` 表达挂起状态。
-
-`executeToolCalls()` 会按 `toolCallId` 检查 deferred queue。相同挂起项只入队一次，避免重复发布 `approval.required` 或 `tool.deferred`。
-
-## 审批与延迟结果如何恢复
-
-挂起会结束当前 run。恢复由新的 run 接收 deferred 项、审批决定或宿主结果，再补齐模型要求的 tool-call/tool-result 消息对。
+runtime 会在 phase 开始前准备全部 Command。每条审批绑定 command identity、input digest、
+catalog revision 和权限 metadata；只要有一条需要审批，整个 phase 暂不执行。
 
 ```mermaid
 sequenceDiagram
-  participant Model
-  participant Loop as Agent loop
-  participant Scheduler as ToolScheduler
-  participant Control as Run control
-  participant Host
-
-  Model->>Loop: tool call
-  Loop->>Scheduler: schedule(calls)
-  alt Approval required
-    Scheduler-->>Control: DeferredApprovalItem
-    Control-->>Host: waiting-approval
-    Host->>Loop: resume(approvals)
-    Loop->>Scheduler: executeApproved(call)
-    Scheduler-->>Loop: output or error
-  else Deferred execution
-    Scheduler-->>Control: DeferredToolCallItem
-    Control-->>Host: waiting-tool-result
-    Host->>Loop: resume(toolResults)
-  end
-  Loop->>Control: create recovery messages
-  Control-->>Model: tool-result in next turn
+  participant Agent
+  participant Runtime as CommandRunRuntime
+  participant Thread
+  participant Client
+  Agent->>Runtime: start(outer call)
+  Runtime-->>Agent: suspended(checkpoint, interactions)
+  Agent->>Thread: persist and flush checkpoint
+  Thread-->>Client: approval request
+  Client-->>Agent: approvals
+  Agent->>Runtime: resume(checkpoint, approvals)
+  Runtime-->>Agent: completed or suspended
 ```
 
-### 批准后的立即工具
+拒绝的 Command 记录为 `denied`；同 step 的独立兄弟继续执行，该 step 完成后再阻断后续 step。
+批准不会永久放宽权限；恢复执行前仍重新运行动态 capability、validation 和环境级约束。
 
-`prepareResume()` 遍历 `DeferredApprovalItem`。批准项尚无结果时，它调用 `executeApproved()`；拒绝项发出失败事件，并在恢复消息中生成 `execution-denied` 结果。
+## Deferred 与恢复
 
-`executeApproved()` 跳过审批策略，因为恢复参数已经携带用户决定。它仍会执行以下检查：
+Deferred capability 没有 Agent 进程内 `execute()`。运行到它时，runtime 保留完成前缀、阻断
+尾部、生成 checkpoint，并把 interaction 交给宿主。外部结果通过 `resume(toolResults)` 关联到
+原 `commandId`。
 
-- 工具存在于执行注册表和 `callableToolNames`；
-- 工具类型为 `immediate`；
-- 输入重新通过 Zod schema 校验；
-- 执行使用新 run 创建的 `AgentToolContext`；
-- 成功与失败继续发出对应事件。
+Checkpoint 包含 compiled frames、已有结果、phase cursor、审批记录、pending command IDs、
+outer provider call ID、input digest 与 catalog revision。恢复不重新解析模型文本，不重放已完成
+Command；catalog revision 不一致直接失败。崩溃时持久记录中的 running Command 标记为
+`interrupted`，有副作用的操作不会自动重试。
 
-重新校验输入可以覆盖持久化、传输和恢复之间的数据边界。`executeApproved()` 返回带输出或错误的 `AgentToolCall`，`prepareResume()` 把结果写入 `toolResults`。
+## 事件与持久化
 
-### 宿主执行的延迟工具
+Runtime 发布 `command_run.started/failed/completed/suspended` 与
+`command.started/completed/failed/blocked/approval_required/deferred`。Agent 将其包装成
+`command.event`，Thread JSONL 持久化一个 `commandRun` item，TUI live 与 reload 都从相同事实
+记录渲染 logical name、Shell 输出、diff、审批和最终状态。
 
-宿主使用 `DeferredToolCallItem.toolCallId` 关联结果，并通过 `resume.toolResults` 回填。恢复逻辑会检查两类错误：结果引用了未知调用 ID，或延迟工具缺少结果。校验通过后，`AgentRunControl` 创建 `tool-result`。
+Provider transcript 只保留 outer `command_run` call/result；内部事件不进入模型工具历史。
 
-会话历史中可能已经持久化 assistant 的 tool-call。`createRecoveryMessages()` 先收集已有调用 ID：已有调用只补结果；缺少调用时补齐 assistant tool-call 和 tool-result。该规则保持调用 ID 唯一，并满足 provider 对消息配对的要求。
+## 源码与测试入口
 
-## 调度不变量
-
-阅读或修改调度器时，可以用以下约束检查行为：
-
-1. 模型只能直接调用 `callableToolNames` 与执行注册表的交集。
-2. 输入先于审批和执行完成校验，批准后执行时再次校验。
-3. `required` 和 `deferred` 分支在当前 run 中不产生工具副作用。
-4. 已结束的调用产生 `tool-result`；挂起调用在恢复时补结果。
-5. 工具结果按模型响应顺序返回；安全只读调用可以并发，其他调用与全部工具互斥。
-6. 混合延迟批次在副作用发生前整批失败。
-7. 所有工具执行都取得 `runId`、回合、环境、metadata 和取消信号。
-
-## 源码阅读入口
-
-| 文件                                                                                                   | 内容                                       |
-| ------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
-| [`tool-scheduler.ts`](../../packages/ello-agent/src/features/agent/engine/tool-scheduler.ts)           | 调度主流程、审批分支、立即执行与批次预检   |
-| [`tool-execution-gate.ts`](../../packages/ello-agent/src/features/agent/engine/tool-execution-gate.ts) | 环境级读写锁与取消处理                     |
-| [`run-state.ts`](../../packages/ello-agent/src/features/agent/engine/run-state.ts)                     | 调度器装配、回合结算与停止条件             |
-| [`run-control.ts`](../../packages/ello-agent/src/features/agent/engine/run-control.ts)                 | 挂起状态和恢复消息配对                     |
-| [`tools.ts`](../../packages/ello-agent/src/features/agent/engine/tools.ts)                             | 工具调用与结果消息编码                     |
-| [`tool-scheduler.test.ts`](../../packages/ello-agent/tests/engine/tool-scheduler.test.ts)              | 输入复验、审批异常、延迟工具和混合批次测试 |
-
-相关架构说明：
-
-- [Agent 与回合循环](../agent/agent-loop.md)
-- [模型输入、工具与恢复](../agent/model-input-tool-loop-and-resume.md)
-- [Permission 权限系统](../permission/README.md)
+- `packages/ello-agent/src/features/command/index.ts`
+- `packages/ello-agent/src/features/command/catalog.ts`
+- `packages/ello-agent/src/features/command/runtime.ts`
+- `packages/ello-agent/src/features/agent/engine/tools.ts`
+- `packages/ello-agent/src/features/thread/run-records.ts`
+- `packages/ello-agent/tests/command/command-run-runtime.test.ts`

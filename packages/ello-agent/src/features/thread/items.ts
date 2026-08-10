@@ -10,7 +10,11 @@ import type {
   ThreadSnapshot,
   Turn,
 } from '../../protocol/v1/index.js';
-import { GoalSchema, PlanSchema } from '../../protocol/v1/index.js';
+import {
+  FileChangeSchema,
+  GoalSchema,
+  PlanSchema,
+} from '../../protocol/v1/index.js';
 
 import { serializeJsonValue } from './records.js';
 
@@ -93,7 +97,7 @@ export function completedToolItem(
   output: unknown,
   _completedAt: string,
 ): ThreadItem {
-  const result = codingToolResult(output);
+  const result = commandResult(output);
   if (item.type === 'commandExecution') {
     if (result === undefined) {
       throw new Error(
@@ -170,6 +174,7 @@ export function completeItem(item: ThreadItem): ThreadItem {
     case 'commandExecution':
     case 'fileChange':
     case 'toolCall':
+    case 'commandRun':
     case 'subagent':
     case 'contextCompaction':
       return { ...item, status: 'completed' };
@@ -183,17 +188,15 @@ export function completeItem(item: ThreadItem): ThreadItem {
   }
 }
 
-interface ProjectedCodingToolResult {
+interface ProjectedCommandResult {
   readonly output: string;
   readonly metadata: Record<string, unknown>;
 }
 
-function codingToolResult(
-  value: unknown,
-): ProjectedCodingToolResult | undefined {
-  if (!isRecord(value) || value.kind !== 'coding-tool-result') return undefined;
+function commandResult(value: unknown): ProjectedCommandResult | undefined {
+  if (!isRecord(value) || value.kind !== 'command-result') return undefined;
   if (typeof value.output !== 'string' || !isRecord(value.metadata)) {
-    throw new Error('Coding tool result is missing output or metadata.');
+    throw new Error('Command result is missing output or metadata.');
   }
   return { output: value.output, metadata: value.metadata };
 }
@@ -242,17 +245,38 @@ interface ProjectableFileChange {
 }
 
 function fileChanges(metadata: Record<string, unknown>): readonly FileChange[] {
-  const changes = metadata.fileChanges;
-  if (
-    !Array.isArray(changes) ||
-    changes.length === 0 ||
-    !changes.every(isProjectableFileChange)
-  ) {
+  const projected = projectFileChangeMetadata(metadata).fileChanges;
+  if (!Array.isArray(projected) || projected.length === 0) {
     throw new Error(
       'File change tool result has invalid fileChanges metadata.',
     );
   }
-  return changes.map(projectFileChange);
+  return projected as readonly FileChange[];
+}
+
+/** 将工具内部 FileChange 归一化为稳定的 RPC 协议形态。 */
+export function projectFileChangeMetadata(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  if (metadata.fileChanges === undefined) return metadata;
+  if (!Array.isArray(metadata.fileChanges)) {
+    throw new Error(
+      'File change tool result has invalid fileChanges metadata.',
+    );
+  }
+  return {
+    ...metadata,
+    fileChanges: metadata.fileChanges.map((change) => {
+      const protocolChange = FileChangeSchema.safeParse(change);
+      if (protocolChange.success) return protocolChange.data;
+      if (!isProjectableFileChange(change)) {
+        throw new Error(
+          'File change tool result has invalid fileChanges metadata.',
+        );
+      }
+      return projectFileChange(change);
+    }),
+  };
 }
 
 function isProjectableFileChange(
@@ -290,6 +314,7 @@ function projectFileChange(change: ProjectableFileChange): FileChange {
         : {
             ...common,
             kind: 'rename',
+            path: change.movePath,
             oldPath: change.path,
           };
     default:

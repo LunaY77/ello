@@ -4,11 +4,19 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import { z } from 'zod';
 
 import { errnoCode } from '../../../infra/filesystem.js';
+import {
+  cliInput,
+  commandInput,
+  defineCommand,
+  structuredInput,
+  type CommandExample,
+} from '../../command/index.js';
 import type { CodingAgentConfig } from '../../config/index.js';
 import type { DecideApproval } from '../permissions/policy.js';
 import type { PermissionMetadata } from '../permissions/types.js';
@@ -19,10 +27,7 @@ import {
   prepareApplyPatch,
 } from './apply-patch.js';
 import { createFileChange, summarizeFileChanges } from './file-change.js';
-import {
-  createCodingToolResult,
-  defineCodingTool,
-} from './runtime/coding-tool.js';
+import { createCommandResult } from './runtime/command-result.js';
 import { SessionFileState } from './runtime/file-state.js';
 import {
   findNearestLine,
@@ -30,6 +35,32 @@ import {
   resolveRuntimePath,
   statRuntimePath,
 } from './shared.js';
+
+const READ_EXAMPLES = [
+  {
+    description: 'Read the first 80 lines of a file',
+    frame: { args: ['README.md', '--limit', '80'] },
+  },
+] as const satisfies readonly CommandExample[];
+
+const WRITE_EXAMPLES = [
+  {
+    description: 'Create a new text file',
+    frame: { args: ['notes.txt'], body: 'First line\n' },
+  },
+] as const satisfies readonly CommandExample[];
+
+const APPLY_PATCH_EXAMPLES = [
+  {
+    description: 'Create a file with a structured patch',
+    frame: {
+      body: `*** Begin Patch
+*** Add File: notes.txt
++First line
+*** End Patch`,
+    },
+  },
+] as const satisfies readonly CommandExample[];
 
 /**
  * 文件系统工具：read / write / edit / apply_patch。
@@ -47,44 +78,87 @@ import {
  * Throws:
  * - 当 工具 `fs` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
-export function createFsTools(
+export function createFsCommands(
   config: CodingAgentConfig,
   decide: DecideApproval,
   fileState: SessionFileState = new SessionFileState(),
 ) {
+  const readInput = z
+    .object({
+      filePath: z.string().min(1).describe('File path to read'),
+      offset: z
+        .number()
+        .int()
+        .min(1)
+        .default(1)
+        .describe('First 1-based line or directory entry to return'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(2000)
+        .default(400)
+        .describe('Maximum number of lines or directory entries to return'),
+    })
+    .strict();
+  const writeInput = z
+    .object({
+      filePath: z.string().min(1).describe('File path to write'),
+      content: z.string().describe('Complete new file content'),
+      expectedDigest: z
+        .string()
+        .regex(/^[a-f\d]{64}$/u)
+        .optional()
+        .describe(
+          'SHA-256 returned by read; required to overwrite an existing file',
+        ),
+      reason: z.string().optional().describe('Reason for writing this file'),
+    })
+    .strict();
+  const editInput = z
+    .object({
+      filePath: z.string().min(1).describe('File path to edit'),
+      oldText: z
+        .string()
+        .min(1)
+        .describe(
+          'Exact text to replace, copied from the file and unique within it',
+        ),
+      newText: z
+        .string()
+        .describe('Replacement text; empty deletes the fragment'),
+      reason: z.string().optional().describe('Reason for this edit'),
+    })
+    .strict();
+  const patchInput = z
+    .object({
+      patch: z
+        .string()
+        .min(1)
+        .describe('Complete patch text in the format described above'),
+      reason: z.string().optional().describe('Reason for applying this patch'),
+    })
+    .strict();
   return [
-    defineCodingTool({
+    defineCommand({
       name: 'read',
-      capabilities: () => ({
+      summary: 'Read a UTF-8 text file or list one directory.',
+      details: `Line numbers are a display gutter followed by two spaces; never copy them into a patch or file body. A directory path returns a sorted, non-recursive 'name<TAB>kind<TAB>size' listing. A binary file returns its byte count and is attached as an artifact instead of text. Re-reading an unchanged range returns a short unchanged marker rather than the same content again.
+A missing or unreadable path fails the Command. Reading outside the configured coding scope requires approval.`,
+      examples: READ_EXAMPLES,
+      aliases: ['file', 'directory', 'cat'],
+      risk: 'readonly',
+      effects: () => ({
         concurrencySafe: true,
         readOnly: true,
         destructive: false,
         interruptible: true,
         telemetryTag: 'filesystem.read',
       }),
-      description: `Read a UTF-8 text file, or list one directory, at 'filePath'.
-File output is line-numbered in a right-aligned gutter followed by two spaces; the gutter is display only, so never copy it into edit or apply_patch. 'offset' is the 1-based first line or directory entry and 'limit' the maximum number of lines or entries, default 400 and at most 2000; the result reports the returned range and total count so you can page with successive offsets. Re-reading the same unchanged file range returns a short unchanged marker instead of duplicating content already present in the thread. A directory path returns a sorted, non-recursive listing of 'name<TAB>kind<TAB>size'. A binary file returns a byte count and is attached as an artifact rather than inlined.
-A missing or unreadable path fails the call. Reading outside the configured coding scope requires Tool Policy approval. Very long output is centrally reduced to a bounded head/tail preview while the complete result is retained as an artifact.
-Read a file before editing it: edit and apply_patch match text literally, so they need the exact current content. Use grep to find which file contains some text, and glob to find files by name. Put independent read, grep, and glob calls directly in the same model response; the runtime schedules safe calls concurrently without a wrapper tool.`,
-      discovery: { aliases: ['file', 'directory', 'cat'], risk: 'readonly' },
-      input: z
-        .object({
-          filePath: z.string().min(1).describe('File path to read'),
-          offset: z
-            .number()
-            .int()
-            .min(1)
-            .optional()
-            .describe('Starting line number (1-based)'),
-          limit: z
-            .number()
-            .int()
-            .min(1)
-            .max(2000)
-            .optional()
-            .describe('Maximum number of lines to return'),
-        })
-        .strict(),
+      invocation: cliInput(commandInput(readInput), {
+        positionals: [{ field: 'filePath', metavar: 'path' }],
+        options: ['offset', 'limit'],
+      }),
       approval: (input, ctx) =>
         decide(
           {
@@ -94,307 +168,277 @@ Read a file before editing it: edit and apply_patch match text literally, so the
             paths: [input.filePath],
             metadata: { kind: 'read', path: input.filePath },
           },
-          ctx.agent,
+          ctx,
         ),
-      execute: async (
-        { filePath: targetPath, offset = 1, limit = 400 },
-        ctx,
-      ) => {
-        const fs = requireFs(ctx.agent);
-        const absolutePath = resolveRuntimePath(fs, targetPath);
-        const info = await statRuntimePath(fs, targetPath);
-        if (info.kind === 'directory') {
-          const entries = await fs.listDir(targetPath);
-          entries.sort((left, right) => left.localeCompare(right));
-          const selectedEntries = entries.slice(offset - 1, offset - 1 + limit);
-          const renderedEntries = await Promise.all(
-            selectedEntries.map(async (entry) => {
-              const entryInfo = await statRuntimePath(
-                fs,
-                path.join(targetPath, entry),
-              );
-              return `${entry}\t${entryInfo.kind}\t${entryInfo.size}`;
-            }),
-          );
-          const nextOffset =
-            offset - 1 + selectedEntries.length < entries.length
-              ? offset + selectedEntries.length
-              : undefined;
-          renderedEntries.push(
-            `[Listed ${selectedEntries.length} of ${entries.length} entries.${nextOffset === undefined ? '' : ` Continue with offset ${nextOffset}.`}]`,
-          );
-          return createCodingToolResult({
-            title: `Directory ${targetPath}`,
-            output: renderedEntries.join('\n'),
-            metadata: {
-              kind: 'read',
-              path: targetPath,
-              bytes: 0,
-              entryCount: selectedEntries.length,
-              totalEntries: entries.length,
-              offset,
-              ...(nextOffset === undefined ? {} : { nextOffset }),
-              isDirectory: true,
-            },
+      execution: {
+        kind: 'immediate',
+        run: async ({ filePath: targetPath, offset, limit }, ctx) => {
+          const fs = requireFs(ctx);
+          const absolutePath = resolveRuntimePath(fs, targetPath);
+          const info = await statRuntimePath(fs, targetPath);
+          if (info.kind === 'directory') {
+            const entries = await fs.listDir(targetPath);
+            entries.sort((left, right) => left.localeCompare(right));
+            const selectedEntries = entries.slice(
+              offset - 1,
+              offset - 1 + limit,
+            );
+            const renderedEntries = await Promise.all(
+              selectedEntries.map(async (entry) => {
+                const entryInfo = await statRuntimePath(
+                  fs,
+                  path.join(targetPath, entry),
+                );
+                return `${entry}\t${entryInfo.kind}\t${entryInfo.size}`;
+              }),
+            );
+            const nextOffset =
+              offset - 1 + selectedEntries.length < entries.length
+                ? offset + selectedEntries.length
+                : undefined;
+            renderedEntries.push(
+              `[Listed ${selectedEntries.length} of ${entries.length} entries.${nextOffset === undefined ? '' : ` Continue with offset ${nextOffset}.`}]`,
+            );
+            return createCommandResult({
+              title: `Directory ${targetPath}`,
+              output: renderedEntries.join('\n'),
+              metadata: {
+                kind: 'read',
+                path: targetPath,
+                bytes: 0,
+                entryCount: selectedEntries.length,
+                totalEntries: entries.length,
+                offset,
+                ...(nextOffset === undefined ? {} : { nextOffset }),
+                isDirectory: true,
+              },
+            });
+          }
+          const sourceStat = await fs.stat(targetPath);
+          const sourceVersion = {
+            mtimeMs: sourceStat.modifiedAtMs,
+            size: sourceStat.size,
+          };
+          const cached = fileState.unchanged(absolutePath, sourceVersion, {
+            offset,
+            limit,
           });
-        }
-        const sourceStat = await fs.stat(targetPath);
-        const sourceVersion = {
-          mtimeMs: sourceStat.modifiedAtMs,
-          size: sourceStat.size,
-        };
-        const cached = fileState.unchanged(absolutePath, sourceVersion, {
-          offset,
-          limit,
-        });
-        if (cached !== undefined) {
-          return createCodingToolResult({
-            title: `Unchanged ${targetPath}`,
-            output: `File unchanged since the previous read of ${targetPath} lines ${cached.lineStart}-${cached.lineEnd}. Reuse the earlier content already present in this thread.`,
-            metadata: {
-              kind: 'read',
-              path: targetPath,
-              bytes: cached.size,
-              lineStart: cached.lineStart,
-              lineEnd: cached.lineEnd,
-              totalLines: cached.totalLines,
-              mime: 'text/plain; charset=utf-8',
-              unchanged: true,
+          if (cached !== undefined) {
+            return createCommandResult({
+              title: `Unchanged ${targetPath}`,
+              output: `File unchanged since the previous read of ${targetPath} lines ${cached.lineStart}-${cached.lineEnd}. Reuse the earlier content already present in this thread.`,
+              metadata: {
+                kind: 'read',
+                path: targetPath,
+                bytes: cached.size,
+                lineStart: cached.lineStart,
+                lineEnd: cached.lineEnd,
+                totalLines: cached.totalLines,
+                sha256: cached.digest,
+                mime: 'text/plain; charset=utf-8',
+                unchanged: true,
+              },
+            });
+          }
+          const stableRead = await readStableFile(
+            fs,
+            targetPath,
+            sourceVersion,
+          );
+          const buffer = stableRead.buffer;
+          if (isBinary(buffer)) {
+            return createCommandResult({
+              title: `Binary file ${targetPath}`,
+              output: `Binary file ${targetPath} (${buffer.byteLength} bytes). Content is available as an attachment artifact only.`,
+              metadata: {
+                kind: 'read',
+                path: targetPath,
+                bytes: buffer.byteLength,
+                mime: 'application/octet-stream',
+                binary: true,
+              },
+              attachments: [
+                {
+                  type: 'binary',
+                  mime: 'application/octet-stream',
+                  content: buffer.toString('base64'),
+                  name: targetPath,
+                  bytes: buffer.byteLength,
+                },
+              ],
+            });
+          }
+          const text = buffer.toString('utf8');
+          const contentDigest = sha256(buffer);
+          const lines = text.split(/\r?\n/u);
+          const slice = lines.slice(offset - 1, offset - 1 + limit);
+          const lineEnd = offset + slice.length - 1;
+          const content = slice
+            .map(
+              (line, index) =>
+                `${String(offset + index).padStart(5, ' ')}  ${line}`,
+            )
+            .join('\n');
+          const nextOffset = lineEnd < lines.length ? lineEnd + 1 : undefined;
+          const modelOutput = [
+            content,
+            `[Read lines ${offset}-${lineEnd} of ${lines.length}.${nextOffset === undefined ? '' : ` Continue with offset ${nextOffset}.`}]`,
+          ]
+            .filter((part) => part !== '')
+            .join('\n');
+          fileState.record(
+            absolutePath,
+            stableRead.version,
+            { offset, limit },
+            {
+              digest: contentDigest,
+              size: stableRead.version.size,
+              lineStart: offset,
+              lineEnd,
+              totalLines: lines.length,
             },
-          });
-        }
-        const stableRead = await readStableFile(fs, targetPath, sourceVersion);
-        const buffer = stableRead.buffer;
-        if (isBinary(buffer)) {
-          return createCodingToolResult({
-            title: `Binary file ${targetPath}`,
-            output: `Binary file ${targetPath} (${buffer.byteLength} bytes). Content is available as an attachment artifact only.`,
+          );
+          return createCommandResult({
+            title: `Read ${targetPath}`,
+            output: modelOutput,
             metadata: {
               kind: 'read',
               path: targetPath,
               bytes: buffer.byteLength,
-              mime: 'application/octet-stream',
-              binary: true,
+              lineStart: offset,
+              lineEnd,
+              totalLines: lines.length,
+              mime: 'text/plain; charset=utf-8',
+              sha256: contentDigest,
             },
-            attachments: [
-              {
-                type: 'binary',
-                mime: 'application/octet-stream',
-                content: buffer.toString('base64'),
-                name: targetPath,
-                bytes: buffer.byteLength,
-              },
-            ],
           });
-        }
-        const text = buffer.toString('utf8');
-        const lines = text.split(/\r?\n/u);
-        const slice = lines.slice(offset - 1, offset - 1 + limit);
-        const lineEnd = offset + slice.length - 1;
-        const content = slice
-          .map(
-            (line, index) =>
-              `${String(offset + index).padStart(5, ' ')}  ${line}`,
-          )
-          .join('\n');
-        const nextOffset = lineEnd < lines.length ? lineEnd + 1 : undefined;
-        const modelOutput = [
-          content,
-          `[Read lines ${offset}-${lineEnd} of ${lines.length}.${nextOffset === undefined ? '' : ` Continue with offset ${nextOffset}.`}]`,
-        ]
-          .filter((part) => part !== '')
-          .join('\n');
-        fileState.record(
-          absolutePath,
-          stableRead.version,
-          { offset, limit },
-          {
-            size: stableRead.version.size,
-            lineStart: offset,
-            lineEnd,
-            totalLines: lines.length,
-          },
-        );
-        return createCodingToolResult({
-          title: `Read ${targetPath}`,
-          output: modelOutput,
-          metadata: {
-            kind: 'read',
-            path: targetPath,
-            bytes: buffer.byteLength,
-            lineStart: offset,
-            lineEnd,
-            totalLines: lines.length,
-            mime: 'text/plain; charset=utf-8',
-          },
-        });
+        },
       },
     }),
-    defineCodingTool({
+    defineCommand({
       name: 'write',
-      description: `Create a new file, or replace an existing file whole, with 'content' as its complete new text.
-Use this for new files. Do not use it to change a file that already exists just to alter a few lines: sending a whole file costs output proportional to its size and loses the rest of the file if your copy is stale. Use edit for one fragment and apply_patch for several fragments or several files.
-Overwriting an existing file requires 'expectedContent' to equal its current content exactly; the call fails when 'expectedContent' is missing or stale, which means re-read the file. Parent directories are created as needed. Writing outside the configured coding scope requires Tool Policy approval; the Environment itself does not claim that scope as an isolation boundary.`,
-      discovery: {
-        aliases: ['create file', 'overwrite file'],
-        risk: 'workspace-write',
-      },
-      input: z
-        .object({
-          filePath: z.string().min(1).describe('File path to write'),
-          content: z.string().describe('Complete new file content'),
-          expectedContent: z
-            .string()
-            .optional()
-            .describe(
-              'Exact current content; required to overwrite an existing file',
-            ),
-          reason: z
-            .string()
-            .optional()
-            .describe('Reason for writing this file'),
-        })
-        .strict(),
+      summary: 'Create a file or replace an existing file whole.',
+      details: `Before overwriting an existing file, read it and pass the returned SHA-256 as 'expectedDigest'; a STALE_WRITE failure means the file changed and requires a fresh read. Parent directories are created as needed. Writing outside the configured coding scope requires approval.`,
+      examples: WRITE_EXAMPLES,
+      aliases: ['create file', 'overwrite file'],
+      risk: 'workspace-write',
+      invocation: cliInput(commandInput(writeInput), {
+        positionals: [{ field: 'filePath', metavar: 'path' }],
+        options: ['expectedDigest', 'reason'],
+        body: 'content',
+      }),
       approval: async (input, ctx) => {
         const descriptor = editDescriptor([input.filePath]);
-        const pathDecision = decide(descriptor, ctx.agent, {
+        const pathDecision = decide(descriptor, ctx, {
           externalPathsOnly: true,
         });
         if (pathDecision !== 'auto') return pathDecision;
         return decide(
-          { ...descriptor, metadata: await writeMetadata(input, ctx.agent) },
-          ctx.agent,
+          { ...descriptor, metadata: await writeMetadata(input, ctx) },
+          ctx,
         );
       },
-      execute: async (
-        { filePath: targetPath, content, expectedContent, reason },
-        ctx,
-      ) => {
-        const fs = requireFs(ctx.agent);
-        const previous = await readOptional(fs, targetPath);
-        assertWriteExpectedContent(targetPath, previous, expectedContent);
-        await fs.writeText(targetPath, content);
-        const fileChanges = [createFileChange(targetPath, previous, content)];
-        const summary = summarizeFileChanges(fileChanges);
-        return createCodingToolResult({
-          title: `Write ${targetPath}`,
-          output: `Wrote ${Buffer.byteLength(content)} bytes to ${targetPath} (+${summary.additions} -${summary.deletions}).`,
-          metadata: {
-            kind: 'edit',
-            path: targetPath,
-            bytes: Buffer.byteLength(content),
-            reason: reason ?? 'write file',
-            fileChanges,
-            before: previous,
-            after: content,
-          },
-        });
+      execution: {
+        kind: 'immediate',
+        run: async (
+          { filePath: targetPath, content, expectedDigest, reason },
+          ctx,
+        ) => {
+          const fs = requireFs(ctx);
+          const previous = await readOptional(fs, targetPath);
+          assertWriteExpectedDigest(targetPath, previous, expectedDigest);
+          await fs.writeText(targetPath, content);
+          const fileChanges = [createFileChange(targetPath, previous, content)];
+          const summary = summarizeFileChanges(fileChanges);
+          return createCommandResult({
+            title: `Write ${targetPath}`,
+            output: `Wrote ${Buffer.byteLength(content)} bytes to ${targetPath} (+${summary.additions} -${summary.deletions}).`,
+            metadata: {
+              kind: 'edit',
+              path: targetPath,
+              bytes: Buffer.byteLength(content),
+              reason: reason ?? 'write file',
+              fileChanges,
+              before: previous,
+              after: content,
+            },
+          });
+        },
       },
     }),
-    defineCodingTool({
+    defineCommand({
       name: 'edit',
-      description: `Replace one exact text fragment in an existing file. This is the preferred way to change a file that already exists: it sends only the changed region instead of the whole file, so prefer it over write for every modification.
-Read the file first and copy 'oldText' verbatim from what read returned, without the line-number gutter. 'oldText' must appear exactly once in the file, matched literally with no regex and no whitespace normalization; include enough surrounding lines to make it unique. 'newText' replaces it verbatim and may be empty to delete the fragment.
-Failures are precise and recoverable: several occurrences report the count and the line number of each match, zero occurrences report the nearest partial match with its line number and text. Both mean re-read the file or extend 'oldText'; neither is a reason to rewrite the file.
-Boundaries: use write only to create a new file or to replace a file whole; use edit for a single fragment in one file; use apply_patch for several fragments at once, several files in one atomic change, or file creation, deletion, and renames.`,
-      discovery: {
-        aliases: ['replace text', 'modify file'],
-        risk: 'workspace-write',
-      },
-      input: z
-        .object({
-          filePath: z.string().min(1).describe('File path to edit'),
-          oldText: z
-            .string()
-            .min(1)
-            .describe(
-              'Exact text to replace, copied from the file and unique within it',
-            ),
-          newText: z
-            .string()
-            .describe('Replacement text; empty deletes the fragment'),
-          reason: z.string().optional().describe('Reason for this edit'),
-        })
-        .strict(),
+      summary: 'Replace one exact text fragment in an existing file.',
+      details: `'oldText' must appear exactly once and is matched literally; copy it from a fresh read without the line-number gutter. An empty 'newText' deletes the fragment.
+Failures are precise: several matches report the count and each line number, no match reports the nearest partial match with its line number and text. Both mean re-read the file or extend 'oldText'.
+Boundaries: write creates a file or replaces one whole, edit changes a single fragment in one file, apply_patch covers several fragments, several files, or file creation, deletion, and renames in one atomic change.`,
+      aliases: ['replace text', 'modify file'],
+      risk: 'workspace-write',
+      invocation: structuredInput(commandInput(editInput)),
       approval: async (input, ctx) => {
         const descriptor = editDescriptor([input.filePath]);
-        const pathDecision = decide(descriptor, ctx.agent, {
+        const pathDecision = decide(descriptor, ctx, {
           externalPathsOnly: true,
         });
         if (pathDecision !== 'auto') return pathDecision;
         return decide(
-          { ...descriptor, metadata: await editMetadata(input, ctx.agent) },
-          ctx.agent,
+          { ...descriptor, metadata: await editMetadata(input, ctx) },
+          ctx,
         );
       },
-      execute: async (
-        { filePath: targetPath, oldText, newText, reason },
-        ctx,
-      ) => {
-        const fs = requireFs(ctx.agent);
-        const current = await fs.readText(targetPath);
-        const first = locateUniqueMatch(targetPath, current, oldText);
-        const next =
-          current.slice(0, first) +
-          newText +
-          current.slice(first + oldText.length);
-        await fs.writeText(targetPath, next);
-        const fileChanges = [createFileChange(targetPath, current, next)];
-        const summary = summarizeFileChanges(fileChanges);
-        return createCodingToolResult({
-          title: `Edit ${targetPath}`,
-          output: `Edited ${targetPath} (+${summary.additions} -${summary.deletions}).`,
-          metadata: {
-            kind: 'edit',
-            path: targetPath,
-            reason: reason ?? 'edit file',
-            fileChanges,
-            before: current,
-            after: next,
-          },
-        });
+      execution: {
+        kind: 'immediate',
+        run: async (
+          { filePath: targetPath, oldText, newText, reason },
+          ctx,
+        ) => {
+          const fs = requireFs(ctx);
+          const current = await fs.readText(targetPath);
+          const first = locateUniqueMatch(targetPath, current, oldText);
+          const next =
+            current.slice(0, first) +
+            newText +
+            current.slice(first + oldText.length);
+          await fs.writeText(targetPath, next);
+          const fileChanges = [createFileChange(targetPath, current, next)];
+          const summary = summarizeFileChanges(fileChanges);
+          return createCommandResult({
+            title: `Edit ${targetPath}`,
+            output: `Edited ${targetPath} (+${summary.additions} -${summary.deletions}).`,
+            metadata: {
+              kind: 'edit',
+              path: targetPath,
+              reason: reason ?? 'edit file',
+              fileChanges,
+              before: current,
+              after: next,
+            },
+          });
+        },
       },
     }),
-    defineCodingTool({
+    defineCommand({
       name: 'apply_patch',
-      description: `Apply file changes using the structured patch protocol. All operations in one patch are previewed in memory and then written together, so a patch either fully applies or changes nothing.
-The patch must start with *** Begin Patch and end with *** End Patch. Use explicit *** Add File:, *** Delete File:, or *** Update File: operations, optionally followed by *** Move to: for a rename. Added file content and inserted update lines start with +; removed lines start with -; unchanged context lines start with a space. Do not use unified diff ---/+++ file headers and do not write @@ -1,4 +1,6 @@ line ranges; a bare @@, or @@ followed by a context line to anchor from, is all that is supported.
-Removed and context lines must reproduce the file's current text, so read the file first. A line whose first character is none of ' ', '+', '-' fails the parse and the error echoes that line. Update hunks that cannot be located fail and the error echoes the expected lines.
-Example:
-*** Begin Patch
-*** Update File: src/example.ts
-@@
--old line
-+new line
-*** End Patch
-Boundaries: use write to create a single new file, edit for one fragment in one file, and apply_patch when a change spans several fragments or several files, or when it deletes or renames files.`,
-      discovery: {
-        aliases: ['patch', 'structured patch', 'multi file edit'],
-        risk: 'workspace-write',
-      },
-      input: z
-        .object({
-          patch: z
-            .string()
-            .min(1)
-            .describe(
-              "Patch text using *** Begin Patch / *** End Patch. Update hunks use @@ plus context, '-' removed lines, and '+' added lines.",
-            ),
-          reason: z
-            .string()
-            .optional()
-            .describe('Reason for applying this patch'),
-        })
-        .strict(),
+      summary: 'Apply a strict structured patch atomically.',
+      details: `Every operation is previewed in memory and then written together, so a patch either fully applies or changes nothing.
+Format: the body runs from *** Begin Patch to *** End Patch and holds *** Add File:, *** Delete File:, or *** Update File: operations; an update may add *** Move to: for a rename and separates hunks with @@ plus context. Added lines start with +, removed lines with -, and context lines with a space. Unified diff ---/+++ headers and numbered @@ ranges are rejected, and removed and context lines must reproduce the current file text.
+Invalid syntax or an update hunk that cannot be located fails with the offending line or the expected context.`,
+      examples: APPLY_PATCH_EXAMPLES,
+      aliases: ['patch', 'structured patch', 'multi file edit'],
+      risk: 'workspace-write',
+      invocation: cliInput(commandInput(patchInput), {
+        options: ['reason'],
+        body: 'patch',
+      }),
       approval: async (input, ctx) => {
         const patch = parseApplyPatch(input.patch);
         const paths = applyPatchPaths(patch);
         const descriptor = editDescriptor(paths);
-        const pathDecision = decide(descriptor, ctx.agent, {
+        const pathDecision = decide(descriptor, ctx, {
           externalPathsOnly: true,
         });
         if (pathDecision !== 'auto') return pathDecision;
-        const prepared = await prepareApplyPatch(requireFs(ctx.agent), patch);
+        const prepared = await prepareApplyPatch(requireFs(ctx), patch);
         return decide(
           {
             ...descriptor,
@@ -404,25 +448,28 @@ Boundaries: use write to create a single new file, edit for one fragment in one 
               fileChanges: prepared.fileChanges,
             },
           },
-          ctx.agent,
+          ctx,
         );
       },
-      execute: async ({ patch, reason }, ctx) => {
-        const fs = requireFs(ctx.agent);
-        const prepared = await prepareApplyPatch(fs, parseApplyPatch(patch));
-        await prepared.apply();
-        const summary = summarizeFileChanges(prepared.fileChanges);
-        return createCodingToolResult({
-          title: `Apply patch ${prepared.paths.join(', ')}`,
-          output: `Applied patch to ${prepared.paths.length} file(s) (+${summary.additions} -${summary.deletions}).`,
-          metadata: {
-            kind: 'edit',
-            path: prepared.paths.join(', '),
-            paths: prepared.paths,
-            reason: reason ?? 'apply patch',
-            fileChanges: prepared.fileChanges,
-          },
-        });
+      execution: {
+        kind: 'immediate',
+        run: async ({ patch, reason }, ctx) => {
+          const fs = requireFs(ctx);
+          const prepared = await prepareApplyPatch(fs, parseApplyPatch(patch));
+          await prepared.apply();
+          const summary = summarizeFileChanges(prepared.fileChanges);
+          return createCommandResult({
+            title: `Apply patch ${prepared.paths.join(', ')}`,
+            output: `Applied patch to ${prepared.paths.length} file(s) (+${summary.additions} -${summary.deletions}).`,
+            metadata: {
+              kind: 'edit',
+              path: prepared.paths.join(', '),
+              paths: prepared.paths,
+              reason: reason ?? 'apply patch',
+              fileChanges: prepared.fileChanges,
+            },
+          });
+        },
       },
     }),
   ];
@@ -546,21 +593,24 @@ async function readOptional(
   }
 }
 
-function assertWriteExpectedContent(
+function assertWriteExpectedDigest(
   targetPath: string,
   previous: string | null,
-  expectedContent: string | undefined,
+  expectedDigest: string | undefined,
 ): void {
   if (previous === null) {
     return;
   }
-  if (expectedContent === undefined) {
+  if (expectedDigest === undefined) {
     throw new Error(
-      `Refusing to overwrite existing file without expectedContent: ${targetPath}`,
+      `STALE_WRITE: refusing to overwrite existing file without expectedDigest: ${targetPath}`,
     );
   }
-  if (expectedContent !== previous) {
-    throw new Error(`File changed since last read: ${targetPath}`);
+  const actualDigest = sha256(previous);
+  if (expectedDigest !== actualDigest) {
+    throw new Error(
+      `STALE_WRITE: file changed since last read: ${targetPath} (expected ${expectedDigest}, actual ${actualDigest})`,
+    );
   }
 }
 
@@ -575,20 +625,22 @@ async function writeMetadata(
   input: {
     readonly filePath: string;
     readonly content: string;
-    readonly expectedContent?: string | undefined;
+    readonly expectedDigest?: string | undefined;
     readonly reason?: string | undefined;
   },
   ctx: Parameters<DecideApproval>[1],
 ): Promise<Extract<PermissionMetadata, { kind: 'edit' }>> {
   const previous = await readOptional(requireFs(ctx), input.filePath);
-  if (previous !== null && input.expectedContent !== previous) {
-    throw new Error(`File changed since last read: ${input.filePath}`);
-  }
+  assertWriteExpectedDigest(input.filePath, previous, input.expectedDigest);
   return {
     kind: 'edit',
     path: input.filePath,
     fileChanges: [createFileChange(input.filePath, previous, input.content)],
   };
+}
+
+function sha256(value: string | Uint8Array): string {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 async function editMetadata(

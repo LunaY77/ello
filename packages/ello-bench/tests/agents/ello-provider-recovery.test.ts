@@ -4,7 +4,10 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { findElloProviderRecoveryTarget } from '../../src/infra/agent/ello/provider-recovery.js';
+import {
+  buildElloProviderRecoveryInstruction,
+  findElloProviderRecoveryTarget,
+} from '../../src/infra/agent/ello/provider-recovery.js';
 
 const directories: string[] = [];
 
@@ -17,6 +20,14 @@ afterEach(async () => {
 });
 
 describe('Ello provider recovery', () => {
+  it('replays the exact original benchmark instruction', () => {
+    const original = 'Implement slice steps and run the evaluator tests.';
+    const recovery = buildElloProviderRecoveryInstruction(original);
+
+    expect(recovery).toContain(original);
+    expect(recovery).toContain('Do not ask whether to continue');
+  });
+
   it('finds a failed live capture from structured CLI notifications', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ello-provider-recovery-'));
     directories.push(root);
@@ -85,6 +96,7 @@ function failedCapture(
       runId: 'run-1',
       occurredAt: '2026-07-23T00:00:00.000Z',
       identity,
+      diagnostics: { toolsetFingerprint: 'a'.repeat(64) },
     }),
     capture(2, 'model.failed', {
       type: 'model.failed',
@@ -99,6 +111,9 @@ function failedCapture(
       sequence: 3,
       runId: 'run-1',
       occurredAt: '2026-07-23T00:00:02.000Z',
+      ...(terminal === 'run.failed'
+        ? { error: { name: 'TypeError', message: 'terminated' } }
+        : {}),
     }),
   ]
     .map(JSON.stringify)

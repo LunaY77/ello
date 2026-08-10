@@ -99,9 +99,7 @@ function eventType(event: AgentRunEvent): AgentRunEvent['type'] {
     case 'messageStarted':
     case 'messageDelta':
     case 'messageCompleted':
-    case 'toolStarted':
-    case 'toolCompleted':
-    case 'toolFailed':
+    case 'commandRunEvent':
     case 'interactionRequired':
     case 'messagesAppended':
     case 'contextCompactionStarted':

@@ -466,6 +466,27 @@ export function composerTextWidthForTerminal(columns: number): number {
 
 const MAX_VISIBLE_SUGGESTIONS = 5;
 
+/**
+ * Composer 实际占用的终端行数。
+ *
+ * 必须和上面的 JSX 保持一致：除了输入文本的视觉行，运行中还有 `Enter steers this
+ * run`、查看 child 时有 `Steer @target`、有候选时还有补全列表。live 区的行数预算靠这个
+ * 数字扣减，少算一行就会让 dynamic frame 顶到终端高度，触发 Ink 的整屏重绘。
+ */
+export function composerRowCount(input: {
+  readonly textRows: number;
+  readonly running: boolean;
+  readonly hasSteerTarget: boolean;
+  readonly suggestionCount: number;
+}): number {
+  return (
+    (input.hasSteerTarget ? 1 : 0) +
+    Math.max(1, input.textRows) +
+    Math.min(input.suggestionCount, MAX_VISIBLE_SUGGESTIONS) +
+    (input.running ? 1 : 0)
+  );
+}
+
 function visibleSuggestionWindow(
   suggestions: readonly ComposerSuggestion[],
   activeIndex: number,

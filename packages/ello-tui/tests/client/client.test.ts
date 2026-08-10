@@ -1,5 +1,5 @@
 /**
- * 本文件验证 TUI `AppServerClient` 的框架关联、Zod 边界、超时关闭和延迟 Server Request 行为。
+ * 本文件验证 TUI `AppServerClient` 的框架关联、Zod 边界、请求超时和延迟 Server Request 行为。
  *
  * 测试使用完整消息 memory transport，不读取 Client 内部 ID 或 pending state，确保通用 RPC 机制只由
  * `vscode-jsonrpc` 拥有。
@@ -160,12 +160,51 @@ describe('AppServerClient', () => {
     await context.client.close();
   });
 
-  it('请求超时后取消请求并关闭连接以清理框架 pending', async () => {
+  it('请求超时只拒绝该请求，连接与后续请求仍然可用', async () => {
     const context = await initializedClient({ requestTimeoutMs: 25 });
-    const request = context.client.request('server/read', {});
-    await expect(request).rejects.toBeInstanceOf(RequestTimeoutError);
-    expect(context.client.state).toBe('closed');
+    const serverMessages = context.server.messages()[Symbol.asyncIterator]();
+
+    const abandoned = context.client.request('server/read', {});
+    await readRequest(serverMessages);
+    await expect(abandoned).rejects.toBeInstanceOf(RequestTimeoutError);
+    expect(context.client.state).toBe('ready');
+
+    const next = context.client.request('thread/list', { archived: false });
+    const nextRequest = await readNextRequest(serverMessages);
+    await send(context.server, {
+      jsonrpc: '2.0',
+      id: nextRequest.id,
+      result: { data: [] },
+    });
+    await expect(next).resolves.toEqual({ data: [] });
     await context.client.close();
+  });
+
+  it('压缩这类长操作使用独立请求预算，不按默认超时中断', async () => {
+    const context = await initializedClient({ requestTimeoutMs: 25 });
+    const serverMessages = context.server.messages()[Symbol.asyncIterator]();
+
+    const compaction = context.client.request('thread/compact/start', {
+      threadId: 'thr_test',
+    });
+    const pending = compaction.then(
+      () => 'settled',
+      () => 'settled',
+    );
+    await readRequest(serverMessages);
+
+    await expect(
+      Promise.race([
+        pending,
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve('pending'), 80),
+        ),
+      ]),
+    ).resolves.toBe('pending');
+    expect(context.client.state).toBe('ready');
+
+    await context.client.close();
+    await pending;
   });
 
   it('底层 transport 异常结束时发布唯一连接关闭事件', async () => {
@@ -351,6 +390,16 @@ async function readRequest(
   iterator: AsyncIterator<Uint8Array>,
 ): Promise<RpcRequest> {
   return (await readJson(iterator)) as RpcRequest;
+}
+
+/** 跳过超时后发出的 `$/cancelRequest`，只返回下一条真实请求。 */
+async function readNextRequest(
+  iterator: AsyncIterator<Uint8Array>,
+): Promise<RpcRequest> {
+  while (true) {
+    const message = await readJson(iterator);
+    if (message.id !== undefined) return message as unknown as RpcRequest;
+  }
 }
 
 function send(

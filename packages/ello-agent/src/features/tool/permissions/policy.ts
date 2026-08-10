@@ -5,10 +5,10 @@
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
 import type {
-  AgentApprovalDecision,
-  AgentToolContext,
+  CommandApprovalDecision,
+  CommandContext,
   MaybePromise,
-} from '../../agent/engine/index.js';
+} from '../../command/index.js';
 import type { CodingAgentConfig } from '../../config/index.js';
 
 import {
@@ -37,9 +37,9 @@ import type {
  */
 export type DecideApproval = (
   descriptor: PermissionDescriptor,
-  ctx: AgentToolContext,
+  ctx: CommandContext,
   options?: DecideApprovalOptions,
-) => AgentApprovalDecision;
+) => CommandApprovalDecision;
 
 export interface DecideApprovalOptions {
   /** 只判定路径是否已获 external_directory 授权，不判定工具自身权限。 */
@@ -47,23 +47,23 @@ export interface DecideApprovalOptions {
 }
 
 /**
- * 执行 工具 `policy` 模块 定义的 `ApprovalFor` 领域操作，输入和副作用均受该边界约束。
+ * 执行 Command `policy` 模块定义的 `ApprovalFor` 领域操作。
  *
  * Args:
- * - `toolName`: `ApprovalFor` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `commandName`: 需要创建审批回调的 Command 名称。
  *
  * Returns:
  * - 返回 `ApprovalFor` 计算出的声明结果；返回值不包含未声明的兜底状态。
  */
 export type ApprovalFor = (
-  toolName: string,
+  commandName: string,
 ) => (
-  input: never,
-  ctx: AgentToolContext,
-) => MaybePromise<AgentApprovalDecision>;
+  input: unknown,
+  ctx: CommandContext,
+) => MaybePromise<CommandApprovalDecision>;
 
 /**
- * 把工具声明的 PermissionDescriptor 判定成 @ello/agent 的审批动作。
+ * 把 Command 声明的 PermissionDescriptor 判定成 @ello/agent 的审批动作。
  *
  * 判定顺序是：先看工具自身 permission/pattern，再看 paths 派生出的
  * external_directory；任一 deny 直接拒绝，存在 ask 则进入人工审批。
@@ -85,9 +85,9 @@ export function makeApprovalPolicy(
 ): DecideApproval {
   return (
     descriptor: PermissionDescriptor,
-    _ctx: AgentToolContext,
+    _ctx: CommandContext,
     options: DecideApprovalOptions = {},
-  ): AgentApprovalDecision => {
+  ): CommandApprovalDecision => {
     assertDescriptor(descriptor);
     const currentMode = mode().mode;
     const boundaryRules = dynamicRules().filter(
@@ -124,8 +124,8 @@ export function makeApprovalPolicy(
     // Plan 规则是安全边界而非默认偏好，因此不能被配置或历史审批规则覆盖。
     // Accept edits 会忽略 edit 类 need_approval，并在下方把普通 ask 提升为 allow；
     // 显式 deny 和 external_directory 仍保留，避免自动编辑扩大禁止项或路径边界。
-    const needApprovalRules = config.tools.need_approval
-      .map(toolNeedApprovalRule)
+    const needApprovalRules = config.commands.need_approval
+      .map(commandNeedApprovalRule)
       .filter(
         (rule) => currentMode !== 'accept-edits' || rule.permission !== 'edit',
       );
@@ -212,13 +212,13 @@ function applyModeToAction(
  * - 返回 `genericApprovalFor` 计算出的声明结果；返回值不包含未声明的兜底状态。
  */
 export function genericApprovalFor(decide: DecideApproval): ApprovalFor {
-  return (toolName: string) =>
-    (input: never, ctx: AgentToolContext): AgentApprovalDecision =>
+  return (commandName: string) =>
+    (input: unknown, ctx: CommandContext): CommandApprovalDecision =>
       decide(
         {
-          permission: derivePermission(toolName),
-          patterns: [toolName],
-          always: [toolName],
+          permission: derivePermission(commandName),
+          patterns: [commandName],
+          always: [commandName],
           metadata: {
             kind: 'generic',
             inputPreview: previewInput(input),
@@ -234,7 +234,6 @@ export interface ApprovalPolicyMetadata {
   readonly always: readonly string[];
   readonly externalDirs?: readonly string[];
   readonly request: PermissionMetadata;
-  readonly proxiedTool?: string;
   readonly reason?: string;
 }
 
@@ -244,7 +243,7 @@ function buildDecision(
   descriptor: PermissionDescriptor,
   externalDirs: readonly string[] = [],
   reason?: string,
-): AgentApprovalDecision {
+): CommandApprovalDecision {
   const metadata = {
     permission: descriptor.permission,
     patterns: descriptor.patterns,
@@ -259,7 +258,7 @@ function buildDecision(
   };
 }
 
-/** 工具没有声明完整 descriptor 属于编程错误，直接 fail fast。 */
+/** Command 没有声明完整 descriptor 属于编程错误，直接 fail fast。 */
 function assertDescriptor(descriptor: PermissionDescriptor): void {
   if (descriptor.permission.length === 0) {
     throw new Error('Permission descriptor has empty permission.');
@@ -276,32 +275,37 @@ function assertDescriptor(descriptor: PermissionDescriptor): void {
   }
 }
 
-/** tools.need_approval 在运行期规则之后追加，保证普通模式下优先进入审批。 */
-function toolNeedApprovalRule(toolName: string): PermissionRule {
+/** commands.need_approval 在运行期规则之后追加，保证普通模式下优先进入审批。 */
+function commandNeedApprovalRule(commandName: string): PermissionRule {
   return {
-    permission: derivePermission(toolName),
+    permission: derivePermission(commandName),
     pattern: '**',
     action: 'ask',
     scope: 'user',
-    source: 'tools.need_approval',
+    source: 'commands.need_approval',
   };
 }
 
-/** 工具名到权限类别的产品层映射。 */
-function derivePermission(toolName: string): string {
-  if (toolName === 'read' || toolName === 'ls') return 'read';
-  if (toolName === 'grep' || toolName === 'glob') return 'search';
-  if (toolName === 'memory_read' || toolName === 'memory_list') return 'read';
-  if (toolName === 'memory_search') return 'search';
-  if (toolName === 'write' || toolName === 'edit' || toolName === 'apply_patch')
+/** Command 名到权限类别的产品层映射。 */
+function derivePermission(commandName: string): string {
+  if (commandName === 'read' || commandName === 'ls') return 'read';
+  if (commandName === 'search') return 'search';
+  if (commandName === 'memory_read' || commandName === 'memory_list')
+    return 'read';
+  if (commandName === 'memory_search') return 'search';
+  if (
+    commandName === 'write' ||
+    commandName === 'edit' ||
+    commandName === 'apply_patch'
+  )
     return 'edit';
-  if (toolName === 'memory_write' || toolName === 'memory_delete')
+  if (commandName === 'memory_write' || commandName === 'memory_delete')
     return 'edit';
-  if (toolName === 'bash') return 'bash';
-  if (toolName === 'web_fetch') return 'web_fetch';
-  if (toolName.startsWith('mcp__')) return 'mcp';
-  if (toolName.startsWith('task_')) return 'task';
-  return toolName;
+  if (commandName === 'bash') return 'bash';
+  if (commandName === 'web_fetch') return 'web_fetch';
+  if (commandName.startsWith('mcp__')) return 'mcp';
+  if (commandName.startsWith('task_')) return 'task';
+  return commandName;
 }
 
 /** 只返回 workspace 外路径，具体是否允许交给 external_directory 规则判定。 */

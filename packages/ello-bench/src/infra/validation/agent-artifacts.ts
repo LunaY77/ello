@@ -6,11 +6,11 @@ import {
   NormalizedAgentEvidenceSchema,
   RoundSchema,
   ToolAuditSchema,
-  type AgentSpec,
+  type AgentArtifactSpec,
   type BenchmarkRound,
   type NormalizedAgentEvidence,
   type NormalizedToolCall,
-  type RunManifest,
+  type RunArtifactManifest,
   type ToolAudit,
 } from '../../domain/contract/index.js';
 import {
@@ -22,6 +22,7 @@ import { stableJson } from '../../domain/hash.js';
 import type { AgentProcessExecution } from '../../ports/agent.js';
 import { parseClaudeCodeEvidence } from '../agent/claude-code/parser.js';
 import { parseCodexEvidence } from '../agent/codex/parser.js';
+import { effectiveToolProvenance } from '../agent/ello/tool-provenance.js';
 import {
   aggregateUsage,
   summarizeTools,
@@ -32,9 +33,11 @@ import { normalizeEventCaptureSource } from '../rounds.js';
 
 import { readReferencedJson, validateFileEvidence } from './artifact.js';
 
+const AGENT_CONTAINER_WORKSPACE = '/app';
+
 export async function validateAgentArtifacts(
-  run: RunManifest,
-  client: NonNullable<RunManifest['client']>,
+  run: RunArtifactManifest,
+  client: NonNullable<RunArtifactManifest['client']>,
 ): Promise<void> {
   const agent = required(run.agent, 'agent', run);
   const runtime = required(run.agentRuntime, 'agentRuntime', run);
@@ -101,6 +104,7 @@ export async function validateAgentArtifacts(
         agent,
         client,
         evidence,
+        legacyArtifact: !('enabledTools' in runtime),
       }));
       break;
     }
@@ -120,7 +124,7 @@ export async function validateAgentArtifacts(
         expectedAudit = auditExternalTools({
           tools: recomputed.tools,
           parserCoverage: evidence.parserCoverage,
-          workspace: run.workspace,
+          workspace: AGENT_CONTAINER_WORKSPACE,
         });
         break;
       }
@@ -133,7 +137,7 @@ export async function validateAgentArtifacts(
       expectedAudit = auditExternalTools({
         tools: recomputed.tools,
         parserCoverage: recomputed.evidence.parserCoverage,
-        workspace: run.workspace,
+        workspace: AGENT_CONTAINER_WORKSPACE,
       });
       break;
     case 'codex':
@@ -146,7 +150,7 @@ export async function validateAgentArtifacts(
       expectedAudit = auditExternalTools({
         tools: recomputed.tools,
         parserCoverage: recomputed.evidence.parserCoverage,
-        workspace: run.workspace,
+        workspace: AGENT_CONTAINER_WORKSPACE,
       });
       break;
   }
@@ -159,17 +163,15 @@ export async function validateAgentArtifacts(
   if (stableJson(expectedAudit) !== stableJson(audit)) {
     throw new Error(`Agent tool audit mismatch: ${run.attemptId}`);
   }
-  if (audit.status !== 'passed') {
-    throw new Error(`Completed Agent tool audit failed: ${run.attemptId}`);
-  }
-  validateAgentRuntime(run, runtime, evidence.observedModel);
+  validateAgentRuntime(run, runtime, evidence);
 }
 
 async function recomputeElloEvidence(options: {
-  readonly run: RunManifest;
-  readonly agent: Extract<AgentSpec, { readonly kind: 'ello' }>;
-  readonly client: NonNullable<RunManifest['client']>;
+  readonly run: RunArtifactManifest;
+  readonly agent: Extract<AgentArtifactSpec, { readonly kind: 'ello' }>;
+  readonly client: NonNullable<RunArtifactManifest['client']>;
   readonly evidence: NormalizedAgentEvidence;
+  readonly legacyArtifact: boolean;
 }): Promise<{
   readonly recomputed: {
     readonly evidence: NormalizedAgentEvidence;
@@ -178,7 +180,7 @@ async function recomputeElloEvidence(options: {
   };
   readonly expectedAudit: ToolAudit;
 }> {
-  const { run, agent, client, evidence } = options;
+  const { run, agent, client, evidence, legacyArtifact } = options;
   const capture = await validateEventEvidence(
     path.dirname(evidence.rawSource.path),
   );
@@ -266,20 +268,30 @@ async function recomputeElloEvidence(options: {
   if (firstRound === undefined) {
     throw new Error(`Ello observed model is missing: ${run.attemptId}`);
   }
+  const expectedEffectiveTools = legacyArtifact
+    ? legacyEffectiveToolProvenance(
+        evidence,
+        main.normalized.toolsetFingerprints,
+        run.attemptId,
+      )
+    : effectiveToolProvenance(main.normalized.toolsetFingerprints);
   const recomputedEvidence = NormalizedAgentEvidenceSchema.parse({
     ...evidence,
     observedModel: firstRound.apiModel,
     terminalStatus: client.timedOut
       ? 'timed_out'
-      : main.normalized.providerFailure
+      : main.normalized.runFailureMessage !== null
         ? 'failed'
         : 'completed',
     providerFailure: main.normalized.providerFailure,
-    terminalStopReason: terminalStopReason(main.normalized.rounds),
+    terminalStopReason:
+      main.normalized.runFailureMessage ??
+      terminalStopReason(main.normalized.rounds),
     unknownFields: [],
     roundCount: combinedRounds.length,
     usage: expectedThreadUsage.combined,
     tools: summarizeTools(combinedRounds),
+    effectiveTools: expectedEffectiveTools,
     threads: normalizedThreads.map(({ declared, normalized }) => ({
       ...declared,
       roundCount: normalized.rounds.length,
@@ -298,9 +310,9 @@ async function recomputeElloEvidence(options: {
 }
 
 function validateAgentRuntime(
-  run: RunManifest,
-  runtime: NonNullable<RunManifest['agentRuntime']>,
-  observedModel: string,
+  run: RunArtifactManifest,
+  runtime: NonNullable<RunArtifactManifest['agentRuntime']>,
+  evidence: NormalizedAgentEvidence,
 ): void {
   const agent = required(run.agent, 'agent', run);
   if (
@@ -308,17 +320,36 @@ function validateAgentRuntime(
     runtime.kind !== agent.kind ||
     runtime.agentConfigHash !== run.job.agentConfigHash ||
     runtime.configSha256 !== run.job.agentConfigHash ||
-    runtime.observedModel !== observedModel
+    runtime.observedModel !== evidence.observedModel
   ) {
     throw new Error(`Agent runtime identity mismatch: ${run.attemptId}`);
   }
   switch (agent.kind) {
     case 'ello':
       if (
+        ('enabledTools' in runtime) !== (evidence.effectiveTools !== undefined)
+      ) {
+        throw new Error(
+          `Ello tool provenance generation mismatch: ${run.attemptId}`,
+        );
+      }
+      if (
         runtime.kind !== 'ello' ||
         runtime.expectedModel !== agent.models[agent.primaryModel]?.apiModel ||
         runtime.primaryModel !== agent.primaryModel ||
-        runtime.auxiliaryModel !== agent.auxiliaryModel
+        runtime.auxiliaryModel !== agent.auxiliaryModel ||
+        (runtime.adapterContractVersion === '2' &&
+          runtime.promptMode !== agent.promptMode)
+      ) {
+        throw new Error(`Ello runtime provenance mismatch: ${run.attemptId}`);
+      }
+      if (
+        'enabledTools' in runtime &&
+        evidence.effectiveTools !== undefined &&
+        (stableJson(runtime.enabledTools) !==
+          stableJson(evidence.effectiveTools.enabled) ||
+          runtime.toolsetFingerprint !==
+            evidence.effectiveTools.toolsetFingerprint)
       ) {
         throw new Error(`Ello runtime provenance mismatch: ${run.attemptId}`);
       }
@@ -355,7 +386,7 @@ function validateAgentRuntime(
 }
 
 function validateElloRoundModels(
-  agent: Extract<AgentSpec, { readonly kind: 'ello' }>,
+  agent: Extract<AgentArtifactSpec, { readonly kind: 'ello' }>,
   rounds: readonly Extract<
     BenchmarkRound,
     { readonly modelSelector: 'primary_model' | 'auxiliary_model' }
@@ -402,7 +433,22 @@ function parseRounds(source: string): BenchmarkRound[] {
     .map((line) => RoundSchema.parse(JSON.parse(line) as unknown));
 }
 
-function required<T>(value: T | undefined, field: string, run: RunManifest): T {
+function legacyEffectiveToolProvenance(
+  evidence: NormalizedAgentEvidence,
+  fingerprints: readonly string[],
+  attemptId: string,
+): undefined {
+  if (fingerprints.length !== 1 || evidence.effectiveTools !== undefined) {
+    throw new Error(`Ello tool provenance generation mismatch: ${attemptId}`);
+  }
+  return undefined;
+}
+
+function required<T>(
+  value: T | undefined,
+  field: string,
+  run: RunArtifactManifest,
+): T {
   if (value === undefined) {
     throw new Error(`Missing ${field}: ${run.attemptId}`);
   }

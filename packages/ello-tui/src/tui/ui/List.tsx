@@ -22,12 +22,21 @@ export interface InlineSelectProps {
   onShortcut?(input: string, value: string): void;
 }
 
+/**
+ * 列表窗口的默认高度。
+ *
+ * 不能默认 `options.length`：model catalog 之类的长列表会把 bottom dock 撑到超过终端
+ * 高度，Ink 随即每帧整屏重绘（闪屏），composer 与 footer 也会被压扁。设计稿 §8 本来就
+ * 要求列表用固定窗口 + scrollbar。
+ */
+export const DEFAULT_VISIBLE_ROWS = 6;
+
 /** Ink Select：上下/翻页移动，回车确认，并把当前项交给上层快捷键。 */
 export function InlineSelect({
   options,
   isActive = true,
   label,
-  visibleRows = options.length,
+  visibleRows = DEFAULT_VISIBLE_ROWS,
   multiple = false,
   selectedValues = new Set<string>(),
   onChange,

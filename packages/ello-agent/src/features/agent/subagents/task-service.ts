@@ -205,7 +205,7 @@ export class AgentTaskService {
       maxTurns: previous.maxTurns,
       depth: previous.depth,
       sidechain: previous.sidechain,
-      toolNames: previous.toolNames,
+      commandNames: previous.commandNames,
       permissionRules: previous.permissionRules,
       externalPaths: previous.externalPaths,
     });
@@ -431,14 +431,24 @@ export class AgentTaskService {
       }
       const consumeEvents = (async () => {
         for await (const event of run.events) {
-          if (event.type === 'messageCompleted') lastMessage = event.text;
-          if (event.type === 'messagesAppended')
-            sidechain.push(...event.messages);
-          const persistedEvent = await this.prepareEvent(task, event);
-          const change = this.persistRunEvent(task.id, persistedEvent);
-          this.publish(change);
-          if (event.type === 'interactionRequired') {
-            await this.forwardInteraction(task, event.interaction, run);
+          try {
+            if (event.type === 'messageCompleted') lastMessage = event.text;
+            if (event.type === 'messagesAppended')
+              sidechain.push(...event.messages);
+            const persistedEvent = await this.prepareEvent(task, event);
+            const change = this.persistRunEvent(task.id, persistedEvent);
+            this.publish(change);
+            if (event.type === 'interactionRequired') {
+              await this.forwardInteraction(task, event.interaction, run);
+            }
+            if (event.type === 'contextCompacted') {
+              run.acknowledgeCompaction(event.compactionId);
+            }
+          } catch (error) {
+            if (event.type === 'contextCompacted') {
+              run.acknowledgeCompaction(event.compactionId, error);
+            }
+            throw error;
           }
         }
       })();
@@ -501,53 +511,59 @@ export class AgentTaskService {
     taskId: string,
     event: AgentRunEvent,
   ): AgentTaskChange {
-    if (event.type === 'toolStarted') {
+    const commandEvent =
+      event.type === 'commandRunEvent' ? event.event : undefined;
+    if (commandEvent?.type === 'command.started') {
+      const record = commandEvent.record;
       const current = this.store.require(taskId);
       return this.store.append(
         taskId,
-        event.type,
+        commandEvent.type,
         event,
         {
           currentTool: {
-            toolCallId: event.toolCallId,
-            name: event.name,
-            startedAt: event.occurredAt,
+            toolCallId: record.commandId,
+            name: record.name,
+            startedAt: commandEvent.occurredAt,
           },
           toolCount: current.toolCount + 1,
           recentTools: [
             ...current.recentTools,
             {
-              toolCallId: event.toolCallId,
-              name: event.name,
-              invocationPreview: invocationPreview(event.input),
+              toolCallId: record.commandId,
+              name: record.name,
+              invocationPreview: invocationPreview(record.input),
               status: 'running' as const,
-              startedAt: event.occurredAt,
+              startedAt: commandEvent.occurredAt,
             },
           ].slice(-4),
         },
-        `tool.started:${event.toolCallId}`,
+        `command.started:${record.commandId}`,
       );
     }
-    if (event.type === 'toolCompleted' || event.type === 'toolFailed') {
+    if (
+      commandEvent?.type === 'command.completed' ||
+      commandEvent?.type === 'command.failed' ||
+      commandEvent?.type === 'command.denied' ||
+      commandEvent?.type === 'command.blocked'
+    ) {
+      const record = commandEvent.record;
       const current = this.store.require(taskId);
-      const completedAt =
-        event.type === 'toolCompleted'
-          ? event.occurredAt
-          : new Date().toISOString();
+      const completedAt = commandEvent.occurredAt;
       return this.store.append(
         taskId,
-        event.type,
+        commandEvent.type,
         event,
         {
-          ...(current.currentTool?.toolCallId === event.toolCallId
+          ...(current.currentTool?.toolCallId === record.commandId
             ? { currentTool: null }
             : {}),
           recentTools: current.recentTools.map((tool) =>
-            tool.toolCallId === event.toolCallId
+            tool.toolCallId === record.commandId
               ? {
                   ...tool,
                   status:
-                    event.type === 'toolCompleted'
+                    commandEvent.type === 'command.completed'
                       ? ('completed' as const)
                       : ('failed' as const),
                   completedAt,
@@ -555,7 +571,7 @@ export class AgentTaskService {
               : tool,
           ),
         },
-        `tool.finished:${event.toolCallId}`,
+        `command.finished:${record.commandId}`,
       );
     }
     return this.store.append(taskId, event.type, event);

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { copyFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -11,8 +11,16 @@ import type { ResolvedTaskFiles } from '../../ports/corpus.js';
 import { errorMessage } from '../io.js';
 
 import { collectVerifierAssertions } from './assertions.js';
-import { executeVerifierProcess, VerifierExecutionError } from './process.js';
-import { prepareVerifierWorkspace } from './workspace.js';
+import {
+  executeBaselineVerifierProcess,
+  executeVerifierProcess,
+  VerifierExecutionError,
+} from './process.js';
+import {
+  prepareBaselineVerifierWorkspace,
+  prepareVerifierWorkspace,
+  sealVerifierPatchArtifact,
+} from './workspace.js';
 
 export async function runVerifier(options: {
   readonly attemptId: string;
@@ -30,18 +38,30 @@ export async function runVerifier(options: {
     workspace: prepared.workspace,
     tests: prepared.tests,
     logs: prepared.logs,
+    inputPatchPath: prepared.inputPatchPath,
     task,
   });
   try {
     const reward = await readReward(prepared.verifierOutput);
-    const verifierCapturedPatchSha256 = sha256(
-      await readFile(path.join(prepared.artifacts, 'model.patch')),
+    const verifierPatchPath = path.join(prepared.artifacts, 'model.patch');
+    const verifierGeneratedPatchPath = path.join(
+      prepared.artifacts,
+      'verifier-generated-model.patch',
     );
-    if (verifierCapturedPatchSha256 !== options.patch.sha256) {
-      throw new Error(
-        `Verifier-captured patch checksum mismatch: ${verifierCapturedPatchSha256} versus ${options.patch.sha256}.`,
+    let verifierGeneratedPatchSha256: string | null = null;
+    try {
+      await copyFile(verifierPatchPath, verifierGeneratedPatchPath);
+      verifierGeneratedPatchSha256 = sha256(
+        await readFile(verifierGeneratedPatchPath),
       );
+    } catch {
+      // Some verifier contracts do not generate their own patch artifact.
     }
+    const verifierCapturedPatchSha256 = await sealVerifierPatchArtifact({
+      inputPatchPath: prepared.inputPatchPath,
+      artifactPatchPath: verifierPatchPath,
+      expectedSha256: options.patch.sha256,
+    });
     return HarnessReportSchema.parse({
       schema: 'ello.benchmark.harness.v1',
       taskId: task.taskId,
@@ -54,6 +74,7 @@ export async function runVerifier(options: {
       modelPatchSha256: options.patch.sha256,
       appliedPatchSha256: prepared.appliedPatchSha256,
       verifierCapturedPatchSha256,
+      verifierGeneratedPatchSha256,
       baselineTestExitCode: process.baselineExitCode,
       newTestsExitCode: process.newTestsExitCode,
       hiddenPatchChangedFiles: prepared.hiddenPatchChangedFiles,
@@ -79,8 +100,31 @@ export async function runVerifier(options: {
 
 export const dockerVerifierRuntime: import('../../ports/verifier.js').VerifierRuntime =
   {
+    preflight: runVerifierBaselinePreflight,
     run: runVerifier,
   };
+
+async function runVerifierBaselinePreflight(options: {
+  readonly attemptId: string;
+  readonly harnessRoot: string;
+  readonly taskFiles: ResolvedTaskFiles;
+  readonly baselineTree: string;
+}) {
+  const prepared = await prepareBaselineVerifierWorkspace(options);
+  const process = await executeBaselineVerifierProcess({
+    attemptId: options.attemptId,
+    harnessRoot: prepared.harnessRoot,
+    workspace: prepared.workspace,
+    tests: prepared.tests,
+    logs: prepared.logs,
+    task: options.taskFiles.task,
+  });
+  return {
+    process: process.reference,
+    exitCode: process.baselineExitCode,
+    imageId: prepared.imageId,
+  };
+}
 
 async function readReward(directory: string): Promise<0 | 1> {
   const value = (

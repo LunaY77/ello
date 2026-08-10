@@ -96,6 +96,21 @@ describe.sequential('Local Environment', () => {
     });
   });
 
+  it('uses Bash pipeline status without turning an expected SIGPIPE into failure', async () => {
+    const root = await temporaryRoot();
+    const { handle } = await attach(root);
+
+    const truncated = await handle.processes.exec(
+      command("yes 'line' | head -n 1"),
+    );
+    expect(truncated).toMatchObject({ exitCode: 0, signal: null });
+    expect(text(truncated.stdout.data)).toBe('line\n');
+
+    await expect(
+      handle.processes.exec(command('false')),
+    ).resolves.toMatchObject({ exitCode: 1, signal: null });
+  });
+
   it('cancellation escalates to kill without being reported as a timeout', async () => {
     const root = await temporaryRoot();
     const { handle } = await attach(root);

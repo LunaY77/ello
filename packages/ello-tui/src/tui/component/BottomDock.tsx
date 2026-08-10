@@ -47,31 +47,40 @@ export function BottomDock({
       >
         {composer}
       </Box>
-      <Box flexDirection="column">
-        <Text color={theme.textMuted}>{model}</Text>
-        <Box gap={1}>
-          <Text color={modeColor(theme, mode.mode)}>
+      <Box flexDirection="column" width="100%">
+        {/* footer 固定三行：换行会顶高 dynamic frame，触发 Ink 整屏重绘，所以只截断。 */}
+        <Text color={theme.textMuted} wrap="truncate-middle">
+          {model}
+        </Text>
+        <Box gap={1} width="100%">
+          <Text color={modeColor(theme, mode.mode)} wrap="truncate">
             {modeLabel(mode.mode)}
           </Text>
           {contextPercent !== undefined ? (
-            <Text color={theme.textMuted}>
+            <Text color={theme.textMuted} wrap="truncate">
               {contextLabel(usage, contextWindow, contextPercent)}
             </Text>
           ) : null}
           {mode.mode === 'plan' ? (
-            <Text color={theme.accent}>Shift+Tab to cycle</Text>
+            <Text color={theme.accent} wrap="truncate">
+              Shift+Tab to cycle
+            </Text>
           ) : null}
           {pendingPlanApproval ? (
-            <Text color={theme.warning}>
+            <Text color={theme.warning} wrap="truncate">
               Plan ready · Accept / Chat about this / Deny
             </Text>
           ) : null}
           {goal !== undefined ? (
-            <Text color={theme.accent}>{formatGoal(goal)}</Text>
+            <Text color={theme.accent} wrap="truncate">
+              {formatGoal(goal)}
+            </Text>
           ) : null}
         </Box>
-        <Box gap={1}>
-          <Text color={theme.textMuted}>{cacheLabel}</Text>
+        <Box gap={1} width="100%">
+          <Text color={theme.textMuted} wrap="truncate">
+            {cacheLabel}
+          </Text>
         </Box>
       </Box>
       {agentSwitcher}

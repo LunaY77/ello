@@ -2,9 +2,8 @@ import { useEffect, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 
 import { loadLocalUiConfig } from '../../config/local-ui-config.js';
+import { clearTerminalScrollback } from '../terminal-screen.js';
 import { defaultThemeName, type ThemeName } from '../theme/index.js';
-
-import { clearTerminalScrollback } from './use-runtime-events.js';
 
 /** 读取本地主题并用 epoch 触发终端 scrollback 清理后的重绘。 */
 export function useThemeState(onError: (error: unknown) => void): {

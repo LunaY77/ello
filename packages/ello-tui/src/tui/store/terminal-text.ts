@@ -97,6 +97,66 @@ export function layoutTerminalText(
   };
 }
 
+/**
+ * 纯展示用的视觉行切分。
+ *
+ * 与 `layoutTerminalText` 的区别：不带光标语义，所以不会在"文本刚好占满一行"时补出
+ * 一个用于停放光标的空行。预览类文本用错就会多出一条空行。
+ */
+export function visualRows(
+  text: string,
+  width: number,
+): readonly TerminalVisualRow[] {
+  const safeWidth = Math.max(1, Math.floor(width));
+  return text
+    .split(/\r?\n/u)
+    .flatMap((line, logicalLine) =>
+      wrapTerminalLine(line, logicalLine, safeWidth),
+    );
+}
+
+/** 把视觉行还原成字符串。 */
+export function visualRowText(
+  lines: readonly string[],
+  row: TerminalVisualRow,
+): string {
+  return (lines[row.logicalLine] ?? '').slice(row.startOffset, row.endOffset);
+}
+
+/**
+ * 取文本末尾最多 `maxRows` 个视觉行。
+ *
+ * live 区必须自己把行数压到预算之内：Ink 的固定 `height` 不会裁剪，只会把超高内容
+ * 压扁成非连续的行。按视觉行（而不是逻辑行）截断，才能让全角字符和软换行也算准。
+ */
+export function tailVisualRows(
+  text: string,
+  width: number,
+  maxRows: number,
+): readonly string[] {
+  if (maxRows <= 0 || text === '') return [];
+  const lines = text.split(/\r?\n/u);
+  const rows = visualRows(text, width);
+  return rows
+    .slice(Math.max(0, rows.length - maxRows))
+    .map((row) => visualRowText(lines, row));
+}
+
+/** 取文本开头最多 `maxRows` 个视觉行，返回值同时告知是否被截断。 */
+export function headVisualRows(
+  text: string,
+  width: number,
+  maxRows: number,
+): { readonly rows: readonly string[]; readonly truncated: boolean } {
+  if (maxRows <= 0 || text === '') return { rows: [], truncated: false };
+  const lines = text.split(/\r?\n/u);
+  const rows = visualRows(text, width);
+  return {
+    rows: rows.slice(0, maxRows).map((row) => visualRowText(lines, row)),
+    truncated: rows.length > maxRows,
+  };
+}
+
 export function offsetAtDisplayColumn(
   text: string,
   row: TerminalVisualRow,

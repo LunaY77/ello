@@ -126,6 +126,13 @@ function renderItem(item: ThreadItem): string {
       return `### files\n\n${item.changes.map((change) => change.path).join('\n')}`;
     case 'toolCall':
       return `### ${item.toolName}\n\n${item.outputPreview ?? item.headline}`;
+    case 'commandRun':
+      return `### command run\n\n${item.commands
+        .map(
+          (command) =>
+            `- [${command.status}] step ${command.step} ${command.name}${command.error === undefined ? '' : `: ${command.error}`}`,
+        )
+        .join('\n')}${item.error === undefined ? '' : `\n\n${item.error}`}`;
     case 'reasoning':
       return `### reasoning\n\n${item.summary}`;
     case 'subagent':

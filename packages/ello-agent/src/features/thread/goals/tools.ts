@@ -6,7 +6,12 @@
  */
 import { z } from 'zod';
 
-import { defineTool, type AnyAgentTool } from '../../agent/engine/index.js';
+import {
+  cliInput,
+  commandInput,
+  defineCommand,
+  type CommandDefinition,
+} from '../../command/index.js';
 
 import type { GoalService } from './service.js';
 
@@ -35,47 +40,63 @@ When marking a budgeted goal achieved with status \`complete\`, report the final
  * Throws:
  * - 当 Thread 工具执行 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
-export function createGoalTools(service: GoalService): AnyAgentTool[] {
+export function createGoalCommands(service: GoalService): CommandDefinition[] {
   return [
-    defineTool({
+    defineCommand({
       name: 'get_goal',
-      description:
+      summary:
         'Get the current session goal, including status, usage, blocker audit, and remaining host limits.',
-      discovery: { aliases: ['goal status'], risk: 'readonly' },
-      capabilities: () => ({
+      aliases: ['goal status'],
+      risk: 'readonly',
+      effects: () => ({
         concurrencySafe: true,
         readOnly: true,
         destructive: false,
         telemetryTag: 'goal.get',
       }),
-      input: z.object({}).strict(),
-      execute: () => {
-        const status = service.status();
-        if (status === null || status.status !== 'active') {
-          throw new Error('No active goal exists for this session.');
-        }
-        return status;
+      invocation: cliInput(commandInput(z.object({}).strict())),
+      execution: {
+        kind: 'immediate',
+        run: () => {
+          const status = service.status();
+          if (status === null || status.status !== 'active') {
+            throw new Error('No active goal exists for this session.');
+          }
+          return status;
+        },
       },
     }),
-    defineTool({
+    defineCommand({
       name: 'update_goal',
-      description: UPDATE_GOAL_DESCRIPTION,
-      discovery: {
-        aliases: ['complete goal', 'block goal'],
-        risk: 'workspace-write',
+      summary: 'Update the active session goal.',
+      details: UPDATE_GOAL_DESCRIPTION,
+      aliases: ['complete goal', 'block goal'],
+      risk: 'workspace-write',
+      invocation: cliInput(
+        commandInput(
+          z
+            .object({
+              status: z
+                .enum(['complete', 'blocked'])
+                .describe('New goal status'),
+              reason: z
+                .string()
+                .trim()
+                .min(1)
+                .describe('Reason for this status change'),
+            })
+            .strict(),
+        ),
+        {
+          positionals: [{ field: 'status' }],
+          body: 'reason',
+        },
+      ),
+      execution: {
+        kind: 'immediate',
+        run: ({ status, reason }, context) =>
+          service.update(status, reason, context.runId),
       },
-      input: z
-        .object({
-          status: z.enum(['complete', 'blocked']).describe('New goal status'),
-          reason: z
-            .string()
-            .trim()
-            .min(1)
-            .describe('Reason for this status change'),
-        })
-        .strict(),
-      execute: ({ status, reason }, context) =>
-        service.update(status, reason, context.runId),
     }),
   ];
 }

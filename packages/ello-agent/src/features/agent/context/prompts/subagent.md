@@ -1,4 +1,6 @@
 {% include "core-behavior.md" %}
+{% include "shared/backward-reasoning.md" %}
+{% include "shared/command-run.md" %}
 
 # Subagent Worker Role
 

@@ -1,163 +1,226 @@
 /**
- * 本文件负责 tool feature 的“task”模块职责。
+ * 持久任务领域的 Command 定义。
  *
- * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
- * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
+ * 简单任务操作使用 CLI invocation；包含嵌套 metadata 的创建和更新通过
+ * `command_search` / `command_invoke` 使用 structured input。
  */
 import { z } from 'zod';
 
-import { defineAnyTool, type AnyAgentTool } from '../../agent/engine/index.js';
+import {
+  cliInput,
+  commandInput,
+  defineCommand,
+  structuredInput,
+  type CommandDefinition,
+} from '../../command/index.js';
 import type { TaskService } from '../../task/index.js';
 import type { ApprovalFor } from '../permissions/policy.js';
 
 const TaskStatus = z.enum(['pending', 'in_progress', 'completed', 'cancelled']);
-
 const Metadata = z.record(z.string(), z.unknown()).default({});
 
 /**
- * 任务工具集。
- *
- * CLI/TUI/模型工具共享绑定当前 board 的 TaskService。
+ * 创建绑定当前 TaskService 的任务 Command 集合。
  *
  * Args:
- * - `approval`: `createTaskTools` 所需的业务值；函数按声明读取，不补造缺失内容。
- * - `service`: `createTaskTools` 所需的业务值；函数按声明读取，不补造缺失内容。
+ * - `approval`: 当前 permission session 的审批回调工厂。
+ * - `service`: 当前 task board 对应的领域服务。
  *
  * Returns:
- * - 返回按领域顺序排列的快照集合；调用方不能借此修改内部状态。
- *
- * Throws:
- * - 当 工具 `task` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+ * - 返回可直接进入 Command Registry 的定义集合。
  */
-export function createTaskTools(
+export function createTaskCommands(
   approval: ApprovalFor,
   service: TaskService,
-): AnyAgentTool[] {
+): CommandDefinition[] {
+  const createInput = z
+    .object({
+      subject: z.string().describe('Task title'),
+      description: z.string().optional().describe('Longer task description'),
+      activeForm: z.string().optional().describe('Present-tense display form'),
+      owner: z.string().optional().describe('Task owner identifier'),
+      blocks: z
+        .array(z.string())
+        .optional()
+        .describe('Task IDs this task blocks'),
+      blockedBy: z
+        .array(z.string())
+        .optional()
+        .describe('Task IDs that block this task'),
+      metadata: Metadata.optional().describe('Additional structured data'),
+    })
+    .strict();
+  const updateInput = z
+    .object({
+      id: z
+        .string()
+        .describe('Persisted task UUID or board sequence'),
+      subject: z.string().optional().describe('Updated task title'),
+      description: z.string().optional().describe('Updated task description'),
+      activeForm: z
+        .string()
+        .nullable()
+        .optional()
+        .describe('Updated present-tense form'),
+      status: TaskStatus.optional().describe('New task status'),
+      owner: z
+        .string()
+        .nullable()
+        .optional()
+        .describe('Updated owner identifier'),
+      blocks: z
+        .array(z.string())
+        .optional()
+        .describe('Updated blocked task IDs'),
+      blockedBy: z
+        .array(z.string())
+        .optional()
+        .describe('Updated blocking task IDs'),
+      metadata: Metadata.optional().describe('Updated structured data'),
+    })
+    .strict();
+  const idInput = z
+    .object({
+      id: z
+        .string()
+        .min(1)
+        .describe('Persisted task UUID or board sequence'),
+    })
+    .strict();
+  const claimInput = z
+    .object({
+      id: z
+        .string()
+        .min(1)
+        .describe('Persisted task UUID or board sequence'),
+      owner: z.string().min(1).describe('Owner to assign'),
+    })
+    .strict();
+  const emptyInput = z.object({}).strict();
   return [
-    defineAnyTool({
+    defineCommand({
       name: 'task_create',
-      description: 'Create a persisted coding-agent task.',
-      discovery: { aliases: ['new task'], risk: 'workspace-write' },
-      input: z
-        .object({
-          subject: z.string().describe('Task title'),
-          description: z
-            .string()
-            .optional()
-            .describe('Longer task description'),
-          activeForm: z
-            .string()
-            .optional()
-            .describe('Present-tense form for display'),
-          owner: z.string().optional().describe('Task owner identifier'),
-          blocks: z
-            .array(z.string())
-            .optional()
-            .describe('Task IDs this task blocks'),
-          blockedBy: z
-            .array(z.string())
-            .optional()
-            .describe('Task IDs that block this task'),
-          metadata: Metadata.optional().describe('Additional structured data'),
-        })
-        .strict(),
+      summary: 'Create a persisted coding-agent task.',
+      aliases: ['new task'],
+      risk: 'workspace-write',
+      invocation: structuredInput(commandInput(createInput)),
       approval: approval('task_create'),
-      execute: (input) => service.create(input),
-    }),
-    defineAnyTool({
-      name: 'task_list',
-      description: 'List persisted coding-agent tasks.',
-      discovery: { aliases: ['tasks'], risk: 'readonly' },
-      capabilities: () => readonlyTaskCapabilities('task.list'),
-      input: z.object({}).strict(),
-      approval: approval('task_list'),
-      execute: () => service.list(),
-    }),
-    defineAnyTool({
-      name: 'task_get',
-      description: 'Get one persisted coding-agent task.',
-      discovery: { aliases: ['task details'], risk: 'readonly' },
-      capabilities: () => readonlyTaskCapabilities('task.get'),
-      input: z.object({ id: z.string().describe('Task identifier') }).strict(),
-      approval: approval('task_get'),
-      execute: async ({ id }) => {
-        const task = await service.get(id);
-        if (task === null) {
-          throw new Error(`Unknown task: ${id}`);
-        }
-        return task;
+      execution: {
+        kind: 'immediate',
+        run: (input) => service.create(input),
       },
     }),
-    defineAnyTool({
+    defineCommand({
+      name: 'task_list',
+      summary: 'List persisted coding-agent tasks.',
+      aliases: ['tasks'],
+      risk: 'readonly',
+      invocation: cliInput(commandInput(emptyInput)),
+      effects: readonlyTaskCapabilities('task.list'),
+      approval: approval('task_list'),
+      execution: { kind: 'immediate', run: () => service.list() },
+    }),
+    defineCommand({
+      name: 'task_get',
+      summary:
+        'Get one persisted task-board task. Subagent job ids belong to task_output and task_stop.',
+      aliases: ['task details'],
+      risk: 'readonly',
+      invocation: cliInput(commandInput(idInput), {
+        positionals: [{ field: 'id' }],
+      }),
+      effects: readonlyTaskCapabilities('task.get'),
+      approval: approval('task_get'),
+      execution: {
+        kind: 'immediate',
+        run: async ({ id }) => {
+          assertPersistedTaskSelector(id);
+          const task = await service.get(id);
+          if (task === null) throw unknownPersistedTask(id);
+          return task;
+        },
+      },
+    }),
+    defineCommand({
       name: 'task_update',
-      description: 'Update one persisted coding-agent task.',
-      discovery: { aliases: ['change task'], risk: 'workspace-write' },
-      input: z
-        .object({
-          id: z.string().describe('Task identifier'),
-          subject: z.string().optional().describe('Updated task title'),
-          description: z
-            .string()
-            .optional()
-            .describe('Updated task description'),
-          activeForm: z
-            .string()
-            .nullable()
-            .optional()
-            .describe('Updated present-tense form'),
-          status: TaskStatus.optional().describe('New task status'),
-          owner: z
-            .string()
-            .nullable()
-            .optional()
-            .describe('Updated owner identifier'),
-          blocks: z
-            .array(z.string())
-            .optional()
-            .describe('Updated blocked task IDs'),
-          blockedBy: z
-            .array(z.string())
-            .optional()
-            .describe('Updated blocking task IDs'),
-          metadata: Metadata.optional().describe('Updated structured data'),
-        })
-        .strict(),
+      summary: 'Update one persisted coding-agent task.',
+      details: 'Only the provided fields change; omitted fields keep their current value.',
+      aliases: ['change task'],
+      risk: 'workspace-write',
+      invocation: structuredInput(commandInput(updateInput)),
       approval: approval('task_update'),
-      execute: ({ id, ...input }) => service.update(id, input),
+      execution: {
+        kind: 'immediate',
+        run: ({ id, ...input }) => {
+          assertPersistedTaskSelector(id);
+          return service.update(id, input);
+        },
+      },
     }),
-    defineAnyTool({
+    defineCommand({
       name: 'task_delete',
-      description: 'Delete one persisted coding-agent task.',
-      discovery: { aliases: ['remove task'], risk: 'workspace-write' },
-      input: z.object({ id: z.string().describe('Task identifier') }).strict(),
+      summary: 'Delete one persisted coding-agent task.',
+      aliases: ['remove task'],
+      risk: 'workspace-write',
+      invocation: cliInput(commandInput(idInput), {
+        positionals: [{ field: 'id' }],
+      }),
       approval: approval('task_delete'),
-      execute: async ({ id }) => ({ deleted: await service.delete(id), id }),
+      execution: {
+        kind: 'immediate',
+        run: async ({ id }) => {
+          assertPersistedTaskSelector(id);
+          return {
+            deleted: await service.delete(id),
+            id,
+          };
+        },
+      },
     }),
-    defineAnyTool({
+    defineCommand({
       name: 'task_claim',
-      description: 'Claim a task for an owner and move it in progress.',
-      discovery: { aliases: ['assign task'], risk: 'workspace-write' },
-      input: z
-        .object({
-          id: z.string().describe('Task identifier'),
-          owner: z.string().describe('Owner to assign'),
-        })
-        .strict(),
+      summary: 'Claim a task for an owner and move it in progress.',
+      aliases: ['assign task'],
+      risk: 'workspace-write',
+      invocation: cliInput(commandInput(claimInput), {
+        positionals: [{ field: 'id' }, { field: 'owner' }],
+      }),
       approval: approval('task_claim'),
-      execute: ({ id, owner }) => service.claim(id, owner),
+      execution: {
+        kind: 'immediate',
+        run: ({ id, owner }) => {
+          assertPersistedTaskSelector(id);
+          return service.claim(id, owner);
+        },
+      },
     }),
-    defineAnyTool({
+    defineCommand({
       name: 'task_reset',
-      description: 'Reset the current persisted task list.',
-      discovery: { aliases: ['clear tasks'], risk: 'workspace-write' },
-      input: z.object({}).strict(),
+      summary: 'Reset the current persisted task list.',
+      aliases: ['clear tasks'],
+      risk: 'workspace-write',
+      invocation: cliInput(commandInput(emptyInput)),
       approval: approval('task_reset'),
-      execute: async () => {
-        await service.reset();
-        return { reset: true };
+      execution: {
+        kind: 'immediate',
+        run: async () => {
+          await service.reset();
+          return { reset: true };
+        },
       },
     }),
   ];
+}
+
+function unknownPersistedTask(id: string): Error {
+  const guidance = id.startsWith('job_')
+    ? 'This is a subagent task ID; use task_output to read it or task_stop to stop it.'
+    : 'Use task_list to find persisted task UUIDs or board sequences.';
+  return new Error(`Unknown persisted task '${id}'. ${guidance}`);
+}
+
+function assertPersistedTaskSelector(id: string): void {
+  if (id.startsWith('job_')) throw unknownPersistedTask(id);
 }
 
 function readonlyTaskCapabilities(telemetryTag: string) {
@@ -165,6 +228,7 @@ function readonlyTaskCapabilities(telemetryTag: string) {
     concurrencySafe: true,
     readOnly: true,
     destructive: false,
+    interruptible: true,
     telemetryTag,
   } as const;
 }

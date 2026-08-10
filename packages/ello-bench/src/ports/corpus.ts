@@ -25,6 +25,7 @@ export interface SweBenchProTaskFiles {
   readonly task: Extract<ResolvedTask, { benchmark: 'swe-bench-pro' }>;
   readonly instruction: string;
   readonly runScriptPath: string;
+  readonly runScript: string;
   readonly parserPath: string;
   readonly workspaceSetupCommands: readonly (readonly string[])[];
   readonly workspacePatch: string;

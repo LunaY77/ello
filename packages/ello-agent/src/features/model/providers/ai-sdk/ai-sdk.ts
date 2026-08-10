@@ -13,8 +13,10 @@ import {
   generateText,
   modelMessageSchema,
   streamText,
+  wrapLanguageModel,
   type AssistantModelMessage,
   type LanguageModel,
+  type LanguageModelMiddleware,
   type ModelMessage,
 } from 'ai';
 
@@ -37,6 +39,8 @@ interface NormalizedAiSdkToolCall {
   readonly name: string;
   readonly input: unknown;
 }
+
+type WrappableLanguageModel = Parameters<typeof wrapLanguageModel>[0]['model'];
 
 /**
  * 创建 Vercel AI SDK 模型 adapter。
@@ -124,7 +128,7 @@ async function* streamWithAiSdk(
   assertConversationMessages(request.messages);
   const result = streamText({
     ...request.modelSettings,
-    model: resolveLanguageModel(request.model),
+    model: modelWithReasoningLifecycleRecovery(request.model),
     ...(request.instructions === undefined
       ? {}
       : { instructions: request.instructions }),
@@ -314,7 +318,7 @@ function normalizeToolCalls(
  * Throws:
  * - 字符串缺少 provider 前缀、模型名为空或 provider 未声明时直接抛错。
  */
-function resolveLanguageModel(model: AgentModel): LanguageModel {
+function resolveLanguageModel(model: AgentModel): WrappableLanguageModel {
   if (typeof model !== 'string') {
     return model;
   }
@@ -340,16 +344,80 @@ function resolveLanguageModel(model: AgentModel): LanguageModel {
 }
 
 /**
+ * 在 AI SDK 聚合响应前补齐缺失的 reasoning 生命周期起点。
+ *
+ * 部分 Responses 兼容代理会省略或错序 `reasoning-start`，却继续发送相同 ID 的
+ * delta/end。AI SDK 的上层聚合器会把这种流转换为 `reasoning part ... not found`
+ * 错误并丢弃整轮响应。这里仅补齐缺失的 start；完整、有序的 provider 流逐项透传。
+ *
+ * Args:
+ * - `model`: engine 配置中的模型引用或已构造的 AI SDK 模型。
+ *
+ * Returns:
+ * - 返回带 reasoning 生命周期恢复中间件的 V4 模型。
+ */
+function modelWithReasoningLifecycleRecovery(model: AgentModel): LanguageModel {
+  return wrapLanguageModel({
+    model: resolveLanguageModel(model),
+    middleware: reasoningLifecycleRecoveryMiddleware,
+  });
+}
+
+const reasoningLifecycleRecoveryMiddleware: LanguageModelMiddleware = {
+  specificationVersion: 'v4',
+  wrapStream: async ({ doStream }) => {
+    const result = await doStream();
+    const activeReasoningIds = new Set<string>();
+    return {
+      ...result,
+      stream: result.stream.pipeThrough(
+        new TransformStream({
+          transform(part, controller) {
+            if (part.type === 'reasoning-start') {
+              if (activeReasoningIds.has(part.id)) {
+                return;
+              }
+              activeReasoningIds.add(part.id);
+              controller.enqueue(part);
+              return;
+            }
+            if (
+              (part.type === 'reasoning-delta' ||
+                part.type === 'reasoning-end') &&
+              !activeReasoningIds.has(part.id)
+            ) {
+              activeReasoningIds.add(part.id);
+              controller.enqueue({
+                type: 'reasoning-start',
+                id: part.id,
+                ...(part.providerMetadata === undefined
+                  ? {}
+                  : { providerMetadata: part.providerMetadata }),
+              });
+            }
+            controller.enqueue(part);
+            if (part.type === 'reasoning-end') {
+              activeReasoningIds.delete(part.id);
+            }
+          },
+        }),
+      ),
+    };
+  },
+};
+
+/**
  * 解析单个 AI SDK tool-call part。
  *
  * Args:
  * - `value`: 从非流式结果或流事件读取的外部值。
  *
  * Returns:
- * - 返回经过字段存在性和非空校验的 engine tool-call 输入。
+ * - 返回经过字段存在性和 provider-safe 输入校验的 engine tool-call 输入。
  *
  * Throws:
- * - 值不是对象、type 不匹配或缺少 `toolCallId`、`toolName`、`input` 时直接抛错。
+ * - 值不是对象、type 不匹配或缺少 `toolCallId`、`toolName`、`input` 时直接抛错；
+ *   非对象 input 会归一化为 `{}`，避免无效 provider 参数污染后续 Anthropic history。
  */
 function readToolCall(value: unknown): NormalizedAiSdkToolCall {
   if (!isRecord(value)) {
@@ -373,8 +441,21 @@ function readToolCall(value: unknown): NormalizedAiSdkToolCall {
   return {
     id: toolCallId,
     name: toolName,
-    input: Reflect.get(value, 'input'),
+    input: providerSafeToolInput(Reflect.get(value, 'input')),
   };
+}
+
+/**
+ * 确保写回模型 history 的 tool-call input 始终是 provider 接受的对象。
+ *
+ * AI SDK 会把 schema 校验失败的双重编码参数保留为字符串，并同时标记
+ * `invalid: true`。Ello 随后仍需把这次调用交给 command runtime，让它生成
+ * 可恢复的输入错误；但 Anthropic `tool_use.input` 不能是字符串，因此只在
+ * 这个最外层边界把非对象值替换为空对象。对象内部的 schema 错误保持原样，
+ * 由 command runtime 负责返回具体错误。
+ */
+function providerSafeToolInput(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
 }
 
 /**

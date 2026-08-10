@@ -29,7 +29,7 @@ const diagnostics = {
 };
 
 describe('provider cache transforms', () => {
-  it('caps the model-input budget at the selected model context window', () => {
+  it('retains total window and output reservation for request admission', () => {
     const model = {
       ...runtimeModel('anthropic'),
       contextWindow: 64_000,
@@ -37,12 +37,12 @@ describe('provider cache transforms', () => {
     };
     const context = {
       max_input_tokens: 160_000,
-      reserved_output_tokens: 8_000,
     } as ContextConfig;
 
     expect(modelInputBudgetFromRuntimeModel(model, context)).toEqual({
       maxInputTokens: 64_000,
-      reservedOutputTokens: 8_000,
+      totalContextTokens: 64_000,
+      maxOutputTokens: 8_000,
     });
     expect(
       modelInputBudgetFromRuntimeModel(
@@ -50,8 +50,9 @@ describe('provider cache transforms', () => {
         context,
       ),
     ).toEqual({
-      maxInputTokens: 40_000,
-      reservedOutputTokens: 8_000,
+      maxInputTokens: 64_000,
+      totalContextTokens: 64_000,
+      maxOutputTokens: 32_000,
     });
   });
 
@@ -103,6 +104,23 @@ describe('provider cache transforms', () => {
     expect(readPromptCacheKey(instructionChanged)).not.toBe(firstKey);
   });
 
+  it('uses a different OpenAI cache identity for each prompt mode', () => {
+    const model = runtimeModel('openai');
+    const input = modelInput(diagnostics, {
+      instructions: cacheInstructions('stable rule', 'skill review'),
+    });
+    const rapid = prepareModelInputForRuntimeModel(model, input, {
+      promptProfile: 'rapid',
+      cwdIdentity: '/workspace',
+    });
+    const thorough = prepareModelInputForRuntimeModel(model, input, {
+      promptProfile: 'thorough',
+      cwdIdentity: '/workspace',
+    });
+
+    expect(readPromptCacheKey(rapid)).not.toBe(readPromptCacheKey(thorough));
+  });
+
   it('does not apply official OpenAI prompt cache options to compatible models', () => {
     const transformed = prepareModelInputForRuntimeModel(
       runtimeModel('openai-compatible'),
@@ -143,28 +161,29 @@ describe('provider cache transforms', () => {
       }),
     ).toEqual({
       anthropic: {
+        disableParallelToolUse: true,
         thinking: { type: 'adaptive' },
         effort: 'high',
       },
     });
-    expect(
-      providerOptionsFromRuntimeModel(runtimeModel('anthropic')),
-    ).toBeUndefined();
+    expect(providerOptionsFromRuntimeModel(runtimeModel('anthropic'))).toEqual({
+      anthropic: { disableParallelToolUse: true },
+    });
     expect(
       providerOptionsFromRuntimeModel(runtimeModel('openai-compatible')),
-    ).toBeUndefined();
+    ).toEqual({ openai: { parallelToolCalls: false } });
   });
 
-  it('keeps official OpenAI Responses requests stateless', () => {
+  it('keeps official OpenAI requests stateless and serializes tool calls', () => {
     expect(providerOptionsFromRuntimeModel(runtimeModel('openai'))).toEqual({
-      openai: { store: false },
+      openai: { parallelToolCalls: false, store: false },
     });
     expect(
       providerOptionsFromRuntimeModel({
         ...runtimeModel('openai'),
         endpoint: 'chat',
       }),
-    ).toBeUndefined();
+    ).toEqual({ openai: { parallelToolCalls: false } });
   });
 
   it('puts Anthropic cache breakpoints in instructions, never conversation messages', () => {

@@ -1,0 +1,617 @@
+{
+  "schema": "ello.benchmark.published-suite.v1",
+  "runId": "deep-swe-0809-03",
+  "generatedAt": "2026-08-09T21:18:40.370Z",
+  "suite": {
+    "id": "deep-swe-v1.1",
+    "benchmarkId": "ello.benchmark.deepswe.v1.1",
+    "displayName": "DeepSWE v1.1 curated",
+    "source": {
+      "repository": "https://github.com/datacurve-ai/deep-swe.git",
+      "revision": "a40d7298b18999c2d9b0ded7d6928e3ee26b5524"
+    },
+    "taskSetHash": "cb823ea5f58aebf80baa78f704d6c57ec3418db08c4399bb754b234b6895220a",
+    "selectedTaskCount": 20,
+    "upstreamTaskCount": 113,
+    "selectionKind": "curated",
+    "scoreMetric": "binary-reward"
+  },
+  "configHash": "fc271cae81f03702891c781b8e3a9a6110a86ca456a5266b5587b1ac84b4d36b",
+  "planHash": "57469551f63b0d5e82d19a1905899672758325343484034d7c19f40094ce03a5",
+  "matrix": {
+    "plannedJobs": 60,
+    "scoredJobs": 60,
+    "invalidJobs": 0,
+    "publishable": false
+  },
+  "agents": [
+    {
+      "id": "ello-ds-rapid",
+      "displayName": "Ello - DeepSeek V4 Flash Official",
+      "kind": "ello",
+      "models": [
+        "deepseek-v4-flash-official"
+      ],
+      "reasoningEffort": [
+        "high"
+      ],
+      "promptMode": "rapid",
+      "subagents": false
+    },
+    {
+      "id": "ello-ds",
+      "displayName": "Ello - DeepSeek V4 Flash Official",
+      "kind": "ello",
+      "models": [
+        "deepseek-v4-flash-official"
+      ],
+      "reasoningEffort": [
+        "high"
+      ],
+      "promptMode": "thorough",
+      "subagents": false
+    },
+    {
+      "id": "claude-code",
+      "displayName": "Claude Code - DeepSeek V4 Flash Official",
+      "kind": "claude-code",
+      "model": "deepseek-v4-flash-official",
+      "reasoningEffort": "high",
+      "expectedVersion": "2.1.220",
+      "executableSha256": "674f61f20ff306f3100cf9200e4c36c4b70278b5bef2884549819b942a89c863"
+    }
+  ],
+  "taskIds": [
+    "actionlint-action-pinning-lint",
+    "abs-stepped-slices",
+    "yaegi-go-embed-directives",
+    "dasel-html-document-format",
+    "cattrs-partial-structuring-recovery",
+    "numba-stencil-boundary-modes",
+    "bandit-incremental-cache-control",
+    "httpx-streaming-json-iteration",
+    "happy-dom-abort-pending-body-reads",
+    "dynamodb-toolbox-conditional-attribute-requirements",
+    "awilix-async-container-initialization",
+    "quill-shared-toolbar-focus",
+    "wasmi-trap-coredumps",
+    "fd-deterministic-multi-key-sorting",
+    "boa-hierarchical-evaluation-cancellation",
+    "pest-character-class-coalescing",
+    "yjs-map-conflict-detection",
+    "testem-per-launcher-reports",
+    "csstree-shorthand-expansion-compression",
+    "katex-multicolumn-array-spans"
+  ],
+  "attempts": [
+    {
+      "taskId": "actionlint-action-pinning-lint",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "e7fba7ee92778e7eeb214619",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/actionlint-action-pinning-lint/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "actionlint-action-pinning-lint",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "dc0159d344cdf396bf9ed5e0",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/actionlint-action-pinning-lint/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "actionlint-action-pinning-lint",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "c68acbe57a5a8bdf0343026e",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/actionlint-action-pinning-lint/claude-code/manifest.json"
+    },
+    {
+      "taskId": "abs-stepped-slices",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "369604c86d1648a660a55633",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/abs-stepped-slices/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "abs-stepped-slices",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "f297873f008af5523f9fe137",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/abs-stepped-slices/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "abs-stepped-slices",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "4058d2f68e1409dbe745471b",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/abs-stepped-slices/claude-code/manifest.json"
+    },
+    {
+      "taskId": "yaegi-go-embed-directives",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "fac19670d2f121dd0e83431a",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/yaegi-go-embed-directives/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "yaegi-go-embed-directives",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "60559b963d26252b65beb8d0",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/yaegi-go-embed-directives/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "yaegi-go-embed-directives",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "5eaef5c2c3b7ed7fef0e6a30",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/yaegi-go-embed-directives/claude-code/manifest.json"
+    },
+    {
+      "taskId": "dasel-html-document-format",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "81664ea0a4f1b61bc0a78b54",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/dasel-html-document-format/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "dasel-html-document-format",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "e1ce815c588be3dd9d3a837d",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/dasel-html-document-format/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "dasel-html-document-format",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "03d2725797c5a251b01d6f8f",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/dasel-html-document-format/claude-code/manifest.json"
+    },
+    {
+      "taskId": "cattrs-partial-structuring-recovery",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "12d06ab43a6dc95f176c65fe",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/cattrs-partial-structuring-recovery/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "cattrs-partial-structuring-recovery",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "301d77ce2abb074489b02279",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/cattrs-partial-structuring-recovery/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "cattrs-partial-structuring-recovery",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "9b8a540f730c9c8e7abfc0a3",
+      "outcome": "timeout_passed",
+      "manifest": "tasks/deep-swe/cattrs-partial-structuring-recovery/claude-code/manifest.json"
+    },
+    {
+      "taskId": "numba-stencil-boundary-modes",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "5a2f4766799fcd8205a3c210",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/numba-stencil-boundary-modes/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "numba-stencil-boundary-modes",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "c6699bfbadf06ee6b1688be7",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/numba-stencil-boundary-modes/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "numba-stencil-boundary-modes",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "11ee4e7f729e9326cd03d7c6",
+      "outcome": "timeout_failed",
+      "manifest": "tasks/deep-swe/numba-stencil-boundary-modes/claude-code/manifest.json"
+    },
+    {
+      "taskId": "bandit-incremental-cache-control",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "47f5155904e17f02686afe75",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/bandit-incremental-cache-control/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "bandit-incremental-cache-control",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "46ce2309949d232baf93cdbb",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/bandit-incremental-cache-control/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "bandit-incremental-cache-control",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "fdae7bc56769b59e7efa2fde",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/bandit-incremental-cache-control/claude-code/manifest.json"
+    },
+    {
+      "taskId": "httpx-streaming-json-iteration",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "3c40b2c9f82b47b0b962562e",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/httpx-streaming-json-iteration/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "httpx-streaming-json-iteration",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "4324ec6c156c9f51a3f0ce7a",
+      "outcome": "timeout_failed",
+      "manifest": "tasks/deep-swe/httpx-streaming-json-iteration/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "httpx-streaming-json-iteration",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "b0b0b0034bfafd2da2583b91",
+      "outcome": "timeout_passed",
+      "manifest": "tasks/deep-swe/httpx-streaming-json-iteration/claude-code/manifest.json"
+    },
+    {
+      "taskId": "happy-dom-abort-pending-body-reads",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "c8f8e91a0328dbe13ddd95ca",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/happy-dom-abort-pending-body-reads/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "happy-dom-abort-pending-body-reads",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "5525235f39254e8aad64d816",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/happy-dom-abort-pending-body-reads/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "happy-dom-abort-pending-body-reads",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "369e7ed64c8103e7f7d424db",
+      "outcome": "timeout_failed",
+      "manifest": "tasks/deep-swe/happy-dom-abort-pending-body-reads/claude-code/manifest.json"
+    },
+    {
+      "taskId": "dynamodb-toolbox-conditional-attribute-requirements",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "dd62bdebf832eeadd7b97605",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/dynamodb-toolbox-conditional-attribute-requirements/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "dynamodb-toolbox-conditional-attribute-requirements",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "229235edb1db72156d564d7d",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/dynamodb-toolbox-conditional-attribute-requirements/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "dynamodb-toolbox-conditional-attribute-requirements",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "5bb268a4fe989cce90d9f210",
+      "outcome": "timeout_passed",
+      "manifest": "tasks/deep-swe/dynamodb-toolbox-conditional-attribute-requirements/claude-code/manifest.json"
+    },
+    {
+      "taskId": "awilix-async-container-initialization",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "74616b0aba09e1e606926135",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/awilix-async-container-initialization/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "awilix-async-container-initialization",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "f4964d2a6fb4f19494539588",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/awilix-async-container-initialization/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "awilix-async-container-initialization",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "38422163d8ce5a124b1385d5",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/awilix-async-container-initialization/claude-code/manifest.json"
+    },
+    {
+      "taskId": "quill-shared-toolbar-focus",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "750a933ce7c7bba5ead79cbe",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/quill-shared-toolbar-focus/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "quill-shared-toolbar-focus",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "c0f6be49f521290ba9eb26e7",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/quill-shared-toolbar-focus/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "quill-shared-toolbar-focus",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "421e87b764ca180c4492a02f",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/quill-shared-toolbar-focus/claude-code/manifest.json"
+    },
+    {
+      "taskId": "wasmi-trap-coredumps",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "82788f6c1da0aedacbebb82e",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/wasmi-trap-coredumps/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "wasmi-trap-coredumps",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "87223bab600c7bbcec6ebb66",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/wasmi-trap-coredumps/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "wasmi-trap-coredumps",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "c37f24c4ab9c4c3ec02666d4",
+      "outcome": "timeout_passed",
+      "manifest": "tasks/deep-swe/wasmi-trap-coredumps/claude-code/manifest.json"
+    },
+    {
+      "taskId": "fd-deterministic-multi-key-sorting",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "72d4996dddb6d7f9e3bb8f15",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/fd-deterministic-multi-key-sorting/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "fd-deterministic-multi-key-sorting",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "01f3acf9d79a281f3de382d0",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/fd-deterministic-multi-key-sorting/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "fd-deterministic-multi-key-sorting",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "b8f4e4d6ef2915b75692f97f",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/fd-deterministic-multi-key-sorting/claude-code/manifest.json"
+    },
+    {
+      "taskId": "boa-hierarchical-evaluation-cancellation",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "2a16b6729c487b411811a74c",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/boa-hierarchical-evaluation-cancellation/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "boa-hierarchical-evaluation-cancellation",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "b118b385f710274c9c09880d",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/boa-hierarchical-evaluation-cancellation/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "boa-hierarchical-evaluation-cancellation",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "118b905e39eb07b1791499c0",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/boa-hierarchical-evaluation-cancellation/claude-code/manifest.json"
+    },
+    {
+      "taskId": "pest-character-class-coalescing",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "43603fb992c19b5f61e0a37b",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/pest-character-class-coalescing/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "pest-character-class-coalescing",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "533614fd9405e86b72818606",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/pest-character-class-coalescing/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "pest-character-class-coalescing",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "05fd5b836a8e0761654d8bfa",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/pest-character-class-coalescing/claude-code/manifest.json"
+    },
+    {
+      "taskId": "yjs-map-conflict-detection",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "bf13c3adca58d4f8142354a3",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/yjs-map-conflict-detection/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "yjs-map-conflict-detection",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "ce9e7df8b723f1031003fb69",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/yjs-map-conflict-detection/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "yjs-map-conflict-detection",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "d295b0bb55eeaaad8dfa7dcb",
+      "outcome": "timeout_passed",
+      "manifest": "tasks/deep-swe/yjs-map-conflict-detection/claude-code/manifest.json"
+    },
+    {
+      "taskId": "testem-per-launcher-reports",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "6180f6e78fe7c51c437ebf54",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/testem-per-launcher-reports/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "testem-per-launcher-reports",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "53795c0aaebc3b530a3503bf",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/testem-per-launcher-reports/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "testem-per-launcher-reports",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "021cf6273601db4a1fc38980",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/testem-per-launcher-reports/claude-code/manifest.json"
+    },
+    {
+      "taskId": "csstree-shorthand-expansion-compression",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "1060f50f8580458f14d70b55",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/csstree-shorthand-expansion-compression/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "csstree-shorthand-expansion-compression",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "ba008df7328eca6d5efecacd",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/csstree-shorthand-expansion-compression/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "csstree-shorthand-expansion-compression",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "95d07af5312a83a62e4fbd76",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/csstree-shorthand-expansion-compression/claude-code/manifest.json"
+    },
+    {
+      "taskId": "katex-multicolumn-array-spans",
+      "agentId": "ello-ds-rapid",
+      "replicate": 1,
+      "attemptId": "430f78b51d0adeed2323ee15",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/katex-multicolumn-array-spans/ello-ds-rapid/manifest.json"
+    },
+    {
+      "taskId": "katex-multicolumn-array-spans",
+      "agentId": "ello-ds",
+      "replicate": 1,
+      "attemptId": "6398a8d3d79fdcee962a1fb9",
+      "outcome": "passed",
+      "manifest": "tasks/deep-swe/katex-multicolumn-array-spans/ello-ds/manifest.json"
+    },
+    {
+      "taskId": "katex-multicolumn-array-spans",
+      "agentId": "claude-code",
+      "replicate": 1,
+      "attemptId": "8d17801bcf3184985036758b",
+      "outcome": "failed",
+      "manifest": "tasks/deep-swe/katex-multicolumn-array-spans/claude-code/manifest.json"
+    }
+  ],
+  "artifacts": {
+    "report": {
+      "path": "report.md",
+      "sha256": "f4f32cb5428b3e6a82580321524d82e1ddd2155252e693207c0bbf36aa3fc45a",
+      "bytes": 24956
+    },
+    "suiteReport": {
+      "path": "suite-report.json",
+      "sha256": "19d3e190edec96e1807d016b895c3b118b8aab5f3fb7d6e814e90b90801052b3",
+      "bytes": 170371
+    },
+    "charts": {
+      "paired-outcomes.svg": {
+        "path": "charts/paired-outcomes.svg",
+        "sha256": "8f6907d304fd05cf763eb1d4c643fadc1d02904a765059d75520dc984bc19180",
+        "bytes": 2786
+      },
+      "pass-rate-by-agent.svg": {
+        "path": "charts/pass-rate-by-agent.svg",
+        "sha256": "42941ccf3556ac2aec92a9259f044b04244b7b56ab30a29ee253fade7d969099",
+        "bytes": 1237
+      },
+      "pass-rate-by-task.svg": {
+        "path": "charts/pass-rate-by-task.svg",
+        "sha256": "605d4621d8ed56eecec4c219d6b83fd0026f9eda8dc33efc722cfec20ea81258",
+        "bytes": 17686
+      },
+      "resource-tradeoff.svg": {
+        "path": "charts/resource-tradeoff.svg",
+        "sha256": "5d9b95a913ece985dde04991c3e8a0c2d4b58a0e074a8efe9635a553c9f19f9c",
+        "bytes": 1230
+      },
+      "round-timeline.svg": {
+        "path": "charts/round-timeline.svg",
+        "sha256": "82d6ba35e53230838f98f944494628b17d82d3f6b45374c9558b854851ed8fa8",
+        "bytes": 1230
+      },
+      "token-breakdown.svg": {
+        "path": "charts/token-breakdown.svg",
+        "sha256": "b38f676a14fd4c53b6450d6502325efefd1c5d8993407155a78c1713e666c865",
+        "bytes": 3699
+      },
+      "tool-failure-pareto.svg": {
+        "path": "charts/tool-failure-pareto.svg",
+        "sha256": "7a7ab5d2538650cdf3d54e8f97be1ba8407859fe90f0749839ac4cc9aa51f43f",
+        "bytes": 1207
+      }
+    }
+  }
+}

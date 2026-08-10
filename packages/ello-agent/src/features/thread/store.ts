@@ -332,18 +332,35 @@ async function recoverInterruptedThreads(options: {
         (turn) => turn.status === 'inProgress',
       );
       for (const turn of activeTurns) {
+        const recoveredItems: ThreadItem[] = [];
         for (const item of turn.items) {
           const interrupted = interruptItem(item);
-          if (interrupted === null) continue;
-          await options.logs.append(threadId, {
-            kind: 'item.completed',
-            turnId: turn.id,
-            item: interrupted,
-          });
+          recoveredItems.push(interrupted ?? item);
+          if (interrupted !== null) {
+            await options.logs.append(threadId, {
+              kind: 'item.completed',
+              turnId: turn.id,
+              item: interrupted,
+            });
+          }
+          if (
+            interrupted?.type === 'commandRun' &&
+            needsInterruptedToolResult(
+              await options.logs.read(threadId),
+              interrupted,
+            )
+          ) {
+            await options.logs.append(threadId, {
+              kind: 'transcript.entry',
+              turnId: turn.id,
+              role: 'tool',
+              message: interruptedToolResult(interrupted),
+            });
+          }
         }
         await options.logs.append(threadId, {
           kind: 'turn.interrupted',
-          turn: interruptedTurn(turn),
+          turn: interruptedTurn(turn, recoveredItems),
           reason: 'server restarted before the turn reached a terminal state',
         });
       }
@@ -381,14 +398,82 @@ function recoverablePreview(snapshot: ThreadSnapshot): string | undefined {
   return undefined;
 }
 
-function interruptedTurn(turn: Turn): Turn {
+function interruptedTurn(turn: Turn, items: readonly ThreadItem[]): Turn {
   return {
     ...turn,
     status: 'interrupted',
-    items: [],
+    items,
     completedAt: new Date().toISOString(),
     errorCode: 'SERVER_RESTARTED',
   };
+}
+
+function needsInterruptedToolResult(
+  records: readonly ThreadRecord[],
+  item: Extract<ThreadItem, { type: 'commandRun' }>,
+): boolean {
+  let callSeen = false;
+  for (const record of records) {
+    if (record.kind !== 'transcript.entry') continue;
+    const content = messageContent(record.message);
+    for (const part of content) {
+      if (toolPartId(part, 'tool-call') === item.providerToolCallId) {
+        callSeen = true;
+      }
+      if (toolPartId(part, 'tool-result') === item.providerToolCallId) {
+        return false;
+      }
+    }
+  }
+  return callSeen;
+}
+
+function interruptedToolResult(
+  item: Extract<ThreadItem, { type: 'commandRun' }>,
+): Record<string, unknown> {
+  return {
+    role: 'tool',
+    content: [
+      {
+        type: 'tool-result',
+        toolCallId: item.providerToolCallId,
+        toolName: 'command_run',
+        output: {
+          type: 'error-text',
+          value: JSON.stringify({
+            commandRunId: item.id,
+            status: 'interrupted',
+            commands: item.commands.map((command) => ({
+              commandId: command.commandId,
+              name: command.name,
+              status: command.status,
+            })),
+          }),
+        },
+      },
+    ],
+  };
+}
+
+function messageContent(message: unknown): readonly unknown[] {
+  if (typeof message !== 'object' || message === null) return [];
+  const content = Reflect.get(message, 'content');
+  return Array.isArray(content) ? content : [];
+}
+
+function toolPartId(
+  part: unknown,
+  type: 'tool-call' | 'tool-result',
+): string | undefined {
+  if (
+    typeof part !== 'object' ||
+    part === null ||
+    Reflect.get(part, 'type') !== type
+  ) {
+    return undefined;
+  }
+  const id = Reflect.get(part, 'toolCallId');
+  return typeof id === 'string' ? id : undefined;
 }
 
 function interruptItem(item: ThreadItem): ThreadItem | null {
@@ -407,6 +492,18 @@ function interruptItem(item: ThreadItem): ThreadItem | null {
     case 'contextCompaction':
       return item.status === 'inProgress'
         ? { ...item, status: 'failed' }
+        : null;
+    case 'commandRun':
+      return item.status === 'inProgress'
+        ? {
+            ...item,
+            status: 'interrupted',
+            commands: item.commands.map((command) =>
+              command.status === 'running'
+                ? { ...command, status: 'interrupted' as const }
+                : command,
+            ),
+          }
         : null;
     default:
       item satisfies never;

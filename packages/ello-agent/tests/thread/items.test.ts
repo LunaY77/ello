@@ -3,7 +3,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { failItem } from '../../src/features/thread/items.js';
+import {
+  failItem,
+  projectFileChangeMetadata,
+} from '../../src/features/thread/items.js';
 import type { ThreadItem } from '../../src/protocol/v1/index.js';
 
 describe('thread items', () => {
@@ -25,6 +28,34 @@ describe('thread items', () => {
       ...item,
       status: 'failed',
       error: 'Path not allowed: /outside/packages',
+    });
+  });
+
+  it('projects an internal move as a protocol rename with source and target paths', () => {
+    expect(
+      projectFileChangeMetadata({
+        fileChanges: [
+          {
+            kind: 'modified',
+            path: 'old.txt',
+            movePath: 'new.txt',
+            additions: 1,
+            deletions: 1,
+            unifiedDiff: '@@ -1 +1 @@\n-old\n+new',
+          },
+        ],
+      }),
+    ).toEqual({
+      fileChanges: [
+        {
+          kind: 'rename',
+          oldPath: 'old.txt',
+          path: 'new.txt',
+          additions: 1,
+          deletions: 1,
+          diff: '@@ -1 +1 @@\n-old\n+new',
+        },
+      ],
     });
   });
 });

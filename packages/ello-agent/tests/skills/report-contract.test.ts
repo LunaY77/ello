@@ -90,7 +90,7 @@ function taskInput(definitionName: string): CreateAgentTask {
     maxTurns: 1,
     depth: 1,
     sidechain: [],
-    toolNames: [],
+    commandNames: [],
     permissionRules: [],
     externalPaths: [],
   };

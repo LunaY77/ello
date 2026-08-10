@@ -1,45 +1,63 @@
 # @ello/bench
 
-`@ello/bench` is a reproducible coding-agent benchmark harness. It expands a
-strict TOML definition into a `task x agent x replicate` matrix, runs every job
-against the task's pinned Docker image, preserves raw evidence, verifies the
-result in a fresh container, and renders JSON, Markdown, and SVG reports.
+<p align="center"><a href="../../README.md">项目首页</a> · <strong>简体中文</strong> · <a href="README-en.md">English</a></p>
 
-The default DeepSWE matrix compares three agents:
+`@ello/bench` 是 Ello 的可复现 Coding Agent Benchmark harness。它把严格 TOML 配置展开为 `task × agent × replicate` 矩阵，在固定 Docker 环境中运行 Agent，用新的同镜像容器验证 patch，保存 retry lineage 和规范化 evidence，并生成 JSON、Markdown 与 SVG 报告。
 
-- `ello`: Ello with subagents enabled
-- `ello-no-subagent`: the same Ello models with subagents disabled
-- `codex`: Codex using the same primary model and reasoning effort
+## 当前发布结果
 
-## Suites
+DeepSWE v1.1 当前记录固定同一个 DeepSeek V4 Flash 0731 模型、High reasoning、20 个任务和同一 Docker/verifier 契约：
 
-| Suite                       | Tasks | Purpose                            | Corpus                                      |
-| --------------------------- | ----: | ---------------------------------- | ------------------------------------------- |
-| `deep-swe-v1.1`             |    20 | Stable optimization and A/B target | Pinned `datacurve-ai/deep-swe` revision     |
-| `swe-bench-pro-calibration` |    30 | Cross-harness calibration          | Pinned `scaleapi/SWE-bench_Pro-os` revision |
+| Agent         | 通过 |    通过率 | 相对 Claude Code |
+| ------------- | ---: | --------: | ---------------- |
+| Ello Rapid    |   13 | **65.0%** | **+20.0 pp**     |
+| Ello Thorough |   13 | **65.0%** | **+20.0 pp**     |
+| Claude Code   |    9 |     45.0% | baseline         |
 
-If `--corpus-root` is omitted, the selected corpus is cloned into
-`packages/ello-bench/raw/_cache/<suite>/`. An existing corpus checkout must
-have the configured origin, pinned revision, and a clean working tree.
+两个 Ello 配置对 Claude Code 均为 6 胜、12 平、2 负。在 evidence 同时可用的配对任务上，Rapid 的 elapsed、模型轮次、Command/Tool 调用和 input token 中位数分别降低 69.0%、68.3%、70.7% 和 74.5%。
 
-## Requirements
+- [当前证据记录](../../docs/benchmark/current-task-set-record.md)
+- [生成报告](../../docs/benchmark/results/report.md)
+- [逐 Task patch](../../docs/benchmark/results/tasks/deep-swe/)
+- [方法论](../../docs/benchmark/benchmark-methodology.md)
 
-- Node.js 24+
-- pnpm 11
-- Git
-- Docker CLI and an accessible Docker daemon
-- Credentials and pinned external agent binaries required by the selected
-  agents
+资源 coverage 不完整，因此严格 `publishable` 为 `false`；这不改变 60/60 job 已取得 verifier score，但资源数字必须保留样本数。
 
-The harness has no host Python or plotting dependency. A task image may still
-run a Python verifier when that is part of the task contract, as it is for
-SWE-bench Pro.
+## 执行流水线
 
-## Configuration
+```mermaid
+flowchart LR
+  Config[TOML Config] --> Plan[Task x Agent x Replicate]
+  Plan --> Attempt[Attempt State Machine]
+  Attempt --> Base[Baseline Preflight]
+  Base --> Agent[Agent in Task Environment]
+  Agent --> Patch[Capture model.patch]
+  Patch --> Verify[Fresh Verifier Container]
+  Verify --> Evidence[Run / Evidence / Harness]
+  Evidence --> Report[JSON / Markdown / SVG]
+```
 
-TOML is the only accepted configuration format. The default entry point is
-[`config/benchmark.toml`](config/benchmark.toml), which references
-[`config/agents.toml`](config/agents.toml) through `agents_file`.
+每个 job 的流程：
+
+1. 校验 corpus revision、task identity、Agent binary/model 和语义 config hash。
+2. 从任务 image 创建干净 Container Environment。
+3. 在未修改代码上执行 baseline preflight；环境不健康不会伪装成 Agent reward 0。
+4. 启动 Agent，记录 model、round、Command/Tool、usage、phase 和进程结果。
+5. 捕获相对 baseline tree 的 `model.patch`。
+6. 在新的 verifier 容器中应用 patch，执行固定 assertion 并得到 binary reward。
+7. 写入 terminal attempt；基础设施失败按固定额度重试，任务失败不重试。
+8. 独立生成 report，并从 raw artifact 重新校验报告一致性。
+
+## Suite 与配置
+
+当前内置两个固定子集：
+
+| Suite                       | 任务数 | 用途                        |
+| --------------------------- | -----: | --------------------------- |
+| `deep-swe-v1.1`             |     20 | 长程功能实现与 Agent 对比   |
+| `swe-bench-pro-calibration` |     30 | issue 修复与跨 harness 校准 |
+
+TOML 是唯一运行配置格式。默认入口是 [`config/benchmark.toml`](config/benchmark.toml)，Agent 定义位于 [`config/agents.toml`](config/agents.toml)。
 
 ```toml
 schema = "ello.benchmark.config.v2"
@@ -48,11 +66,8 @@ agents_file = "agents.toml"
 
 [execution]
 replicates = 1
-concurrency = 2
-max_infrastructure_retries = 1
-
-[report]
-render_charts = true
+concurrency = 16
+max_infrastructure_retries = 5
 
 [report.publishability]
 require_complete_matrix = true
@@ -61,73 +76,84 @@ require_tool_audit = true
 
 [container]
 pull_policy = "if-absent"
-network = "task"
+network = "bridge"
 cleanup = "always"
 ```
 
-Configuration is strict: unknown fields, missing values, duplicate IDs, or an
-invalid combination fail before execution. `network = "task"` is mandatory;
-the effective Docker network is derived from each task's `allow_internet`
-contract and cannot be overridden by a benchmark run.
+配置是 strict schema：unknown field、缺失值、重复 ID 和非法组合在执行前失败。规范化配置计算 `configHash`；task、Agent、replicate 和配置形成 `planHash`。已有 run root 只允许用相同 identity resume，输入变化必须创建新的 run root。
 
-The resolved object is frozen after schema validation. Its semantic hash is
-computed from recursively key-sorted normalized JSON, so TOML comments,
-formatting, and key order do not change `configHash`.
+凭据和外部二进制只通过命名环境变量引用，不能写入 TOML 或 artifact。外部 Agent 还固定 canonical version 与 executable SHA-256，`doctor` 在运行前校验。
 
-Inspect the exact resolved input before a run:
+## Docker 与 Environment
 
-```bash
-pnpm --filter @ello/bench bench config print --resolved
+Benchmark 没有 local task runtime：
+
+- workspace 从任务固定 image 提取；
+- Agent 修改发生在分配给该 job 的容器路径空间；
+- verifier 使用新的同镜像容器；
+- CPU、memory、storage、user、network 和 timeout 都进入 attempt artifact；
+- storage watchdog 同时计算 bind-mounted workspace apparent bytes 与 Docker `SizeRw`；
+- external Agent binary 复制进任务容器执行；
+- Ello App Server 使用 `@ello/agent/runtime` 注入 Container Environment，Agent engine 无需知道 Docker。
+
+每个 Ello job 还有独立 App Server 子进程、state root、Unix socket 和 EngineEvent recorder。普通 `ello --remote ... --json --no-tui run` Client 通过生产 JSON-RPC 路径启动 Thread。
+
+## Attempt 与恢复
+
+```text
+planned -> preparing -> running -> capturing -> verifying -> completed
+              \________________________________________-> invalid_infrastructure
 ```
 
-To start from templates, use
-[`config/examples/agents.toml`](config/examples/agents.toml),
-[`config/examples/deep-swe.toml`](config/examples/deep-swe.toml), or
-[`config/examples/swe-bench-pro.toml`](config/examples/swe-bench-pro.toml).
-The benchmark and agents files may live anywhere, but `agents_file` is resolved
-relative to the benchmark TOML file.
+`completed` 表示 verifier 给出了有效 reward；`invalid_infrastructure` 表示该 attempt 没有有效测量 Agent 能力。只有 infrastructure-invalid 可以消耗 retry budget。
 
-Agent credentials are named, never embedded:
+runner 重启时先尝试从已经落盘的 verifier report 收割 verdict。报告与发布归档都以每个 job 的最后一个 completed attempt 为权威结果，并保留全部 invalid ledger。validator 接受明确链接的 `retryOf + resume-interrupted-run` salvage lineage，但仍拒绝普通 completed 后重跑。
 
-```bash
-export ELLO_BENCH_API_KEY=<token>
-export ELLO_BENCH_CODEX_EXE=/absolute/path/to/codex
-# Required only when a selected config contains Claude Code:
-export ELLO_BENCH_CLAUDE_EXE=/absolute/path/to/claude
+## Evidence 与统计
+
+Raw run 保存三层事实：
+
+| 层             | 主要内容                                                                 |
+| -------------- | ------------------------------------------------------------------------ |
+| Attempt        | identity、phase、runtime、patch、process、harness、failure 和 provenance |
+| Agent evidence | model round、main/subagent usage、Command/Tool event、tool audit         |
+| Verifier       | baseline、新测试、assertion、stdout/stderr、patch checksum               |
+
+报告只让有对应 evidence 的 completed run 进入资源分布，缺失 usage 不填 0。配置级同时显示 mean、median、p95 和 coverage；Task 级并列 Agent 的 outcome、elapsed、round、tools 和 token。
+
+`validate` 会重新读取所有 attempt，校验路径边界、schema、checksum、retry lineage、runtime identity、evidence 和 published report，而不是只检查 JSON 能否解析。
+
+## Raw 与 Git 发布产物
+
+完整 raw run 保留在 ignored 的 `packages/ello-bench/raw/`。Git 发布集位于 `docs/benchmark/results/`：
+
+```text
+results/
+├── manifest.json
+├── report.md
+├── suite-report.json
+├── charts/
+└── tasks/deep-swe/<task>/
+    ├── instruction.md
+    ├── task.json
+    └── <agent>/
+        ├── manifest.json
+        ├── model.patch
+        └── harness.json
 ```
 
-External agent entries pin both `expected_version` and `sha256`. `doctor`
-checks the file, checksum, canonical version output, and required noninteractive
-JSON flags.
+逐 Task 目录只保留复核结果所需的最小集合。stdout/stderr、完整 evidence、tool audit 和 phase timing 留在 raw run，不复制到 Git；聚合统计与 coverage 已进入 `suite-report.json`。
 
-## Docker Execution
+生成发布集：
 
-There is no local runtime. Every task workspace is extracted from its pinned
-image and every verifier runs in a fresh container using the same image.
+```bash
+pnpm --filter @ello/bench bench:archive-docs -- \
+  --run-root packages/ello-bench/raw/deep-swe-0809-03
+```
 
-- `allow_internet = false` becomes `docker run --network none`; otherwise it
-  becomes `bridge`.
-- Task `cpus` and `memory_mb` become Docker-native resource limits.
-- `storage_mb` is enforced by a watchdog that combines apparent bytes in the
-  bind-mounted workspace with Docker `SizeRw` for the container writable
-  layer. It does not follow workspace symlinks, kills the owning container on
-  overflow, and is audited before patch capture and after verifier execution.
-  This works across Docker storage drivers, unlike `--storage-opt`, which does
-  not constrain bind mounts.
-- Containers run as the host UID/GID with a writable benchmark HOME.
-- Codex and Claude Code binaries are copied into the task container and run
-  there.
-- Ello's App Server remains on the host, while all task shell and filesystem
-  operations are routed through the task container at `/app`.
-- `cleanup = "always" | "on-success" | "never"` controls retained agent
-  containers. Verifier containers are always removed.
+## CLI
 
-The attempt records the effective image, user, network, CPU, memory, and
-storage policy in `docker-preflight.json` and `network-policy.json`.
-
-## Commands
-
-Build before invoking the compiled CLI:
+先构建 compiled CLI：
 
 ```bash
 pnpm --filter @ello/bench build
@@ -137,16 +163,15 @@ pnpm --filter @ello/bench build
 ello-bench list [--config PATH]
 ello-bench config print --resolved [--config PATH]
 ello-bench agents [--config PATH]
-ello-bench plan (--task ID | --all) (--agent ID | --all-agents) [--config PATH]
-ello-bench doctor (--agent ID | --all-agents) [--config PATH]
+ello-bench plan (--task ID | --all) (--agent ID | --all-agents)
+ello-bench doctor (--agent ID | --all-agents)
 ello-bench run (--task ID | --all) (--agent ID | --all-agents)
-               --run-root PATH [--corpus-root PATH] [--report] [--config PATH]
+               --run-root PATH [--corpus-root PATH] [--report]
 ello-bench report --run-root PATH
-ello-bench validate [--run-root PATH] [--config PATH]
+ello-bench validate --run-root PATH
 ```
 
-Agent and task selection are explicit for `plan` and `run`; agent selection is
-also explicit for `doctor`. Start with a single-task pilot:
+先执行单题 pilot，再启动完整矩阵：
 
 ```bash
 pnpm --filter @ello/bench bench doctor --all-agents
@@ -154,102 +179,33 @@ pnpm --filter @ello/bench bench doctor --all-agents
 pnpm --filter @ello/bench bench run \
   --task actionlint-action-pinning-lint \
   --all-agents \
-  --run-root /absolute/path/to/deep-swe-pilot-001 \
+  --run-root /absolute/path/to/pilot \
   --report
 ```
 
-Run the complete Part A three-agent matrix:
+## 分层架构
+
+源码依赖方向为 `cli -> infra -> application -> domain`：
+
+| 层            | 责任                                                     |
+| ------------- | -------------------------------------------------------- |
+| `domain`      | strict contracts、hash、selection、evidence、scoring     |
+| `application` | attempt phase 与 matrix orchestration                    |
+| `ports`       | Agent、Container、Corpus、Verifier、Artifact 等宿主接口  |
+| `infra`       | Docker、filesystem、process、adapter、report persistence |
+| `render`      | 不读取文件的纯 Markdown / SVG renderer                   |
+| `cli`         | command composition                                      |
+
+ESLint 阻止内层反向 import Node I/O 或外层实现。Agent adapter、Docker 和报告持久化可以替换，但 scoring 与 contract 不依赖它们。
+
+## 验证
 
 ```bash
-pnpm --filter @ello/bench bench run \
-  --all \
-  --all-agents \
-  --run-root /absolute/path/to/deep-swe-part-a-001 \
-  --report
+pnpm --filter @ello/bench test
+pnpm --filter @ello/bench typecheck
+pnpm exec eslint packages/ello-bench/src packages/ello-bench/tests \
+  packages/ello-bench/scripts/archive-doc-results.mjs
+pnpm --filter @ello/bench build
 ```
 
-A run root permanently binds its semantic `configHash`, `planHash`, task set,
-agent set, and replicate set. Resume with the same inputs; use a new empty run
-root after any input change.
-
-## Outcomes And Retries
-
-An attempt has one application-owned phase machine. Failures in corpus,
-container, agent setup/process/evidence, patch capture, or verifier execution
-are infrastructure-invalid and may be retried up to
-`max_infrastructure_retries`.
-
-A nonzero verifier baseline is classified as `baseline-unhealthy`, not as an
-agent failure and not as reward `0`. It is listed in the report's invalid
-ledger. Only a healthy baseline enters the scored denominator; the new-test
-exit code then determines reward `0` or `1`.
-
-## Evidence And Reports
-
-Ello archives redacted EngineEvents as recovery-safe append-only JSONL. Exactly
-one `thr_*` capture is required for the main thread; zero or more `job_*`
-captures are accepted as subagents. Unknown prefixes, missing captures,
-sequence gaps, lifecycle-count mismatches, and checksum mismatches fail
-validation.
-
-Normalized evidence exposes main, subagent, and combined token/tool usage.
-Publishability gates consume the combined usage, preventing delegated work from
-being omitted from cost reporting.
-
-`report` writes:
-
-```text
-<run-root>/
-├── suite-manifest.json
-├── runs/<task>/<agent>/r<replicate>/<attempt>/
-│   ├── run.json
-│   ├── workspace/
-│   ├── agent-state/
-│   └── raw/
-│       ├── docker-preflight.json
-│       ├── network-policy.json
-│       ├── model.patch
-│       ├── phase-timings.json
-│       ├── agent/
-│       │   ├── evidence.json
-│       │   ├── rounds.jsonl
-│       │   └── tool-audit.json
-│       └── harness/
-│           ├── process.json
-│           └── report.json
-└── results/
-    ├── suite-report.json
-    ├── report.md
-    ├── agents/
-    ├── tasks/
-    ├── comparisons/
-    └── charts/*.svg
-```
-
-The report stack is pure TypeScript. Markdown and all seven charts are
-deterministic text renderers; chart output is SVG. `render_charts = false`
-still writes JSON and `report.md`, but skips the `charts/` directory.
-
-Always validate a completed run independently:
-
-```bash
-pnpm --filter @ello/bench bench report --run-root /absolute/path/to/run
-pnpm --filter @ello/bench bench validate --run-root /absolute/path/to/run
-```
-
-## Architecture
-
-The source tree enforces inward dependencies:
-
-- `domain/`: contracts and pure planning, evidence, and scoring logic
-- `application/`: attempt and matrix orchestration through ports
-- `ports/`: type/interface-only runtime contracts
-- `infra/`: filesystem, processes, Docker, agents, verifier, corpus, and report
-  persistence
-- `render/`: pure Markdown and SVG rendering
-- `cli/`: composition-facing command interface
-
-ESLint prevents domain/application/ports/render from importing forbidden outer
-layers or Node I/O APIs. The source root contains only the package export and
-the two executable process entries; active implementations live in the layers
-above.
+更详细的执行状态、artifact 和发布规则见 [Benchmark 架构](../../docs/benchmark/architecture.md)。

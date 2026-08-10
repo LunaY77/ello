@@ -67,6 +67,18 @@ describe('benchmark matrix', () => {
     expect(DEEP_SWE_TASK_SET_HASH).toBe(sha256(stableJson(DEEP_SWE_TASKS)));
     expect(config.tasks).toHaveLength(20);
     expect(new Set(config.tasks.map((task) => task.taskId))).toHaveLength(20);
+    expect(config.tasks.map((task) => task.taskId)).toEqual(
+      expect.arrayContaining([
+        'cattrs-partial-structuring-recovery',
+        'httpx-streaming-json-iteration',
+      ]),
+    );
+    expect(config.tasks.map((task) => task.taskId)).not.toEqual(
+      expect.arrayContaining([
+        'narwhals-rolling-window-suite',
+        'langchain-request-coalescing',
+      ]),
+    );
   });
 
   it('loads the fixed thirty-task SWE-bench Pro declaration', async () => {

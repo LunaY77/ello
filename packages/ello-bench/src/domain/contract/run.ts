@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-import { AgentRuntimeProvenanceSchema, AgentSpecSchema } from './agent.js';
+import {
+  AgentArtifactRuntimeProvenanceSchema,
+  AgentArtifactSpecSchema,
+  AgentRuntimeProvenanceSchema,
+  AgentSpecSchema,
+} from './agent.js';
 import {
   BenchmarkReportConfigSchema,
   BenchmarkSuiteMetadataSchema,
@@ -71,12 +76,19 @@ export const HarnessReportSchema = z
     status: z.enum(['passed', 'failed']),
     reward: z.union([z.literal(0), z.literal(1)]),
     verifierProcess: ArtifactReferenceSchema,
+    baselinePreflightProcess: ArtifactReferenceSchema.optional(),
+    baselinePreflightExitCode: z.number().int().nonnegative().optional(),
     verifierRuntime: z.literal('docker').default('docker'),
     verifierImage: z.string().min(1).optional(),
     verifierImageId: z.string().min(1).optional(),
     modelPatchSha256: z.string().regex(/^[0-9a-f]{64}$/u),
     appliedPatchSha256: z.string().regex(/^[0-9a-f]{64}$/u),
     verifierCapturedPatchSha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    verifierGeneratedPatchSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/u)
+      .nullable()
+      .optional(),
     baselineTestExitCode: z.number().int().nonnegative(),
     newTestsExitCode: z.number().int().nonnegative(),
     hiddenPatchChangedFiles: z.array(z.string().min(1)),
@@ -94,6 +106,27 @@ export const HarnessReportSchema = z
   })
   .strict()
   .superRefine((report, context) => {
+    if (
+      (report.baselinePreflightProcess === undefined) !==
+      (report.baselinePreflightExitCode === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['baselinePreflightProcess'],
+        message:
+          'Baseline preflight process and exit code must appear together.',
+      });
+    }
+    if (
+      report.baselinePreflightExitCode !== undefined &&
+      report.baselinePreflightExitCode !== 0
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['baselinePreflightExitCode'],
+        message: 'Completed harness requires a healthy baseline preflight.',
+      });
+    }
     if (
       report.verifierRuntime === 'docker' &&
       (report.verifierImage === undefined ||
@@ -189,82 +222,101 @@ export const RunOutcomeSchema = z.enum([
   'agent_error_failed',
 ]);
 
+const RunManifestFields = {
+  schema: z.literal('ello.benchmark.run.v2'),
+  attemptId: z.string().regex(/^[0-9a-f]{24}$/u),
+  attempt: z.number().int().positive(),
+  retryOf: z
+    .string()
+    .regex(/^[0-9a-f]{24}$/u)
+    .optional(),
+  retryReason: InfrastructureFailureSchema.optional(),
+  job: JobSchema,
+  configHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  status: z.enum([
+    'planned',
+    'preparing',
+    'running',
+    'capturing',
+    'verifying',
+    'completed',
+    'invalid_infrastructure',
+  ]),
+  phase: z.string().min(1),
+  startedAt: z.string().datetime().optional(),
+  completedAt: z.string().datetime().optional(),
+  attemptRoot: z.string().min(1),
+  workspace: z.string().min(1),
+  agentStateRoot: z.string().min(1),
+  agent: AgentSpecSchema.optional(),
+  agentRuntime: AgentRuntimeProvenanceSchema.optional(),
+  provenance: RunProvenanceSchema.optional(),
+  task: ResolvedTaskSchema.optional(),
+  executionRuntime: z.literal('docker').default('docker'),
+  imageId: z.string().min(1).optional(),
+  containerName: z.string().min(1).optional(),
+  baselineTree: z
+    .string()
+    .regex(/^[0-9a-f]{40,64}$/u)
+    .optional(),
+  client: ProcessResultSchema.optional(),
+  agentProcess: ArtifactReferenceSchema.optional(),
+  agentEvidence: ArtifactReferenceSchema.optional(),
+  toolAudit: ArtifactReferenceSchema.optional(),
+  patch: PatchArtifactSchema.optional(),
+  verifierProcess: ArtifactReferenceSchema.optional(),
+  baselinePreflightProcess: ArtifactReferenceSchema.optional(),
+  baselinePreflightExitCode: z.number().int().nonnegative().optional(),
+  phaseTimingsPath: z.string().min(1).optional(),
+  harness: HarnessReportSchema.optional(),
+  outcome: RunOutcomeSchema.optional(),
+  evidenceDegradation: EvidenceDegradationSchema.optional(),
+  failure: InfrastructureFailureSchema.optional(),
+} as const;
+
 export const RunManifestSchema = z
-  .object({
-    schema: z.literal('ello.benchmark.run.v2'),
-    attemptId: z.string().regex(/^[0-9a-f]{24}$/u),
-    attempt: z.number().int().positive(),
-    retryOf: z
-      .string()
-      .regex(/^[0-9a-f]{24}$/u)
-      .optional(),
-    retryReason: InfrastructureFailureSchema.optional(),
-    job: JobSchema,
-    configHash: z.string().regex(/^[0-9a-f]{64}$/u),
-    status: z.enum([
-      'planned',
-      'preparing',
-      'running',
-      'capturing',
-      'verifying',
-      'completed',
-      'invalid_infrastructure',
-    ]),
-    phase: z.string().min(1),
-    startedAt: z.string().datetime().optional(),
-    completedAt: z.string().datetime().optional(),
-    attemptRoot: z.string().min(1),
-    workspace: z.string().min(1),
-    agentStateRoot: z.string().min(1),
-    agent: AgentSpecSchema.optional(),
-    agentRuntime: AgentRuntimeProvenanceSchema.optional(),
-    provenance: RunProvenanceSchema.optional(),
-    task: ResolvedTaskSchema.optional(),
-    executionRuntime: z.literal('docker').default('docker'),
-    imageId: z.string().min(1).optional(),
-    containerName: z.string().min(1).optional(),
-    baselineTree: z
-      .string()
-      .regex(/^[0-9a-f]{40,64}$/u)
-      .optional(),
-    client: ProcessResultSchema.optional(),
-    agentProcess: ArtifactReferenceSchema.optional(),
-    agentEvidence: ArtifactReferenceSchema.optional(),
-    toolAudit: ArtifactReferenceSchema.optional(),
-    patch: PatchArtifactSchema.optional(),
-    verifierProcess: ArtifactReferenceSchema.optional(),
-    phaseTimingsPath: z.string().min(1).optional(),
-    harness: HarnessReportSchema.optional(),
-    outcome: RunOutcomeSchema.optional(),
-    evidenceDegradation: EvidenceDegradationSchema.optional(),
-    failure: InfrastructureFailureSchema.optional(),
-  })
+  .object(RunManifestFields)
   .strict()
-  .superRefine((manifest, context) => {
-    if (manifest.attempt === 1 && manifest.retryOf !== undefined) {
-      context.addIssue({
-        code: 'custom',
-        path: ['retryOf'],
-        message: 'The first attempt cannot declare retryOf.',
-      });
-    }
-    if (
-      manifest.attempt > 1 &&
-      (manifest.retryOf === undefined || manifest.retryReason === undefined)
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['retryOf'],
-        message: 'A retry requires retryOf and retryReason.',
-      });
-    }
-    if (manifest.status === 'completed') validateCompleted(manifest, context);
-    if (manifest.status === 'invalid_infrastructure') {
-      validateInvalid(manifest, context);
-    }
-  });
+  .superRefine(validateRunManifest);
 
 export type RunManifest = z.infer<typeof RunManifestSchema>;
+
+export const RunArtifactManifestSchema = z
+  .object({
+    ...RunManifestFields,
+    agent: AgentArtifactSpecSchema.optional(),
+    agentRuntime: AgentArtifactRuntimeProvenanceSchema.optional(),
+  })
+  .strict()
+  .superRefine(validateRunManifest);
+export type RunArtifactManifest = z.infer<typeof RunArtifactManifestSchema>;
+
+function validateRunManifest(
+  manifest: z.infer<typeof RunArtifactManifestSchema>,
+  context: z.RefinementCtx,
+): void {
+  if (manifest.attempt === 1 && manifest.retryOf !== undefined) {
+    context.addIssue({
+      code: 'custom',
+      path: ['retryOf'],
+      message: 'The first attempt cannot declare retryOf.',
+    });
+  }
+  if (
+    manifest.attempt > 1 &&
+    (manifest.retryOf === undefined || manifest.retryReason === undefined)
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['retryOf'],
+      message: 'A retry requires retryOf and retryReason.',
+    });
+  }
+  if (manifest.status === 'completed') validateCompleted(manifest, context);
+  if (manifest.status === 'invalid_infrastructure') {
+    validateInvalid(manifest, context);
+  }
+}
 
 export const SuiteManifestSchema = z
   .object({
@@ -290,8 +342,13 @@ export const SuiteManifestSchema = z
 
 export type SuiteManifest = z.infer<typeof SuiteManifestSchema>;
 
+export const SuiteArtifactManifestSchema = SuiteManifestSchema.extend({
+  agents: z.array(AgentArtifactSpecSchema).min(1),
+});
+export type SuiteArtifactManifest = z.infer<typeof SuiteArtifactManifestSchema>;
+
 function validateCompleted(
-  manifest: z.infer<typeof RunManifestSchema>,
+  manifest: z.infer<typeof RunArtifactManifestSchema>,
   context: z.RefinementCtx,
 ): void {
   for (const [field, value] of [
@@ -356,7 +413,7 @@ function validateCompleted(
 }
 
 function validateInvalid(
-  manifest: z.infer<typeof RunManifestSchema>,
+  manifest: z.infer<typeof RunArtifactManifestSchema>,
   context: z.RefinementCtx,
 ): void {
   if (manifest.completedAt === undefined || manifest.failure === undefined) {

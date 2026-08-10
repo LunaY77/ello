@@ -6,6 +6,7 @@ display_name = "Ello"
 kind = "ello"
 primary_model = "benchmark-pro"
 auxiliary_model = "benchmark-flash"
+prompt_mode = "rapid"
 
 [agent.models.benchmark-pro]
 protocol = "anthropic"

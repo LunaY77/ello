@@ -5,7 +5,6 @@
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
 import type { SessionMode } from '../../protocol/v1/index.js';
-import { projectToolEvent } from '../tool/index.js';
 
 import type {
   AgentResumeResult,
@@ -115,11 +114,15 @@ class RunningAgent implements AgentRun {
   private readonly interactions;
   private readonly messageText = new Map<string, string>();
   private readonly reasoningText = new Map<string, string>();
-  private readonly pendingCompactions: Array<
-    Extract<EngineEvent, { type: 'context.compaction' }>
-  > = [];
   private readonly pendingInputs: QueuedRunInput[] = [];
   private readonly waitingInputs: QueuedRunInput[] = [];
+  private readonly pendingCompactionAcknowledgements = new Map<
+    string,
+    {
+      readonly resolve: () => void;
+      readonly reject: (error: unknown) => void;
+    }
+  >();
   private readonly abortController = new AbortController();
   private activeStream: AgentStream | undefined;
   private phase: 'transitioning' | 'streaming' | 'waiting' | 'closed' =
@@ -162,6 +165,18 @@ class RunningAgent implements AgentRun {
     this.interactions.resume(result);
   }
 
+  acknowledgeCompaction(compactionId: string, error?: unknown): void {
+    const acknowledgement = this.pendingCompactionAcknowledgements.get(
+      compactionId,
+    );
+    if (acknowledgement === undefined) {
+      throw new Error(`Unknown Context Checkpoint acknowledgement ${compactionId}.`);
+    }
+    this.pendingCompactionAcknowledgements.delete(compactionId);
+    if (error === undefined) acknowledgement.resolve();
+    else acknowledgement.reject(error);
+  }
+
   private async runAgent(): Promise<AgentRunResult> {
     let usage = emptyUsage();
     try {
@@ -179,24 +194,6 @@ class RunningAgent implements AgentRun {
         this.phase = 'transitioning';
         usage = addUsage(usage, result.usage);
         this.completeOpenMessages();
-        if (result.newMessages.length > 0) {
-          this.queue.push({
-            type: 'messagesAppended',
-            messages: result.newMessages,
-          });
-        }
-        for (const compaction of this.pendingCompactions.splice(0)) {
-          this.queue.push({
-            type: 'contextCompacted',
-            compactionId: compaction.compactionId,
-            beforeMessageCount: compaction.beforeMessageCount,
-            afterMessageCount: compaction.afterMessageCount,
-            summary: compaction.summary,
-            keptMessageCount: compaction.keptMessageCount,
-            tokensBefore: compaction.tokensBefore,
-            occurredAt: compaction.occurredAt,
-          });
-        }
         messages = [...result.messages];
         if (
           this.interruptReason !== undefined ||
@@ -368,11 +365,13 @@ class RunningAgent implements AgentRun {
         threadId: this.options.threadId,
         turnId: this.options.turnId,
       },
+      waitForContextCompactionCommit: (compactionId: string) =>
+        this.waitForCompactionCommit(compactionId),
     } as const;
   }
 
   private async publish(rawEvent: EngineEvent): Promise<void> {
-    const event = projectToolEvent(rawEvent);
+    const event = rawEvent;
     switch (event.type) {
       case 'reasoning.started':
         if (this.reasoningText.has(event.reasoningId)) {
@@ -430,34 +429,18 @@ class RunningAgent implements AgentRun {
         });
         return;
       case 'tool.started':
-        this.queue.push({
-          type: 'toolStarted',
-          toolCallId: event.toolCallId,
-          name: event.name,
-          input: event.input,
-          occurredAt: event.occurredAt,
-        });
-        return;
       case 'tool.completed':
-        this.queue.push({
-          type: 'toolCompleted',
-          toolCallId: event.toolCallId,
-          output: event.output,
-          occurredAt: event.occurredAt,
-        });
-        return;
       case 'tool.failed':
-        this.queue.push({
-          type: 'toolFailed',
-          toolCallId: event.toolCallId,
-          message: event.error.message,
-        });
+        // Provider outer Tool 事件仅用于 engine observability；产品使用内部 Command 事件。
         return;
       case 'approval.required':
         this.interactions.register(event.item, event.occurredAt);
         return;
       case 'tool.deferred':
         this.interactions.register(event.item, event.occurredAt);
+        return;
+      case 'command.event':
+        this.queue.push({ type: 'commandRunEvent', event: event.event });
         return;
       case 'context.compaction.started':
         this.queue.push({
@@ -469,7 +452,7 @@ class RunningAgent implements AgentRun {
         });
         return;
       case 'context.compaction':
-        this.pendingCompactions.push(event);
+        this.publishCompaction(event);
         return;
       case 'run.failed':
         this.queue.push({
@@ -492,6 +475,12 @@ class RunningAgent implements AgentRun {
           this.publishConsumedInputs(event.count, event.occurredAt);
         }
         return;
+      case 'messages.appended':
+        this.queue.push({
+          type: 'messagesAppended',
+          messages: event.messages,
+        });
+        return;
       case 'run.completed':
       case 'run.started':
       case 'turn.started':
@@ -505,6 +494,46 @@ class RunningAgent implements AgentRun {
         event satisfies never;
         throw new Error(`Unhandled engine event: ${String(event)}`);
     }
+  }
+
+  private publishCompaction(
+    event: Extract<EngineEvent, { type: 'context.compaction' }>,
+  ): void {
+    this.queue.push({
+      type: 'contextCompacted',
+      compactionId: event.compactionId,
+      beforeMessageCount: event.beforeMessageCount,
+      afterMessageCount: event.afterMessageCount,
+      summary: event.summary,
+      keptMessageCount: event.keptMessageCount,
+      tokensBefore: event.tokensBefore,
+      occurredAt: event.occurredAt,
+    });
+  }
+
+  private waitForCompactionCommit(compactionId: string): Promise<void> {
+    if (this.pendingCompactionAcknowledgements.has(compactionId)) {
+      throw new Error(
+        `Context Checkpoint ${compactionId} is already awaiting acknowledgement.`,
+      );
+    }
+    let resolveAcknowledgement: (() => void) | undefined;
+    let rejectAcknowledgement: ((error: unknown) => void) | undefined;
+    const acknowledgement = new Promise<void>((resolve, reject) => {
+      resolveAcknowledgement = resolve;
+      rejectAcknowledgement = reject;
+    });
+    if (
+      resolveAcknowledgement === undefined ||
+      rejectAcknowledgement === undefined
+    ) {
+      throw new Error('Context Checkpoint acknowledgement did not initialize.');
+    }
+    this.pendingCompactionAcknowledgements.set(compactionId, {
+      resolve: resolveAcknowledgement,
+      reject: rejectAcknowledgement,
+    });
+    return acknowledgement;
   }
 
   private completeOpenMessages(): void {

@@ -171,6 +171,43 @@ describe('thread compactor', () => {
     ]);
   });
 
+  it('按配置百分比达到有效输入容量水位时自动压缩', async () => {
+    const messages: AgentMessage[] = [
+      { role: 'user', content: 'a'.repeat(180) },
+      { role: 'assistant', content: 'b'.repeat(180) },
+    ];
+    const generateCheckpoint = vi.fn(async () => 'percentage checkpoint');
+    const compactor = createThreadCompactor({
+      config: configFor('/workspace', true),
+      generateCheckpoint,
+    });
+
+    await expect(
+      compactor.compact({
+        messages,
+        contextWindow: 100,
+        signal: new AbortController().signal,
+        compact,
+      }),
+    ).resolves.toMatchObject({
+      report: { summary: 'percentage checkpoint', tokensBefore: 90 },
+    });
+    expect(generateCheckpoint).toHaveBeenCalledOnce();
+
+    await expect(
+      compactor.compact({
+        messages: [
+          { role: 'user', content: 'a'.repeat(176) },
+          { role: 'assistant', content: 'b'.repeat(176) },
+        ],
+        contextWindow: 100,
+        signal: new AbortController().signal,
+        compact,
+      }),
+    ).resolves.toBeNull();
+    expect(generateCheckpoint).toHaveBeenCalledOnce();
+  });
+
   it('手动压缩即使 auto 关闭也保留最近一个 user turn', async () => {
     const { logs, threadId } = await createThread();
     await appendMessages(logs, threadId);
@@ -355,12 +392,11 @@ function configFor(cwd: string, auto: boolean) {
     auxiliary_model: 'compact',
     context: {
       max_input_tokens: 100,
-      reserved_output_tokens: 10,
       compaction: {
         auto,
         tail_turns: 1,
         preserve_recent_tokens: 2,
-        reserved_tokens: 5,
+        threshold_percent: 90,
         prune_tool_output: false,
         tool_output_max_chars: 2_000,
         split_turns: true,

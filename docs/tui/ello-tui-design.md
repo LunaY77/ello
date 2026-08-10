@@ -16,6 +16,7 @@ typed JSON-RPC 访问。
 - tool 展示以 `buildToolCardModel()` 为视图模型源；历史和 live 两条路径可以有不同密度，但不得各自解释 tool result。
 - session resume 和 rewind 都使用 bottom dock 内滚动列表，不使用主屏历史窗口。
 - rewind / resume / clear 会重置 terminal scrollback，再从当前 active path 重放历史。
+- dynamic frame 必须矮于终端高度，靠内容行数预算而不是布局高度实现，见 §3.1。
 - `SubagentActivity` 负责主 Thread 中的有界委派摘要；`AgentSwitcher` 固定在完整 footer
   下方，`AgentTranscript` 负责 child 详情，三者通过公开任务协议读取 Server 投影。
 
@@ -29,6 +30,7 @@ packages/ello-tui/src/tui/
   index.ts
   completion.ts
   overlay-loaders.ts
+  terminal-screen.ts
 
   component/
     AppShell.tsx
@@ -48,6 +50,7 @@ packages/ello-tui/src/tui/
     use-agent-navigation.ts
     use-agent-tasks.ts
     use-runtime-events.ts
+    use-terminal-size.ts
 
   presenters/
     index.ts
@@ -59,6 +62,7 @@ packages/ello-tui/src/tui/
     diff.ts
     history-entry.ts
     history-replay.ts
+    live-budget.ts
     permission-view.ts
     prompt-parts.ts
     terminal-text.ts
@@ -92,7 +96,8 @@ packages/ello-tui/src/tui/
 
 - `component/`：产品组件，组合 runtime state、overlay、composer、live viewport。
 - `ui/`：基础 UI primitive、glyph、token、列表、diff、panel，不访问 runtime。
-- `store/`：TUI 状态、history entry、tool card model、composer buffer、history replay。
+- `store/`：TUI 状态、history entry、tool card model、composer buffer、history replay、
+  dynamic frame 行数预算。
 - `theme/`：主题 token 和 provider。
 - `commands/`：在 slash command 之上叠加 TUI command metadata。
 - `presenters/`：工具结果的细节渲染，供展开态和 diff 预览复用。
@@ -126,8 +131,9 @@ bottom dock
 
 `AppShell` 只渲染 dynamic viewport 和 dock：
 
-- `AppShell.tsx` 读取 terminal columns，使用 `tuiTokens.width.minMain` 作为最小宽度。
-- `LiveViewport` 展示运行中内容。
+- `AppShell.tsx` 通过 `hooks/use-terminal-size.ts` 读取 terminal columns/rows，使用
+  `tuiTokens.width.minMain` 作为最小宽度。该 hook 订阅 stdout `resize`，并把 0 视为无效值。
+- `LiveViewport` 展示运行中内容，行数由 `store/live-budget.ts` 的预算决定。
 - `BottomDock` 按 overlay、composer、footer、Agent switcher 的顺序展示；Agent 列表不得插入
   composer 与 footer 之间。
 
@@ -135,7 +141,38 @@ bottom dock
 
 - 用 Ink `Static` 输出已提交历史。
 - `resetKey` 变化时重挂 `Static`，用于 session resume / rewind / clear 后按 active path 重放。
-- `useRuntimeEvents` 在 Client snapshot 替换时清 terminal screen + scrollback，然后递增 `historyResetKey`。
+- 重挂会把全部历史重新写一遍，所以每个递增 `resetKey` 的位置都必须先调用
+  `tui/terminal-screen.ts` 的 `clearTerminalScrollback()`，否则终端里会留下两份历史。
+  这包括 snapshot 替换（`useRuntimeEvents`）、主题切换（`useThemeState` / `useSettings`）和
+  Agent 视图切换（`useAgentTasks`）。
+
+### 3.1 Dynamic frame 高度合同
+
+**dynamic frame 必须始终矮于终端高度。** Ink 6 在 `outputHeight >= stdout.rows` 时会切换成
+`clearTerminal + 全部 Static 历史 + 当前帧` 的整屏重绘（见 ink `ink.js` 的 `onRender`）。流式
+输出下每帧都整屏重绘并重写整个会话历史，就是 TUI 上看到的闪屏，同时 shell scrollback 也会
+被反复覆盖。
+
+约束只能落在**内容**上，不能落在布局上：
+
+- 不得给 `AppShell` 根 Box 或 live 区设固定 `height`。Ink 对超出固定高度的 column 内容不是
+  裁剪，而是把子节点压扁成非连续的行，会把 composer 边框和 footer 撕碎。
+- 不得开启 Ink 的 `incrementalRendering`：它的 previousLines 记账与 `Static` 输出互相打断，
+  实测 24 行终端上 composer 会被重复渲染 18 次。
+- live 区自己按 `store/live-budget.ts` 的预算截断内容；文本按视觉行截断，使用
+  `store/terminal-text.ts` 的 `tailVisualRows()` / `headVisualRows()`。
+
+行数账必须集中且可验证：
+
+- `liveViewportRows(rows, dockCost) = max(0, rows - dockRows(dockCost) - 1)`，多扣的 1 行用来
+  满足 `frame <= rows - 1`。
+- `dockRows()` 的输入由 `App.tsx` 提供：`composerRowCount()`（含运行中的 `Enter steers this
+run`、`Steer @target` 和补全候选行）、`agentSwitcherRows()`、overlay 是否打开。
+- dock 中所有列表都必须有界：`InlineSelect` 的 `visibleRows` 默认 `DEFAULT_VISIBLE_ROWS`，
+  Agent switcher 最多 `AGENT_SWITCHER_MAX_TASK_ROWS` 个 child 行并显示 `… +N more`。
+- footer 三行只截断不换行，否则窄终端下会顶高 frame。
+- `dockFitsTerminal()` 为 false 时（很矮的终端 + overlay + 多 child）是显式承认的降级边界：
+  live 区让到 0 行仍装不下，此时接受整屏重绘。
 
 ## 4. History Entry
 
@@ -175,9 +212,11 @@ diagnostic
 `component/LiveViewport.tsx` 的职责：
 
 - 只展示尚未封口的运行态信息。
-- assistant streaming 用 `*` 起始行，空白 stream 不渲染。
-- reasoning streaming 折叠为空白分隔的单行尾部预览；完整内容只在完成后写入静态历史，
-  避免动态区域滚屏后留下重复行。
+- 总行数不得超过 `maxRows`（由 `AppShell` 依 §3.1 的预算传入），超出部分自己截断。
+- assistant streaming 用 `*` 起始行，空白 stream 不渲染；只保留尾部若干视觉行，行数由预算
+  决定，工具很多时也至少保留几行可读文本。
+- reasoning streaming 折叠为空白分隔的单行尾部预览，前面被截断时以 `…` 开头；完整内容只在
+  完成后写入静态历史，避免动态区域滚屏后留下重复行。
 - running tools 交给 `ToolActivityList`。
 - running subagents 使用 `agentName(description)` 标题，逐行简要展示最近 4 个 tool call。
 - 超过 4 个 subagent tool call 时显示 `… +N tool uses`；同一 toolCallId 的 delta 不重复计数。
@@ -186,6 +225,8 @@ diagnostic
 - 运行中显示 `working Ns`。
 - 中断后显示 `interrupted: ...`。
 - 运行中提交的新输入作为 steer 暂存，显示在 `Messages queued for the running turn` 下。
+- 预算不足时的丢弃顺序：先丢 tool card、再丢 command run、再丢 subagent 卡片；运行状态、
+  compaction / reasoning 的单行预览和 assistant 的最小行数最后才让位。
 
 ## 6. Bottom Dock
 
@@ -211,6 +252,9 @@ footer 右侧：
 
 - cache 命中率及未缓存 token 数
 - `inputTokens + outputTokens`，大于等于 1000 时显示 `1.2k tokens`。
+
+footer 固定三行，只截断不换行：model 行用 `truncate-middle`，其余用 `truncate`。窄终端下换行
+会顶高 dynamic frame，触发 §3.1 描述的整屏重绘。
 
 approval mode 颜色：
 
@@ -328,7 +372,7 @@ rewind-selector
 - 支持 PageUp/PageDown。
 - 支持 Home/End。
 - 支持 disabled item。
-- `visibleRows` 控制窗口高度。
+- `visibleRows` 控制窗口高度，默认 `DEFAULT_VISIBLE_ROWS`；不允许默认渲染全部候选。
 - label 行格式：`sessions  1-6 of 18`。
 - 超出窗口时显示 `scrollbar  [####------]`。
 
@@ -552,6 +596,17 @@ TUI 测试必须覆盖：
   - 精确填满宽度时的行尾光标；
   - 上下移动保持目标 display column；
   - 删除操作不拆分 grapheme。
+- `AppShellScreen.test.tsx`
+  - 用 `tests/support/ansi-screen.ts` 还原真实屏幕，覆盖 40/60/80/120 列与 12/20/24/40 行；
+  - 长 reasoning / 长 assistant / 大量工具 / 大量 subagent / 大量 steer / overlay 同时存在时，
+    composer 边框与 footer 都不被撕碎；
+  - `dockFitsTerminal()` 为 true 的尺寸下流式更新不得出现 `clearTerminal`。
+- `composer-rows.test.tsx`
+  - `composerRowCount()` 的预测值等于 `Composer` 实际渲染行数。
+- `live-budget.test.ts`
+  - `frame <= rows - 1` 不变量；分配顺序；视觉行截断。
+- `App.test.tsx`
+  - 真实 App 在 24 行终端上长流式输出不触发 `clearTerminal`。
 - `AgentTaskViews.test.tsx`
   - Agent 列表位于 footer 之后；
   - composer 最后一个视觉行按 `↓` 进入列表；
@@ -567,6 +622,8 @@ TUI 测试必须覆盖：
 ## 15. 修改准则
 
 - 修改 TUI 交互前先判断目标属于 history、live viewport 还是 bottom dock。
+- 任何会增加 dock 或 live 区行数的改动，必须同步更新 §3.1 的行数账（`live-budget.ts` 与
+  `composerRowCount()` / `agentSwitcherRows()`），并让屏幕级测试覆盖。
 - 已提交历史不得重新进入 `AppShell`。
 - 新 tool UI 必须先扩展 `buildToolCardModel()`，再考虑 presenter。
 - 新 overlay 必须加入 `OverlayState` union，并传入显式回调；不写 no-op 默认值。

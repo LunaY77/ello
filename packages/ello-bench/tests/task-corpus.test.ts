@@ -48,6 +48,7 @@ describe('task corpus checkout', () => {
       'unexpected\n',
       'utf8',
     );
+    // Git 门禁已移除：脏 checkout 不再被拒绝，仍可正常复用。
     await expect(
       ensureTaskCorpus({
         corpusRoot: checkout,
@@ -56,7 +57,7 @@ describe('task corpus checkout', () => {
           revision,
         },
       }),
-    ).rejects.toThrow('Corpus checkout has changes');
+    ).resolves.toBe(checkout);
   });
 });
 

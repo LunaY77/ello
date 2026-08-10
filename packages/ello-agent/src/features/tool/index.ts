@@ -6,53 +6,33 @@
  */
 import type { TaskBoardStore } from '../task/index.js';
 
-import { createToolRoutes, type LoadAdditionalTools } from './routes.js';
+import { createToolRoutes, type LoadAdditionalCommands } from './routes.js';
 
 export interface CreateToolFeatureOptions {
-  readonly loadAdditionalTools?: LoadAdditionalTools;
+  readonly loadAdditionalCommands?: LoadAdditionalCommands;
 }
 
 export { isPathInside, resolveAbsolute } from './permissions/engine.js';
-export {
-  projectApprovalItem,
-  projectToolEvent,
-} from './internal/event-projection.js';
-export {
-  createMetaToolRuntime,
-  TOOL_ROUTING_INSTRUCTIONS,
-} from './internal/meta-tools.js';
-export {
-  createProductionToolRuntime,
-  markCoreTool,
-} from './internal/production.js';
+export { createProductionCommandRuntime } from './internal/production.js';
 export type {
-  CreateProductionToolRuntimeOptions,
-  ProductionToolRuntime,
+  CreateProductionCommandRuntimeOptions,
+  ProductionCommandRuntime,
 } from './internal/production.js';
 export {
   SessionFileState,
   SessionFileStateRegistry,
 } from './internal/runtime/file-state.js';
-export {
-  createCodingToolResult,
-  defineCodingTool,
-} from './internal/runtime/coding-tool.js';
+export { createCommandResult } from './internal/runtime/command-result.js';
 export type {
-  AnyCodingTool,
-  CodingToolContext,
-  CodingToolResult,
-  ToolAttachment,
-  ToolMetadata,
-} from './internal/runtime/coding-tool.js';
+  CommandAttachment,
+  CommandResult,
+  CommandResultMetadata,
+} from './internal/runtime/command-result.js';
 export {
-  CodingToolExecutionError,
-  ToolFailureTracker,
-  type ToolFailureDiagnostic,
+  CommandExecutionError,
+  CommandFailureTracker,
+  type CommandFailureDiagnostic,
 } from './internal/runtime/tool-errors.js';
-export {
-  AgentWorkflowState,
-  type AgentWorkflowPhase,
-} from './internal/runtime/workflow-state.js';
 export { RulesStore } from './permissions/rules-store.js';
 export {
   genericApprovalFor,
@@ -84,6 +64,6 @@ export function createToolFeature(
   options: CreateToolFeatureOptions = {},
 ) {
   return {
-    routes: createToolRoutes(taskBoards, options.loadAdditionalTools),
+    routes: createToolRoutes(taskBoards, options.loadAdditionalCommands),
   };
 }

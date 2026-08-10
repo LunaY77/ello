@@ -4,13 +4,17 @@
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
+import { z } from 'zod';
+
 import type { Goal } from '../../../protocol/v1/index.js';
+import type { SystemSection } from '../../agent/engine/index.js';
 import {
-  defineTool,
-  type AnyAgentTool,
-  type SystemSection,
-  z,
-} from '../../agent/engine/index.js';
+  cliInput,
+  commandInput,
+  defineCommand,
+  defineCommandModule,
+  type CommandModule,
+} from '../../command/index.js';
 
 export interface ThreadGoalToolResult {
   readonly kind: 'thread-goal-updated';
@@ -19,7 +23,7 @@ export interface ThreadGoalToolResult {
 }
 
 export interface ThreadGoalRuntime {
-  readonly tools: readonly AnyAgentTool[];
+  readonly module: CommandModule;
   readonly systemSection: SystemSection;
 }
 
@@ -40,68 +44,85 @@ export function createThreadGoalRuntime(
 ): ThreadGoalRuntime {
   if (initialGoal === null || initialGoal.status !== 'active') {
     return {
-      tools: [],
+      module: defineCommandModule({ id: 'goal', commands: [] }),
       systemSection: () => null,
     };
   }
   let currentGoal = initialGoal;
   return {
     systemSection: () => renderGoalSection(currentGoal),
-    tools: [
-      defineTool({
-        name: 'get_goal',
-        description:
-          'Get the current thread goal and its persisted token usage. Fails when this thread has no goal.',
-        discovery: { aliases: ['goal status'], risk: 'readonly' },
-        capabilities: () => ({
-          concurrencySafe: true,
-          readOnly: true,
-          destructive: false,
-          telemetryTag: 'goal.get',
+    module: defineCommandModule({
+      id: 'goal',
+      commands: [
+        defineCommand({
+          name: 'get_goal',
+          summary:
+            'Get the current thread goal and its persisted token usage. Fails when this thread has no goal.',
+          aliases: ['goal status'],
+          risk: 'readonly',
+          effects: () => ({
+            concurrencySafe: true,
+            readOnly: true,
+            destructive: false,
+            telemetryTag: 'goal.get',
+          }),
+          invocation: cliInput(commandInput(z.object({}).strict())),
+          execution: {
+            kind: 'immediate',
+            run: () => {
+              if (currentGoal === null) {
+                throw new Error('No goal exists for this thread.');
+              }
+              return goalView(currentGoal);
+            },
+          },
         }),
-        input: z.object({}).strict(),
-        execute: () => {
-          if (currentGoal === null) {
-            throw new Error('No goal exists for this thread.');
-          }
-          return goalView(currentGoal);
-        },
-      }),
-      defineTool({
-        name: 'update_goal',
-        description:
-          'Mark the active thread goal complete or blocked. This updates the persisted host goal; ordinary final text does not.',
-        discovery: {
+        defineCommand({
+          name: 'update_goal',
+          summary:
+            'Mark the active thread goal complete or blocked. This updates the persisted host goal; ordinary final text does not.',
           aliases: ['complete goal', 'block goal'],
           risk: 'workspace-write',
-        },
-        input: z
-          .object({
-            status: z.enum(['complete', 'blocked']).describe('New goal status'),
-          })
-          .strict(),
-        execute: ({ status }): ThreadGoalToolResult => {
-          if (currentGoal === null) {
-            throw new Error('No goal exists for this thread.');
-          }
-          if (currentGoal.status !== 'active') {
-            throw new Error(
-              `Goal must be active; current status is ${currentGoal.status}.`,
-            );
-          }
-          currentGoal = {
-            ...currentGoal,
-            status,
-            updatedAt: new Date().toISOString(),
-          };
-          return {
-            kind: 'thread-goal-updated',
-            goal: currentGoal,
-            message: `Goal marked ${status}.`,
-          };
-        },
-      }),
-    ],
+          invocation: cliInput(
+            commandInput(
+              z
+                .object({
+                  status: z
+                    .enum(['complete', 'blocked'])
+                    .describe('New goal status'),
+                })
+                .strict(),
+            ),
+            {
+              positionals: [{ field: 'status' }],
+            },
+          ),
+          execution: {
+            kind: 'immediate',
+            run: ({ status }): ThreadGoalToolResult => {
+              if (currentGoal === null) {
+                throw new Error('No goal exists for this thread.');
+              }
+              if (currentGoal.status !== 'active') {
+                throw new Error(
+                  `Goal must be active; current status is ${currentGoal.status}.`,
+                );
+              }
+              currentGoal = {
+                ...currentGoal,
+                status,
+                updatedAt: new Date().toISOString(),
+              };
+              return {
+                kind: 'thread-goal-updated',
+                goal: currentGoal,
+                message: `Goal marked ${status}.`,
+              };
+            },
+          },
+        }),
+      ],
+    }),
   };
 }
 

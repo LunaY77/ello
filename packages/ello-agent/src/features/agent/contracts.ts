@@ -5,6 +5,11 @@
  * 执行内核契约使用，不能把 Thread snapshot、RPC DTO 或持久化实现带入 engine。
  */
 import type { SessionMode } from '../../protocol/v1/index.js';
+import type {
+  CommandDefinition,
+  CommandRunEvent,
+  CommandRunRuntime,
+} from '../command/index.js';
 import type { CodingAgentConfig, PermissionRule } from '../config/index.js';
 import type {
   EnvironmentGrant,
@@ -22,7 +27,6 @@ import type {
   AgentProviderOptions,
   AgentSkill,
   AgentUsage,
-  AnyAgentTool,
   CreateAgentOptions,
   DeferredApprovalItem,
   DeferredToolCallItem,
@@ -41,7 +45,7 @@ export interface AgentRunSelection {
   readonly agent: string;
 }
 
-export const PLAN_EXIT_TOOL_NAME = 'request_plan_exit';
+export const PLAN_EXIT_COMMAND_NAME = 'request_plan_exit';
 
 export interface AgentRunGoal {
   readonly id: string;
@@ -64,8 +68,8 @@ export interface AgentDelegationContext {
   readonly executionMode: 'foreground' | 'background';
   readonly maxTurns: number;
   readonly modelSelector?: 'primary_model' | 'auxiliary_model';
-  /** fork 使用父级 exact tools；普通命名子代理省略并重新按 definition 装配。 */
-  readonly exactToolNames?: readonly string[];
+  /** fork 使用父级 exact Commands；普通命名子代理省略并重新按 definition 装配。 */
+  readonly exactCommandNames?: readonly string[];
 }
 
 export type AgentInteraction =
@@ -114,22 +118,8 @@ export type AgentRunEvent =
       readonly text: string;
     }
   | {
-      readonly type: 'toolStarted';
-      readonly toolCallId: string;
-      readonly name: string;
-      readonly input: unknown;
-      readonly occurredAt: string;
-    }
-  | {
-      readonly type: 'toolCompleted';
-      readonly toolCallId: string;
-      readonly output: unknown;
-      readonly occurredAt: string;
-    }
-  | {
-      readonly type: 'toolFailed';
-      readonly toolCallId: string;
-      readonly message: string;
+      readonly type: 'commandRunEvent';
+      readonly event: CommandRunEvent;
     }
   | {
       readonly type: 'interactionRequired';
@@ -209,6 +199,17 @@ export interface AgentRun {
   readonly events: AsyncIterable<AgentRunEvent>;
   /** 事件生产结束后兑现的唯一终态，不会早于事件流关闭。 */
   readonly result: Promise<AgentRunResult>;
+  /**
+   * 确认 Context Checkpoint 的产品层持久化已经完成。
+   *
+   * Args:
+   * - `compactionId`: `contextCompacted` 事件携带的运行内关联标识。
+   * - `error`: 持久化失败原因；提供时 Engine 不得继续下一次 provider call。
+   *
+   * Returns:
+   * - 对应等待被 resolve 或 reject 后同步返回；未知或重复确认直接抛错。
+   */
+  acknowledgeCompaction(compactionId: string, error?: unknown): void;
   /**
    * 把运行中的用户引导加入当前 run，供下一个可执行 turn 消费。
    *
@@ -525,7 +526,7 @@ export interface AgentMemoryContextLoader {
 
 export interface AgentRunContextParts {
   readonly skills: ReadonlyArray<AgentSkill>;
-  readonly activationTool: AnyAgentTool;
+  readonly activationCommand: CommandDefinition;
   /**
    * 读取工具与 Skill 在当前 run 可见的根目录。
    *
@@ -554,17 +555,14 @@ export interface AgentRunContextParts {
   createSystemSections(input: {
     readonly memoryIndexLoader?: AgentMemoryContextLoader;
     readonly goalSystemSection: SystemSection;
-    readonly routingInstructions?: string;
     readonly taskNotificationSection?: SystemSection;
   }): ReadonlyArray<SystemSection>;
 }
 
-export interface AgentRunTools {
-  readonly executionTools: ReadonlyArray<AnyAgentTool>;
-  readonly modelTools: ReadonlyArray<AnyAgentTool>;
+export interface AgentRunCommands {
+  readonly commandRun: CommandRunRuntime;
   readonly memoryIndexLoader?: AgentMemoryContextLoader;
   readonly goalSystemSection: SystemSection;
-  readonly routingInstructions?: string;
   readonly taskNotificationSection?: SystemSection;
   /** 主 Agent 自然停止时等待后台任务通知；child run 不提供该能力。 */
   readonly waitForTaskNotification?: (
@@ -643,17 +641,17 @@ export type LoadAgentContext = (input: {
  * Returns:
  * - Promise 兑现为工具集合及其动态依赖；execution/model 两组工具顺序在 run 内稳定。
  */
-export type CreateAgentTools = (input: {
+export type CreateAgentCommands = (input: {
   readonly request: AgentRunRequest;
   readonly definition: ResolvedAgentDefinition;
   readonly context: AgentRunContextParts;
-}) => Promise<AgentRunTools>;
+}) => Promise<AgentRunCommands>;
 
 export interface CreateAgentFeatureInput {
   readonly resolveDefinition: ResolveAgentDefinition;
   readonly resolveModel: ResolveAgentModel;
   readonly loadContext: LoadAgentContext;
-  readonly createTools: CreateAgentTools;
+  readonly createCommands: CreateAgentCommands;
   readonly createCompactor: CreateAgentCompactor;
   readonly runtime: AgentRuntime;
 }

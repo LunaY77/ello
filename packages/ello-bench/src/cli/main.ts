@@ -9,6 +9,7 @@ import {
   semanticConfigHash,
 } from '../infra/config/toml-loader.js';
 import { runDoctor } from '../infra/doctor.js';
+import { repairRunRoot } from '../infra/repair.js';
 import { generateSuiteReport } from '../infra/report/fs-report.js';
 import { renderReport } from '../infra/report/renderer.js';
 import { validateRunRoot } from '../infra/validation/fs-validation.js';
@@ -73,6 +74,18 @@ try {
     const result = await runDoctor(config, new Set(agentIds));
     writeJson(result);
     if (!result.ready) process.exitCode = 1;
+  } else if (command === 'repair') {
+    rejectTaskSelection(options);
+    rejectAgentSelection(options);
+    rejectConfig(options);
+    if (options.runRoot === undefined) {
+      throw new Error('Usage: ello-bench repair --run-root PATH [--apply]');
+    }
+    const result = await repairRunRoot({
+      runRoot: options.runRoot,
+      apply: options.apply,
+    });
+    writeJson(result);
   } else if (command === 'validate') {
     rejectTaskSelection(options);
     rejectAgentSelection(options);
@@ -159,6 +172,7 @@ interface CliOptions {
   readonly allTasks: boolean;
   readonly allAgents: boolean;
   readonly report: boolean;
+  readonly apply: boolean;
   readonly configProvided: boolean;
   readonly resolved: boolean;
   readonly taskIds: readonly string[];
@@ -172,6 +186,7 @@ function parseOptions(args: readonly string[], command: string): CliOptions {
   let allTasks = false;
   let allAgents = false;
   let report = false;
+  let apply = false;
   let configProvided = false;
   let resolved = false;
   const taskIds: string[] = [];
@@ -180,6 +195,13 @@ function parseOptions(args: readonly string[], command: string): CliOptions {
     const argument = args[index];
     if (argument === '--report') {
       report = true;
+      continue;
+    }
+    if (argument === '--apply') {
+      if (command !== 'repair') {
+        throw new Error('--apply is only valid for the repair command.');
+      }
+      apply = true;
       continue;
     }
     if (argument === '--resolved') {
@@ -243,6 +265,7 @@ function parseOptions(args: readonly string[], command: string): CliOptions {
     allTasks,
     allAgents,
     report,
+    apply,
     configProvided,
     resolved,
     taskIds,
@@ -334,6 +357,7 @@ function usage(): string {
   ello-bench plan (--task ID | --all) (--agent ID | --all-agents) [--config PATH]
   ello-bench doctor (--agent ID | --all-agents) [--config PATH]
   ello-bench run (--task ID | --all) (--agent ID | --all-agents) --run-root PATH [--corpus-root PATH] [--report] [--config PATH]
+  ello-bench repair --run-root PATH [--apply]
   ello-bench report --run-root PATH
   ello-bench validate [--run-root PATH] [--config PATH]
 `;

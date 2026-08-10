@@ -8,6 +8,12 @@ export interface ElloProviderRecoveryTarget {
   readonly eventLogPath: string;
 }
 
+export function buildElloProviderRecoveryInstruction(
+  originalInstruction: string,
+): string {
+  return `The previous turn ended because the model provider connection failed after bounded retries. Continue in the same thread and workspace. Inspect the existing progress, finish the implementation, run the relevant tests, and report the result. Do not restart from scratch. Do not ask whether to continue ordinary implementation or verification.\n\nOriginal task:\n${originalInstruction}`;
+}
+
 export async function findElloProviderRecoveryTarget(options: {
   readonly stdoutPath: string;
   readonly eventRoot: string;

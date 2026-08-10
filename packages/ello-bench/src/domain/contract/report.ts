@@ -9,33 +9,30 @@ import { InfrastructureFailureSchema } from './run.js';
 export const DistributionSchema = z
   .object({
     count: z.number().int().nonnegative(),
+    mean: z.number().nonnegative().nullable().optional(),
     median: z.number().nonnegative().nullable(),
     p95: z.number().nonnegative().nullable(),
   })
   .strict();
 
-export const TaskAgentReportSchema = z
-  .object({
-    taskId: z.string().min(1),
-    agentId: z.string().min(1),
-    validRuns: z.number().int().nonnegative(),
-    passedRuns: z.number().int().nonnegative(),
-    passRate: z.number().min(0).max(1).nullable(),
-  })
-  .strict();
+const ResourceDistributionFields = {
+  elapsedMs: DistributionSchema,
+  rounds: DistributionSchema,
+  toolCalls: DistributionSchema,
+  inputTokens: DistributionSchema,
+  nonCachedInputTokens: DistributionSchema.optional(),
+  outputTokens: DistributionSchema,
+  cacheReadTokens: DistributionSchema,
+  cacheWriteTokens: DistributionSchema,
+  cacheHitRate: DistributionSchema.optional(),
+  reasoningTokens: DistributionSchema.optional(),
+} as const;
+
+const TaskResourcesSchema = z.object(ResourceDistributionFields).strict();
 
 const AgentResourcesSchema = z
   .object({
-    elapsedMs: DistributionSchema,
-    rounds: DistributionSchema,
-    toolCalls: DistributionSchema,
-    inputTokens: DistributionSchema,
-    nonCachedInputTokens: DistributionSchema.optional(),
-    outputTokens: DistributionSchema,
-    cacheReadTokens: DistributionSchema,
-    cacheWriteTokens: DistributionSchema,
-    cacheHitRate: DistributionSchema.optional(),
-    reasoningTokens: DistributionSchema.optional(),
+    ...ResourceDistributionFields,
     phaseElapsedMs: z.record(z.string().min(1), DistributionSchema),
     threadUsage: z
       .object({
@@ -51,6 +48,17 @@ const AgentResourcesSchema = z
       })
       .strict()
       .optional(),
+  })
+  .strict();
+
+export const TaskAgentReportSchema = z
+  .object({
+    taskId: z.string().min(1),
+    agentId: z.string().min(1),
+    validRuns: z.number().int().nonnegative(),
+    passedRuns: z.number().int().nonnegative(),
+    passRate: z.number().min(0).max(1).nullable(),
+    resources: TaskResourcesSchema.optional(),
   })
   .strict();
 
@@ -125,6 +133,36 @@ export const SuiteReportSchema = z
           taskId: z.string().min(1),
           agentId: z.string().min(1),
           failure: InfrastructureFailureSchema,
+          partialEvidence: z
+            .object({
+              elapsedMs: z.number().nonnegative(),
+              rounds: z
+                .object({
+                  observed: z.number().int().nonnegative(),
+                  completed: z.number().int().nonnegative(),
+                  failed: z.number().int().nonnegative(),
+                  incomplete: z.number().int().nonnegative(),
+                })
+                .strict(),
+              tools: z
+                .object({
+                  observed: z.number().int().nonnegative(),
+                  failed: z.number().int().nonnegative(),
+                })
+                .strict(),
+              usage: z
+                .object({
+                  completeRounds: z.number().int().nonnegative(),
+                  unavailableRounds: z.number().int().nonnegative(),
+                  inputTokens: z.number().int().nonnegative(),
+                  outputTokens: z.number().int().nonnegative(),
+                  cacheReadTokens: z.number().int().nonnegative().nullable(),
+                  cacheWriteTokens: z.number().int().nonnegative().nullable(),
+                })
+                .strict(),
+            })
+            .strict()
+            .optional(),
         })
         .strict(),
     ),

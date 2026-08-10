@@ -37,7 +37,7 @@ export async function buildAgent(
     definition,
     model,
   });
-  const tools = await dependencies.createTools({
+  const commands = await dependencies.createCommands({
     request,
     definition,
     context,
@@ -72,8 +72,7 @@ export async function buildAgent(
         ? {}
         : { instructions: definition.definition.prompt }),
       environment,
-      executionTools: tools.executionTools,
-      modelTools: tools.modelTools,
+      commandRun: commands.commandRun,
       compactor,
       ...(modelCompactor === undefined ? {} : { modelCompactor }),
       ...(tracing.eventRecorder === undefined
@@ -82,16 +81,13 @@ export async function buildAgent(
       modelInputBudget: model.modelInputBudget,
       modelInput: {
         systemSections: context.createSystemSections({
-          ...(tools.memoryIndexLoader === undefined
+          ...(commands.memoryIndexLoader === undefined
             ? {}
-            : { memoryIndexLoader: tools.memoryIndexLoader }),
-          goalSystemSection: tools.goalSystemSection,
-          ...(tools.routingInstructions === undefined
+            : { memoryIndexLoader: commands.memoryIndexLoader }),
+          goalSystemSection: commands.goalSystemSection,
+          ...(commands.taskNotificationSection === undefined
             ? {}
-            : { routingInstructions: tools.routingInstructions }),
-          ...(tools.taskNotificationSection === undefined
-            ? {}
-            : { taskNotificationSection: tools.taskNotificationSection }),
+            : { taskNotificationSection: commands.taskNotificationSection }),
         }),
         providerOptions: model.providerOptions,
         prepare: model.prepareModelInput,
@@ -118,11 +114,11 @@ export async function buildAgent(
   return {
     engine,
     maxTurns: request.delegation?.maxTurns ?? definition.definition.maxTurns,
-    ...(tools.waitForTaskNotification === undefined
+    ...(commands.waitForTaskNotification === undefined
       ? {}
-      : { waitForTaskNotification: tools.waitForTaskNotification }),
+      : { waitForTaskNotification: commands.waitForTaskNotification }),
     modelCompactor: () => engine.modelCompactor(),
-    setMode: tools.setMode,
+    setMode: commands.setMode,
     close: () => closeBuiltAgent(engine, tracing.close),
   };
 }

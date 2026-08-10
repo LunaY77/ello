@@ -18,7 +18,7 @@ describe('config settings descriptors', () => {
         title_generation: false,
         allowed_paths: ['/workspace'],
         subagents: { enabled: true, cwd_policy: 'workspace' },
-        tools: { routing_enabled: false },
+        commands: { search: { result_limit: 6 } },
         context: { max_input_tokens: 160_000 },
         agent: { reviewer: { model: 'primary_model' } },
         projects: {},
@@ -36,7 +36,7 @@ describe('config settings descriptors', () => {
         },
         {
           name: 'project',
-          data: { tools: { routing_enabled: false } },
+          data: { commands: { search: { result_limit: 6 } } },
         },
         { name: 'override', data: {} },
       ],
@@ -82,8 +82,8 @@ describe('config settings descriptors', () => {
           effect: 'newThread',
         }),
         expect.objectContaining({
-          id: 'tools.routing_enabled',
-          type: 'boolean',
+          id: 'commands.search.result_limit',
+          type: 'integer',
           source: 'project',
         }),
         expect.objectContaining({

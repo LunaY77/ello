@@ -46,14 +46,36 @@ export function renderMarkdown(
       return `| ${escapeCell(agent.agentId)} | ${agent.validRuns} | ${agent.passedRuns} | ${percent(agent.passRate)} | ${ci} | ${agent.invalidRuns} | ${percent(agent.taskMacroAverage)} |`;
     }),
     '',
-    '## Resources (median)',
+    '## Resources',
     '',
-    '| agent | elapsed | rounds | tools | input | non-cache input | cache read | cache write | cache hit rate | output | reasoning | main input | subagent input |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
-    ...report.agents.map((agent) => {
-      const threads = agent.resources.threadUsage;
-      return `| ${escapeCell(agent.agentId)} | ${seconds(agent.resources.elapsedMs.median)} | ${count(agent.resources.rounds.median)} | ${count(agent.resources.toolCalls.median)} | ${count(agent.resources.inputTokens.median)} | ${count(agent.resources.nonCachedInputTokens?.median ?? null)} | ${count(agent.resources.cacheReadTokens.median)} | ${count(agent.resources.cacheWriteTokens.median)} | ${percent(agent.resources.cacheHitRate?.median ?? null)} | ${count(agent.resources.outputTokens.median)} | ${count(agent.resources.reasoningTokens?.median ?? null)} | ${count(threads?.mainInputTokens.median ?? null)} | ${count(threads?.subagentInputTokens.median ?? null)} |`;
-    }),
+    'Only completed runs with normalized evidence contribute resource values. Mean is the arithmetic mean across measured runs; cache hit rate is averaged per run.',
+    '',
+    '### Aggregate (median)',
+    '',
+    ...resourceSummary(report, 'median'),
+    '',
+    '### Aggregate (mean)',
+    '',
+    ...resourceSummary(report, 'mean'),
+    '',
+    '### Resource coverage',
+    '',
+    '| agent | elapsed | rounds | tools | input / output | cache hit |',
+    '| --- | ---: | ---: | ---: | ---: | ---: |',
+    ...report.agents.map(
+      (agent) =>
+        `| ${escapeCell(agent.agentId)} | ${agent.resources.elapsedMs.count} | ${agent.resources.rounds.count} | ${agent.resources.toolCalls.count} | ${agent.resources.inputTokens.count} / ${agent.resources.outputTokens.count} | ${agent.resources.cacheHitRate?.count ?? 0} |`,
+    ),
+    '',
+    '### By task: outcome / elapsed / rounds / tools',
+    '',
+    'Task resource values are medians across measured replicates.',
+    '',
+    ...taskResourceSummary(report, 'execution'),
+    '',
+    '### By task: input / non-cache input / cache read / cache hit / output',
+    '',
+    ...taskResourceSummary(report, 'tokens'),
     '',
     '## Comparisons',
     '',
@@ -81,6 +103,24 @@ export function renderMarkdown(
           ),
         ]),
     '',
+    '### Partial observations (excluded from scores)',
+    '',
+    ...(report.invalidLedger.every(
+      (entry) => entry.partialEvidence === undefined,
+    )
+      ? ['No partial resource evidence was available.']
+      : [
+          '| task | agent | attempt | elapsed | rounds (completed / failed) | tools (failed) | observed input | observed output | usage coverage |',
+          '| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
+          ...report.invalidLedger.flatMap((entry) => {
+            const evidence = entry.partialEvidence;
+            if (evidence === undefined) return [];
+            return [
+              `| ${entry.taskId} | ${entry.agentId} | ${entry.attemptId} | ${seconds(evidence.elapsedMs)} | ${evidence.rounds.observed} (${evidence.rounds.completed} / ${evidence.rounds.failed}) | ${evidence.tools.observed} (${evidence.tools.failed}) | ${count(evidence.usage.inputTokens)} | ${count(evidence.usage.outputTokens)} | ${evidence.usage.completeRounds}/${evidence.rounds.observed} rounds |`,
+            ];
+          }),
+        ]),
+    '',
     ...(report.reportConfig.renderCharts
       ? [
           '## Charts',
@@ -95,6 +135,66 @@ export function renderMarkdown(
     '',
   ];
   return lines.join('\n');
+}
+
+type ResourceStatistic = 'mean' | 'median';
+type Distribution = SuiteReport['agents'][number]['resources']['elapsedMs'];
+
+function resourceSummary(
+  report: SuiteReport,
+  statistic: ResourceStatistic,
+): string[] {
+  return [
+    '| agent | elapsed | rounds | tools | input | non-cache input | cache read | cache write | cache hit rate | output | reasoning | main input | subagent input |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    ...report.agents.map((agent) => {
+      const resources = agent.resources;
+      const threads = resources.threadUsage;
+      return `| ${escapeCell(agent.agentId)} | ${seconds(statisticValue(resources.elapsedMs, statistic))} | ${count(statisticValue(resources.rounds, statistic))} | ${count(statisticValue(resources.toolCalls, statistic))} | ${count(statisticValue(resources.inputTokens, statistic))} | ${count(statisticValue(resources.nonCachedInputTokens, statistic))} | ${count(statisticValue(resources.cacheReadTokens, statistic))} | ${count(statisticValue(resources.cacheWriteTokens, statistic))} | ${percent(statisticValue(resources.cacheHitRate, statistic))} | ${count(statisticValue(resources.outputTokens, statistic))} | ${count(statisticValue(resources.reasoningTokens, statistic))} | ${count(statisticValue(threads?.mainInputTokens, statistic))} | ${count(statisticValue(threads?.subagentInputTokens, statistic))} |`;
+    }),
+  ];
+}
+
+function taskResourceSummary(
+  report: SuiteReport,
+  kind: 'execution' | 'tokens',
+): string[] {
+  const taskIds = report.agents[0]?.tasks.map((task) => task.taskId) ?? [];
+  if (taskIds.length === 0)
+    return ['No task-level resource data was available.'];
+  return [
+    `| task | ${report.agents.map((agent) => escapeCell(agent.agentId)).join(' | ')} |`,
+    `| --- | ${report.agents.map(() => '---').join(' | ')} |`,
+    ...taskIds.map(
+      (taskId) =>
+        `| ${escapeCell(taskId)} | ${report.agents
+          .map((agent) => {
+            const task = agent.tasks.find((entry) => entry.taskId === taskId);
+            if (task === undefined) return 'missing';
+            const resources = task.resources;
+            if (kind === 'execution') {
+              return `${taskOutcome(task)} / ${seconds(resources?.elapsedMs.median ?? null)} / ${count(resources?.rounds.median ?? null)} / ${count(resources?.toolCalls.median ?? null)}`;
+            }
+            return `${count(resources?.inputTokens.median ?? null)} / ${count(resources?.nonCachedInputTokens?.median ?? null)} / ${count(resources?.cacheReadTokens.median ?? null)} / ${percent(resources?.cacheHitRate?.median ?? null)} / ${count(resources?.outputTokens.median ?? null)}`;
+          })
+          .join(' | ')} |`,
+    ),
+  ];
+}
+
+function taskOutcome(
+  task: SuiteReport['agents'][number]['tasks'][number],
+): string {
+  if (task.validRuns === 0) return 'invalid';
+  if (task.validRuns === 1) return task.passedRuns === 1 ? 'pass' : 'fail';
+  return `${task.passedRuns}/${task.validRuns} pass`;
+}
+
+function statisticValue(
+  distribution: Distribution | undefined,
+  statistic: ResourceStatistic,
+): number | null {
+  return distribution?.[statistic] ?? null;
 }
 
 function percent(value: number | null): string {

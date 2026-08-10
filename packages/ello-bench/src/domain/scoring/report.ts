@@ -5,8 +5,8 @@ import {
   TaskAgentReportSchema,
   type AgentComparisonReport,
   type AgentReport,
-  type RunManifest,
-  type SuiteManifest,
+  type RunArtifactManifest,
+  type SuiteArtifactManifest,
   type SuiteReport,
 } from '../contract/index.js';
 
@@ -36,8 +36,8 @@ export interface AttemptMetrics {
 }
 
 export interface SuiteReportInput {
-  readonly suite: SuiteManifest;
-  readonly finalAttempts: readonly RunManifest[];
+  readonly suite: SuiteArtifactManifest;
+  readonly finalAttempts: readonly RunArtifactManifest[];
   readonly metrics: ReadonlyMap<string, AttemptMetrics>;
   readonly invalidLedger: SuiteReport['invalidLedger'];
   readonly generatedAt: string;
@@ -96,9 +96,9 @@ export function buildSuiteReport(input: SuiteReportInput): SuiteReport {
 }
 
 function isPublishable(
-  suite: SuiteManifest,
-  completed: readonly RunManifest[],
-  invalid: readonly RunManifest[],
+  suite: SuiteArtifactManifest,
+  completed: readonly RunArtifactManifest[],
+  invalid: readonly RunArtifactManifest[],
   metrics: ReadonlyMap<string, AttemptMetrics>,
 ): boolean {
   const gates = suite.report.publishability;
@@ -132,7 +132,7 @@ function isPublishable(
 function createAgentReport(
   agentId: string,
   taskIds: readonly string[],
-  attempts: readonly RunManifest[],
+  attempts: readonly RunArtifactManifest[],
   metrics: ReadonlyMap<string, AttemptMetrics>,
 ): AgentReport {
   const agentAttempts = attempts.filter(
@@ -156,6 +156,9 @@ function createAgentReport(
   }
   const tasks = taskIds.map((taskId) => {
     const taskRuns = valid.filter((attempt) => attempt.job.taskId === taskId);
+    const measuredTaskRuns = taskRuns.filter((attempt) =>
+      metrics.has(attempt.attemptId),
+    );
     const passedRuns = taskRuns.filter(
       (attempt) => requiredReward(attempt) === 1,
     ).length;
@@ -165,6 +168,7 @@ function createAgentReport(
       validRuns: taskRuns.length,
       passedRuns,
       passRate: taskRuns.length === 0 ? null : passedRuns / taskRuns.length,
+      resources: resourceDistributions(measuredTaskRuns, metrics),
     });
   });
   const taskRates = tasks.map((task) => task.passRate);
@@ -190,24 +194,7 @@ function createAgentReport(
       : null,
     tasks,
     resources: {
-      elapsedMs: metricDistribution(measured, metrics, 'elapsedMs'),
-      rounds: metricDistribution(measured, metrics, 'rounds'),
-      toolCalls: metricDistribution(measured, metrics, 'toolCalls'),
-      inputTokens: metricDistribution(measured, metrics, 'inputTokens'),
-      nonCachedInputTokens: metricDistribution(
-        measured,
-        metrics,
-        'nonCachedInputTokens',
-      ),
-      outputTokens: metricDistribution(measured, metrics, 'outputTokens'),
-      cacheReadTokens: metricDistribution(measured, metrics, 'cacheReadTokens'),
-      cacheWriteTokens: metricDistribution(
-        measured,
-        metrics,
-        'cacheWriteTokens',
-      ),
-      cacheHitRate: metricDistribution(measured, metrics, 'cacheHitRate'),
-      reasoningTokens: metricDistribution(measured, metrics, 'reasoningTokens'),
+      ...resourceDistributions(measured, metrics),
       phaseElapsedMs: Object.fromEntries(
         [...phaseNames]
           .sort((left, right) => left.localeCompare(right))
@@ -281,21 +268,46 @@ function createAgentReport(
   });
 }
 
+function resourceDistributions(
+  attempts: readonly RunArtifactManifest[],
+  metrics: ReadonlyMap<string, AttemptMetrics>,
+) {
+  return {
+    elapsedMs: metricDistribution(attempts, metrics, 'elapsedMs'),
+    rounds: metricDistribution(attempts, metrics, 'rounds'),
+    toolCalls: metricDistribution(attempts, metrics, 'toolCalls'),
+    inputTokens: metricDistribution(attempts, metrics, 'inputTokens'),
+    nonCachedInputTokens: metricDistribution(
+      attempts,
+      metrics,
+      'nonCachedInputTokens',
+    ),
+    outputTokens: metricDistribution(attempts, metrics, 'outputTokens'),
+    cacheReadTokens: metricDistribution(attempts, metrics, 'cacheReadTokens'),
+    cacheWriteTokens: metricDistribution(attempts, metrics, 'cacheWriteTokens'),
+    cacheHitRate: metricDistribution(attempts, metrics, 'cacheHitRate'),
+    reasoningTokens: metricDistribution(attempts, metrics, 'reasoningTokens'),
+  };
+}
+
 function createComparison(
   leftAgentId: string,
   rightAgentId: string,
   taskIds: readonly string[],
-  attempts: readonly RunManifest[],
+  attempts: readonly RunArtifactManifest[],
   metrics: ReadonlyMap<string, AttemptMetrics>,
 ): AgentComparisonReport {
-  const byKey = new Map<string, Map<string, RunManifest>>();
+  const byKey = new Map<string, Map<string, RunArtifactManifest>>();
   for (const attempt of attempts) {
     const key = `${attempt.job.taskId}:${attempt.job.replicate}`;
-    const entries = byKey.get(key) ?? new Map<string, RunManifest>();
+    const entries = byKey.get(key) ?? new Map<string, RunArtifactManifest>();
     entries.set(attempt.job.agentId, attempt);
     byKey.set(key, entries);
   }
-  const pairs: Array<{ left: RunManifest; right: RunManifest }> = [];
+  const pairs: Array<{
+    left: RunArtifactManifest;
+    right: RunArtifactManifest;
+  }> = [];
   let excludedPairs = 0;
   for (const entries of byKey.values()) {
     const left = entries.get(leftAgentId);
@@ -356,7 +368,7 @@ function createComparison(
 }
 
 function metricDistribution(
-  attempts: readonly RunManifest[],
+  attempts: readonly RunArtifactManifest[],
   metrics: ReadonlyMap<string, AttemptMetrics>,
   field: NumericMetricField,
 ) {
@@ -369,7 +381,10 @@ function metricDistribution(
 }
 
 function ratioDistribution(
-  pairs: ReadonlyArray<{ left: RunManifest; right: RunManifest }>,
+  pairs: ReadonlyArray<{
+    left: RunArtifactManifest;
+    right: RunArtifactManifest;
+  }>,
   metrics: ReadonlyMap<string, AttemptMetrics>,
   field: NumericMetricField,
 ) {
@@ -389,10 +404,13 @@ function ratioDistribution(
 }
 
 function distribution(values: readonly number[]) {
-  if (values.length === 0) return { count: 0, median: null, p95: null };
+  if (values.length === 0) {
+    return { count: 0, mean: null, median: null, p95: null };
+  }
   const sorted = [...values].sort((left, right) => left - right);
   return {
     count: sorted.length,
+    mean: average(sorted),
     median: percentile(sorted, 0.5),
     p95: percentile(sorted, 0.95),
   };
@@ -414,7 +432,7 @@ function average(values: readonly number[]): number {
 
 function requiredMetrics(
   metrics: ReadonlyMap<string, AttemptMetrics>,
-  attempt: RunManifest,
+  attempt: RunArtifactManifest,
 ): AttemptMetrics {
   const value = metrics.get(attempt.attemptId);
   if (value === undefined) {
@@ -423,7 +441,7 @@ function requiredMetrics(
   return value;
 }
 
-function requiredReward(run: RunManifest): 0 | 1 {
+function requiredReward(run: RunArtifactManifest): 0 | 1 {
   if (run.harness === undefined) {
     throw new Error(`Missing harness: ${run.attemptId}`);
   }
@@ -431,7 +449,10 @@ function requiredReward(run: RunManifest): 0 | 1 {
 }
 
 function ratioCount(
-  pairs: ReadonlyArray<{ left: RunManifest; right: RunManifest }>,
+  pairs: ReadonlyArray<{
+    left: RunArtifactManifest;
+    right: RunArtifactManifest;
+  }>,
   metrics: ReadonlyMap<string, AttemptMetrics>,
   field: NumericMetricField,
 ): number {

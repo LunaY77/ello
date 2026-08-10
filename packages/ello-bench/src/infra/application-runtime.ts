@@ -26,7 +26,7 @@ import {
   updateRun,
 } from './run-state.js';
 import { dockerVerifierRuntime } from './verifier/docker.js';
-import { prepareTaskWorkspace } from './workspace.js';
+import { cleanupAttemptWorkspaces, prepareTaskWorkspace } from './workspace.js';
 
 const services: RunAttemptServices = {
   agents: { create: createAgentAdapter },
@@ -43,6 +43,7 @@ const services: RunAttemptServices = {
         taskInstruction: path.join(taskRoot, 'instruction.md'),
         resolvedTask: path.join(taskRoot, 'resolved-task.json'),
         harnessRoot: path.join(rawRoot, 'harness'),
+        baselineHarnessRoot: path.join(rawRoot, 'baseline-preflight'),
         phaseTimings: path.join(rawRoot, 'phase-timings.json'),
         patch: path.join(rawRoot, 'model.patch'),
         gitStatus: path.join(rawRoot, 'git-status.txt'),
@@ -60,7 +61,10 @@ const services: RunAttemptServices = {
     invalidate: invalidateRun,
   },
   verifier: dockerVerifierRuntime,
-  workspace: { prepare: prepareTaskWorkspace },
+  workspace: {
+    prepare: prepareTaskWorkspace,
+    cleanup: cleanupAttemptWorkspaces,
+  },
 };
 
 export function runBenchmarkJob(request: RunAttemptRequest) {
