@@ -86,6 +86,7 @@ const RawAgentSchema = z.discriminatedUnion('kind', [
       kind: z.literal('ello'),
       primary_model: z.string().min(1),
       auxiliary_model: z.string().min(1),
+      prompt_mode: z.enum(['rapid', 'thorough']).default('rapid'),
       models: z.record(z.string().min(1), RawModelSchema),
       features: RawFeaturesSchema,
     })
@@ -235,6 +236,7 @@ function mapAgent(raw: z.infer<typeof RawAgentSchema>): AgentSpec {
       kind: raw.kind,
       primaryModel: raw.primary_model,
       auxiliaryModel: raw.auxiliary_model,
+      promptMode: raw.prompt_mode,
       features: raw.features,
       models: Object.fromEntries(
         Object.entries(raw.models).map(([name, model]) => [

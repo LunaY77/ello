@@ -22,13 +22,15 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "README-en.md"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "verify-dist": "node scripts/verify-dist.mjs",
     "format": "prettier --write src",
     "lint": "eslint src",
+    "prompt:show": "pnpm build && node dist/cli/print-system-prompt.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "verify-comments": "node scripts/verify-source-comments.mjs"

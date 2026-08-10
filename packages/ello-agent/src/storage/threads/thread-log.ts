@@ -450,6 +450,7 @@ function requiresFlush(record: ThreadRecord): boolean {
     'turn.interrupted',
     'turn.failed',
     'item.completed',
+    'item.updated',
     'serverRequest.created',
     'serverRequest.resolved',
   ].includes(record.kind);

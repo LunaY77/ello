@@ -63,6 +63,19 @@ export interface AppServerClientOptions {
   readonly requestTimeoutMs?: number;
 }
 
+/**
+ * 会在 Server 侧驱动模型调用或外部进程的 method 各自持有更长的请求预算。
+ *
+ * 默认预算只适合"读一次状态"这类请求。压缩要跑一次完整的模型调用，shell 命令由 Server
+ * 自己的执行超时兜底，两者都可能远超默认值；沿用默认预算会在操作正常进行时报超时，
+ * 并让用户以为会话断了。这里的超时只用于兜住卡死的 Server，真正的中止入口是
+ * `thread/compact/interrupt` 这类显式操作。
+ */
+const REQUEST_TIMEOUT_OVERRIDES_MS = {
+  'thread/compact/start': 15 * 60_000,
+  'thread/shellCommand': 120_000,
+} as const satisfies Partial<Record<ClientMethod, number>>;
+
 export interface IncomingServerRequest<M extends ServerRequestMethod> {
   readonly id: string;
   readonly method: M;
@@ -117,7 +130,7 @@ export class AppServerClient {
    * 创建并装配一条 Client MessageConnection。
    *
    * Args:
-   * - `options`: 完整消息 transport 和单请求超时；超时会关闭连接以清理框架 pending。
+   * - `options`: 完整消息 transport 和默认单请求超时；超时只取消并拒绝该请求，不关闭连接。
    */
   constructor(options: AppServerClientOptions) {
     this.transport = options.transport;
@@ -349,17 +362,19 @@ export class AppServerClient {
     request: Promise<unknown>,
     cancellation: CancellationTokenSource,
   ): Promise<unknown> {
+    const timeoutMs = this.timeoutFor(method);
     return new Promise((resolve, reject) => {
       let settled = false;
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        const error = new RequestTimeoutError(method, this.requestTimeoutMs);
+        // 超时只终止这一个请求：连接上的订阅、通知和其它 pending 请求都还有效，
+        // 关掉整条连接会把一次慢操作放大成整个会话断线。框架的 pending 记录会在
+        // Server 迟到的 response 到达时清理，取消消息已经在上面发出。
         cancellation.cancel();
         cancellation.dispose();
-        reject(error);
-        this.fail(error);
-      }, this.requestTimeoutMs);
+        reject(new RequestTimeoutError(method, timeoutMs));
+      }, timeoutMs);
       request.then(
         (result) => {
           if (settled) return;
@@ -377,6 +392,19 @@ export class AppServerClient {
         },
       );
     });
+  }
+
+  private timeoutFor(method: ClientMethod): number {
+    const override =
+      method in REQUEST_TIMEOUT_OVERRIDES_MS
+        ? REQUEST_TIMEOUT_OVERRIDES_MS[
+            method as keyof typeof REQUEST_TIMEOUT_OVERRIDES_MS
+          ]
+        : undefined;
+    // 显式配置的默认预算比覆盖表更长时以调用方为准，避免 --timeout 被静默缩小。
+    return override === undefined
+      ? this.requestTimeoutMs
+      : Math.max(override, this.requestTimeoutMs);
   }
 
   private handleMessage(

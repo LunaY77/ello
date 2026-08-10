@@ -323,6 +323,13 @@ export const NormalizedAgentEvidenceSchema = z
     roundCount: z.number().int().positive(),
     usage: UsageEvidenceSchema,
     tools: ToolSummarySchema,
+    effectiveTools: z
+      .object({
+        enabled: z.tuple([z.literal('command_run')]),
+        toolsetFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+      })
+      .strict()
+      .optional(),
     threads: z.array(AgentThreadEvidenceSchema).optional(),
     threadUsage: ThreadUsageEvidenceSchema.optional(),
   })

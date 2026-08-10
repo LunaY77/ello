@@ -1,13 +1,13 @@
 /**
- * 本文件统一 coding 工具的失败诊断与重试预算。
+ * 本文件统一 Command 的失败诊断与重试预算。
  *
- * 工具实现只需要抛出原始错误；适配层在这里生成稳定指纹、错误码和下一步策略，
- * 避免每个工具自行拼接一套无法统计的错误文本。
+ * Command 实现只需要抛出原始错误；运行时在这里生成稳定指纹、错误码和下一步策略，
+ * 避免每个 Command 自行拼接一套无法统计的错误文本。
  */
 import { createHash } from 'node:crypto';
 
-/** 工具失败后提供给模型、事件流和测试的稳定诊断。 */
-export interface ToolFailureDiagnostic {
+/** Command 失败后提供给模型、事件流和测试的稳定诊断。 */
+export interface CommandFailureDiagnostic {
   readonly code: string;
   readonly fingerprint: string;
   readonly retryable: boolean;
@@ -17,50 +17,50 @@ export interface ToolFailureDiagnostic {
   readonly message: string;
 }
 
-/** 携带结构化诊断的工具执行错误。 */
-export class CodingToolExecutionError extends Error {
-  readonly diagnostic: ToolFailureDiagnostic;
+/** 携带结构化诊断的 Command 执行错误。 */
+export class CommandExecutionError extends Error {
+  readonly diagnostic: CommandFailureDiagnostic;
 
   /**
-   * 创建可被 engine 原样记录的工具错误。
+   * 创建可被 engine 原样记录的 Command 错误。
    *
    * Args:
-   * - `toolName`: 发生失败的稳定工具名。
+   * - `commandName`: 发生失败的稳定 Command 名。
    * - `diagnostic`: 已完成指纹和预算计算的诊断。
-   * - `cause`: 工具抛出的原始错误；保留给日志和调试链路。
+   * - `cause`: Command 抛出的原始错误；保留给日志和调试链路。
    */
   constructor(
-    toolName: string,
-    diagnostic: ToolFailureDiagnostic,
+    commandName: string,
+    diagnostic: CommandFailureDiagnostic,
     cause: unknown,
   ) {
-    super(renderFailure(toolName, diagnostic), { cause });
-    this.name = 'CodingToolExecutionError';
+    super(renderFailure(commandName, diagnostic), { cause });
+    this.name = 'CommandExecutionError';
     this.diagnostic = diagnostic;
   }
 }
 
 /** 同一个 run 内共享的失败预算；相同指纹最多建议重试两次。 */
-export class ToolFailureTracker {
+export class CommandFailureTracker {
   private readonly attempts = new Map<string, number>();
 
   /**
-   * 把原始工具异常转换成带稳定重试语义的错误。
+   * 把原始 Command 异常转换成带稳定重试语义的错误。
    *
    * Args:
-   * - `toolName`: 发生失败的工具名。
-   * - `error`: 工具实现抛出的原始异常。
+   * - `commandName`: 发生失败的 Command 名。
+   * - `error`: Command 实现抛出的原始异常。
    *
    * Returns:
    * - 返回包含错误码、指纹、剩余预算和建议策略的执行错误。
    */
-  create(toolName: string, error: unknown): CodingToolExecutionError {
-    if (error instanceof CodingToolExecutionError) return error;
+  create(commandName: string, error: unknown): CommandExecutionError {
+    if (error instanceof CommandExecutionError) return error;
     const message = errorMessage(error);
     const code = classifyCode(error, message);
     const retryable = isRetryable(code);
     const fingerprint = createHash('sha256')
-      .update(`${toolName}\0${code}\0${normalizeMessage(message)}`)
+      .update(`${commandName}\0${code}\0${normalizeMessage(message)}`)
       .digest('hex')
       .slice(0, 16);
     const attempt = (this.attempts.get(fingerprint) ?? 0) + 1;
@@ -71,8 +71,8 @@ export class ToolFailureTracker {
       : attemptsRemaining > 0
         ? 'retry_with_context'
         : 'switch_strategy';
-    return new CodingToolExecutionError(
-      toolName,
+    return new CommandExecutionError(
+      commandName,
       {
         code,
         fingerprint,
@@ -88,11 +88,11 @@ export class ToolFailureTracker {
 }
 
 function renderFailure(
-  toolName: string,
-  diagnostic: ToolFailureDiagnostic,
+  commandName: string,
+  diagnostic: CommandFailureDiagnostic,
 ): string {
   return [
-    `${toolName} failed [${diagnostic.code}; fingerprint=${diagnostic.fingerprint}; attempt=${diagnostic.attempt}; remaining=${diagnostic.attemptsRemaining}; strategy=${diagnostic.strategy}]`,
+    `${commandName} failed [${diagnostic.code}; fingerprint=${diagnostic.fingerprint}; attempt=${diagnostic.attempt}; remaining=${diagnostic.attemptsRemaining}; strategy=${diagnostic.strategy}]`,
     diagnostic.message,
   ].join('\n');
 }
@@ -114,7 +114,7 @@ function classifyCode(error: unknown, message: string): string {
   if (/stale|changed since|failed to find|occurs \d+ times/iu.test(message)) {
     return 'STALE_CONTEXT';
   }
-  return 'TOOL_EXECUTION_FAILED';
+  return 'COMMAND_EXECUTION_FAILED';
 }
 
 function isRetryable(code: string): boolean {

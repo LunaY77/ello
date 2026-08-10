@@ -166,6 +166,39 @@ describe('tui-event-store', () => {
     expect(state.status).toBe('idle');
   });
 
+  it('replays completed reasoning before its assistant when start order was reversed', () => {
+    const turn = turnFixture({
+      id: 'turn-reasoning-order',
+      status: 'completed',
+      items: [
+        userItem('user-reasoning-order', 'inspect the parser'),
+        agentItem(
+          'agent-reasoning-order',
+          'The parser is correct.',
+          'completed',
+        ),
+        reasoningItem('reasoning-order', 'Checked the parser states.'),
+      ],
+      completedAt: fixtureTimestamp,
+    });
+
+    const state = createInitialTuiEventState(
+      fixtureSnapshot({ turns: [turn] }),
+    );
+
+    expect(state.history.map((entry) => entry.kind)).toEqual([
+      'session_header',
+      'user',
+      'reasoning',
+      'assistant',
+      'separator',
+    ]);
+    expect(state.history[2]).toMatchObject({
+      id: 'reasoning-order',
+      text: 'Checked the parser states.',
+    });
+  });
+
   it('projects turn and item lifecycle notifications into live and committed state', () => {
     let state = createInitialTuiEventState(fixtureSnapshot());
     const turn = turnFixture({ id: 'turn-1', status: 'inProgress', items: [] });
@@ -283,6 +316,124 @@ describe('tui-event-store', () => {
     });
     expect(state.live.runningTools.has(item.id)).toBe(false);
     expect(state.history.at(-1)).toMatchObject({ kind: 'tool', id: item.id });
+  });
+
+  it('keeps one Command Run group across live updates and snapshot reload', () => {
+    const turn = turnFixture({ id: 'turn-command-run', status: 'inProgress' });
+    const started = commandRunItem('inProgress', 'running');
+    let state = createInitialTuiEventState(fixtureSnapshot());
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('turn/started', 1, { turnId: turn.id, turn }),
+    });
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('item/started', 2, {
+        turnId: turn.id,
+        itemId: started.id,
+        item: started,
+      }),
+    });
+    expect(state.live.runningCommandRuns.get(started.id)).toMatchObject({
+      id: started.id,
+      commands: [{ name: 'bash', commandStatus: 'running' }],
+    });
+
+    const updated = commandRunItem('inProgress', 'completed');
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('item/updated', 3, {
+        turnId: turn.id,
+        itemId: updated.id,
+        item: updated,
+      }),
+    });
+    expect(state.live.runningCommandRuns).toHaveLength(1);
+    expect(
+      state.live.runningCommandRuns.get(updated.id)?.commands[0]?.output,
+    ).toEqual({ output: 'pass\n', metadata: { kind: 'shell', exitCode: 0 } });
+
+    const completed = commandRunItem('completed', 'completed');
+    state = reduceTuiEvent(state, {
+      type: 'notification',
+      notification: notification('item/completed', 4, {
+        turnId: turn.id,
+        itemId: completed.id,
+        item: completed,
+      }),
+    });
+    expect(state.live.runningCommandRuns).toHaveLength(0);
+    expect(
+      state.history.filter((entry) => entry.kind === 'command_run'),
+    ).toEqual([
+      expect.objectContaining({
+        id: completed.id,
+        run: expect.objectContaining({
+          commands: [expect.objectContaining({ name: 'bash', status: 'ok' })],
+        }),
+      }),
+    ]);
+
+    const reloaded = createInitialTuiEventState(
+      fixtureSnapshot({
+        turns: [
+          turnFixture({
+            id: turn.id,
+            status: 'completed',
+            items: [completed],
+            completedAt: fixtureTimestamp,
+          }),
+        ],
+      }),
+    );
+    expect(
+      reloaded.history.filter((entry) => entry.kind === 'command_run'),
+    ).toEqual([
+      expect.objectContaining({
+        id: completed.id,
+        run: expect.objectContaining({
+          commands: [expect.objectContaining({ name: 'bash', status: 'ok' })],
+        }),
+      }),
+    ]);
+  });
+
+  it('reloads a denied Command with its approval reason inside the Command Run group', () => {
+    const denied = commandRunItem('failed', 'denied');
+    const reloaded = createInitialTuiEventState(
+      fixtureSnapshot({
+        turns: [
+          turnFixture({
+            id: denied.turnId,
+            status: 'failed',
+            items: [denied],
+            completedAt: fixtureTimestamp,
+          }),
+        ],
+      }),
+    );
+
+    expect(
+      reloaded.history.filter((entry) => entry.kind === 'command_run'),
+    ).toEqual([
+      expect.objectContaining({
+        id: denied.id,
+        run: expect.objectContaining({
+          status: 'fail',
+          commands: [
+            expect.objectContaining({
+              commandStatus: 'denied',
+              status: 'fail',
+              approval: {
+                status: 'denied',
+                reason: 'Declined by client.',
+              },
+              error: { message: 'Declined by client.' },
+            }),
+          ],
+        }),
+      }),
+    ]);
   });
 
   it('projects reasoning deltas into live state and committed history', () => {
@@ -770,6 +921,52 @@ function turnFixture(overrides: Partial<Turn> = {}): Turn {
   };
 }
 
+function commandRunItem(
+  status: Extract<ThreadItem, { type: 'commandRun' }>['status'],
+  commandStatus: Extract<
+    ThreadItem,
+    { type: 'commandRun' }
+  >['commands'][number]['status'],
+): Extract<ThreadItem, { type: 'commandRun' }> {
+  return {
+    id: 'command-run:outer-1',
+    turnId: 'turn-command-run',
+    type: 'commandRun',
+    providerToolCallId: 'outer-1',
+    status,
+    createdAt: fixtureTimestamp,
+    commands: [
+      {
+        commandId: 'command-run:outer-1:0',
+        index: 0,
+        step: 1,
+        name: 'bash',
+        input: { command: 'pnpm test', cwd: '/workspace', timeoutMs: 120_000 },
+        inputDigest: 'a'.repeat(64),
+        status: commandStatus,
+        ...(commandStatus === 'completed'
+          ? {
+              output: {
+                output: 'pass\n',
+                metadata: { kind: 'shell', exitCode: 0 },
+              },
+              completedAt: fixtureTimestamp,
+            }
+          : commandStatus === 'denied'
+            ? {
+                approval: {
+                  status: 'denied',
+                  reason: 'Declined by client.',
+                },
+                error: 'Declined by client.',
+                completedAt: fixtureTimestamp,
+              }
+            : { startedAt: fixtureTimestamp }),
+      },
+    ],
+  };
+}
+
 function userItem(
   id: string,
   text: string,
@@ -795,6 +992,20 @@ function agentItem(
     text,
     phase: 'commentary',
     status,
+    createdAt: fixtureTimestamp,
+  };
+}
+
+function reasoningItem(
+  id: string,
+  summary: string,
+): Extract<ThreadItem, { type: 'reasoning' }> {
+  return {
+    id,
+    turnId: 'turn-1',
+    type: 'reasoning',
+    summary,
+    status: 'completed',
     createdAt: fixtureTimestamp,
   };
 }

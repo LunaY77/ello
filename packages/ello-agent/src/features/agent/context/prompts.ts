@@ -104,6 +104,36 @@ export function createCodingSystemPromptSection(
   config: CodingAgentConfig,
   runtime: CodingSystemPromptRuntime,
 ) {
+  const render = createCodingSystemPromptRenderer(config, runtime);
+  return (run: AgentRunContext) => render(run.input, run);
+}
+
+/**
+ * 按产品运行时的真实装配链路渲染一次 coding system prompt，供本地诊断命令使用。
+ *
+ * Args:
+ * - `config`: 已解析的当前配置；决定 profile、instructions、memory 与运行边界。
+ * - `runtime`: 当前模型与可选 Memory loader；语义与生产 Agent 装配一致。
+ * - `input`: 用于判断本轮是否显式忽略 Memory 的用户输入。
+ *
+ * Returns:
+ * - Promise 兑现为 coding Agent 的完整稳定规则与 context source 文本。
+ *
+ * Throws:
+ * - Prompt 模板、instruction source 或 Memory index 加载失败时直接拒绝。
+ */
+export function renderCodingSystemPrompt(
+  config: CodingAgentConfig,
+  runtime: CodingSystemPromptRuntime,
+  input: AgentInput,
+): Promise<string> {
+  return createCodingSystemPromptRenderer(config, runtime)(input);
+}
+
+function createCodingSystemPromptRenderer(
+  config: CodingAgentConfig,
+  runtime: CodingSystemPromptRuntime,
+): (input: AgentInput, snapshotOwner?: object) => Promise<string> {
   const profile = resolvePromptProfile(config, runtime);
   const stablePrompt = renderPromptTemplate(profile, {
     model: runtime.model,
@@ -119,13 +149,14 @@ export function createCodingSystemPromptSection(
       : {}),
     ...(memory !== undefined ? { memoryIndexLoader: memory.loader } : {}),
   };
-  const snapshots = new WeakMap<AgentRunContext, ContextSnapshot>();
-  return async (run: AgentRunContext) => {
+  const snapshots = new WeakMap<object, ContextSnapshot>();
+  return async (input: AgentInput, snapshotOwner?: object) => {
     const includeMemory =
       config.context.memory.enabled &&
       memory !== undefined &&
-      !shouldIgnoreMemory(run.input);
-    let snapshot = snapshots.get(run);
+      !shouldIgnoreMemory(input);
+    let snapshot =
+      snapshotOwner === undefined ? undefined : snapshots.get(snapshotOwner);
     if (snapshot === undefined) {
       snapshot = new ContextSnapshot(
         config,
@@ -134,7 +165,7 @@ export function createCodingSystemPromptSection(
         basePromptHash,
         includeMemory,
       );
-      snapshots.set(run, snapshot);
+      if (snapshotOwner !== undefined) snapshots.set(snapshotOwner, snapshot);
     }
     const context = await snapshot.render();
     const stable = [
@@ -186,7 +217,7 @@ function inputText(input: AgentInput): string {
 }
 
 function entryTemplate(profile: string): string {
-  return `${profile === 'coding' ? 'primary-agent' : profile}.md`;
+  return `${['rapid', 'thorough'].includes(profile) ? `primary/${profile}` : profile}.md`;
 }
 
 function promptDir(): string {
@@ -197,11 +228,5 @@ function resolvePromptProfile(
   config: CodingAgentConfig,
   runtime: Pick<CodingSystemPromptRuntime, 'profile'>,
 ): string {
-  return (
-    runtime.profile ??
-    (config.context.system_prompt_profile !== 'coding'
-      ? config.context.system_prompt_profile
-      : config.system_prompt_profile) ??
-    config.system_prompt_profile
-  );
+  return runtime.profile ?? config.context.prompt_mode;
 }

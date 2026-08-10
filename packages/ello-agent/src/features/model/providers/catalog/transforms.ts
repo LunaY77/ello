@@ -26,30 +26,20 @@ import type { RuntimeModel } from './types.js';
  * - `context`: 已校验的 context 配置，只能缩小模型窗口，不能放大。
  *
  * Returns:
- * - 返回 engine 使用的输入上限与输出预留量。
- *
- * Throws:
- * - 模型的最大输出占满 context window、没有剩余输入容量时抛出配置错误。
+ * - 返回 engine 使用的输入 admission；它同时保留总窗口和默认输出保留，供每次请求复算。
  */
 export function modelInputBudgetFromRuntimeModel(
   model: RuntimeModel,
   context: ContextConfig,
 ): NonNullable<CreateAgentOptions['modelInputBudget']> {
-  const configuredInputTokens =
-    context.max_input_tokens - context.reserved_output_tokens;
-  const modelInputTokens = model.contextWindow - model.maxOutputTokens;
-  if (modelInputTokens < 1) {
-    throw new Error(
-      `max_output_tokens (${model.maxOutputTokens}) leaves no input capacity within context_window (${model.contextWindow}) for model '${model.name}'.`,
-    );
-  }
-  const availableInputTokens = Math.min(
-    configuredInputTokens,
-    modelInputTokens,
+  const outputReservation = Math.min(
+    model.maxOutputTokens,
+    model.contextWindow,
   );
   return {
-    maxInputTokens: availableInputTokens + context.reserved_output_tokens,
-    reservedOutputTokens: context.reserved_output_tokens,
+    maxInputTokens: Math.min(context.max_input_tokens, model.contextWindow),
+    totalContextTokens: model.contextWindow,
+    maxOutputTokens: outputReservation,
   };
 }
 
@@ -79,24 +69,41 @@ export function modelSettingsFromRuntimeModel(
  * - `model`: 已解析并固定协议的 runtime model。
  *
  * Returns:
- * - OpenAI Responses 模型关闭服务端状态，避免兼容代理跨请求引用失效的 item ID。
- * - DeepSeek Anthropic 兼容模型返回原生 thinking 与 effort；其他模型返回 `undefined`。
+ * - 所有 provider 都关闭并行 Tool Call，使一次回复最多产生一个 `command_run`。
+ * - OpenAI Responses 模型同时关闭服务端状态，避免兼容代理跨请求引用失效的 item ID。
+ * - DeepSeek Anthropic 兼容模型同时返回原生 thinking 与 effort。
  */
 export function providerOptionsFromRuntimeModel(
   model: RuntimeModel,
 ): AgentProviderOptions | undefined {
-  if (model.protocol === 'openai' && model.endpoint === 'responses') {
-    return { openai: { store: false } };
+  switch (model.protocol) {
+    case 'openai':
+      return {
+        openai: {
+          parallelToolCalls: false,
+          ...(model.endpoint === 'responses' ? { store: false } : {}),
+        },
+      };
+    case 'openai-compatible':
+      return {
+        openai: { parallelToolCalls: false },
+      };
+    case 'anthropic':
+      return {
+        anthropic: {
+          disableParallelToolUse: true,
+          ...(isDeepSeekModel(model)
+            ? {
+                thinking: { type: 'adaptive' },
+                effort: model.reasoningEffort,
+              }
+            : {}),
+        },
+      };
+    default:
+      model.protocol satisfies never;
+      throw new Error(`Unsupported model protocol: ${String(model.protocol)}`);
   }
-  if (model.protocol === 'anthropic' && isDeepSeekModel(model)) {
-    return {
-      anthropic: {
-        thinking: { type: 'adaptive' },
-        effort: model.reasoningEffort,
-      },
-    };
-  }
-  return undefined;
 }
 
 function isDeepSeekModel(model: RuntimeModel): boolean {

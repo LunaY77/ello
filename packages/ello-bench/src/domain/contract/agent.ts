@@ -109,6 +109,9 @@ export const AgentFeaturesSchema = z
   .strict();
 export type AgentFeatures = z.infer<typeof AgentFeaturesSchema>;
 
+export const ElloPromptModeSchema = z.enum(['rapid', 'thorough']);
+export type ElloPromptMode = z.infer<typeof ElloPromptModeSchema>;
+
 export const ElloAgentSpecSchema = z
   .object({
     ...AgentSpecBase,
@@ -116,6 +119,7 @@ export const ElloAgentSpecSchema = z
     models: z.record(z.string().min(1), BenchmarkModelSchema),
     primaryModel: z.string().min(1),
     auxiliaryModel: z.string().min(1),
+    promptMode: ElloPromptModeSchema.default('rapid'),
     features: AgentFeaturesSchema.default({ subagents: true }),
   })
   .strict()
@@ -183,6 +187,10 @@ export const AgentSpecSchema = z.discriminatedUnion('kind', [
   CodexAgentSpecSchema,
 ]);
 
+// The Command Run refactor did not change the serialized Agent definition.
+// Keep a named artifact contract so readers can evolve independently later.
+export const AgentArtifactSpecSchema = AgentSpecSchema;
+
 const AgentRuntimeBase = {
   schema: z.literal('ello.benchmark.agent-runtime.v1'),
   agentId: AgentIdSchema,
@@ -197,12 +205,35 @@ const AgentRuntimeBase = {
 export const ElloAgentRuntimeSchema = z
   .object({
     ...AgentRuntimeBase,
+    adapterContractVersion: z.literal('2'),
+    kind: z.literal('ello'),
+    primaryModel: z.string().min(1),
+    auxiliaryModel: z.string().min(1),
+    promptMode: ElloPromptModeSchema,
+    enabledTools: z.tuple([z.literal('command_run')]),
+    toolsetFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+  })
+  .strict();
+
+/** Read-only v1 contract from after Command Run tool provenance was introduced. */
+export const LegacyElloCommandRunRuntimeSchema = z
+  .object({
+    ...AgentRuntimeBase,
     adapterContractVersion: z.literal('1'),
     kind: z.literal('ello'),
     primaryModel: z.string().min(1),
     auxiliaryModel: z.string().min(1),
+    enabledTools: z.tuple([z.literal('command_run')]),
+    toolsetFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
   })
   .strict();
+
+/** Read-only v1 contract for Ello artifacts created before tool provenance. */
+export const LegacyElloAgentRuntimeSchema =
+  LegacyElloCommandRunRuntimeSchema.omit({
+    enabledTools: true,
+    toolsetFingerprint: true,
+  });
 
 const ExternalAgentRuntimeBase = {
   ...AgentRuntimeBase,
@@ -239,11 +270,21 @@ export const AgentRuntimeProvenanceSchema = z.discriminatedUnion('kind', [
   CodexAgentRuntimeSchema,
 ]);
 
+export const AgentArtifactRuntimeProvenanceSchema = z.union([
+  AgentRuntimeProvenanceSchema,
+  LegacyElloCommandRunRuntimeSchema,
+  LegacyElloAgentRuntimeSchema,
+]);
+
 export type AgentSpec = z.infer<typeof AgentSpecSchema>;
+export type AgentArtifactSpec = z.infer<typeof AgentArtifactSpecSchema>;
 export type ElloAgentSpec = z.infer<typeof ElloAgentSpecSchema>;
 export type BenchmarkModel = z.infer<typeof BenchmarkModelSchema>;
 export type ClaudeCodeAgentSpec = z.infer<typeof ClaudeCodeAgentSpecSchema>;
 export type CodexAgentSpec = z.infer<typeof CodexAgentSpecSchema>;
 export type AgentRuntimeProvenance = z.infer<
   typeof AgentRuntimeProvenanceSchema
+>;
+export type AgentArtifactRuntimeProvenance = z.infer<
+  typeof AgentArtifactRuntimeProvenanceSchema
 >;

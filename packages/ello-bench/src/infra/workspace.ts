@@ -1,4 +1,4 @@
-import { mkdir, statfs } from 'node:fs/promises';
+import { mkdir, rm, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -141,6 +141,32 @@ export async function prepareTaskWorkspace(options: {
     initialGitStatus,
     network,
   };
+}
+
+export async function cleanupAttemptWorkspaces(options: {
+  readonly attemptRoot: string;
+  readonly workspace: string;
+}): Promise<void> {
+  const attemptRoot = path.resolve(options.attemptRoot);
+  const expectedWorkspace = path.join(attemptRoot, 'workspace');
+  if (path.resolve(options.workspace) !== expectedWorkspace) {
+    throw new Error(
+      `Attempt workspace cleanup path mismatch: ${options.workspace} versus ${expectedWorkspace}.`,
+    );
+  }
+  const workspaces = [
+    expectedWorkspace,
+    path.join(attemptRoot, 'raw', 'baseline-preflight', 'workspace'),
+    path.join(attemptRoot, 'raw', 'harness', 'workspace'),
+  ];
+  for (const workspace of workspaces) {
+    await rm(workspace, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 100,
+    });
+  }
 }
 
 export function agentContainerNetwork(): 'bridge' {

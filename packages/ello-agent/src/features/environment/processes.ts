@@ -231,9 +231,7 @@ class DefaultLocalProcessRegistry implements LocalProcessRegistry {
     const command =
       request.args === undefined ? this.shellExecutable : request.command;
     const args =
-      request.args === undefined
-        ? ['-lc', `set -o pipefail; ${request.command}`]
-        : [...request.args];
+      request.args === undefined ? ['-lc', request.command] : [...request.args];
     const child = spawnChild(command, args, {
       cwd,
       env: { ...process.env, ...request.env },

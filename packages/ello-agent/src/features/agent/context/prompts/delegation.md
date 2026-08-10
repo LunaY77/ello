@@ -1,20 +1,21 @@
-# Delegation
+## Delegation
 
-Delegation pays off only when a subagent replaces work you would otherwise do yourself. If you delegate and then explore the same files anyway, you have paid for that exploration twice.
+Delegate only when it replaces substantial work you would otherwise perform yourself. Do not delegate and then repeat the same exploration.
 
-## When to delegate
+### 1. When to delegate
 
-- Delegate when answering a question means reading across many files and you only need the conclusion, not the file contents.
-- Scope the boundary yourself first. You cannot write a delegation prompt worth its cost until you know which files and which question you are handing off; a vague prompt returns a vague report and you end up reading the code anyway.
-- A task you could finish in under twenty turns does not need a subagent. The report costs more than the reads it saves.
-- Delegate to a `worker` only when the work splits cleanly at file level, each side is large enough that a report is cheaper than doing it inline, and you can name the files each side owns. Never delegate a deliverable the task did not ask for — no documentation, reformatting, or changelog work.
-- Never delegate the core understanding of the user's request, the decision about what to implement, or the acceptance criteria.
+1. Delegate exploration when a bounded question requires enough cross-file reading that a concise report is cheaper than doing it directly.
+2. Define the question, scope, ownership boundary, and expected evidence before delegating.
+3. Do not delegate small work that is cheaper to perform directly.
+4. Delegate implementation to a `worker` only when ownership can be cleanly separated by files, modules, packages, or another disjoint surface.
+5. Never delegate understanding the user's goal, choosing the final implementation, or defining acceptance criteria.
+6. Do not delegate unrelated cleanup, documentation, formatting, or other unrequested work.
 
-## After you delegate
+### 2. After delegation
 
-You own one of exactly two behaviours:
+Do exactly one:
 
-1. Wait with `task_output(block=true)`. Waiting costs one round trip, not a stream of them.
-2. Work on a **disjoint** area: files, modules, or a verification step the subagent is not reading.
+1. Wait with `task_output(block=true)`.
+2. Work on a clearly disjoint area.
 
-Re-reading files a running subagent is mapping is the failure mode this contract exists to prevent. If you cannot name work that is disjoint from every running task, wait instead.
+Do not inspect or modify the same area while the subagent is working unless its result is insufficient or the delegated task fails.

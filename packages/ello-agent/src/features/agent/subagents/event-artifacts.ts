@@ -15,8 +15,15 @@ export function createAgentTaskEventPreparer(
   artifacts: ArtifactStore,
 ): PrepareAgentTaskEvent {
   return async (task, event) => {
-    if (event.type !== 'toolCompleted') return event;
-    const serialized = serializeOutput(event.output);
+    if (
+      event.type !== 'commandRunEvent' ||
+      event.event.type !== 'command.completed' ||
+      event.event.record.output === undefined
+    ) {
+      return event;
+    }
+    const record = event.event.record;
+    const serialized = serializeOutput(record.output);
     if (
       Buffer.byteLength(serialized.content, 'utf8') <= INLINE_EVENT_OUTPUT_BYTES
     ) {
@@ -28,20 +35,26 @@ export function createAgentTaskEventPreparer(
       contentType: serialized.contentType,
       owner: {
         kind: 'tool-result',
-        id: `${task.id}:${event.toolCallId}`,
+        id: `${task.id}:${record.commandId}`,
         relation: 'agent-task-transcript',
       },
     });
     return {
       ...event,
-      output: {
-        output: previewOutput(event.output, serialized.content),
-        metadata: {
-          ...boundedMetadata(event.output),
-          artifactId: artifact.id,
-          artifactBytes: artifact.byteSize,
-          artifactContentType: artifact.contentType,
-          truncated: true,
+      event: {
+        ...event.event,
+        record: {
+          ...record,
+          output: {
+            output: previewOutput(record.output, serialized.content),
+            metadata: {
+              ...boundedMetadata(record.output),
+              artifactId: artifact.id,
+              artifactBytes: artifact.byteSize,
+              artifactContentType: artifact.contentType,
+              truncated: true,
+            },
+          },
         },
       },
     };

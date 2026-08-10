@@ -1,4 +1,4 @@
-import { useApp, useInput, useStdout } from 'ink';
+import { useApp, useInput } from 'ink';
 import React, {
   useCallback,
   useEffect,
@@ -15,6 +15,7 @@ import { AgentTranscript } from './component/AgentTranscript.js';
 import { AppShell } from './component/AppShell.js';
 import {
   Composer,
+  composerRowCount,
   composerTextWidthForTerminal,
 } from './component/Composer.js';
 import { OverlayHost } from './component/OverlayHost.js';
@@ -35,6 +36,7 @@ import { useRuntimeEvents } from './hooks/use-runtime-events.js';
 import { useSettings } from './hooks/use-settings.js';
 import { useStableInput } from './hooks/use-stable-input.js';
 import { useSubmission } from './hooks/use-submission.js';
+import { useTerminalSize } from './hooks/use-terminal-size.js';
 import { useThemeState } from './hooks/use-theme-state.js';
 import { buildModelCatalogOptions } from './model-selectors.js';
 import {
@@ -50,6 +52,8 @@ import {
   agentTaskToRunView,
   terminalAgentTaskEntry,
 } from './store/agent-task-view.js';
+import { AGENT_SWITCHER_MAX_TASK_ROWS } from './store/live-budget.js';
+import { layoutTerminalText } from './store/terminal-text.js';
 import { resolveTheme, ThemeProvider } from './theme/index.js';
 import { createThreadCommandRunner } from './thread-command-runner.js';
 
@@ -134,7 +138,8 @@ function ReadyThreadScreen({
   onError(error: unknown): void;
 }): React.ReactElement {
   const { exit } = useApp();
-  const { stdout } = useStdout();
+  const terminal = useTerminalSize();
+  const composerTextWidth = composerTextWidthForTerminal(terminal.columns);
   const { state, workingSeconds, dispatch, queueSteer } = runtimeEvents;
   const { overlay, setOverlay } = useOverlay();
   const commitTerminalTask = useCallback(
@@ -317,6 +322,20 @@ function ReadyThreadScreen({
       agentTasks.setFocus('composer');
     }
   }, [agentTasks, visibleAgentTasks.length]);
+  // Composer 与 live 区共享同一份行数账：这里的输入必须和下面传给 <Composer> 的一致。
+  const composerSuggestions =
+    agentTasks.activeTask === undefined ? suggestions : undefined;
+  const composerRunning =
+    agentTasks.activeTask === undefined
+      ? ctrlCInterrupts
+      : agentTasks.activeTask.status === 'running';
+  const composerRows = composerRowCount({
+    textRows: layoutTerminalText(draft.split('\n'), cursor, composerTextWidth)
+      .rows.length,
+    running: composerRunning,
+    hasSteerTarget: agentTasks.activeTask !== undefined,
+    suggestionCount: composerSuggestions?.length ?? 0,
+  });
   return (
     <ThemeProvider theme={resolveTheme(themeName)}>
       <TerminalHistoryOutput
@@ -331,6 +350,12 @@ function ReadyThreadScreen({
         cwd={thread.cwd}
         model={`primary: ${globalModelSelections.primaryModel} · auxiliary: ${globalModelSelections.auxiliaryModel}`}
         mode={{ mode: state.settings.mode }}
+        composerRows={composerRows}
+        agentRows={agentSwitcherRows(
+          visibleAgentTasks.length,
+          agentTasks.focus === 'agent-switcher',
+        )}
+        overlayOpen={effectiveOverlay.type !== 'none'}
         {...(contextPercent === undefined ? {} : { contextPercent })}
         {...(contextWindow === undefined ? {} : { contextWindow })}
         pendingPlanApproval={effectiveOverlay.type === 'plan-approval'}
@@ -338,6 +363,7 @@ function ReadyThreadScreen({
         liveReasoningText={state.live.reasoningText}
         liveCompactionText={state.live.compactionText}
         runningTools={[...state.live.runningTools.values()]}
+        runningCommandRuns={[...state.live.runningCommandRuns.values()]}
         runningSubagents={
           agentTasks.activeView.kind === 'main'
             ? runningTaskViews
@@ -438,16 +464,11 @@ function ReadyThreadScreen({
               effectiveOverlay.type === 'none' &&
               agentTasks.focus === 'composer'
             }
-            running={
-              agentTasks.activeTask === undefined
-                ? ctrlCInterrupts
-                : agentTasks.activeTask.status === 'running'
-            }
+            running={composerRunning}
             history={submission.inputHistory}
-            {...(agentTasks.activeTask === undefined &&
-            suggestions !== undefined
-              ? { suggestions }
-              : {})}
+            {...(composerSuggestions === undefined
+              ? {}
+              : { suggestions: composerSuggestions })}
             {...(agentTasks.activeTask === undefined
               ? {}
               : {
@@ -456,7 +477,7 @@ function ReadyThreadScreen({
                     agentTasks.activeTask.definitionName,
                 })}
             value={draft}
-            textWidth={composerTextWidthForTerminal(stdout.columns ?? 100)}
+            textWidth={composerTextWidth}
             onChange={(value, nextCursor) => {
               setDraft(value);
               setCursor(nextCursor);
@@ -497,6 +518,17 @@ function ReadyThreadScreen({
       />
     </ThemeProvider>
   );
+}
+
+/**
+ * AgentSwitcher 的行数：marginTop + main 行 + 有界的 child 行 + 溢出计数 + 选择态提示。
+ * 必须与 `AgentSwitcher` 的窗口逻辑一致，否则 live 区预算会算漏。
+ */
+function agentSwitcherRows(taskCount: number, focused: boolean): number {
+  if (taskCount === 0) return 0;
+  const visible = Math.min(taskCount, AGENT_SWITCHER_MAX_TASK_ROWS);
+  const overflow = taskCount > visible ? 1 : 0;
+  return 2 + visible + overflow + (focused ? 1 : 0);
 }
 
 function contextRemainingPercent(

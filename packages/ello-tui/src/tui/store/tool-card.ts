@@ -12,6 +12,7 @@ import path from 'node:path';
 import type { FileChange } from '../../api/protocol-types.js';
 
 import {
+  InvalidFileChangeMetadataError,
   readFileChanges,
   summarizeDiff,
   unifiedDiffFromFileChanges,
@@ -33,6 +34,8 @@ export interface ToolCardModel {
   readonly metrics: readonly string[];
   readonly details: readonly string[];
   readonly outputPreview: readonly string[];
+  /** 工具执行已完成，但部分展示元数据损坏时给出的非致命诊断。 */
+  readonly presentationError?: string;
   /** TUI 只展示短路径，完整路径留给后续展开或复制操作。 */
   readonly artifact?: {
     readonly displayPath: string;
@@ -53,6 +56,7 @@ export interface ToolCardDisplayOptions {
 }
 
 const DEFAULT_MAX_PATH_LENGTH = 56;
+const INVALID_FILE_CHANGES = 'Invalid file change metadata; diff unavailable.';
 
 /** 从工具结果对象里取出 {@link ToolMetadata}（CodingToolResult.metadata）。 */
 export function readToolMetadata(output: unknown): ToolMetadata | undefined {
@@ -351,7 +355,14 @@ export function buildToolCardModel(
   options: ToolCardDisplayOptions,
 ): ToolCardModel {
   const metadata = readToolMetadata(call.output);
-  const sourceFileChanges = readFileChanges(metadata?.fileChanges);
+  let sourceFileChanges: readonly FileChange[] = [];
+  let presentationError: string | undefined;
+  try {
+    sourceFileChanges = readFileChanges(metadata?.fileChanges);
+  } catch (error) {
+    if (!(error instanceof InvalidFileChangeMetadataError)) throw error;
+    presentationError = INVALID_FILE_CHANGES;
+  }
   const fileChanges = sourceFileChanges.map((change) => ({
     ...change,
     path: formatToolPath(change.path, options),
@@ -376,9 +387,12 @@ export function buildToolCardModel(
     outputPreview:
       call.status === 'fail' && call.error?.message !== undefined
         ? outputPreview(call.error.message)
-        : metadata?.kind === 'shell' || call.name === 'bash'
-          ? outputPreview(call.output)
-          : [],
+        : presentationError !== undefined
+          ? [presentationError]
+          : metadata?.kind === 'shell' || call.name === 'bash'
+            ? outputPreview(call.output)
+            : [],
+    ...(presentationError === undefined ? {} : { presentationError }),
     ...(outputPath !== '' || artifactId !== ''
       ? {
           artifact: {
@@ -394,7 +408,8 @@ export function buildToolCardModel(
     ...(fileChanges.length > 0 ? { fileChanges } : {}),
     hasDiff,
     // 默认折叠普通成功工具；diff / 失败默认展开。
-    defaultCollapsed: !hasDiff && call.status !== 'fail',
+    defaultCollapsed:
+      !hasDiff && call.status !== 'fail' && presentationError === undefined,
   };
 }
 

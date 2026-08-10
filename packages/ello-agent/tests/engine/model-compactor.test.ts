@@ -5,21 +5,20 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createAgent,
-  defineTool,
   z,
   type AgentModelRequest,
   type AgentModelResponse,
   type CreateAgentOptions,
   type ModelInput,
 } from '../../src/features/agent/engine/index.js';
+import { createTestCommandRun, defineTestCommand } from '../support/command.js';
 import { createTestEnvironmentHandle } from '../support/environment.js';
 
-const testTool = defineTool({
+const testTool = defineTestCommand({
   name: 'noop',
-  description: 'No-op tool for compact model tests.',
-  discovery: { aliases: [], risk: 'readonly' },
-  input: z.object({}).strict(),
-  execute: () => null,
+  summary: 'No-op tool for compact model tests.',
+  schema: z.object({}).strict(),
+  run: () => null,
 });
 
 const modelCall = {
@@ -31,17 +30,13 @@ const modelCall = {
 } as const;
 
 function createTestAgent(
-  options: Omit<
-    CreateAgentOptions,
-    'modelCall' | 'environment' | 'executionTools' | 'modelTools'
-  >,
+  options: Omit<CreateAgentOptions, 'modelCall' | 'environment' | 'commandRun'>,
 ) {
   return createAgent({
     ...options,
     modelCall,
     environment: createTestEnvironmentHandle(),
-    executionTools: [testTool],
-    modelTools: [testTool],
+    commandRun: createTestCommandRun([testTool]),
   });
 }
 
@@ -119,7 +114,7 @@ describe('model compactor', () => {
           yield { type: 'final', response: response(request, 'answer') };
         },
       },
-      modelInputBudget: { maxInputTokens: 100 },
+      modelInputBudget: { maxInputTokens: 1_000 },
       compactor: {
         name: 'test-compactor',
         async compact(input) {

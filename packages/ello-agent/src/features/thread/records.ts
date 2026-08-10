@@ -183,6 +183,7 @@ function applyThreadRecord(
     case 'item.delta':
       applyItemDelta(state, record.itemId, record.delta);
       return;
+    case 'item.updated':
     case 'item.completed':
       replaceItem(state, record.turnId, record.item);
       return;

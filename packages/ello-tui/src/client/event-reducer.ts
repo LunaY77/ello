@@ -108,6 +108,14 @@ export function applyNotification(
         notification.params.item,
         false,
       );
+    case 'item/updated':
+      return replaceItem(
+        snapshot,
+        notification.params.turnId,
+        notification.params.itemId,
+        notification.params.item,
+        false,
+      );
     case 'item/agentMessage/delta':
     case 'item/reasoning/delta':
     case 'item/plan/delta':

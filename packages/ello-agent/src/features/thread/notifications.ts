@@ -128,6 +128,19 @@ export function notificationsFor(
           },
         },
       ];
+    case 'item.updated':
+      return [
+        {
+          method: 'item/updated',
+          params: {
+            threadId: record.threadId,
+            turnId: record.turnId,
+            itemId: record.item.id,
+            seq: record.seq,
+            item: record.item,
+          },
+        },
+      ];
     case 'item.delta': {
       const base = {
         threadId: record.threadId,

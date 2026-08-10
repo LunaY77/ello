@@ -13,6 +13,10 @@ import { EventCaptureSchema } from '../domain/contract/index.js';
 
 type RecordedEvent = Parameters<AgentEventRecorder['record']>[0];
 
+const MAX_REDACTION_DEPTH = 64;
+const CIRCULAR_VALUE = '[Circular]';
+const TRUNCATED_VALUE = '[Truncated]';
+
 export interface EventCaptureRecorder {
   readonly eventLogPath: string;
   readonly completePath: string;
@@ -154,14 +158,28 @@ class JsonlEventCaptureRecorder implements EventCaptureRecorder {
   }
 }
 
-function redact(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redact);
-  if (!isRecord(value)) return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => !isSensitiveKey(key))
-      .map(([key, child]) => [key, redact(child)]),
-  );
+function redact(
+  value: unknown,
+  ancestors = new WeakSet<object>(),
+  depth = 0,
+): unknown {
+  if (typeof value !== 'object' || value === null) return value;
+  if (ancestors.has(value)) return CIRCULAR_VALUE;
+  if (depth >= MAX_REDACTION_DEPTH) return TRUNCATED_VALUE;
+
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((child) => redact(child, ancestors, depth + 1));
+    }
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !isSensitiveKey(key))
+        .map(([key, child]) => [key, redact(child, ancestors, depth + 1)]),
+    );
+  } finally {
+    ancestors.delete(value);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

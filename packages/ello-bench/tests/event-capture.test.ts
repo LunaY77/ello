@@ -89,6 +89,101 @@ describe('event capture', () => {
     await expect(capture.close()).rejects.toThrow('already closed');
   });
 
+  it('captures recursive model tool schemas without overflowing the stack', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'ello-bench-events-'));
+    directories.push(directory);
+    const capture = createEventCaptureRecorder(
+      path.join(directory, 'events.jsonl'),
+    );
+    const inputSchema: Record<string, unknown> = { type: 'object' };
+    inputSchema.self = inputSchema;
+    const shared = { type: 'string' };
+    inputSchema.left = shared;
+    inputSchema.right = shared;
+    let deeplyNested = inputSchema;
+    for (let depth = 0; depth < 70; depth += 1) {
+      const child: Record<string, unknown> = {};
+      deeplyNested.child = child;
+      deeplyNested = child;
+    }
+
+    await capture.recorder.record(
+      {
+        type: 'model.started',
+        runId: 'run_1',
+        sequence: 1,
+        occurredAt: '2026-07-23T00:00:00.000Z',
+        identity: {
+          runId: 'run_1',
+          turnIndex: 0,
+          modelCallId: 'call_1',
+          agentName: 'build',
+          modelSelector: 'primary_model',
+          configuredModel: 'benchmark-pro',
+          protocol: 'openai',
+          apiModel: 'model',
+        },
+        request: {
+          runId: 'run_1',
+          model: 'model',
+          messages: [],
+          tools: {
+            command_run: {
+              description: 'Run commands.',
+              inputSchema: inputSchema as never,
+            },
+          },
+          modelSettings: {},
+          signal: new AbortController().signal,
+        },
+        diagnostics: {
+          systemFingerprint: 'a'.repeat(64),
+          toolsetFingerprint: 'b'.repeat(64),
+          messagePrefixFingerprint: 'c'.repeat(64),
+          compactionBoundary: false,
+        },
+      },
+      {},
+    );
+    await capture.close();
+
+    const recorded = JSON.parse(
+      await readFile(capture.eventLogPath, 'utf8'),
+    ) as {
+      readonly payload: {
+        readonly request: {
+          readonly tools: {
+            readonly command_run: {
+              readonly inputSchema: {
+                readonly self: unknown;
+                readonly child: Record<string, unknown>;
+              };
+            };
+          };
+        };
+        readonly diagnostics: { readonly toolsetFingerprint: string };
+      };
+    };
+    expect(recorded.payload.request.tools.command_run.inputSchema.self).toBe(
+      '[Circular]',
+    );
+    expect(
+      recorded.payload.request.tools.command_run.inputSchema,
+    ).toMatchObject({
+      left: { type: 'string' },
+      right: { type: 'string' },
+    });
+    let truncated: unknown =
+      recorded.payload.request.tools.command_run.inputSchema.child;
+    for (let depth = 0; depth < 59; depth += 1) {
+      truncated = (truncated as Record<string, unknown>).child;
+    }
+    expect(truncated).toBe('[Truncated]');
+    expect(recorded.payload.diagnostics.toolsetFingerprint).toBe(
+      'b'.repeat(64),
+    );
+  });
+
   it('rejects non-increasing engine event sequences', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'ello-bench-events-'));
     directories.push(directory);

@@ -34,6 +34,16 @@ describe('benchmark Agent config', () => {
       enabled: true,
       cwd_policy: 'allowed_paths',
     });
+    expect(config.commands).toEqual({
+      disabled: [],
+      need_approval: [],
+      search: { result_limit: 6, max_result_bytes: 24_000 },
+    });
+    expect(config.tools).toBeUndefined();
+    expect(config.context).toMatchObject({
+      prompt_mode: 'thorough',
+      compaction: { threshold_percent: 90 },
+    });
     expect(config.agent).toBeUndefined();
     expect(config.models).toMatchObject({
       'benchmark-pro': {
@@ -128,5 +138,6 @@ function agentFixture() {
     },
     primaryModel: 'benchmark-pro',
     auxiliaryModel: 'benchmark-flash',
+    promptMode: 'thorough',
   });
 }

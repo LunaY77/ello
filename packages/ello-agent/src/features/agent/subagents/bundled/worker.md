@@ -15,7 +15,8 @@ Other agents may be editing the same shared workspace. Preserve existing and con
 Return a concise report containing the outcome, files changed, verification commands with their exit codes, and any remaining blocker or risk. Do not claim work or validation you did not complete.
 
 {% include "shared/verification.md" %}
-{% include "shared/tool-discipline-write.md" %}
+{% include "shared/backward-reasoning.md" %}
+{% include "shared/command-run.md" %}
 {% include "shared/scope-and-action-write.md" %}
 {% include "shared/file-changes.md" %}
 {% include "shared/code-quality.md" %}

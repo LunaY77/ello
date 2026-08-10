@@ -11,7 +11,11 @@ import type {
   ThreadSnapshot,
   Turn,
 } from '../../protocol/v1/index.js';
-import { JsonValueSchema } from '../../protocol/v1/index.js';
+import {
+  CommandRunCheckpointSchema,
+  CommandRunCommandSchema,
+  JsonValueSchema,
+} from '../../protocol/v1/index.js';
 import type {
   NewThreadRecord,
   ThreadRecord,
@@ -24,9 +28,7 @@ import type {
 
 import type { CompactionEntry } from './compact.js';
 import {
-  completedToolItem,
-  failItem,
-  startedToolItem,
+  projectFileChangeMetadata,
   writtenGoal,
   writtenPlan,
 } from './items.js';
@@ -126,9 +128,19 @@ export async function consumeAgentRun(
   let eventFailure: unknown;
   try {
     for await (const event of run.events) {
-      await options.enqueue(() =>
-        recordAgentRunEvent(options, turn, run, event),
-      );
+      try {
+        await options.enqueue(() =>
+          recordAgentRunEvent(options, turn, run, event),
+        );
+        if (event.type === 'contextCompacted') {
+          run.acknowledgeCompaction(event.compactionId);
+        }
+      } catch (error) {
+        if (event.type === 'contextCompacted') {
+          run.acknowledgeCompaction(event.compactionId, error);
+        }
+        throw error;
+      }
     }
   } catch (error) {
     eventFailure = error;
@@ -276,55 +288,8 @@ async function recordAgentRunEvent(
       });
       return;
     }
-    case 'toolStarted': {
-      const existing = findItem(options, event.toolCallId);
-      if (existing !== undefined) {
-        if ('status' in existing && existing.status === 'inProgress') return;
-        throw new Error(
-          `Tool item ${event.toolCallId} started more than once.`,
-        );
-      }
-      await options.append({
-        kind: 'item.started',
-        turnId: turn.id,
-        item: startedToolItem(
-          event.toolCallId,
-          turn,
-          event.name,
-          event.input,
-          event.occurredAt,
-          options.snapshot().thread.cwd,
-        ),
-      });
-      return;
-    }
-    case 'toolCompleted': {
-      const item = completedToolItem(
-        requireItem(options, event.toolCallId),
-        event.output,
-        event.occurredAt,
-      );
-      await options.append({
-        kind: 'item.completed',
-        turnId: turn.id,
-        item,
-      });
-      const plan = writtenPlan(event.output);
-      if (plan !== undefined) {
-        await options.append({ kind: 'plan.state', plan });
-      }
-      const goal = writtenGoal(event.output);
-      if (goal !== undefined) {
-        await options.append({ kind: 'goal.state', goal });
-      }
-      return;
-    }
-    case 'toolFailed':
-      await options.append({
-        kind: 'item.completed',
-        turnId: turn.id,
-        item: failItem(requireItem(options, event.toolCallId), event.message),
-      });
+    case 'commandRunEvent':
+      await recordCommandRunEvent(options, turn, event.event);
       return;
     case 'interactionRequired':
       await options.registerInteraction(turn, event.interaction, run);
@@ -441,6 +406,245 @@ async function recordAgentRunEvent(
       event satisfies never;
       throw new Error(`Unhandled Agent run event: ${String(event)}`);
   }
+}
+
+async function recordCommandRunEvent(
+  options: ConsumeAgentRunOptions,
+  turn: Turn,
+  event: Extract<AgentRunEvent, { type: 'commandRunEvent' }>['event'],
+): Promise<void> {
+  switch (event.type) {
+    case 'command_run.started': {
+      const existing = findItem(options, event.commandRunId);
+      const commands = event.commands.map((frame) => {
+        const previous =
+          existing?.type === 'commandRun'
+            ? existing.commands.find(
+                (command) => command.commandId === frame.commandId,
+              )
+            : undefined;
+        return (
+          previous ??
+          commandRunCommand({
+            commandId: frame.commandId,
+            index: frame.index,
+            step: frame.step,
+            name: frame.command,
+            input: frame.input,
+            inputDigest: frame.inputDigest,
+            status: 'pending',
+          })
+        );
+      });
+      const item: Extract<ThreadItem, { type: 'commandRun' }> = {
+        type: 'commandRun',
+        id: event.commandRunId,
+        turnId: turn.id,
+        createdAt:
+          existing?.type === 'commandRun'
+            ? existing.createdAt
+            : event.occurredAt,
+        providerToolCallId: event.providerToolCallId,
+        status: 'inProgress',
+        commands,
+        ...(existing?.type === 'commandRun' && existing.checkpoint !== undefined
+          ? { checkpoint: existing.checkpoint }
+          : {}),
+      };
+      await options.append({
+        kind: existing === undefined ? 'item.started' : 'item.updated',
+        turnId: turn.id,
+        item,
+      });
+      return;
+    }
+    case 'command_run.failed': {
+      if (event.error === undefined) {
+        throw new Error('Command Run compile failure has no error details.');
+      }
+      const error = formatCommandRunError(event.error);
+      const item: Extract<ThreadItem, { type: 'commandRun' }> = {
+        type: 'commandRun',
+        id: event.commandRunId,
+        turnId: turn.id,
+        createdAt: event.occurredAt,
+        providerToolCallId: event.providerToolCallId,
+        status: 'failed',
+        commands: [],
+        error,
+      };
+      if (findItem(options, event.commandRunId) === undefined) {
+        await options.append({ kind: 'item.started', turnId: turn.id, item });
+      }
+      await options.append({ kind: 'item.completed', turnId: turn.id, item });
+      return;
+    }
+    case 'command.started':
+    case 'command.completed':
+    case 'command.failed':
+    case 'command.denied':
+    case 'command.blocked': {
+      const current = requireCommandRun(options, event.record.commandRunId);
+      const item = replaceCommandRunCommand(
+        current,
+        commandRunCommand(event.record),
+      );
+      await options.append({ kind: 'item.updated', turnId: turn.id, item });
+      if (event.type === 'command.completed') {
+        const plan = writtenPlan(event.record.output);
+        if (plan !== undefined)
+          await options.append({ kind: 'plan.state', plan });
+        const goal = writtenGoal(event.record.output);
+        if (goal !== undefined)
+          await options.append({ kind: 'goal.state', goal });
+      }
+      return;
+    }
+    case 'command.approval_required':
+    case 'command.deferred': {
+      const current = requireCommandRun(options, event.checkpoint.commandRunId);
+      const command = current.commands.find(
+        (candidate) => candidate.commandId === event.interaction.commandId,
+      );
+      if (command === undefined) {
+        throw new Error(
+          `Command Run ${current.id} is missing ${event.interaction.commandId}.`,
+        );
+      }
+      const updated = commandRunCommand({
+        ...command,
+        status: event.type === 'command.deferred' ? 'deferred' : command.status,
+        ...(event.type === 'command.approval_required'
+          ? {
+              approval: {
+                status: 'required',
+                ...(event.interaction.reason === undefined
+                  ? {}
+                  : { reason: event.interaction.reason }),
+                ...(event.interaction.metadata === undefined
+                  ? {}
+                  : { metadata: event.interaction.metadata }),
+              },
+            }
+          : {}),
+      });
+      await options.append({
+        kind: 'item.updated',
+        turnId: turn.id,
+        item: {
+          ...replaceCommandRunCommand(current, updated),
+          checkpoint: CommandRunCheckpointSchema.parse(
+            serializeJsonValue(event.checkpoint),
+          ),
+        },
+      });
+      return;
+    }
+    case 'command_run.suspended':
+      return;
+    case 'command_run.completed': {
+      const current = requireCommandRun(options, event.commandRunId);
+      const interrupted = current.commands.some(
+        (command) => command.status === 'interrupted',
+      );
+      const failed = current.commands.some(
+        (command) => command.status === 'failed',
+      );
+      const denied = current.commands.some(
+        (command) => command.status === 'denied',
+      );
+      const item: Extract<ThreadItem, { type: 'commandRun' }> = {
+        ...current,
+        status: interrupted
+          ? 'interrupted'
+          : failed
+            ? 'failed'
+            : denied
+              ? 'denied'
+              : 'completed',
+      };
+      await options.append({ kind: 'item.completed', turnId: turn.id, item });
+      return;
+    }
+    default:
+      event satisfies never;
+      throw new Error(`Unhandled Command Run event: ${String(event)}`);
+  }
+}
+
+function commandRunCommand(
+  value: unknown,
+): Extract<ThreadItem, { type: 'commandRun' }>['commands'][number] {
+  const serialized = serializeJsonValue(value);
+  if (
+    typeof serialized === 'object' &&
+    serialized !== null &&
+    !Array.isArray(serialized)
+  ) {
+    const command = { ...serialized } as Record<string, unknown>;
+    Reflect.deleteProperty(command, 'commandRunId');
+    normalizeCommandFileChanges(command);
+    return CommandRunCommandSchema.parse(command);
+  }
+  return CommandRunCommandSchema.parse(serialized);
+}
+
+function normalizeCommandFileChanges(command: Record<string, unknown>): void {
+  if (isRecord(command.metadata)) {
+    command.metadata = projectFileChangeMetadata(command.metadata);
+  }
+  if (!isRecord(command.output) || !isRecord(command.output.metadata)) return;
+  command.output = {
+    ...command.output,
+    metadata: projectFileChangeMetadata(command.output.metadata),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requireCommandRun(
+  options: ConsumeAgentRunOptions,
+  commandRunId: string,
+): Extract<ThreadItem, { type: 'commandRun' }> {
+  const item = requireItem(options, commandRunId);
+  if (item.type !== 'commandRun') {
+    throw new Error(
+      `Thread item ${commandRunId} is ${item.type}, expected commandRun.`,
+    );
+  }
+  return item;
+}
+
+function replaceCommandRunCommand(
+  item: Extract<ThreadItem, { type: 'commandRun' }>,
+  command: Extract<ThreadItem, { type: 'commandRun' }>['commands'][number],
+): Extract<ThreadItem, { type: 'commandRun' }> {
+  const index = item.commands.findIndex(
+    (candidate) => candidate.commandId === command.commandId,
+  );
+  if (index === -1) {
+    throw new Error(`Command Run ${item.id} is missing ${command.commandId}.`);
+  }
+  const commands = [...item.commands];
+  commands[index] = command;
+  return { ...item, commands };
+}
+
+function formatCommandRunError(
+  error: NonNullable<
+    Extract<
+      Extract<AgentRunEvent, { type: 'commandRunEvent' }>['event'],
+      { type: 'command_run.failed' }
+    >['error']
+  >,
+): string {
+  const location =
+    error.frameIndex === undefined
+      ? ''
+      : `Frame ${error.frameIndex}${error.command === undefined ? '' : ` (${error.command})`}: `;
+  return `${location}${error.message}${error.usage === undefined ? '' : ` Usage: ${error.usage}`}`;
 }
 
 function findItem(

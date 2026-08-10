@@ -2,22 +2,22 @@
  * 单次产品 Agent 装配使用的 Memory 工具、索引缓存和仓储生命周期。
  *
  * 启用状态由配置边界决定；启用后工具 mutation 与索引失效共享同一串行队列，调用方必须在读取
- * `tools` 或 `indexLoader` 前完成 `initialize()`。
+ * `commands` 或 `indexLoader` 前完成 `initialize()`。
  */
-import type { AnyAgentTool } from '../agent/engine/index.js';
+import { defineCommandModule, type CommandModule } from '../command/index.js';
 import type { CodingAgentConfig } from '../config/index.js';
-import { markCoreTool, type ApprovalFor } from '../tool/index.js';
+import type { ApprovalFor } from '../tool/index.js';
 
 import { MemoryIndexLoader } from './internal/index-loader.js';
 import { memoryRoots } from './internal/paths.js';
 import { createMemoryStore } from './internal/store.js';
-import { createMemoryTools } from './internal/tools.js';
+import { createMemoryCommands } from './internal/tools.js';
 
 export type MemoryRunRuntime =
   | { readonly enabled: false }
   | {
       readonly enabled: true;
-      readonly tools: ReadonlyArray<AnyAgentTool>;
+      readonly module: CommandModule;
       readonly indexLoader: MemoryIndexLoader;
       /**
        * 初始化 Memory `runtime` 模块 所需的目录、连接或缓存；完成前不得使用依赖这些资源的操作。
@@ -54,28 +54,29 @@ export function createMemoryRunRuntime(
   const repository = createMemoryStore(memoryRoots(config));
   const indexLoader = new MemoryIndexLoader(repository);
   let mutationQueue: Promise<void> = Promise.resolve();
-  const tools = createMemoryTools({
-    approval,
-    port: {
-      repository,
-      mutate<TValue>(operation: () => Promise<TValue>): Promise<TValue> {
-        const result = mutationQueue.then(operation);
-        mutationQueue = result.then(
-          () => undefined,
-          () => undefined,
-        );
-        return result.then((value) => {
-          indexLoader.invalidate();
-          return value;
-        });
+  const module = defineCommandModule({
+    id: 'memory',
+    commands: createMemoryCommands({
+      approval,
+      port: {
+        repository,
+        mutate<TValue>(operation: () => Promise<TValue>): Promise<TValue> {
+          const result = mutationQueue.then(operation);
+          mutationQueue = result.then(
+            () => undefined,
+            () => undefined,
+          );
+          return result.then((value) => {
+            indexLoader.invalidate();
+            return value;
+          });
+        },
       },
-    },
-  })
-    .filter((tool) => !config.tools.disabled.includes(tool.name))
-    .map(markCoreTool);
+    }).filter((command) => !config.commands.disabled.includes(command.name)),
+  });
   return {
     enabled: true,
-    tools,
+    module,
     indexLoader,
     initialize: () => repository.initialize(),
   };

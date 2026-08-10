@@ -5,17 +5,18 @@ import {
   HarnessReportSchema,
   PhaseTimingsArtifactSchema,
   VerifierProcessArtifactSchema,
-  type RunManifest,
+  type RunArtifactManifest,
   type VerifierProcessArtifact,
 } from '../../domain/contract/index.js';
 import { sha256, stableJson } from '../../domain/hash.js';
+import { classifyDeliveryOutcome } from '../../domain/scoring/attempt-outcome.js';
 import { readJsonFile } from '../io.js';
 
 import { validateAgentArtifacts } from './agent-artifacts.js';
 import { assertInside } from './artifact.js';
 
 export async function validateAttempt(
-  run: RunManifest,
+  run: RunArtifactManifest,
   runPath: string,
   runRoot: string,
 ): Promise<void> {
@@ -31,11 +32,25 @@ export async function validateAttempt(
     await readJsonFile(run.phaseTimingsPath, PhaseTimingsArtifactSchema);
   }
   let verifierProcessArtifact: VerifierProcessArtifact | undefined;
+  let baselinePreflightArtifact: VerifierProcessArtifact | undefined;
+  if (run.baselinePreflightProcess !== undefined) {
+    baselinePreflightArtifact = await validateVerifierProcess(
+      run.attemptRoot,
+      run.baselinePreflightProcess,
+      'baseline-only',
+    );
+    if (
+      run.baselinePreflightExitCode !==
+      baselinePreflightArtifact.testResults.baselineExitCode
+    ) {
+      throw new Error(`Baseline preflight result mismatch: ${run.attemptId}`);
+    }
+  }
   if (run.verifierProcess !== undefined) {
     verifierProcessArtifact = await validateVerifierProcess(
       run.attemptRoot,
       run.verifierProcess,
-      run.status === 'completed',
+      run.status === 'completed' ? 'full' : 'none',
     );
   }
   if (run.status === 'invalid_infrastructure') return;
@@ -90,6 +105,23 @@ export async function validateAttempt(
   if (stableJson(harness.verifierProcess) !== stableJson(run.verifierProcess)) {
     throw new Error(`Verifier process reference mismatch: ${run.attemptId}`);
   }
+  const hasBaselinePreflight =
+    run.baselinePreflightProcess !== undefined ||
+    run.baselinePreflightExitCode !== undefined ||
+    harness.baselinePreflightProcess !== undefined ||
+    harness.baselinePreflightExitCode !== undefined;
+  if (hasBaselinePreflight) {
+    if (
+      stableJson(harness.baselinePreflightProcess) !==
+        stableJson(run.baselinePreflightProcess) ||
+      harness.baselinePreflightExitCode !== run.baselinePreflightExitCode ||
+      baselinePreflightArtifact === undefined ||
+      harness.baselinePreflightExitCode !==
+        baselinePreflightArtifact.testResults.baselineExitCode
+    ) {
+      throw new Error(`Baseline preflight evidence mismatch: ${run.attemptId}`);
+    }
+  }
   if (
     verifierProcessArtifact === undefined ||
     harness.baselineTestExitCode !==
@@ -105,15 +137,38 @@ export async function validateAttempt(
   ) {
     throw new Error(`Harness patch checksum mismatch: ${run.attemptId}`);
   }
-  if (run.outcome !== classifyOutcome(client, harness.reward)) {
+  if (
+    run.outcome !==
+    (isLegacyDeliveryArtifact(run)
+      ? classifyLegacyOutcome(client, harness.reward)
+      : classifyDeliveryOutcome({
+          process: client,
+          reward: harness.reward,
+          patch,
+        }))
+  ) {
     throw new Error(`Run outcome mismatch: ${run.attemptId}`);
   }
+}
+
+function isLegacyDeliveryArtifact(run: RunArtifactManifest): boolean {
+  return run.baselinePreflightProcess === undefined;
+}
+
+function classifyLegacyOutcome(
+  process: NonNullable<RunArtifactManifest['client']>,
+  reward: 0 | 1,
+): NonNullable<RunArtifactManifest['outcome']> {
+  if (process.timedOut)
+    return reward === 1 ? 'timeout_passed' : 'timeout_failed';
+  if (process.exitCode === 0) return reward === 1 ? 'passed' : 'failed';
+  return reward === 1 ? 'agent_error_passed' : 'agent_error_failed';
 }
 
 async function validateVerifierProcess(
   attemptRoot: string,
   reference: { readonly path: string; readonly sha256: string },
-  requireSuccess: boolean,
+  mode: 'none' | 'baseline-only' | 'full',
 ): Promise<VerifierProcessArtifact> {
   assertInside(attemptRoot, reference.path);
   const artifactContent = await readFile(reference.path);
@@ -133,12 +188,14 @@ async function validateVerifierProcess(
       throw new Error(`Verifier output artifact mismatch: ${output.path}`);
     }
   }
+  const missingRequiredResults =
+    artifact.testResults.baselineExitCode === null ||
+    (mode === 'full' && artifact.testResults.newTestsExitCode === null);
   if (
-    requireSuccess &&
+    mode !== 'none' &&
     (artifact.process.timedOut ||
       artifact.process.exitCode !== 0 ||
-      artifact.testResults.baselineExitCode === null ||
-      artifact.testResults.newTestsExitCode === null)
+      missingRequiredResults)
   ) {
     throw new Error(
       `Completed verifier process is not successful: ${reference.path}`,
@@ -147,18 +204,11 @@ async function validateVerifierProcess(
   return artifact;
 }
 
-function classifyOutcome(
-  client: NonNullable<RunManifest['client']>,
-  reward: 0 | 1,
-): NonNullable<RunManifest['outcome']> {
-  if (client.timedOut) {
-    return reward === 1 ? 'timeout_passed' : 'timeout_failed';
-  }
-  if (client.exitCode === 0) return reward === 1 ? 'passed' : 'failed';
-  return reward === 1 ? 'agent_error_passed' : 'agent_error_failed';
-}
-
-function required<T>(value: T | undefined, field: string, run: RunManifest): T {
+function required<T>(
+  value: T | undefined,
+  field: string,
+  run: RunArtifactManifest,
+): T {
   if (value === undefined) {
     throw new Error(`Missing ${field}: ${run.attemptId}`);
   }

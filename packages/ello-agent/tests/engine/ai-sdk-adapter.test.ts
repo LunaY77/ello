@@ -6,14 +6,89 @@
  */
 import { MockLanguageModelV4, simulateReadableStream } from 'ai/test';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import type {
   AgentModelEvent,
   AgentModelRequest,
 } from '../../src/features/agent/engine/model.js';
+import { buildToolSet } from '../../src/features/agent/engine/tools.js';
 import { createAiSdkModelAdapter } from '../../src/features/model/providers/ai-sdk/ai-sdk.js';
 
 describe('AI SDK model adapter', () => {
+  it('preserves an invalid Command Run tool call for runtime recovery', async () => {
+    const adapter = createAiSdkModelAdapter();
+    const input = {
+      commands: [
+        {
+          step: 1,
+          command: 'bash',
+          body: 'pwd',
+          timeoutMs: 30_000,
+          cwd: '/app',
+          reason: 'inspect the workspace',
+        },
+      ],
+    };
+    const tools = buildToolSet({
+      tools: [
+        {
+          name: 'command_run',
+          description: 'Run Commands.',
+          input: z
+            .object({
+              commands: z
+                .array(
+                  z
+                    .object({
+                      step: z.number().int().positive(),
+                      command: z.literal('bash'),
+                      body: z.string(),
+                    })
+                    .strict(),
+                )
+                .min(1),
+            })
+            .strict(),
+        },
+      ],
+    });
+
+    const events = await collectEvents(
+      adapter.stream(
+        createRequest(
+          [
+            {
+              type: 'tool-call',
+              toolCallId: 'call_schema_recovery',
+              toolName: 'command_run',
+              input,
+            },
+            {
+              type: 'finish',
+              finishReason: { unified: 'tool-calls', raw: 'tool-calls' },
+              usage: emptyUsage(),
+            },
+          ],
+          tools,
+        ),
+      ),
+    );
+
+    const final = events.at(-1);
+    if (final?.type !== 'final') {
+      throw new Error('expected final event');
+    }
+    expect(final.response.toolCalls).toEqual([
+      {
+        id: 'call_schema_recovery',
+        name: 'command_run',
+        input,
+      },
+    ]);
+    expect(final.response.finishReason).toBe('tool-calls');
+  });
+
   it('does not emit text deltas for provider tool-call mirror JSON', async () => {
     const mirror =
       '[{"type":"tool-call","toolCallId":"call_1","toolName":"read","input":{"filePath":"README.md"}}]';
@@ -69,6 +144,115 @@ describe('AI SDK model adapter', () => {
         ],
       },
     ]);
+  });
+
+  it('keeps malformed non-object tool input provider-safe in history', async () => {
+    const adapter = createAiSdkModelAdapter();
+    const malformedInput = JSON.stringify(
+      JSON.stringify({
+        commands: [{ step: 1, command: 'bash', body: 'printf ok' }],
+      }),
+    );
+
+    const events = await collectEvents(
+      adapter.stream(
+        createRequest([
+          {
+            type: 'tool-call',
+            toolCallId: 'call_malformed_input',
+            toolName: 'command_run',
+            input: malformedInput,
+          },
+          {
+            type: 'finish',
+            finishReason: { unified: 'tool-calls', raw: 'tool-calls' },
+            usage: emptyUsage(),
+          },
+        ]),
+      ),
+    );
+
+    const final = events.at(-1);
+    if (final?.type !== 'final') {
+      throw new Error('expected final event');
+    }
+    expect(final.response.toolCalls).toEqual([
+      {
+        id: 'call_malformed_input',
+        name: 'command_run',
+        input: {},
+      },
+    ]);
+    expect(final.response.newMessages).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'call_malformed_input',
+            toolName: 'command_run',
+            input: {},
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('preserves object tool input when a nested command field is malformed', async () => {
+    const adapter = createAiSdkModelAdapter();
+
+    const events = await collectEvents(
+      adapter.stream(
+        createRequest([
+          {
+            type: 'tool-call',
+            toolCallId: 'call_nested_malformed_input',
+            toolName: 'command_run',
+            input: {
+              commands: JSON.stringify([
+                { step: 1, command: 'bash', body: 'printf ok' },
+              ]),
+            },
+          },
+          {
+            type: 'finish',
+            finishReason: { unified: 'tool-calls', raw: 'tool-calls' },
+            usage: emptyUsage(),
+          },
+        ]),
+      ),
+    );
+
+    const final = events.at(-1);
+    if (final?.type !== 'final') {
+      throw new Error('expected final event');
+    }
+    expect(final.response.toolCalls).toEqual([
+      {
+        id: 'call_nested_malformed_input',
+        name: 'command_run',
+        input: {
+          commands: JSON.stringify([
+            { step: 1, command: 'bash', body: 'printf ok' },
+          ]),
+        },
+      },
+    ]);
+    expect(final.response.newMessages[0]).toEqual({
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool-call',
+          toolCallId: 'call_nested_malformed_input',
+          toolName: 'command_run',
+          input: {
+            commands: JSON.stringify([
+              { step: 1, command: 'bash', body: 'printf ok' },
+            ]),
+          },
+        },
+      ],
+    });
   });
 
   it('keeps normal text streaming incremental', async () => {
@@ -130,6 +314,95 @@ describe('AI SDK model adapter', () => {
       { type: 'reasoning-delta', text: 'checking context' },
       { type: 'text-delta', text: 'done' },
       { type: 'final' },
+    ]);
+  });
+
+  it('recovers orphan provider reasoning parts before AI SDK aggregation', async () => {
+    const adapter = createAiSdkModelAdapter();
+    const events = await collectEvents(
+      adapter.stream(
+        createRequest([
+          {
+            type: 'reasoning-delta',
+            id: 'item_orphan:0',
+            delta: 'checking context',
+          },
+          { type: 'reasoning-end', id: 'item_orphan:0' },
+          { type: 'text-start', id: 'text_1' },
+          { type: 'text-delta', id: 'text_1', delta: 'done' },
+          { type: 'text-end', id: 'text_1' },
+          {
+            type: 'finish',
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: emptyUsage(),
+          },
+        ]),
+      ),
+    );
+
+    expect(events).toMatchObject([
+      { type: 'stream-start' },
+      { type: 'reasoning-delta', text: 'checking context' },
+      { type: 'text-delta', text: 'done' },
+      {
+        type: 'final',
+        response: {
+          text: 'done',
+          newMessages: [
+            {
+              role: 'assistant',
+              content: [
+                { type: 'reasoning', text: 'checking context' },
+                { type: 'text', text: 'done' },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it('does not duplicate reasoning when a delayed start arrives after its delta', async () => {
+    const adapter = createAiSdkModelAdapter();
+    const events = await collectEvents(
+      adapter.stream(
+        createRequest([
+          {
+            type: 'reasoning-delta',
+            id: 'item_delayed:0',
+            delta: 'first',
+          },
+          { type: 'reasoning-start', id: 'item_delayed:0' },
+          {
+            type: 'reasoning-delta',
+            id: 'item_delayed:0',
+            delta: ' second',
+          },
+          { type: 'reasoning-end', id: 'item_delayed:0' },
+          { type: 'text-start', id: 'text_1' },
+          { type: 'text-delta', id: 'text_1', delta: 'done' },
+          { type: 'text-end', id: 'text_1' },
+          {
+            type: 'finish',
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: emptyUsage(),
+          },
+        ]),
+      ),
+    );
+
+    const final = events.at(-1);
+    if (final?.type !== 'final') {
+      throw new Error('expected final event');
+    }
+    expect(final.response.newMessages).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'first second' },
+          { type: 'text', text: 'done' },
+        ],
+      },
     ]);
   });
 
@@ -200,7 +473,10 @@ describe('AI SDK model adapter', () => {
   });
 });
 
-function createRequest(chunks: unknown[]): AgentModelRequest {
+function createRequest(
+  chunks: unknown[],
+  tools: AgentModelRequest['tools'] = {},
+): AgentModelRequest {
   return {
     runId: 'run_1',
     model: new MockLanguageModelV4({
@@ -209,7 +485,7 @@ function createRequest(chunks: unknown[]): AgentModelRequest {
       }),
     }),
     messages: [{ role: 'user', content: 'hi' }],
-    tools: {},
+    tools,
     modelSettings: {},
   };
 }

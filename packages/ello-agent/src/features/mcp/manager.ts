@@ -16,18 +16,17 @@ import type { JsonSchemaType } from '@modelcontextprotocol/sdk/validation';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { z } from 'zod';
 
-import type {
-  AgentToolCapabilities,
-  AgentToolInputJsonSchema,
-} from '../agent/engine/index.js';
-import type { CodingAgentConfig } from '../config/index.js';
 import {
-  createCodingToolResult,
-  defineCodingTool,
-  type AnyCodingTool,
-  type CodingToolContext,
-  type ToolAttachment,
-} from '../tool/index.js';
+  commandInput,
+  defineCommand,
+  immediate,
+  structuredInput,
+  type CommandCapabilities,
+  type CommandContext,
+  type CommandDefinition,
+} from '../command/index.js';
+import type { CodingAgentConfig } from '../config/index.js';
+import { createCommandResult, type CommandAttachment } from '../tool/index.js';
 
 import {
   loadMcpConfig,
@@ -57,7 +56,7 @@ interface McpRuntime {
 
 interface RenderedMcpContent {
   readonly output: string;
-  readonly attachments: readonly ToolAttachment[];
+  readonly attachments: readonly CommandAttachment[];
   readonly contentTypes: readonly string[];
 }
 
@@ -67,10 +66,10 @@ export class McpManager {
   private readonly schemaValidator = new AjvJsonSchemaValidator();
   private closed = false;
 
-  /** 加载配置中的 MCP 工具和资源工具。 */
-  async toolsForConfig(
+  /** 加载配置中的 MCP structured Command 与资源 Command。 */
+  async commandsForConfig(
     config: Pick<CodingAgentConfig, 'cwd' | 'mcp_config_path'>,
-  ): Promise<readonly AnyCodingTool[]> {
+  ): Promise<readonly CommandDefinition[]> {
     if (this.closed) {
       throw new Error('MCP manager is closed.');
     }
@@ -89,7 +88,7 @@ export class McpManager {
       }
       throw error;
     }
-    return this.createTools(runtime);
+    return this.createCommands(runtime);
   }
 
   /** 关闭已建立的 MCP 连接及其 stdio 子进程。 */
@@ -190,8 +189,8 @@ export class McpManager {
     }
   }
 
-  private createTools(runtime: McpRuntime): readonly AnyCodingTool[] {
-    const tools: AnyCodingTool[] = [];
+  private createCommands(runtime: McpRuntime): readonly CommandDefinition[] {
+    const commands: CommandDefinition[] = [];
     const names = new Map<string, string>();
     for (const connection of runtime.connections) {
       for (const remote of connection.tools) {
@@ -201,7 +200,9 @@ export class McpManager {
           exposedName,
           `${connection.serverName}/${remote.name}`,
         );
-        tools.push(this.createRemoteTool(connection, remote, exposedName));
+        commands.push(
+          this.createRemoteCommand(connection, remote, exposedName),
+        );
       }
       if (connection.client.getServerCapabilities()?.resources !== undefined) {
         const listName = exposedToolName(
@@ -222,76 +223,82 @@ export class McpManager {
           readName,
           `${connection.serverName}/read_resource`,
         );
-        tools.push(
-          createResourceListTool(connection, listName),
-          createResourceReadTool(connection, readName),
+        commands.push(
+          createResourceListCommand(connection, listName),
+          createResourceReadCommand(connection, readName),
         );
       }
     }
-    return tools;
+    return commands;
   }
 
-  private createRemoteTool(
+  private createRemoteCommand(
     connection: McpConnection,
     remote: ListedMcpTool,
     exposedName: string,
-  ): AnyCodingTool {
+  ): CommandDefinition {
+    const input = z.record(z.string(), z.unknown());
     const validate = this.schemaValidator.getValidator<Record<string, unknown>>(
       remote.inputSchema as unknown as JsonSchemaType,
     );
     const initialCapabilities = mcpCapabilities(connection, remote);
-    return defineCodingTool({
+    return defineCommand({
       name: exposedName,
-      description: remote.description?.trim()
+      summary: remote.description?.trim()
         ? `[MCP ${connection.serverName}] ${remote.description.trim()}`
         : `Call MCP tool '${remote.name}' on server '${connection.serverName}'.`,
-      discovery: {
-        aliases: [`${connection.serverName} ${remote.name}`],
-        risk: initialCapabilities.readOnly ? 'readonly' : 'external',
-      },
-      input: z.record(z.string(), z.unknown()),
-      inputJsonSchema:
-        remote.inputSchema as unknown as AgentToolInputJsonSchema,
-      capabilities: () => mcpCapabilities(connection, remote),
-      validateInput: (input) => {
-        const result = validate(input);
+      aliases: [`${connection.serverName} ${remote.name}`],
+      risk: initialCapabilities.readOnly ? 'readonly' : 'external',
+      exposure: 'discoverable',
+      invocation: structuredInput({
+        schema: input,
+        jsonSchema: remote.inputSchema as Readonly<Record<string, unknown>>,
+      }),
+      effects: () => mcpCapabilities(connection, remote),
+      validate: (argumentsValue) => {
+        const result = validate(argumentsValue);
         if (!result.valid) {
           throw new Error(
             `Invalid arguments for MCP tool '${remote.name}': ${result.errorMessage}`,
           );
         }
       },
-      execute: async (input, ctx) => {
-        assertConnectionActive(connection);
-        const result = await connection.client.callTool(
-          { name: remote.name, arguments: input },
-          undefined,
-          requestOptions(connection.config.timeout_ms, ctx),
-        );
-        const rendered = renderToolResult(result);
-        if (rendered.isError) {
-          throw new Error(
-            `MCP tool '${connection.serverName}/${remote.name}' failed: ${rendered.content.output}`,
+      execution: immediate(
+        async (
+          argumentsValue: Record<string, unknown>,
+          context: CommandContext,
+        ) => {
+          assertConnectionActive(connection);
+          const result = await connection.client.callTool(
+            { name: remote.name, arguments: argumentsValue },
+            undefined,
+            requestOptions(connection.config.timeout_ms, context),
           );
-        }
-        return createCodingToolResult({
-          title: `${connection.serverName}/${remote.name}`,
-          output: rendered.content.output,
-          metadata: {
-            kind: 'network',
-            summary: `MCP ${connection.serverName}/${remote.name}`,
-            url: connection.origin,
-            domain: connection.serverName,
-            server: connection.serverName,
-            remoteTool: remote.name,
-            contentTypes: rendered.content.contentTypes,
-            structured: rendered.structured,
-          },
-          ...(rendered.content.attachments.length === 0
-            ? {}
-            : { attachments: rendered.content.attachments }),
-        });
-      },
+          const rendered = renderToolResult(result);
+          if (rendered.isError) {
+            throw new Error(
+              `MCP tool '${connection.serverName}/${remote.name}' failed: ${rendered.content.output}`,
+            );
+          }
+          return createCommandResult({
+            title: `${connection.serverName}/${remote.name}`,
+            output: rendered.content.output,
+            metadata: {
+              kind: 'network',
+              summary: `MCP ${connection.serverName}/${remote.name}`,
+              url: connection.origin,
+              domain: connection.serverName,
+              server: connection.serverName,
+              remoteTool: remote.name,
+              contentTypes: rendered.content.contentTypes,
+              structured: rendered.structured,
+            },
+            ...(rendered.content.attachments.length === 0
+              ? {}
+              : { attachments: rendered.content.attachments }),
+          });
+        },
+      ),
     });
   }
 }
@@ -320,26 +327,26 @@ async function listAllTools(
   return tools;
 }
 
-function createResourceListTool(
+function createResourceListCommand(
   connection: McpConnection,
   name: string,
-): AnyCodingTool {
-  return defineCodingTool({
+): CommandDefinition {
+  const input = z.object({ cursor: z.string().min(1).optional() }).strict();
+  return defineCommand({
     name,
-    description: `List resources exposed by MCP server '${connection.serverName}'.`,
-    discovery: {
-      aliases: [`${connection.serverName} resources list`],
-      risk: 'readonly',
-    },
-    input: z.object({ cursor: z.string().min(1).optional() }).strict(),
-    capabilities: () => resourceCapabilities(connection, 'resources.list'),
-    execute: async ({ cursor }, ctx) => {
+    summary: `List resources exposed by MCP server '${connection.serverName}'.`,
+    aliases: [`${connection.serverName} resources list`],
+    risk: 'readonly',
+    exposure: 'discoverable',
+    invocation: structuredInput(commandInput(input)),
+    effects: () => resourceCapabilities(connection, 'resources.list'),
+    execution: immediate(async ({ cursor }: z.infer<typeof input>, context) => {
       assertConnectionActive(connection);
       const result = await connection.client.listResources(
         cursor === undefined ? undefined : { cursor },
-        requestOptions(connection.config.timeout_ms, ctx),
+        requestOptions(connection.config.timeout_ms, context),
       );
-      return createCodingToolResult({
+      return createCommandResult({
         title: `${connection.serverName} resources`,
         output: formatJson({
           resources: result.resources,
@@ -357,31 +364,31 @@ function createResourceListTool(
           truncated: result.nextCursor !== undefined,
         },
       });
-    },
+    }),
   });
 }
 
-function createResourceReadTool(
+function createResourceReadCommand(
   connection: McpConnection,
   name: string,
-): AnyCodingTool {
-  return defineCodingTool({
+): CommandDefinition {
+  const input = z.object({ uri: z.string().min(1) }).strict();
+  return defineCommand({
     name,
-    description: `Read one resource by URI from MCP server '${connection.serverName}'.`,
-    discovery: {
-      aliases: [`${connection.serverName} resource read`],
-      risk: 'readonly',
-    },
-    input: z.object({ uri: z.string().min(1) }).strict(),
-    capabilities: () => resourceCapabilities(connection, 'resources.read'),
-    execute: async ({ uri }, ctx) => {
+    summary: `Read one resource by URI from MCP server '${connection.serverName}'.`,
+    aliases: [`${connection.serverName} resource read`],
+    risk: 'readonly',
+    exposure: 'discoverable',
+    invocation: structuredInput(commandInput(input)),
+    effects: () => resourceCapabilities(connection, 'resources.read'),
+    execution: immediate(async ({ uri }: z.infer<typeof input>, context) => {
       assertConnectionActive(connection);
       const result = await connection.client.readResource(
         { uri },
-        requestOptions(connection.config.timeout_ms, ctx),
+        requestOptions(connection.config.timeout_ms, context),
       );
       const rendered = renderResourceResult(result);
-      return createCodingToolResult({
+      return createCommandResult({
         title: `${connection.serverName} ${uri}`,
         output: rendered.output,
         metadata: {
@@ -397,14 +404,14 @@ function createResourceReadTool(
           ? {}
           : { attachments: rendered.attachments }),
       });
-    },
+    }),
   });
 }
 
 function mcpCapabilities(
   connection: McpConnection,
   tool: ListedMcpTool,
-): AgentToolCapabilities {
+): CommandCapabilities {
   const readOnly = tool.annotations?.readOnlyHint === true;
   const destructive = readOnly
     ? tool.annotations?.destructiveHint === true
@@ -423,7 +430,7 @@ function mcpCapabilities(
 function resourceCapabilities(
   connection: McpConnection,
   telemetryTag: string,
-): AgentToolCapabilities {
+): CommandCapabilities {
   return {
     logicalName: exposedToolName(
       connection.serverName,
@@ -470,11 +477,11 @@ function registerExposedName(
 
 function requestOptions(
   timeout: number,
-  ctx: CodingToolContext,
+  context: CommandContext,
 ): { readonly timeout: number; readonly signal?: AbortSignal } {
   return {
     timeout,
-    ...(ctx.abortSignal === undefined ? {} : { signal: ctx.abortSignal }),
+    signal: context.signal,
   };
 }
 
@@ -528,7 +535,7 @@ function renderResourceResult(result: McpResourceResult): RenderedMcpContent {
 
 function renderContent(content: readonly unknown[]): RenderedMcpContent {
   const output: string[] = [];
-  const attachments: ToolAttachment[] = [];
+  const attachments: CommandAttachment[] = [];
   const contentTypes: string[] = [];
   for (const item of content) {
     const parsed = McpContentSchema.parse(item);

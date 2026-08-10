@@ -11,31 +11,31 @@ import {
   type FeatureHandlerMap,
 } from '../../server/rpc/route.js';
 import type { RpcRouteFragment } from '../../server/rpc/route.js';
+import type { CommandDefinition } from '../command/index.js';
 import {
   loadCodingAgentConfig,
   type CodingAgentConfig,
 } from '../config/index.js';
 import type { TaskBoardStore } from '../task/index.js';
 
-import { createProductionToolRuntime } from './internal/production.js';
-import type { AnyCodingTool } from './internal/runtime/coding-tool.js';
+import { createProductionCommandRuntime } from './internal/production.js';
 
 /** 根据 Agent 配置加载需要加入工具目录的扩展工具。 */
-export type LoadAdditionalTools = (
+export type LoadAdditionalCommands = (
   config: CodingAgentConfig,
-) => Promise<readonly AnyCodingTool[]>;
+) => Promise<readonly CommandDefinition[]>;
 
 interface ToolContext {
   readonly taskBoards: TaskBoardStore;
-  readonly loadAdditionalTools: LoadAdditionalTools;
+  readonly loadAdditionalCommands: LoadAdditionalCommands;
 }
 
 /** tool catalog 使用真实 production runtime，避免展示与执行权限配置漂移。 */
 const toolHandlers = {
   'tool/list': async (context, params) => {
     const config = await loadCodingAgentConfig({ cwd: params.cwd });
-    const additionalTools = await context.loadAdditionalTools(config);
-    const runtime = createProductionToolRuntime({
+    const additionalCommands = await context.loadAdditionalCommands(config);
+    const runtime = createProductionCommandRuntime({
       config,
       taskBoards: context.taskBoards,
       taskBoardScope: {
@@ -48,18 +48,20 @@ const toolHandlers = {
         source: 'config',
         changedAt: new Date().toISOString(),
       }),
-      ...(additionalTools.length === 0 ? {} : { additionalTools }),
+      ...(additionalCommands.length === 0 ? {} : { additionalCommands }),
     });
     return {
-      data: runtime.tools.map((tool) => ({
-        id: tool.name,
-        name: tool.name,
-        description: tool.description,
+      data: runtime.module.commands.map((command) => ({
+        id: command.name,
+        name: command.name,
+        description: [command.summary, command.details]
+          .filter((value): value is string => value !== undefined)
+          .join(' '),
         enabled: true,
         metadata: {
-          execution: tool.execution,
-          risk: tool.discovery.risk,
-          aliases: [...tool.discovery.aliases],
+          execution: command.execution.kind,
+          risk: command.risk,
+          aliases: [...command.aliases],
         },
       })),
     };
@@ -71,7 +73,7 @@ const toolHandlers = {
  *
  * Args:
  * - `taskBoards`: `createToolRoutes` 所需的业务值；函数按声明读取，不补造缺失内容。
- * - `loadAdditionalTools`: 根据 Agent 配置加载扩展工具；默认返回空数组。
+ * - `loadAdditionalCommands`: 根据 Agent 配置加载扩展 Command；默认返回空数组。
  *
  * Returns:
  * - 返回 `createToolRoutes` 计算出的声明结果；返回值不包含未声明的兜底状态。
@@ -81,12 +83,12 @@ const toolHandlers = {
  */
 export function createToolRoutes(
   taskBoards: TaskBoardStore,
-  loadAdditionalTools: LoadAdditionalTools = () => Promise.resolve([]),
+  loadAdditionalCommands: LoadAdditionalCommands = () => Promise.resolve([]),
 ): RpcRouteFragment<'tool/list'> {
   return {
     'tool/list': bindFeatureRoute(
       toolHandlers,
-      () => ({ taskBoards, loadAdditionalTools }),
+      () => ({ taskBoards, loadAdditionalCommands }),
       'tool/list',
     ),
   };

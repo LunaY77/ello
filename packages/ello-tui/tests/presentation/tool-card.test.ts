@@ -308,4 +308,33 @@ describe('buildToolCardModel', () => {
       'Path not allowed: /workspace/packages',
     ]);
   });
+
+  it('reports invalid legacy file changes without throwing from presentation', () => {
+    const model = buildToolCardModel(
+      call({
+        name: 'apply_patch',
+        output: {
+          metadata: {
+            kind: 'edit',
+            path: 'tool-test.txt',
+            fileChanges: [
+              {
+                kind: 'modified',
+                path: 'tool-test.txt',
+                unifiedDiff: '@@ -1 +1 @@\n-old\n+new',
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    expect(model.diff).toBeUndefined();
+    expect(model.outputPreview).toEqual([
+      'Invalid file change metadata; diff unavailable.',
+    ]);
+    expect(model.presentationError).toBe(
+      'Invalid file change metadata; diff unavailable.',
+    );
+  });
 });

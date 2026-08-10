@@ -21,9 +21,11 @@ import { createCodingSystemPromptSection } from '../../src/features/agent/contex
 import type {
   AgentInput,
   AgentRunContext,
-  AgentToolContext,
-  AnyAgentTool,
 } from '../../src/features/agent/engine/index.js';
+import type {
+  CommandContext,
+  CommandDefinition,
+} from '../../src/features/command/index.js';
 import { CodingAgentConfigSchema } from '../../src/features/config/schema.js';
 import {
   createMemoryFeature,
@@ -32,7 +34,7 @@ import {
   MemoryIndexLoader,
   type MemoryStore,
 } from '../../src/features/memory/index.js';
-import { createProductionToolRuntime } from '../../src/features/tool/internal/production.js';
+import { createProductionCommandRuntime } from '../../src/features/tool/internal/production.js';
 import { createTestEnvironmentHandle } from '../support/environment.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 import { createTestStores } from '../support/stores.js';
@@ -419,7 +421,7 @@ describe('Memory 生产装配契约', () => {
           },
         },
       });
-      const toolRuntime = createProductionToolRuntime({
+      const toolRuntime = createProductionCommandRuntime({
         config,
         taskBoards: storage.taskBoards,
         taskBoardScope: { type: 'session', sessionId: 'memory-runtime' },
@@ -435,7 +437,7 @@ describe('Memory 生产装配契约', () => {
         throw new Error('Memory runtime must be enabled by the test config.');
       }
       await memory.initialize();
-      expect(memory.tools.map((tool) => tool.name)).toEqual(
+      expect(memory.module.commands.map((tool) => tool.name)).toEqual(
         expect.arrayContaining([
           'memory_list',
           'memory_read',
@@ -444,19 +446,20 @@ describe('Memory 生产装配契约', () => {
           'memory_search',
         ]),
       );
-      expect(memory.tools.every((tool) => tool.discovery.core === true)).toBe(
-        true,
-      );
+      expect(
+        memory.module.commands.every(
+          (command) => command.exposure === 'inline',
+        ),
+      ).toBe(true);
       expect(
         (await memory.indexLoader.load()).sources[0]?.content,
       ).not.toContain('Runtime preference');
 
-      const write = immediateTool(memory.tools, 'memory_write');
+      const write = immediateTool(memory.module.commands, 'memory_write');
       await write.execute(
         {
           scope: 'private',
           file: 'runtime-preference.md',
-          expectedRevision: null,
           content: topic({
             name: 'Runtime preference',
             description: 'Production memory wiring',
@@ -492,7 +495,7 @@ describe('Memory 生产装配契约', () => {
           },
         },
       });
-      const toolRuntime = createProductionToolRuntime({
+      const toolRuntime = createProductionCommandRuntime({
         config,
         taskBoards: storage.taskBoards,
         taskBoardScope: { type: 'session', sessionId: 'memory-plan' },
@@ -507,13 +510,12 @@ describe('Memory 生产装配契约', () => {
       if (!memory.enabled) {
         throw new Error('Memory runtime must be enabled by the test config.');
       }
-      const write = immediateTool(memory.tools, 'memory_write');
+      const write = immediateTool(memory.module.commands, 'memory_write');
       expect(
         write.approval?.(
           {
             scope: 'team',
             file: 'blocked.md',
-            expectedRevision: null,
             content: topic({
               name: 'Blocked',
               description: 'Must not write in Plan mode',
@@ -571,10 +573,10 @@ describe('Memory 生产装配契约', () => {
   });
 });
 
-const TOOL_CONTEXT: AgentToolContext = {
+const TOOL_CONTEXT: CommandContext = {
   runId: 'run-memory',
   turnIndex: 0,
-  toolCallId: 'call-memory',
+  commandId: 'call-memory',
   environment: createTestEnvironmentHandle(),
   metadata: {},
   signal: new AbortController().signal,
@@ -599,10 +601,29 @@ function modelConfig() {
   };
 }
 
-function immediateTool(tools: ReadonlyArray<AnyAgentTool>, name: string) {
-  const tool = tools.find((candidate) => candidate.name === name);
-  if (tool === undefined || tool.execution !== 'immediate') {
-    throw new Error(`Missing immediate tool ${name}.`);
+function immediateTool(
+  commands: ReadonlyArray<CommandDefinition>,
+  name: string,
+) {
+  const command = commands.find((candidate) => candidate.name === name);
+  if (command === undefined || command.execution.kind !== 'immediate') {
+    throw new Error(`Missing immediate Command ${name}.`);
   }
-  return tool;
+  return {
+    approval:
+      command.approval === undefined
+        ? undefined
+        : (input: unknown, context: CommandContext) =>
+            command.approval?.(
+              command.invocation.input.schema.parse(input),
+              context,
+            ),
+    execute: (input: unknown, context: CommandContext) =>
+      command.execution.kind === 'immediate'
+        ? command.execution.run(
+            command.invocation.input.schema.parse(input),
+            context,
+          )
+        : undefined,
+  };
 }

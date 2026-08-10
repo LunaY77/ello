@@ -53,16 +53,12 @@ title_generation: false
 # MCP 配置文件路径；默认使用 ~/.ello/mcp.json。
 # mcp_config_path: ~/.ello/mcp.json
 
-# system prompt 配置名；默认 coding。
-# system_prompt_profile: coding
-
 # context pipeline 配置。
 # 运行期信息会作为可观测 source 注入 system，而不是拼在 base prompt 尾部。
 # context:
 #   max_input_tokens: 1000000
-#   reserved_output_tokens: 64000
 #   show_sources_in_tui: true
-#   system_prompt_profile: coding
+#   prompt_mode: rapid
 #   instructions:
 #     global:
 #       - ~/.ello/ELLO.md
@@ -78,7 +74,7 @@ title_generation: false
 #     auto: true
 #     tail_turns: 2
 #     preserve_recent_tokens: 20000
-#     reserved_tokens: 16384
+#     threshold_percent: 90
 #     prune_tool_output: false
 #     tool_output_max_chars: 2000
 #   memory:
@@ -112,16 +108,15 @@ title_generation: false
 #     release: ello-ts-local
 #     content: metadata # metadata 或 full
 
-# 工具配置。disabled 表示完全不注册；need_approval 在 Default/Accept edits 下要求审批，
+# Command 配置。disabled 表示完全不注册；need_approval 在 Default/Accept edits 下要求审批，
 # 但 Accept edits 会自动放行 edit 类工具，Bypass 会跳过全部审批。
-# routing_enabled=true 且存在非 core 工具时，core 工具直连，非 core 工具通过
-# tool_search/call_tool 路由；没有非 core 工具时不会注册这两个工具。
-# tools:
+# 模型只看见 command_run；非核心能力始终通过内部 command_search/command_invoke Command
+# 发现和调用。search 控制目录查询的结果数量与字节上限。
+# commands:
 #   disabled: []
 #   need_approval:
 #     - bash
 #     - web_fetch
-#   routing_enabled: false
 #   search:
 #     result_limit: 6
 #     max_result_bytes: 24000

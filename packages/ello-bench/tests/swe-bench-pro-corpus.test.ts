@@ -5,9 +5,25 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  applySweBenchProRunScriptCorrections,
   loadSweBenchProRows,
   loadSweBenchProTask,
 } from '../src/infra/corpus/swe-bench-pro.js';
+
+const PROTON_DRIVE_INSTANCE =
+  'instance_protonmail__webclients-6f8916fbadf1d1f4a26640f53b5cf7f55e8bedb7';
+
+const MISROUTED_PROTON_SCRIPT = `      file_path=$(echo "$test_path" | cut -d'|' -f1 | xargs)
+      test_name=$(echo "$test_path" | cut -d'|' -f2- | xargs)
+      if [[ "$file_path" == src/app/* ]] || [[ "$file_path" == *mail* ]]; then
+        echo "Running test in proton-mail workspace: $file_path | $test_name"
+        yarn workspace proton-mail test --runInBand --ci --testPathPattern="$file_path" --testNamePattern="$test_name" --verbose
+fi
+      if [[ "$test_path" == src/app/* ]] || [[ "$test_path" == *mail* ]]; then
+        echo "Running test file in proton-mail workspace: $test_path"
+        yarn workspace proton-mail test --runInBand --ci --testPathPattern="$test_path" --verbose
+fi
+`;
 
 describe('SWE-bench Pro corpus', () => {
   it('resolves the pinned JSONL, workspace setup, scripts, and test contract', async () => {
@@ -82,10 +98,48 @@ describe('SWE-bench Pro corpus', () => {
       ['checkout', testCommit, '--', 'internal/cache/cache_test.go'],
     ]);
     expect(loaded.workspacePatch).toBe(row.test_patch);
+    expect(loaded.runScript).toBe('go test ./...\n');
     expect(loaded.testSpec).toEqual({
       selectedTests: ['TestCache'],
       failToPass: ['TestCache'],
       passToPass: [],
     });
+  });
+
+  it('corrects Proton Drive routing and quote-safe test-name trimming', () => {
+    const corrected = applySweBenchProRunScriptCorrections(
+      PROTON_DRIVE_INSTANCE,
+      MISROUTED_PROTON_SCRIPT,
+    );
+
+    expect(corrected).toContain(
+      'if [[ "$file_path" == src/app/* ]]; then\n' +
+        '        echo "Running test in proton-drive workspace: $file_path | $test_name"\n' +
+        '        yarn workspace proton-drive test',
+    );
+    expect(corrected).toContain(
+      'if [[ "$test_path" == src/app/* ]]; then\n' +
+        '        echo "Running test file in proton-drive workspace: $test_path"\n' +
+        '        yarn workspace proton-drive test',
+    );
+    expect(corrected).not.toContain(
+      'src/app/* ]] || [[ "$file_path" == *mail*',
+    );
+    expect(corrected).not.toContain(
+      'src/app/* ]] || [[ "$test_path" == *mail*',
+    );
+    expect(corrected).not.toContain('| xargs');
+    expect(corrected).toContain(
+      `test_name=$(echo "$test_path" | cut -d'|' -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')`,
+    );
+  });
+
+  it('fails closed when the corrected upstream script drifts', () => {
+    expect(() =>
+      applySweBenchProRunScriptCorrections(
+        PROTON_DRIVE_INSTANCE,
+        '#!/bin/bash\n',
+      ),
+    ).toThrow(/corpus correction drifted/u);
   });
 });

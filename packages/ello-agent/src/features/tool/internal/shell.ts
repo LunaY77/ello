@@ -6,14 +6,12 @@
  */
 import { z } from 'zod';
 
+import { cliInput, commandInput, defineCommand } from '../../command/index.js';
 import type { CodingAgentConfig } from '../../config/index.js';
 import type { DecideApproval } from '../permissions/policy.js';
 import type { PermissionMetadata } from '../permissions/types.js';
 
-import {
-  createCodingToolResult,
-  defineCodingTool,
-} from './runtime/coding-tool.js';
+import { createCommandResult } from './runtime/command-result.js';
 import { processOutputText, requireProcesses } from './shared.js';
 
 /**
@@ -32,22 +30,38 @@ import { processOutputText, requireProcesses } from './shared.js';
  * Throws:
  * - 当 工具 `shell` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
-export function createShellTools(
+export function createShellCommands(
   config: CodingAgentConfig,
   decide: DecideApproval,
 ) {
+  const bashInput = z
+    .object({
+      command: z.string().min(1).describe('Shell program to execute'),
+      timeoutMs: z
+        .number()
+        .int()
+        .min(1000)
+        .max(120_000)
+        .default(30_000)
+        .describe('Timeout in milliseconds'),
+      cwd: z.string().optional().describe('Working directory for the command'),
+      reason: z.string().optional().describe('Reason for running this command'),
+    })
+    .strict();
   return [
-    defineCodingTool({
+    defineCommand({
       name: 'bash',
-      description: `Run one shell command in the workspace and return its stdout followed by its stderr under a 'stderr:' heading.
-'timeoutMs' defaults to 30000 and cannot exceed 120000; on timeout the process is killed and whatever it had already written is still returned, so a killed test run is reported as a timeout rather than as a failure. A nonzero exit is a normal result, not a tool error: read the output to decide what to do.
-Long output is centrally reduced to a bounded head/tail preview while the complete result is retained as an artifact, because test runners print their failure summary last. When output is reduced, narrow the command instead of rerunning it unchanged: name a single test file, choose a terser reporter, or pipe through 'tail'.
-Use bash for builds, tests, lint, typecheck, code generation, and git inspection. Prefer read, grep, and glob over 'cat', 'grep', and 'find' so results come back structured, and prefer edit or apply_patch over 'sed -i' and shell redirection so file changes are reported.`,
-      discovery: {
-        aliases: ['shell', 'terminal', 'command'],
-        risk: 'external',
-      },
-      capabilities: ({ command }) => {
+      summary: 'Run a shell program in the Environment.',
+      details: `Returns the exit code, then stdout, then stderr under a 'stderr:' heading. A nonzero exit marks the Command failed and still returns its output. On timeout the process is killed and its output so far is returned.`,
+      examples: [
+        {
+          description: 'Run a shell program',
+          frame: { body: 'date' },
+        },
+      ],
+      aliases: ['shell', 'terminal', 'command'],
+      risk: 'external',
+      effects: ({ command }) => {
         const readOnly = isClearlyReadOnlyCommand(command);
         return {
           concurrencySafe: readOnly,
@@ -57,26 +71,10 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
           telemetryTag: readOnly ? 'shell.read' : 'shell.command',
         };
       },
-      input: z
-        .object({
-          command: z.string().min(1).describe('Shell command to execute'),
-          timeoutMs: z
-            .number()
-            .int()
-            .min(1000)
-            .max(120_000)
-            .default(30_000)
-            .describe('Timeout in milliseconds'),
-          cwd: z
-            .string()
-            .optional()
-            .describe('Working directory for the command'),
-          reason: z
-            .string()
-            .optional()
-            .describe('Reason for running this command'),
-        })
-        .strict(),
+      invocation: cliInput(commandInput(bashInput), {
+        options: ['timeoutMs', 'cwd', 'reason'],
+        body: 'command',
+      }),
       approval: async (input, ctx) =>
         decide(
           {
@@ -86,122 +84,44 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
             paths: [input.cwd ?? config.cwd],
             metadata: shellMetadata(input, config),
           },
-          ctx.agent,
+          ctx,
         ),
-      execute: async ({ command, timeoutMs, cwd }, ctx) => {
-        const workingDirectory = cwd ?? config.cwd;
-        const result = await requireProcesses(ctx.agent).exec({
-          command,
-          maxRuntimeMs: timeoutMs,
-          cwd: workingDirectory,
-          ...(ctx.abortSignal === undefined ? {} : { signal: ctx.abortSignal }),
-        });
-        const stdout = processOutputText(result.stdout, 'stdout');
-        const stderr = processOutputText(result.stderr, 'stderr');
-        const output = [stdout, stderr.length > 0 ? `stderr:\n${stderr}` : '']
-          .filter(Boolean)
-          .join('\n');
-        // 超时进程被终止，输出通常缺少测试 runner 的失败摘要；不给出收窄建议
-        // 时调用方倾向原样重跑，再次撞满同一超时。
-        const body = result.timedOut
-          ? `${timeoutNotice(timeoutMs)}\n${output}`
-          : output;
-        // 退出码必须进入模型可见文本：metadata 只流向 UI，模型看不到。
-        // 长输出由统一 adapter 处理；退出码行始终保留在模型可见首行。
-        return createCodingToolResult({
-          title: `bash ${command}`,
-          output: `${exitCodeLine(result.exitCode, result.signal)}\n${body}`,
-          metadata: {
-            kind: 'shell',
+      execution: {
+        kind: 'immediate',
+        run: async ({ command, timeoutMs, cwd }, ctx) => {
+          const workingDirectory = cwd ?? config.cwd;
+          const result = await requireProcesses(ctx).exec({
             command,
+            maxRuntimeMs: timeoutMs,
             cwd: workingDirectory,
-            exitCode: result.exitCode ?? -1,
-            durationMs: result.durationMs,
-            stdoutBytes: result.stdout.totalBytes,
-            stderrBytes: result.stderr.totalBytes,
-          },
-        });
-      },
-    }),
-    defineCodingTool({
-      name: 'test',
-      description:
-        'Run one verification command with an explicit phase and return a structured result. Use preflight before relying on an environment, baseline before edits when practical, targeted during implementation, new for newly added tests, and final for the broad acceptance check.',
-      discovery: {
-        aliases: ['verify', 'check tests'],
-        risk: 'external',
-      },
-      capabilities: () => ({
-        concurrencySafe: false,
-        readOnly: false,
-        destructive: false,
-        interruptible: true,
-        telemetryTag: 'test.command',
-      }),
-      input: z
-        .object({
-          phase: z.enum(['preflight', 'baseline', 'targeted', 'new', 'final']),
-          command: z.string().min(1),
-          timeoutMs: z.number().int().min(1000).max(120_000).default(30_000),
-          cwd: z.string().optional(),
-        })
-        .strict(),
-      approval: (input, ctx) =>
-        decide(
-          {
-            permission: 'bash',
-            patterns: [input.command],
-            always: [input.command],
-            paths: [input.cwd ?? config.cwd],
+            signal: ctx.signal,
+          });
+          const stdout = processOutputText(result.stdout, 'stdout');
+          const stderr = processOutputText(result.stderr, 'stderr');
+          const output = [stdout, stderr.length > 0 ? `stderr:\n${stderr}` : '']
+            .filter(Boolean)
+            .join('\n');
+          // 超时进程被终止，输出通常缺少测试 runner 的失败摘要；不给出收窄建议
+          // 时调用方倾向原样重跑，再次撞满同一超时。
+          const body = result.timedOut
+            ? `${timeoutNotice(timeoutMs)}\n${output}`
+            : output;
+          // 退出码必须进入模型可见文本：metadata 只流向 UI，模型看不到。
+          // 长输出由统一 adapter 处理；退出码行始终保留在模型可见首行。
+          return createCommandResult({
+            title: `bash ${command}`,
+            output: `${exitCodeLine(result.exitCode, result.signal)}\n${body}`,
             metadata: {
               kind: 'shell',
-              command: input.command,
-              cwd: input.cwd ?? config.cwd,
-              risk: 'normal',
+              command,
+              cwd: workingDirectory,
+              exitCode: result.exitCode ?? -1,
+              durationMs: result.durationMs,
+              stdoutBytes: result.stdout.totalBytes,
+              stderrBytes: result.stderr.totalBytes,
             },
-          },
-          ctx.agent,
-        ),
-      execute: async ({ phase, command, timeoutMs, cwd }, ctx) => {
-        const workingDirectory = cwd ?? config.cwd;
-        const result = await requireProcesses(ctx.agent).exec({
-          command,
-          maxRuntimeMs: timeoutMs,
-          cwd: workingDirectory,
-          ...(ctx.abortSignal === undefined ? {} : { signal: ctx.abortSignal }),
-        });
-        const stdout = processOutputText(result.stdout, 'stdout');
-        const stderr = processOutputText(result.stderr, 'stderr');
-        const output = [
-          JSON.stringify({
-            phase,
-            command,
-            cwd: workingDirectory,
-            exitCode: result.exitCode,
-            timedOut: result.timedOut,
-            signal: result.signal,
-            durationMs: result.durationMs,
-          }),
-          stdout,
-          stderr === '' ? '' : `stderr:\n${stderr}`,
-        ]
-          .filter(Boolean)
-          .join('\n');
-        return createCodingToolResult({
-          title: `${phase} verification`,
-          output,
-          metadata: {
-            kind: 'shell',
-            command,
-            cwd: workingDirectory,
-            phase,
-            exitCode: result.exitCode ?? -1,
-            timedOut: result.timedOut,
-            durationMs: result.durationMs,
-            stdoutBytes: result.stdout.totalBytes,
-            stderrBytes: result.stderr.totalBytes,
-          },
-        });
+          });
+        },
       },
     }),
   ];
@@ -220,7 +140,7 @@ Use bash for builds, tests, lint, typecheck, code generation, and git inspection
  * 生成退出码行。`-1` 表示进程被信号终止（超时），没有正常退出码。
  *
  * Args:
- * - `exitCode`: 被执行命令的真实退出码，已由 shell 层的 `pipefail` 保证不被管道吞掉。
+ * - `exitCode`: 被执行命令的真实退出码；管道命令遵循 Bash 的默认末项退出码语义。
  *
  * Returns:
  * - 返回置于输出首行的单行退出码描述。

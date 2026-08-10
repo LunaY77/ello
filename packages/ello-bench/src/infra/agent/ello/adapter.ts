@@ -39,9 +39,11 @@ import {
   writeNormalizedEvidence,
 } from '../evidence.js';
 
-import { findElloProviderRecoveryTarget } from './provider-recovery.js';
-
-const PROVIDER_RECOVERY_PROMPT = `The previous turn ended because the model provider connection failed after bounded retries. Continue the original task from the current thread and workspace. Inspect the existing progress, finish the implementation, run the relevant tests, and report the result. Do not restart from scratch.`;
+import {
+  buildElloProviderRecoveryInstruction,
+  findElloProviderRecoveryTarget,
+} from './provider-recovery.js';
+import { effectiveToolProvenance } from './tool-provenance.js';
 
 export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
   return {
@@ -133,6 +135,7 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
             stdoutPath,
             stderrPath,
             initialProcess,
+            originalInstruction: context.taskFiles.instruction,
           });
           const process = recovery?.process ?? initialProcess;
           const completedAt = new Date().toISOString();
@@ -208,6 +211,9 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
           if (firstRound === undefined)
             throw new Error('Ello observed model is missing.');
           const observedModel = firstRound.apiModel;
+          const effectiveTools = effectiveToolProvenance(
+            main.toolsetFingerprints,
+          );
           const primaryModel = agent.models[agent.primaryModel];
           if (primaryModel === undefined) {
             throw new Error(
@@ -221,18 +227,20 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
             observedModel,
             terminalStatus: execution.process.timedOut
               ? 'timed_out'
-              : main.providerFailure
+              : main.runFailureMessage !== null
                 ? 'failed'
                 : 'completed',
             providerFailure: main.providerFailure,
             parserCoverage: 'complete',
-            terminalStopReason: terminalStopReason(main.rounds),
+            terminalStopReason:
+              main.runFailureMessage ?? terminalStopReason(main.rounds),
             unknownFields: [],
             rawSource: await fileEvidence(captures.main.eventLogPath),
             rounds: await fileEvidence(roundsPath),
             roundCount: combinedRounds.length,
             usage: aggregateUsage(combinedRounds),
             tools: summarizeTools(combinedRounds),
+            effectiveTools,
             threads: [
               {
                 threadId: captures.main.threadId,
@@ -267,13 +275,16 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
             agentId: agent.id,
             displayName: agent.displayName,
             agentConfigHash: context.agentConfigHash,
-            adapterContractVersion: '1',
+            adapterContractVersion: '2',
             expectedModel: primaryModel.apiModel,
             observedModel,
             configSha256: sha256(stableJson(agent)),
             kind: agent.kind,
             primaryModel: agent.primaryModel,
             auxiliaryModel: agent.auxiliaryModel,
+            promptMode: agent.promptMode,
+            enabledTools: effectiveTools.enabled,
+            toolsetFingerprint: effectiveTools.toolsetFingerprint,
           });
           await writeJsonAtomic(
             path.join(context.rawAgentRoot, 'identity.json'),
@@ -292,9 +303,7 @@ export function createElloAdapter(agent: ElloAgentSpec): AgentAdapter {
             toolAudit: audit,
             toolAuditArtifact: artifacts.toolAuditArtifact,
             providerFailure: main.providerFailure,
-            providerFailureMessage: main.providerFailure
-              ? providerFailureMessage(main.rounds)
-              : null,
+            providerFailureMessage: main.providerFailureMessage,
           };
         },
       };
@@ -314,6 +323,7 @@ async function recoverProviderFailure(options: {
   readonly stdoutPath: string;
   readonly stderrPath: string;
   readonly initialProcess: import('../../../domain/contract/index.js').ProcessResult;
+  readonly originalInstruction: string;
 }): Promise<{
   readonly process: import('../../../domain/contract/index.js').ProcessResult;
 } | null> {
@@ -347,7 +357,9 @@ async function recoverProviderFailure(options: {
     endpoint: options.endpoint,
     workspace: options.workspace,
     elloHome: options.elloHome,
-    instruction: PROVIDER_RECOVERY_PROMPT,
+    instruction: buildElloProviderRecoveryInstruction(
+      options.originalInstruction,
+    ),
     threadId: target.threadId,
     timeoutMs: remainingTimeoutMs,
     stdoutPath: options.stdoutPath,
@@ -418,18 +430,6 @@ function requiredEnvironment(name: string): string {
     );
   }
   return value;
-}
-
-function providerFailureMessage(
-  rounds: readonly import('../../../domain/contract/index.js').BenchmarkRound[],
-): string | null {
-  const failed = rounds.filter((round) => round.status === 'failed');
-  if (failed.length === 0) return null;
-  const messages = failed.map((round) => round.error);
-  if (messages.some((message) => message === undefined)) {
-    throw new Error('Ello failed model round is missing its provider error.');
-  }
-  return `Ello provider error: ${messages.join(' | ')}`;
 }
 
 function validateElloRounds(

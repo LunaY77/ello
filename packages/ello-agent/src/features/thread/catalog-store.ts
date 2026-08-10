@@ -288,6 +288,7 @@ function applyCatalogRecord(
     case 'item.delta':
       applyItemDelta(database, record);
       break;
+    case 'item.updated':
     case 'item.completed':
       completeItem(database, record);
       break;
@@ -480,7 +481,7 @@ function applyItemDelta(
 
 function completeItem(
   database: CodingDatabase,
-  record: Extract<ThreadRecord, { kind: 'item.completed' }>,
+  record: Extract<ThreadRecord, { kind: 'item.updated' | 'item.completed' }>,
 ): void {
   if (record.item.turnId !== record.turnId) {
     throw new Error(

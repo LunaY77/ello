@@ -19,6 +19,33 @@ const AGENT_TIMEOUT_MS = 60 * 60_000;
 const VERIFIER_TIMEOUT_MS = 60 * 60_000;
 const BUILD_TIMEOUT_MS = 30 * 60_000;
 export const SWE_BENCH_PRO_DATASET_TASK_COUNT = 731;
+const PROTON_DRIVE_WORKSPACE_CORRECTION_INSTANCE =
+  'instance_protonmail__webclients-6f8916fbadf1d1f4a26640f53b5cf7f55e8bedb7';
+
+const PROTON_DRIVE_TEST_NAME_TRIM_ORIGINAL = `      file_path=$(echo "$test_path" | cut -d'|' -f1 | xargs)
+      test_name=$(echo "$test_path" | cut -d'|' -f2- | xargs)`;
+const PROTON_DRIVE_TEST_NAME_TRIM_CORRECTED = `      file_path=$(echo "$test_path" | cut -d'|' -f1 | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+      test_name=$(echo "$test_path" | cut -d'|' -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')`;
+
+const PROTON_DRIVE_NAMED_TEST_ORIGINAL = `      if [[ "$file_path" == src/app/* ]] || [[ "$file_path" == *mail* ]]; then
+        echo "Running test in proton-mail workspace: $file_path | $test_name"
+        yarn workspace proton-mail test --runInBand --ci --testPathPattern="$file_path" --testNamePattern="$test_name" --verbose`;
+const PROTON_DRIVE_NAMED_TEST_CORRECTED = `      if [[ "$file_path" == src/app/* ]]; then
+        echo "Running test in proton-drive workspace: $file_path | $test_name"
+        yarn workspace proton-drive test --runInBand --ci --testPathPattern="$file_path" --testNamePattern="$test_name" --verbose
+      elif [[ "$file_path" == *mail* ]]; then
+        echo "Running test in proton-mail workspace: $file_path | $test_name"
+        yarn workspace proton-mail test --runInBand --ci --testPathPattern="$file_path" --testNamePattern="$test_name" --verbose`;
+
+const PROTON_DRIVE_FILE_ORIGINAL = `      if [[ "$test_path" == src/app/* ]] || [[ "$test_path" == *mail* ]]; then
+        echo "Running test file in proton-mail workspace: $test_path"
+        yarn workspace proton-mail test --runInBand --ci --testPathPattern="$test_path" --verbose`;
+const PROTON_DRIVE_FILE_CORRECTED = `      if [[ "$test_path" == src/app/* ]]; then
+        echo "Running test file in proton-drive workspace: $test_path"
+        yarn workspace proton-drive test --runInBand --ci --testPathPattern="$test_path" --verbose
+      elif [[ "$test_path" == *mail* ]]; then
+        echo "Running test file in proton-mail workspace: $test_path"
+        yarn workspace proton-mail test --runInBand --ci --testPathPattern="$test_path" --verbose`;
 
 const SweBenchProRowSchema = z
   .object({
@@ -96,10 +123,14 @@ export async function loadSweBenchProTask(
     row.instance_id,
     'parser.py',
   );
-  const [runScript, parser] = await Promise.all([
+  const [upstreamRunScript, parser] = await Promise.all([
     readFile(runScriptPath, 'utf8'),
     readFile(parserPath, 'utf8'),
   ]);
+  const runScript = applySweBenchProRunScriptCorrections(
+    row.instance_id,
+    upstreamRunScript,
+  );
   const workspaceSetupCommands = parseWorkspaceSetup(
     row.before_repo_set_cmd,
     row.base_commit,
@@ -177,11 +208,59 @@ export async function loadSweBenchProTask(
     task,
     instruction,
     runScriptPath,
+    runScript,
     parserPath,
     workspaceSetupCommands,
     workspacePatch: row.test_patch,
     testSpec,
   };
+}
+
+export function applySweBenchProRunScriptCorrections(
+  instanceId: string,
+  runScript: string,
+): string {
+  if (instanceId !== PROTON_DRIVE_WORKSPACE_CORRECTION_INSTANCE) {
+    return runScript;
+  }
+  const correction = 'Proton Drive baseline script';
+  let corrected = replaceExactlyOnce(
+    runScript,
+    PROTON_DRIVE_TEST_NAME_TRIM_ORIGINAL,
+    PROTON_DRIVE_TEST_NAME_TRIM_CORRECTED,
+    correction,
+    instanceId,
+  );
+  corrected = replaceExactlyOnce(
+    corrected,
+    PROTON_DRIVE_NAMED_TEST_ORIGINAL,
+    PROTON_DRIVE_NAMED_TEST_CORRECTED,
+    correction,
+    instanceId,
+  );
+  return replaceExactlyOnce(
+    corrected,
+    PROTON_DRIVE_FILE_ORIGINAL,
+    PROTON_DRIVE_FILE_CORRECTED,
+    correction,
+    instanceId,
+  );
+}
+
+function replaceExactlyOnce(
+  source: string,
+  expected: string,
+  replacement: string,
+  correction: string,
+  instanceId: string,
+): string {
+  const first = source.indexOf(expected);
+  if (first < 0 || source.indexOf(expected, first + expected.length) !== -1) {
+    throw new Error(
+      `SWE-bench Pro corpus correction drifted for ${instanceId}: ${correction}.`,
+    );
+  }
+  return `${source.slice(0, first)}${replacement}${source.slice(first + expected.length)}`;
 }
 
 function decodeProblemStatement(value: string): string {

@@ -20,7 +20,10 @@ export {
   type MemoryStore,
   type MemoryTopicRecord,
 } from './internal/store.js';
-export { createMemoryTools, type MemoryToolPort } from './internal/tools.js';
+export {
+  createMemoryCommands,
+  type MemoryCommandPort,
+} from './internal/tools.js';
 export { createMemoryRunRuntime, type MemoryRunRuntime } from './runtime.js';
 
 /**

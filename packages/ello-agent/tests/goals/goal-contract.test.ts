@@ -6,10 +6,8 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import type {
-  AgentRunContext,
-  AgentToolContext,
-} from '../../src/features/agent/engine/index.js';
+import type { AgentRunContext } from '../../src/features/agent/engine/index.js';
+import type { CommandContext } from '../../src/features/command/index.js';
 import {
   formatGoalStatus,
   goalUsage,
@@ -287,12 +285,12 @@ describe('Goal 生产 Turn 契约', () => {
     expect(section).not.toContain('<objective>完成 <真实>');
     expect(section).toContain('20/100');
 
-    const getGoal = immediateTool(runtime.tools, 'get_goal');
+    const getGoal = immediateTool(runtime.module.commands, 'get_goal');
     expect(getGoal.execute({}, TOOL_CONTEXT)).toMatchObject({
       id: goal.id,
       remainingTokens: 80,
     });
-    const updateGoal = immediateTool(runtime.tools, 'update_goal');
+    const updateGoal = immediateTool(runtime.module.commands, 'update_goal');
     expect(
       updateGoal.execute({ status: 'complete' }, TOOL_CONTEXT),
     ).toMatchObject({
@@ -307,7 +305,7 @@ describe('Goal 生产 Turn 契约', () => {
 
   it('仅在 Goal 显式活动时向模型注入 Goal 工具', async () => {
     const absent = createThreadGoalRuntime(null);
-    expect(absent.tools).toEqual([]);
+    expect(absent.module.commands).toEqual([]);
     expect(absent.systemSection({} as AgentRunContext)).toBeNull();
 
     const paused = createThreadGoalRuntime({
@@ -318,27 +316,35 @@ describe('Goal 生产 Turn 契约', () => {
       createdAt: '2026-07-19T00:00:00.000Z',
       updatedAt: '2026-07-19T00:00:00.000Z',
     });
-    expect(paused.tools).toEqual([]);
+    expect(paused.module.commands).toEqual([]);
     expect(paused.systemSection({} as AgentRunContext)).toBeNull();
   });
 });
 
-const TOOL_CONTEXT: AgentToolContext = {
+const TOOL_CONTEXT: CommandContext = {
   runId: 'run-goal',
   turnIndex: 0,
-  toolCallId: 'call-goal',
+  commandId: 'call-goal',
   environment: createTestEnvironmentHandle(),
   metadata: {},
   signal: new AbortController().signal,
 };
 
 function immediateTool(
-  tools: ReturnType<typeof createThreadGoalRuntime>['tools'],
+  commands: ReturnType<typeof createThreadGoalRuntime>['module']['commands'],
   name: string,
 ) {
-  const tool = tools.find((candidate) => candidate.name === name);
-  if (tool === undefined || tool.execution !== 'immediate') {
-    throw new Error(`Missing immediate tool ${name}.`);
+  const command = commands.find((candidate) => candidate.name === name);
+  if (command === undefined || command.execution.kind !== 'immediate') {
+    throw new Error(`Missing immediate Command ${name}.`);
   }
-  return tool;
+  return {
+    execute: (input: unknown, context: CommandContext) =>
+      command.execution.kind === 'immediate'
+        ? command.execution.run(
+            command.invocation.input.schema.parse(input),
+            context,
+          )
+        : undefined,
+  };
 }

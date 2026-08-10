@@ -65,7 +65,7 @@ export const AgentConfigSchema = z
     description: z.string().optional(),
     hidden: z.boolean().optional(),
     prompt: z.string().optional(),
-    tools: z.array(z.string()).optional(),
+    commands: z.array(z.string()).optional(),
     permission: z.array(PermissionRuleSchema).optional(),
     max_turns: AgentMaxTurnsSchema,
     color: z.string().optional(),
@@ -146,51 +146,47 @@ export const ModelConfigSchema = z
     }
   });
 
-const DEFAULT_TOOL_SEARCH_CONFIG = {
+const DEFAULT_COMMAND_SEARCH_CONFIG = {
   result_limit: 6,
   max_result_bytes: 24_000,
 };
 
-const DEFAULT_TOOL_CONFIG: {
+const DEFAULT_COMMAND_CONFIG: {
   readonly disabled: string[];
   readonly need_approval: string[];
-  readonly routing_enabled: boolean;
-  readonly search: typeof DEFAULT_TOOL_SEARCH_CONFIG;
+  readonly search: typeof DEFAULT_COMMAND_SEARCH_CONFIG;
 } = {
   disabled: [],
   need_approval: [],
-  routing_enabled: false,
-  search: DEFAULT_TOOL_SEARCH_CONFIG,
+  search: DEFAULT_COMMAND_SEARCH_CONFIG,
 };
 
-/** tool_search 的单次结果数量与总字节限制。 */
-export const ToolSearchConfigSchema = z
+/** command_search 的单次结果数量与总字节限制。 */
+export const CommandSearchConfigSchema = z
   .object({
     result_limit: z
       .number()
       .int()
       .min(1)
       .max(8)
-      .default(DEFAULT_TOOL_SEARCH_CONFIG.result_limit),
+      .default(DEFAULT_COMMAND_SEARCH_CONFIG.result_limit),
     max_result_bytes: z
       .number()
       .int()
       .positive()
-      .default(DEFAULT_TOOL_SEARCH_CONFIG.max_result_bytes),
+      .default(DEFAULT_COMMAND_SEARCH_CONFIG.max_result_bytes),
   })
   .strict();
 
-export const ToolConfigSchema = z
+export const CommandConfigSchema = z
   .object({
-    /** 完全不注册的核心 coding 工具名。 */
-    disabled: z.array(z.string()).default(DEFAULT_TOOL_CONFIG.disabled),
-    /** 非 Plan 模式下始终需要审批的工具名。 */
+    /** 完全不注册的 Command 名。 */
+    disabled: z.array(z.string()).default(DEFAULT_COMMAND_CONFIG.disabled),
+    /** 非 Plan 模式下始终需要审批的 Command 名。 */
     need_approval: z
       .array(z.string())
-      .default(DEFAULT_TOOL_CONFIG.need_approval),
-    /** 存在非 core 工具时加入 tool_search/call_tool，并通过它们路由非 core 工具。 */
-    routing_enabled: z.boolean().default(DEFAULT_TOOL_CONFIG.routing_enabled),
-    search: ToolSearchConfigSchema.default(DEFAULT_TOOL_SEARCH_CONFIG),
+      .default(DEFAULT_COMMAND_CONFIG.need_approval),
+    search: CommandSearchConfigSchema.default(DEFAULT_COMMAND_SEARCH_CONFIG),
   })
   .strict();
 
@@ -216,21 +212,15 @@ export const ContextCompactionConfigSchema = z.object({
   auto: z.boolean().default(true),
   tail_turns: z.number().int().positive().default(2),
   preserve_recent_tokens: z.number().int().positive().default(20_000),
-  reserved_tokens: z.number().int().positive().default(16_384),
+  threshold_percent: z.number().positive().max(100).default(90),
   prune_tool_output: z.boolean().default(false),
   tool_output_max_chars: z.number().int().positive().default(2_000),
   /** 单 turn 超预算时允许切到 turn 内 assistant 边界（split turn，§1.5）。 */
   split_turns: z.boolean().default(true),
 });
 
-/**
- * 大 tool 输出预算替换配置（§2）。模型输入前把超限 tool_result 写入 artifact，
- * 上下文里替换为 preview + stub。默认关闭，避免改变现有 tool 输出测试语义。
- */
-export const ContextToolResultBudgetConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  max_chars: z.number().int().positive().default(20_000),
-});
+export const PromptModeSchema = z.enum(['rapid', 'thorough']);
+export type PromptMode = z.infer<typeof PromptModeSchema>;
 
 /** 文件型 memory 注入配置。 */
 export const ContextMemoryConfigSchema = z.object({
@@ -254,9 +244,8 @@ export const ContextMemoryConfigSchema = z.object({
 export const ContextConfigSchema = z
   .object({
     max_input_tokens: z.number().int().positive().default(1_000_000),
-    reserved_output_tokens: z.number().int().positive().default(64_000),
     show_sources_in_tui: z.boolean().default(true),
-    system_prompt_profile: z.string().default('coding'),
+    prompt_mode: PromptModeSchema.default('rapid'),
     instructions: ContextInstructionsConfigSchema.default({
       global: ['~/.ello/ELLO.md'],
       project: ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'],
@@ -267,14 +256,10 @@ export const ContextConfigSchema = z
       auto: true,
       tail_turns: 2,
       preserve_recent_tokens: 20_000,
-      reserved_tokens: 16_384,
+      threshold_percent: 90,
       prune_tool_output: false,
       tool_output_max_chars: 2_000,
       split_turns: true,
-    }),
-    tool_result_budget: ContextToolResultBudgetConfigSchema.default({
-      enabled: false,
-      max_chars: 20_000,
     }),
     memory: ContextMemoryConfigSchema.default({
       enabled: false,
@@ -287,15 +272,7 @@ export const ContextConfigSchema = z
       },
     }),
   })
-  .superRefine((value, context) => {
-    if (value.reserved_output_tokens >= value.max_input_tokens) {
-      context.addIssue({
-        code: 'custom',
-        path: ['reserved_output_tokens'],
-        message: 'must be below max_input_tokens',
-      });
-    }
-  });
+  .strict();
 
 export const GoalConfigSchema = z.object({
   max_continuations: z.number().int().positive().default(20),
@@ -364,7 +341,7 @@ export const CodingAgentConfigSchema = z
       enabled: true,
       cwd_policy: 'allowed_paths',
     }),
-    tools: ToolConfigSchema.default(DEFAULT_TOOL_CONFIG),
+    commands: CommandConfigSchema.default(DEFAULT_COMMAND_CONFIG),
     tool_output: ToolOutputConfigSchema.default({
       max_bytes: 12_000,
       max_lines: 400,
@@ -382,12 +359,10 @@ export const CodingAgentConfigSchema = z
     title_generation: z.boolean().default(false),
     permission_rules: z.array(PermissionRuleSchema).default([]),
     mcp_config_path: z.string().nullable().default(null),
-    system_prompt_profile: z.string().default('coding'),
     context: ContextConfigSchema.default({
       max_input_tokens: 1_000_000,
-      reserved_output_tokens: 64_000,
       show_sources_in_tui: true,
-      system_prompt_profile: 'coding',
+      prompt_mode: 'rapid',
       instructions: {
         global: ['~/.ello/ELLO.md'],
         project: ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'],
@@ -398,14 +373,10 @@ export const CodingAgentConfigSchema = z
         auto: true,
         tail_turns: 2,
         preserve_recent_tokens: 20_000,
-        reserved_tokens: 16_384,
+        threshold_percent: 90,
         prune_tool_output: false,
         tool_output_max_chars: 2_000,
         split_turns: true,
-      },
-      tool_result_budget: {
-        enabled: false,
-        max_chars: 20_000,
       },
       memory: {
         enabled: false,
@@ -441,44 +412,14 @@ export const CodingAgentConfigSchema = z
         });
       }
     }
-    const selectedModels = new Set([
-      config.primary_model,
-      config.auxiliary_model,
-    ]);
-    for (const modelName of selectedModels) {
-      const model = config.models[modelName];
-      if (model === undefined) continue;
-      const effectiveInputTokens = Math.min(
-        config.context.max_input_tokens - config.context.reserved_output_tokens,
-        model.context_window - model.max_output_tokens,
-      );
-      if (effectiveInputTokens < 1) {
-        context.addIssue({
-          code: 'custom',
-          path: ['models', modelName, 'max_output_tokens'],
-          message: `must leave positive input capacity within context_window for model '${modelName}'`,
-        });
-      } else if (
-        config.context.compaction.reserved_tokens >= effectiveInputTokens
-      ) {
-        context.addIssue({
-          code: 'custom',
-          path: ['context', 'compaction', 'reserved_tokens'],
-          message: `must be below effective input capacity ${effectiveInputTokens} for model '${modelName}'`,
-        });
-      }
-    }
   });
 
 export type AgentConfigEntry = z.infer<typeof AgentConfigSchema>;
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;
-export type ToolConfig = z.infer<typeof ToolConfigSchema>;
+export type CommandConfig = z.infer<typeof CommandConfigSchema>;
 export type ToolOutputConfig = z.infer<typeof ToolOutputConfigSchema>;
 export type ContextCompactionConfig = z.infer<
   typeof ContextCompactionConfigSchema
->;
-export type ContextToolResultBudgetConfig = z.infer<
-  typeof ContextToolResultBudgetConfigSchema
 >;
 export type ContextMemoryConfig = z.infer<typeof ContextMemoryConfigSchema>;
 export type ContextConfig = z.infer<typeof ContextConfigSchema>;

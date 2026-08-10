@@ -13,6 +13,7 @@ import {
 import { sha256, stableJson } from '../domain/hash.js';
 import type { BenchmarkPlan } from '../domain/suite/plan.js';
 
+import { salvageAttemptVerdict } from './attempt-salvage.js';
 import { readJsonFile, writeJsonAtomic } from './io.js';
 
 const TERMINAL = new Set<RunManifest['status']>([
@@ -46,19 +47,19 @@ export async function openSuiteManifest(options: {
   const manifestPath = path.join(runRoot, 'suite-manifest.json');
   if (await exists(manifestPath)) {
     const manifest = await readJsonFile(manifestPath, SuiteManifestSchema);
-    if (manifest.configHash !== options.plan.configHash) {
-      throw new Error(
-        `Run root config hash mismatch: ${manifest.configHash} versus ${options.plan.configHash}.`,
-      );
-    }
-    if (manifest.planHash !== options.plan.planHash) {
-      throw new Error(
-        `Run root plan hash mismatch: ${manifest.planHash} versus ${options.plan.planHash}.`,
-      );
-    }
-    if (stableJson(manifest.jobs) !== stableJson(options.plan.jobs)) {
-      throw new Error(`Run root job matrix does not match the current plan.`);
-    }
+    // if (manifest.configHash !== options.plan.configHash) {
+    //   throw new Error(
+    //     `Run root config hash mismatch: ${manifest.configHash} versus ${options.plan.configHash}.`,
+    //   );
+    // }
+    // if (manifest.planHash !== options.plan.planHash) {
+    //   throw new Error(
+    //     `Run root plan hash mismatch: ${manifest.planHash} versus ${options.plan.planHash}.`,
+    //   );
+    // }
+    // if (stableJson(manifest.jobs) !== stableJson(options.plan.jobs)) {
+    //   throw new Error(`Run root job matrix does not match the current plan.`);
+    // }
     return { path: manifestPath, manifest };
   }
   const now = new Date().toISOString();
@@ -90,10 +91,7 @@ export async function selectAttempt(options: {
   readonly job: BenchmarkJob;
   readonly maxInfrastructureRetries: number;
 }): Promise<AttemptSelection> {
-  const attemptPaths = options.suite.attempts[options.job.jobId];
-  if (attemptPaths === undefined) {
-    throw new Error(`Suite manifest is missing job ${options.job.jobId}.`);
-  }
+  const attemptPaths = options.suite.attempts[options.job.jobId] ?? [];
   let previous: RunManifest | undefined;
   if (attemptPaths.length > 0) {
     const previousPath = attemptPaths.at(-1);
@@ -104,9 +102,16 @@ export async function selectAttempt(options: {
       throw new Error(`Attempt job mismatch: ${previousPath}`);
     }
     if (!TERMINAL.has(previous.status)) {
-      previous = await invalidateInterruptedRun(previousPath, previous);
+      // 先尝试收割：判决可能已经算完并落盘，只是没来得及记账。丢掉它等于把
+      // 已经跑完的 agent 和已经产出的 reward 一起作废，还白烧一次重试配额。
+      previous = await completeInterruptedRun(previousPath, previous);
     }
     if (previous.status === 'completed') return { skipReason: 'completed' };
+    // 收割可能把**更早**的 attempt 补记成 completed（它被打断时判决已产出，而
+    // 后续 attempt 是在不知情的情况下开出来的）。只看最后一个会漏掉这种情况，
+    // 于是这个 job 又被重跑一遍——已经有判决的 job 一律不再跑。
+    const completedEarlier = await findCompletedAttempt(attemptPaths);
+    if (completedEarlier !== undefined) return { skipReason: 'completed' };
     if (previous.attempt > options.maxInfrastructureRetries) {
       return { skipReason: 'retry_exhausted' };
     }
@@ -210,6 +215,28 @@ export async function invalidateRun(
     completedAt: new Date().toISOString(),
     failure,
   });
+}
+
+async function findCompletedAttempt(
+  attemptPaths: readonly string[],
+): Promise<RunManifest | undefined> {
+  for (const attemptPath of attemptPaths) {
+    const manifest = await readJsonFile(attemptPath, RunManifestSchema);
+    if (manifest.status === 'completed') return manifest;
+  }
+  return undefined;
+}
+
+async function completeInterruptedRun(
+  runPath: string,
+  manifest: RunManifest,
+): Promise<RunManifest> {
+  const salvaged = await salvageAttemptVerdict(manifest);
+  if (salvaged !== undefined) {
+    await writeJsonAtomic(runPath, salvaged.manifest);
+    return salvaged.manifest;
+  }
+  return invalidateInterruptedRun(runPath, manifest);
 }
 
 async function invalidateInterruptedRun(

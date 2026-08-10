@@ -115,7 +115,7 @@ export interface AgentTask {
   readonly errorMessage?: string;
   readonly usage?: AgentUsage;
   readonly sidechain: readonly AgentMessage[];
-  readonly toolNames: readonly string[];
+  readonly commandNames: readonly string[];
   readonly permissionRules: readonly PermissionRule[];
   readonly externalPaths: readonly string[];
   readonly createdAt: string;

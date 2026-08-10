@@ -12,6 +12,7 @@ import type {
 } from 'vscode-jsonrpc/node';
 
 import {
+  DEFAULT_RPC_CONNECTION_LIMITS,
   ProtocolMessageWriter,
   type RpcConnectionLimits,
 } from '../../src/server/server-connection.js';
@@ -113,7 +114,90 @@ describe('ProtocolMessageWriter outbound ordering', () => {
     );
     expect(transport.closeForces).toEqual([true]);
   });
+
+  it('默认预算容忍 Client 数秒级停顿，不把慢 Client 判成过载', async () => {
+    // 大 Thread snapshot 会让 TUI 在解析和渲染上连续阻塞数秒，期间 stdio pipe 不被读取。
+    // 这种“慢但活着”的 Client 必须继续等待，不能被当成卡死的对端强制断开。
+    vi.useFakeTimers();
+    try {
+      const transport = new PausedTransport();
+      const failures: Error[] = [];
+      const writer = new ProtocolMessageWriter(
+        transport,
+        DEFAULT_RPC_CONNECTION_LIMITS,
+        (error) => failures.push(error),
+      );
+      const pending = writer.write(pausedNotification);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(failures).toEqual([]);
+
+      transport.completeSend();
+      await pending;
+      expect(failures).toEqual([]);
+      expect(transport.sendCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('write 超过背压预算才按对端卡死关闭连接', async () => {
+    const transport = new PausedTransport();
+    const failures: Error[] = [];
+    const writer = new ProtocolMessageWriter(
+      transport,
+      { ...TEST_LIMITS, backpressureTimeoutMs: 30 },
+      (error) => failures.push(error),
+    );
+
+    await expect(writer.write(pausedNotification)).rejects.toThrow(
+      'Connection peer did not accept an outbound message for 30 ms.',
+    );
+    expect(failures.map((failure) => failure.message)).toEqual([
+      'Connection peer did not accept an outbound message for 30 ms.',
+    ]);
+    transport.completeSend();
+  });
 });
+
+const pausedNotification: NotificationMessage = {
+  jsonrpc: '2.0',
+  method: 'thread/sequence/advanced',
+  params: { threadId: 'thr_test', seq: 1 },
+};
+
+/** send 只在测试显式放行后兑现，用来表达“对端暂时不读”而不是“对端已经死了”。 */
+class PausedTransport implements AppServerTransport {
+  readonly kind = 'stdio' as const;
+  readonly connectionId = 'watch_paused';
+  sendCount = 0;
+  private release: (() => void) | undefined;
+
+  messages(): AsyncIterable<Uint8Array> {
+    return {
+      [Symbol.asyncIterator]: () => ({
+        next: () => Promise.resolve({ done: true, value: undefined }),
+      }),
+    };
+  }
+
+  send(): Promise<void> {
+    this.sendCount += 1;
+    return new Promise<void>((resolve) => {
+      this.release = resolve;
+    });
+  }
+
+  completeSend(): void {
+    this.release?.();
+    this.release = undefined;
+  }
+
+  close(): Promise<void> {
+    this.completeSend();
+    return Promise.resolve();
+  }
+}
 
 class TestTransport implements AppServerTransport {
   readonly kind = 'stdio' as const;

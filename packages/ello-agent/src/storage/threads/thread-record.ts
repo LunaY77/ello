@@ -134,6 +134,15 @@ export const ItemCompletedRecordSchema = z
   })
   .strict();
 
+export const ItemUpdatedRecordSchema = z
+  .object({
+    ...RecordBaseShape,
+    kind: z.literal('item.updated'),
+    turnId: OpaqueIdSchema,
+    item: ThreadItemSchema,
+  })
+  .strict();
+
 export const TranscriptEntryRecordSchema = z
   .object({
     ...RecordBaseShape,
@@ -224,6 +233,7 @@ export const ThreadRecordSchema = z.discriminatedUnion('kind', [
   TurnFailedRecordSchema,
   ItemStartedRecordSchema,
   ItemDeltaRecordSchema,
+  ItemUpdatedRecordSchema,
   ItemCompletedRecordSchema,
   TranscriptEntryRecordSchema,
   CompactionRecordSchema,

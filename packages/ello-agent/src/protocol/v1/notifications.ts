@@ -111,6 +111,13 @@ export const SERVER_NOTIFICATION_SCHEMAS = {
       item: ThreadItemSchema,
     })
     .strict(),
+  'item/updated': z
+    .object({
+      ...TurnSequenceShape,
+      itemId: OpaqueIdSchema,
+      item: ThreadItemSchema,
+    })
+    .strict(),
   'item/agentMessage/delta': z
     .object({
       ...TurnSequenceShape,
@@ -195,7 +202,7 @@ export const SERVER_NOTIFICATION_SCHEMAS = {
       details: z.record(z.string(), JsonValueSchema).optional(),
     })
     .strict(),
-  'server/ready': z.object({ protocolVersion: z.literal(2) }).strict(),
+  'server/ready': z.object({ protocolVersion: z.literal(3) }).strict(),
 } as const;
 
 export type ClientNotificationMethod = keyof typeof CLIENT_NOTIFICATION_SCHEMAS;

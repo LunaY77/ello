@@ -17,6 +17,7 @@ export interface FileReadRange {
 }
 
 export interface FileReadSnapshot {
+  readonly digest: string;
   readonly lineStart: number;
   readonly lineEnd: number;
   readonly totalLines: number;

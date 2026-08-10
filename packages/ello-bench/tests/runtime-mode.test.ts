@@ -31,6 +31,25 @@ describe('container benchmark runtime boundary', () => {
     });
   });
 
+  it('audits external file paths in the container workspace namespace', () => {
+    const inside = auditExternalTools({
+      workspace: '/app',
+      parserCoverage: 'complete',
+      tools: [fileTool('/app/src/index.ts')],
+    });
+    const outside = auditExternalTools({
+      workspace: '/app',
+      parserCoverage: 'complete',
+      tools: [fileTool('/tmp/secret.txt')],
+    });
+
+    expect(inside).toMatchObject({ status: 'passed', fileCalls: 1 });
+    expect(outside).toMatchObject({ status: 'failed', fileCalls: 1 });
+    expect(outside.violations).toEqual([
+      expect.objectContaining({ kind: 'path_escape' }),
+    ]);
+  });
+
   it('routes Ello shell and filesystem operations through ContainerHandle', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ello-container-runtime-'));
     const workspace = path.join(root, 'workspace');
@@ -325,6 +344,21 @@ function shellTool(command: string): NormalizedToolCall {
     command,
     paths: [],
     mutating: false,
+  };
+}
+
+function fileTool(filePath: string): NormalizedToolCall {
+  return {
+    id: 'file-1',
+    name: 'file_change',
+    category: 'edit',
+    status: 'completed',
+    startedAt: null,
+    completedAt: null,
+    durationMs: null,
+    command: null,
+    paths: [filePath],
+    mutating: true,
   };
 }
 

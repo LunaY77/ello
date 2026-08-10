@@ -8,20 +8,19 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createAgent,
-  defineTool,
   z,
   type AgentModelRequest,
   type AgentModelResponse,
   type EngineEvent,
 } from '../../src/features/agent/engine/index.js';
+import { createTestCommandRun, defineTestCommand } from '../support/command.js';
 import { createTestEnvironmentHandle } from '../support/environment.js';
 
-const noopTool = defineTool({
+const noopTool = defineTestCommand({
   name: 'test_noop',
-  description: 'No-op tool for model retry tests.',
-  discovery: { aliases: [], risk: 'readonly' },
-  input: z.object({}).strict(),
-  execute: () => null,
+  summary: 'No-op tool for model retry tests.',
+  schema: z.object({}).strict(),
+  run: () => null,
 });
 
 describe('model stream retry', () => {
@@ -55,8 +54,7 @@ describe('model stream retry', () => {
         },
       },
       environment: createTestEnvironmentHandle(),
-      executionTools: [noopTool],
-      modelTools: [noopTool],
+      commandRun: createTestCommandRun([noopTool]),
     });
     const stream = agent.stream('hi');
     const events: EngineEvent[] = [];

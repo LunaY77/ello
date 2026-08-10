@@ -1,10 +1,14 @@
-import type {
+import {
+  HarnessReportSchema,
   EvidenceDegradation,
   InfrastructureFailure,
   RunManifest,
 } from '../domain/contract/index.js';
 import { lastVerificationRound } from '../domain/evidence/verification-round.js';
-import { classifyAttempt } from '../domain/scoring/attempt-outcome.js';
+import {
+  classifyAttempt,
+  classifyDeliveryOutcome,
+} from '../domain/scoring/attempt-outcome.js';
 import {
   type AgentAdapterFailure,
   type AgentProcessExecution,
@@ -16,8 +20,6 @@ import type {
   RunAttemptServices,
 } from '../ports/attempt.js';
 import type { VerifierFailure } from '../ports/verifier.js';
-
-type RunOutcome = NonNullable<RunManifest['outcome']>;
 
 export async function runAttempt(
   options: RunAttemptRequest,
@@ -89,6 +91,38 @@ export async function runAttempt(
       containerName: preparedWorkspace.container.name,
     });
 
+    const baselinePreflight = await runPhase(
+      'verifier-baseline-preflight',
+      () =>
+        services.verifier.preflight({
+          attemptId: manifest.attemptId,
+          harnessRoot: paths.baselineHarnessRoot,
+          taskFiles: options.taskFiles,
+          baselineTree: preparedWorkspace.baselineTree,
+        }),
+    );
+    manifest = await services.runs.update(manifest, {
+      phase,
+      baselinePreflightProcess: baselinePreflight.process,
+      baselinePreflightExitCode: baselinePreflight.exitCode,
+    });
+    if (baselinePreflight.imageId !== preparedWorkspace.imageId) {
+      manifest = await services.runs.invalidate(manifest, {
+        kind: 'verifier',
+        phase,
+        message: `baseline-unhealthy: verifier image changed from ${preparedWorkspace.imageId} to ${baselinePreflight.imageId}.`,
+      });
+      return manifest;
+    }
+    if (baselinePreflight.exitCode !== 0) {
+      manifest = await services.runs.invalidate(manifest, {
+        kind: 'verifier',
+        phase,
+        message: `baseline-unhealthy: clean baseline exited ${baselinePreflight.exitCode}.`,
+      });
+      return manifest;
+    }
+
     const agentContextBase = {
       attemptId: manifest.attemptId,
       agent: options.agent,
@@ -144,7 +178,7 @@ export async function runAttempt(
       }),
     );
     if (pendingFailure !== undefined || execution === undefined) {
-      return await services.runs.invalidate(
+      manifest = await services.runs.invalidate(
         await services.runs.update(manifest, { patch, phase }),
         pendingFailure ??
           closeFailure ?? {
@@ -153,6 +187,7 @@ export async function runAttempt(
             message: 'Agent process result is missing.',
           },
       );
+      return manifest;
     }
 
     let normalized: NormalizedAgentExecution | undefined;
@@ -174,26 +209,8 @@ export async function runAttempt(
         error,
       );
     }
-    if (normalized !== undefined && normalized.toolAudit.status === 'failed') {
-      return await services.runs.invalidate(
-        await services.runs.update(manifest, {
-          phase,
-          agentRuntime: normalized.runtime,
-          agentEvidence: normalized.evidenceArtifact,
-          toolAudit: normalized.toolAuditArtifact,
-          patch,
-        }),
-        {
-          kind: 'agent_environment',
-          phase: 'agent-tool-audit',
-          message: normalized.toolAudit.violations
-            .map((violation) => violation.detail)
-            .join(' '),
-        },
-      );
-    }
     if (normalized?.providerFailure === true) {
-      return await services.runs.invalidate(
+      manifest = await services.runs.invalidate(
         await services.runs.update(manifest, {
           phase,
           agentRuntime: normalized.runtime,
@@ -207,9 +224,10 @@ export async function runAttempt(
           message: requiredProviderFailureMessage(normalized),
         },
       );
+      return manifest;
     }
     if (closeFailure !== undefined) {
-      return await services.runs.invalidate(
+      manifest = await services.runs.invalidate(
         await services.runs.update(manifest, {
           phase,
           ...(normalized === undefined
@@ -224,6 +242,7 @@ export async function runAttempt(
         }),
         closeFailure,
       );
+      return manifest;
     }
 
     manifest = await services.runs.transition(manifest, 'verifying', {
@@ -251,23 +270,17 @@ export async function runAttempt(
             : lastVerificationRound(normalized.rounds),
       }),
     );
-    await services.artifacts.writeJson(harness.reportPath, harness);
+    const harnessWithPreflight = HarnessReportSchema.parse({
+      ...harness,
+      baselinePreflightProcess: baselinePreflight.process,
+      baselinePreflightExitCode: baselinePreflight.exitCode,
+    });
+    await services.artifacts.writeJson(
+      harnessWithPreflight.reportPath,
+      harnessWithPreflight,
+    );
 
-    const attemptOutcome = classifyAttempt(harness);
-    if (attemptOutcome.kind === 'invalid') {
-      return await services.runs.invalidate(
-        await services.runs.update(manifest, {
-          phase: 'verifier-baseline',
-          verifierProcess: harness.verifierProcess,
-          harness,
-        }),
-        {
-          kind: 'verifier',
-          phase: 'verifier-baseline',
-          message: `baseline-unhealthy: verifier baseline exited ${attemptOutcome.exitCode}.`,
-        },
-      );
-    }
+    const attemptOutcome = classifyAttempt(harnessWithPreflight);
 
     if (options.cleanupPolicy !== 'never') {
       await runPhase('cleanup-agent-container', async () => {
@@ -275,19 +288,27 @@ export async function runAttempt(
         container = undefined;
       });
     }
-    const outcome = classifyOutcome(execution.process, attemptOutcome.reward);
-    return await services.runs.transition(manifest, 'completed', {
+    const outcome = classifyDeliveryOutcome({
+      process: execution.process,
+      reward: attemptOutcome.reward,
+      patch,
+    });
+    manifest = await services.runs.transition(manifest, 'completed', {
       phase: 'completed',
       completedAt: services.clock.now().toISOString(),
       verifierProcess: harness.verifierProcess,
-      harness,
+      harness: harnessWithPreflight,
       outcome,
     });
+    return manifest;
   } catch (error) {
     if (isVerifierFailure(error)) {
-      manifest = await services.runs.update(manifest, {
-        verifierProcess: error.processEvidence,
-      });
+      manifest = await services.runs.update(
+        manifest,
+        phase === 'verifier-baseline-preflight'
+          ? { baselinePreflightProcess: error.processEvidence }
+          : { verifierProcess: error.processEvidence },
+      );
     }
     const invalidFailure = pendingFailure ?? failureForError(phase, error);
     if (preparedAgent !== undefined) {
@@ -305,22 +326,48 @@ export async function runAttempt(
       manifest.status !== 'completed' &&
       manifest.status !== 'invalid_infrastructure'
     ) {
-      return await services.runs.invalidate(manifest, invalidFailure);
+      manifest = await services.runs.invalidate(manifest, invalidFailure);
+      return manifest;
     }
     throw error;
   } finally {
     const cleanupContainer = container;
+    let containerCleanupFailed = false;
     if (cleanupContainer !== undefined && options.cleanupPolicy === 'always') {
       try {
         await runPhase('cleanup-agent-container-finalizer', () =>
           cleanupContainer.remove(),
         );
       } catch (error) {
+        containerCleanupFailed = true;
         await writeFailureLog(
           services,
           paths.failureLog('container-cleanup-error.log'),
           error,
         );
+      }
+    }
+    if (
+      !containerCleanupFailed &&
+      shouldCleanupAttemptWorkspaces(options.cleanupPolicy, manifest.status)
+    ) {
+      try {
+        await runPhase('cleanup-attempt-workspaces', () =>
+          services.workspace.cleanup({
+            attemptRoot: manifest.attemptRoot,
+            workspace: manifest.workspace,
+          }),
+        );
+      } catch (error) {
+        await writeFailureLog(
+          services,
+          paths.failureLog('workspace-cleanup-error.log'),
+          error,
+        );
+        // A terminal attempt is already durable; stop the matrix instead of
+        // silently leaking workspace storage after cleanup fails.
+        // eslint-disable-next-line no-unsafe-finally
+        throw error;
       }
     }
   }
@@ -332,6 +379,15 @@ export async function runAttempt(
     phase = name;
     return timings.run(name, operation);
   }
+}
+
+function shouldCleanupAttemptWorkspaces(
+  cleanupPolicy: RunAttemptRequest['cleanupPolicy'],
+  status: RunManifest['status'],
+): boolean {
+  if (cleanupPolicy === 'never') return false;
+  if (cleanupPolicy === 'on-success') return status === 'completed';
+  return status === 'completed' || status === 'invalid_infrastructure';
 }
 
 function requiredProviderFailureMessage(
@@ -348,16 +404,6 @@ function requiredPreparedAgent(
 ): PreparedAgent {
   if (prepared === undefined) throw new Error('Agent is not prepared.');
   return prepared;
-}
-
-function classifyOutcome(
-  process: NonNullable<RunManifest['client']>,
-  reward: 0 | 1,
-): RunOutcome {
-  if (process.timedOut)
-    return reward === 1 ? 'timeout_passed' : 'timeout_failed';
-  if (process.exitCode === 0) return reward === 1 ? 'passed' : 'failed';
-  return reward === 1 ? 'agent_error_passed' : 'agent_error_failed';
 }
 
 function failureForError(phase: string, error: unknown): InfrastructureFailure {

@@ -18,7 +18,7 @@ import {
   type ContextEvent,
 } from '../../src/features/agent/context/source-registry.js';
 import type { AgentRunContext } from '../../src/features/agent/engine/contracts.js';
-import { compactMessages } from '../../src/features/agent/engine/model-input.js';
+import { preserveToolCallPairs } from '../../src/features/agent/engine/model-input.js';
 import {
   CodingAgentConfigSchema,
   type CodingAgentConfig,
@@ -105,21 +105,31 @@ describe('context source contract', () => {
     expect(nextRun.fingerprint).not.toBe(beforeChange.fingerprint);
   });
 
-  it('并发说明只允许直接调用现有工具，不声明额外包装工具', async () => {
+  it('Command Run 说明固定唯一 Tool 与 step 调度语义', async () => {
     const root = await temporaryRoot();
     const section = createCodingSystemPromptSection(configFor(root, []), {
       model: 'test-model',
     });
     const prompt = await section(promptRunContext());
 
+    expect(prompt).toContain('`command_run` is the only model-visible Tool');
     expect(prompt).toContain(
-      'there is no separate batching or parallel-execution tool',
+      'Commands in the same `step` must be independent; dependent Commands use a later `step`',
     );
     expect(prompt).toContain(
-      'name only those definitions and do not infer extra orchestration tools',
+      'Include all currently known actions whose inputs are available',
     );
     expect(prompt).toContain(
-      'Never borrow tool names, capabilities, or tool-use conventions',
+      'Prefer the registered `search` Command for repository search',
+    );
+    expect(prompt).toContain(
+      'Treat the current Command Catalog as authoritative. Do not invent Commands, fields, arguments, or calling conventions',
+    );
+    expect(prompt).not.toContain(
+      'Use `read`, `search`, `write`, `apply_patch`, and `bash` for direct environment operations',
+    );
+    expect(prompt).not.toContain(
+      'Before overwriting an existing file with `write`',
     );
     expect(prompt).not.toContain('multi_tool_use.parallel');
   });
@@ -298,91 +308,36 @@ describe('context source contract', () => {
     expect(interruptCompact).toHaveBeenCalledWith('thr_context_contract');
   });
 
-  it('按输入预算保留最新消息，并拒绝无可用输入空间的参数', async () => {
-    const transform = compactMessages(
-      { maxInputTokens: 10, reservedOutputTokens: 2 },
-      { index: 0 },
-    );
-    const messages = [
-      { role: 'user' as const, content: '1111111111111111' },
-      { role: 'assistant' as const, content: '2222222222222222' },
-      { role: 'user' as const, content: '3333333333333333' },
-    ];
-
-    await expect(transform(messages, {} as never)).resolves.toEqual(
-      messages.slice(2),
-    );
-    expect(() => compactMessages({ maxInputTokens: 0 }, { index: 0 })).toThrow(
-      'maxInputTokens must be a positive safe integer',
-    );
-    expect(() =>
-      compactMessages(
-        { maxInputTokens: 8, reservedOutputTokens: 8 },
-        { index: 0 },
-      ),
-    ).toThrow('reservedOutputTokens must be');
-    expect(() =>
-      CodingAgentConfigSchema.parse({
-        cwd: '/workspace',
-        initial_mode: 'ask-before-changes',
-        ...modelConfig(),
-        context: { max_input_tokens: 8, reserved_output_tokens: 8 },
-      }),
-    ).toThrow('must be below max_input_tokens');
-  });
-
-  it('最新单条消息超过有效窗口时在 provider 调用前明确失败', async () => {
-    const transform = compactMessages(
-      { maxInputTokens: 10, reservedOutputTokens: 2 },
-      { index: 0 },
-    );
-
-    await expect(
-      transform([{ role: 'user', content: 'x'.repeat(40) }], {} as never),
-    ).rejects.toThrow(
-      'Newest model input message exceeds the available context budget of 8',
-    );
-  });
-
-  it('锚点在未超预算的回合之间逐字节不动，超预算后一次推进到留有余量的水位', async () => {
-    const anchor = { index: 0 };
-    const transform = compactMessages({ maxInputTokens: 100 }, anchor);
-    // 每条 10 token（40 字符）。历史逐轮追加，模拟连续回合。
-    const history = Array.from({ length: 20 }, (_, index) => ({
-      role: (index % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
-      content: String(index % 10).repeat(40),
-    }));
-
-    await transform(history.slice(0, 8), {} as never);
-    expect(anchor.index).toBe(0);
-    await transform(history.slice(0, 10), {} as never);
-    expect(anchor.index).toBe(0);
-
-    // 12 条 = 120 token 超过 100，推进到 0.6*100=60 水位，即保留末 6 条。
-    await transform(history.slice(0, 12), {} as never);
-    expect(anchor.index).toBe(6);
-
-    // 推进后留有余量，后续几个回合锚点不再移动，缓存断点下标随之稳定。
-    for (const count of [13, 14, 15, 16]) {
-      const kept = await transform(history.slice(0, count), {} as never);
-      expect(anchor.index).toBe(6);
-      expect(kept[0]).toEqual(history[6]);
-    }
-  });
-
-  it('历史被压缩变短时锚点归零，不会发出空 messages 请求', async () => {
-    const anchor = { index: 8 };
-    const transform = compactMessages({ maxInputTokens: 100 }, anchor);
-    const kept = await transform(
-      [
-        { role: 'user' as const, content: 'a' },
-        { role: 'assistant' as const, content: 'b' },
+  it('上下文裁剪只保留完整的 outer command_run call/result 配对', () => {
+    const call = {
+      role: 'assistant' as const,
+      content: [
+        {
+          type: 'tool-call' as const,
+          toolCallId: 'outer-command-run',
+          toolName: 'command_run',
+          input: { commands: [{ step: 1, command: 'read' }] },
+        },
       ],
-      {} as never,
-    );
+    };
+    const result = {
+      role: 'tool' as const,
+      content: [
+        {
+          type: 'tool-result' as const,
+          toolCallId: 'outer-command-run',
+          toolName: 'command_run',
+          output: {
+            type: 'json' as const,
+            value: { status: 'completed', commands: [] },
+          },
+        },
+      ],
+    };
 
-    expect(anchor.index).toBe(0);
-    expect(kept).toHaveLength(2);
+    expect(preserveToolCallPairs([call, result])).toEqual([call, result]);
+    expect(preserveToolCallPairs([call])).toEqual([]);
+    expect(preserveToolCallPairs([result])).toEqual([]);
   });
 
   async function temporaryRoot(): Promise<string> {

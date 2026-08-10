@@ -33,6 +33,13 @@ export function renderItem(item: ThreadItem): string {
       return `file changes: ${item.changes.map((change) => `${change.kind} ${change.path}`).join(', ')}`;
     case 'toolCall':
       return `tool: ${item.toolName} ${item.headline}${item.error === undefined ? '' : `\n${item.error}`}`;
+    case 'commandRun':
+      return `command run (${item.status})\n${item.commands
+        .map(
+          (command) =>
+            `  [${command.status}] step ${command.step} ${command.name}${command.error === undefined ? '' : `: ${command.error}`}`,
+        )
+        .join('\n')}${item.error === undefined ? '' : `\n${item.error}`}`;
     case 'subagent':
       return `subagent: ${item.agentName} ${item.description}`;
     case 'contextCompaction':

@@ -137,6 +137,7 @@ export function createThreadCompactor(
       );
       if (
         options.force !== true &&
+        input.force !== true &&
         !shouldCompact(
           tokensBefore,
           contextWindow,
@@ -148,7 +149,7 @@ export function createThreadCompactor(
       const cut = findCutIndex(
         checkpoint.messages,
         options.config.context.compaction,
-        options.force === true,
+        options.force === true || input.force === true,
       );
       if (cut === null) return null;
       const toSummarize = checkpoint.messages.slice(0, cut);
@@ -362,10 +363,11 @@ function shouldCompact(
   contextWindow: number,
   settings: ContextCompactionConfig,
 ): boolean {
-  return (
-    settings.auto &&
-    tokens > Math.max(1, contextWindow - settings.reserved_tokens)
+  const threshold = Math.max(
+    1,
+    Math.ceil((contextWindow * settings.threshold_percent) / 100),
   );
+  return settings.auto && tokens >= threshold;
 }
 
 function findCutIndex(
@@ -448,6 +450,13 @@ function summaryMessage(summary: string): AgentMessage {
   };
 }
 
+/**
+ * 从已经持久化/投影的消息构造稳定 checkpoint。
+ *
+ * 这是 Context Management 的宿主投影，不尝试生成新的事实；每条旧消息只
+ * 提供角色、顺序和有界内容，后续模型仍可通过 durable transcript/artifact
+ * 读取完整细节。固定上限保证 checkpoint 自身不会成为新的超大 newest message。
+ */
 function estimateTokens(message: AgentMessage): number {
   return Math.ceil(messageText(message).length / 4);
 }

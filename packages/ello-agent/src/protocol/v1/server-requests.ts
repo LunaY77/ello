@@ -17,6 +17,7 @@ const ServerRequestBaseShape = {
   threadId: OpaqueIdSchema,
   turnId: OpaqueIdSchema,
   itemId: OpaqueIdSchema,
+  commandId: OpaqueIdSchema.optional(),
   reason: z.string(),
   agent: z
     .object({

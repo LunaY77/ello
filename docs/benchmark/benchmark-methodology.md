@@ -11,11 +11,11 @@
 
 本轮仅执行了 DeepSWE 子集。SWE-bench Pro 子集已定义但尚未执行。
 
-本文档描述任务选择标准、数据归一化规则、评估边界、已知异常和局限性。任务清单、可执行合同、选择逻辑和发布结果 artifact 由本仓库维护；[当前测试集证据记录](current-task-set-record.md) 将本方法论应用于 2026 年 7 月的 DeepSWE 运行 artifact。
+本文档描述任务选择标准、数据归一化规则、评估边界、已知异常和局限性。任务清单、可执行合同、选择逻辑和发布结果 artifact 由本仓库维护；[当前测试集证据记录](current-task-set-record.md) 将本方法论应用于 2026 年 8 月的 DeepSWE 三配置运行 artifact。
 
 ### 1.1 研究问题和 estimand
 
-比较的主单位是完整的已配置 Agent 系统。当前两配置矩阵联合评估结果和资源度量；它不估计孤立运行时组件的效应。
+比较的主单位是完整的已配置 Agent 系统。当前三配置矩阵联合评估结果和资源度量；它不估计孤立运行时组件的效应。
 
 | 分析问题             | 主要 estimand                      | 必要控制或限定                                                          |
 | -------------------- | ---------------------------------- | ----------------------------------------------------------------------- |
@@ -23,7 +23,7 @@
 | 资源分配             | 观测 token、round、和工具调用记录  | token 组分保持分离；round 在不同运行时之间语义不等价                    |
 | 轨迹形状与工具可靠性 | 工具调用数量、失败模式、缓存命中率 | 同一 adapter 内解释 round；跨系统用工具调用和 elapsed time              |
 
-Ello 配置实现完整的 agent loop 和工具面。Codex 配置使用固定版本的 CLI binary。它们的标签标识的是已配置策略，而不是成功标准。每次比较都报告 harness 结果、观测模型 token、模型 round、以及相关的不确定性或识别限界。
+Ello Rapid、Ello Thorough 和 Claude Code 都作为完整配置参与比较。它们的标签标识已配置策略，而不是成功标准。每次比较都报告 harness 结果、观测模型 token、模型 round、工具调用，以及相关的不确定性或识别限界。
 
 这个矩阵不是特性级 ablation。运行时架构、工具编排、上下文管理、prompt 和停止策略在配置之间同时变化。本方法论将这些配置当作完整 bundle 进行比较，不强加不存在的一对一映射。
 
@@ -37,33 +37,30 @@ Ello 配置实现完整的 agent loop 和工具面。Codex 配置使用固定版
 
 ### 1.3 已发布矩阵和人群定义
 
-当前轮次发布矩阵包含 20 个 DeepSWE 任务、2 个 Agent、每个 `task × agent` 1 次重复：共 40 个 scored job。
+当前轮次发布矩阵包含 20 个 DeepSWE 任务、3 个 Agent、每个 `task × agent` 1 次重复：共 60 个 planned job。最终 scored job 与 infrastructure-invalid job 必须分开报告。
 
 后续多 replicate 轮次将使用多种分析人群（发布结果人群、跨运行关系人群、观测代码人群等）。当前单 replicate 轮次仅使用"发布结果人群"。
 
 ## 2. Agent 配置
 
-### 2.1 Ello
+### 2.1 Ello Rapid 与 Ello Thorough
 
-- primary model：`gpt-5.6-sol`，high reasoning；
-- auxiliary model：`deepseek-v4-pro-official`，medium；
-- 声明上下文窗口：1,000,000；
-- routing：disabled；memory：disabled；bypass：enabled；
-- sub-agent delegation 运行时：**未装配**（`enabled=false`，`runtime=unavailable:no-delegation-runner`）。
+- primary/auxiliary model：`deepseek-v4-flash-official`；
+- reasoning effort：High；声明上下文窗口：1,000,000；
+- provider-visible toolset：精确为 `{ command_run }`；
+- Rapid 与 Thorough 使用相同 Ello runtime、Command schema、权限和模型配置，仅 prompt policy 不同；
+- subagent：本轮两侧都 disabled，所有已记录用量来自 main thread。
 
-工具事件和内部 agent loop 由 Ello adapter 归一化。Ello 的 round 接近内部 agent loop（读代码 → 搜索 → 编辑 → 运行测试 → 下一轮）。工具面包括 `read`、`grep`、`glob`、`edit`、`apply_patch`、`write`、`bash`、`task_create` 等。
+Ello adapter 从 Agent evidence 归一化模型 round、内部 Command 和 usage。一个 outer `command_run` 可以包含多个带 phase 依赖的 Command；报告中的 tool calls 是规范化 Command 事件，不等于 provider-visible Tool Call 数量。
 
-### 2.2 Codex
+### 2.2 Claude Code
 
-- model：`gpt-5.6-sol`，high reasoning；
-- 使用固定版本的 Codex CLI binary；
-- 一次 CLI turn 在 benchmark adapter 中归一化为一个 round；
-- Codex 的工具面由其 CLI 定义，包括 `Read`、`Grep`、`Glob`、`Edit`、`Write`、`Bash` 等；
-- 真实工具动作仍从事件和 tool call 记录中统计。
+- model：`deepseek-v4-flash-official`，High reasoning；
+- 使用固定 Claude Code 2.1.220 binary 与校验后的 SHA-256；
+- 工具面由 Claude Code CLI 定义；
+- adapter 从 stream-json 事件归一化模型 round、工具调用和 provider usage。
 
-**两配置之间的关键差异：** Ello 的 round 接近内部 agent loop，Codex 的一次 CLI turn 被归一化为一个 round，内部发生了多次工具调用（中位数 60 次）。因此不能用 round 数量直接对比两个 Agent 的"思考步数"。跨系统最可比的工作量指标是工具调用数量和 Agent elapsed time。
-
-**比较不是干净的 A/B test。** 两个配置同时改变运行时架构、prompt、工具协议、上下文策略和 round 语义。任何差异不能归因到单一组件。
+**比较不是干净的 A/B test。** 三个配置同时改变运行时架构、prompt、Command/Tool 协议、上下文策略和停止/恢复语义。任何差异不能归因到单一组件。跨系统资源比较应优先使用同 Task 的 elapsed、token 与 tool-call ratio，并保留证据覆盖 n。
 
 ## 3. 数据协议和统一
 
@@ -80,13 +77,13 @@ cache hit rate  = cache read tokens / input tokens（当 input > 0）
 
 ### 3.2 Round 会计
 
-Ello 的 round 是完整的内部 agent loop 迭代（观察 → 行动 → 验证 → 下一轮）。Codex 的 round 是一次 CLI turn（内部可能包含多次工具调用）。同一个模型在不同运行时下也可能产生不同数量的 round。
+每个 adapter 从自身可观测事件中恢复模型请求/响应 round。同一个模型在不同 runtime、compaction 和批处理策略下仍可能产生语义不同的 round。
 
-因此 round 计数是运行时特定的，不应在不同 Agent 之间直接对比。跨运行时最可比的工作量指标是工具调用数量和 elapsed time。当报告 round 时，同时报告 median tool calls 和 elapsed time。
+因此 round 计数是运行时特定的描述性指标，不应单独解释为"思考步数"。跨运行时报告 round 时，必须同时报告 elapsed、tool calls、token 和 evidence coverage。
 
 ### 3.3 工具调用和命令会计
 
-工具调用计数来自 Agent adapter 记录的完整调用历史。Codex 的 `command_execution` 计为一次工具调用，无论其内部批处理了多个 shell 命令还是一个。同样，Ello 的 `bash` 调用计为一次工具调用。因此"命令"或工具调用的绝对计数不能在不同运行时之间视为等价的原子工作单元。
+工具调用计数来自 Agent adapter 记录的完整调用历史。Ello 统计 Command Run 内部 Command；Claude Code 统计其 stream-json 暴露的工具事件。二者的批处理边界不同，因此"工具调用"不能在不同 runtime 之间视为等价的原子工作单元。
 
 这一定义差异全部发生在运行时的 recording 层，而不是在模型使用的指令或上下文内容中。保留原始计数完整性，但将其标定为同一 adapter 内的诊断信号，而非跨适配器的能力指标。
 
@@ -94,15 +91,19 @@ Ello 的 round 是完整的内部 agent loop 迭代（观察 → 行动 → 验�
 
 ### 4.1 来源与固定
 
-上游 DeepSWE v1.1 任务仓库和官方 trial 数据按 revision 固定。任务 membership 不可变——官方 trial 更新可以刷新记录的 pass rate 和排名，但不能静默更改比较队列。
+上游 DeepSWE v1.1 任务仓库和官方 trial 数据按 revision 固定。一个已归档的
+task-set hash 对应的 membership 不可变；若 clean-baseline preflight 证明任务环境
+已经失真，只能发布一个带新 hash 的受控 task-set revision，不能静默改写旧运行的
+比较队列。
 
-| 项目          | 值                                                                              |
-| ------------- | ------------------------------------------------------------------------------- |
-| 来源          | [DeepSWE v1.1](https://deepswe.datacurve.ai/)，任务仓库 `datacurve-ai/deep-swe` |
-| 固定 revision | `a40d7298b18999c2d9b0ded7d6928e3ee26b5524`                                      |
-| 上游任务数    | 113                                                                             |
-| 选择任务数    | 20                                                                              |
-| task set hash | `c6cb3ef8b90ca30bd266178ff64291a22dd7a2536a83f1dfbe59e35bebadbb37`              |
+| 项目               | 值                                                                              |
+| ------------------ | ------------------------------------------------------------------------------- |
+| 来源               | [DeepSWE v1.1](https://deepswe.datacurve.ai/)，任务仓库 `datacurve-ai/deep-swe` |
+| 固定 revision      | `a40d7298b18999c2d9b0ded7d6928e3ee26b5524`                                      |
+| 上游任务数         | 113                                                                             |
+| 选择任务数         | 20                                                                              |
+| 历史 task set hash | `c6cb3ef8b90ca30bd266178ff64291a22dd7a2536a83f1dfbe59e35bebadbb37`              |
+| 当前 task set hash | `cb823ea5f58aebf80baa78f704d6c57ec3418db08c4399bb754b234b6895220a`              |
 
 ### 4.2 分层抽样规则
 
@@ -114,7 +115,15 @@ Ello 的 round 是完整的内部 agent loop 迭代（观察 → 行动 → 验�
 4. 选择每个 band 中通过率最高的任务；
 5. 同等通过率按 task ID 确定性打破平局。
 
-这产生了每种语言 4 个任务、每个难度 band 5 个任务。20/40/60/80 这些分位值因此是**难度锚点，不是保证的精确 bin**。选定的 20 个 task ID 现在固定于 suite manifest 中。当前官方 trial 数据可以刷新记录的通过率和排名，但绝不能更改任务 membership。
+这产生了每种语言 4 个任务、每个难度 band 5 个任务。20/40/60/80 这些分位值因此是**难度锚点，不是保证的精确 bin**。选定的 20 个 task ID 固定于 suite manifest 中。当前官方 trial 数据可以刷新记录的通过率和排名，但绝不能改写已经归档的 task-set hash。
+
+2026-08-04 的 clean-baseline 审计发现两个 Python 镜像已经因宽松依赖范围失真：
+`narwhals-rolling-window-suite` 受 Polars 行为和 warning 漂移影响，
+`langchain-request-coalescing` 受 `FakeListChatModel` repr 漂移影响。当前 revision
+分别用同语言、同难度 band 且真实 clean baseline 健康的
+`cattrs-partial-structuring-recovery` 和 `httpx-streaming-json-iteration` 替换；新集合
+已通过 20/20 Docker baseline preflight。旧 hash 和旧报告保持原样，两代 task set
+不可直接合并统计。
 
 ### 4.3 选择难度分布
 
@@ -123,7 +132,7 @@ Ello 的 round 是完整的内部 agent loop 迭代（观察 → 行动 → 验�
 | 语言       | 选定官方完成率，hard → easy |
 | ---------- | --------------------------- |
 | Go         | 44%, 59%, 70%, 80%          |
-| Python     | 36%, 51%, 60%, 87%          |
+| Python     | n/a, 51%, 60%, n/a          |
 | TypeScript | 26%, 36%, 69%, 91%          |
 | Rust       | 13%, 44%, 59%, 61%          |
 | JavaScript | 25%, 30%, 66%, 73%          |
@@ -134,40 +143,43 @@ Ello 的 round 是完整的内部 agent loop 迭代（观察 → 行动 → 验�
 
 ### 4.4 完整 DeepSWE 任务清单
 
-| 语言       | 难度 band   | 官方通过率 | Task                                                  | 要求行为                                             |
-| ---------- | ----------- | ---------- | ----------------------------------------------------- | ---------------------------------------------------- |
-| Go         | Easy        | 79.88%     | `actionlint-action-pinning-lint`                      | 为 action 和 reusable workflow 增加 pinning lint     |
-| Go         | Medium-easy | 70.12%     | `abs-stepped-slices`                                  | 为数组和字符串增加 stepped slices                    |
-| Go         | Medium-hard | 59.15%     | `yaegi-go-embed-directives`                           | 为解释器包增加 `go:embed` 指令支持                   |
-| Go         | Hard        | 44.38%     | `dasel-html-document-format`                          | 为 Dasel 增加 HTML document-format 处理              |
-| Python     | Easy        | 87.20%     | `narwhals-rolling-window-suite`                       | 增加 rolling minimum、maximum、median、quantile 方法 |
-| Python     | Medium-easy | 59.88%     | `numba-stencil-boundary-modes`                        | 为 `@stencil` 增加 boundary modes                    |
-| Python     | Medium-hard | 50.61%     | `bandit-incremental-cache-control`                    | 为 Bandit 增加增量缓存控制                           |
-| Python     | Hard        | 35.58%     | `langchain-request-coalescing`                        | 为 `Runnable` 增加 request coalescing                |
-| TypeScript | Easy        | 91.46%     | `happy-dom-abort-pending-body-reads`                  | 在 shutdown 时取消 pending body reads                |
-| TypeScript | Medium-easy | 69.14%     | `dynamodb-toolbox-conditional-attribute-requirements` | 为 schema 增加条件必填属性                           |
-| TypeScript | Medium-hard | 35.63%     | `awilix-async-container-initialization`               | 增加依赖感知的异步容器初始化                         |
-| TypeScript | Hard        | 25.77%     | `quill-shared-toolbar-focus`                          | 在多个 Quill editor 之间共享一个 toolbar             |
-| Rust       | Easy        | 60.98%     | `wasmi-trap-coredumps`                                | 为 wasmi 增加 trap coredump 生成                     |
-| Rust       | Medium-easy | 59.26%     | `fd-deterministic-multi-key-sorting`                  | 为 fd 增加确定性多关键字排序                         |
-| Rust       | Medium-hard | 44.03%     | `boa-hierarchical-evaluation-cancellation`            | 为 Boa 增加分层 evaluation cancellation              |
-| Rust       | Hard        | 12.80%     | `pest-character-class-coalescing`                     | 将符合条件的 choices 合并为 character classes        |
-| JavaScript | Easy        | 73.17%     | `yjs-map-conflict-detection`                          | 为 `Y.Map` 写入增加确定性冲突检测                    |
-| JavaScript | Medium-easy | 65.64%     | `testem-per-launcher-reports`                         | 按 launcher 分割报告并扩展报告模板                   |
-| JavaScript | Medium-hard | 29.81%     | `csstree-shorthand-expansion-compression`             | 为 lexer 增加 shorthand 展开和压缩                   |
-| JavaScript | Hard        | 24.54%     | `katex-multicolumn-array-spans`                       | 为 array-like 环境增加 `\multicolumn` 列跨度         |
+| 语言       | 难度 band   | 官方通过率 | Task                                                  | 要求行为                                         |
+| ---------- | ----------- | ---------- | ----------------------------------------------------- | ------------------------------------------------ |
+| Go         | Easy        | 79.88%     | `actionlint-action-pinning-lint`                      | 为 action 和 reusable workflow 增加 pinning lint |
+| Go         | Medium-easy | 70.12%     | `abs-stepped-slices`                                  | 为数组和字符串增加 stepped slices                |
+| Go         | Medium-hard | 59.15%     | `yaegi-go-embed-directives`                           | 为解释器包增加 `go:embed` 指令支持               |
+| Go         | Hard        | 44.38%     | `dasel-html-document-format`                          | 为 Dasel 增加 HTML document-format 处理          |
+| Python     | Easy        | n/a        | `cattrs-partial-structuring-recovery`                 | 增加可恢复的字段级 partial structuring           |
+| Python     | Medium-easy | 59.88%     | `numba-stencil-boundary-modes`                        | 为 `@stencil` 增加 boundary modes                |
+| Python     | Medium-hard | 50.61%     | `bandit-incremental-cache-control`                    | 为 Bandit 增加增量缓存控制                       |
+| Python     | Hard        | n/a        | `httpx-streaming-json-iteration`                      | 为 HTTPX response 增加流式 JSON 迭代             |
+| TypeScript | Easy        | 91.46%     | `happy-dom-abort-pending-body-reads`                  | 在 shutdown 时取消 pending body reads            |
+| TypeScript | Medium-easy | 69.14%     | `dynamodb-toolbox-conditional-attribute-requirements` | 为 schema 增加条件必填属性                       |
+| TypeScript | Medium-hard | 35.63%     | `awilix-async-container-initialization`               | 增加依赖感知的异步容器初始化                     |
+| TypeScript | Hard        | 25.77%     | `quill-shared-toolbar-focus`                          | 在多个 Quill editor 之间共享一个 toolbar         |
+| Rust       | Easy        | 60.98%     | `wasmi-trap-coredumps`                                | 为 wasmi 增加 trap coredump 生成                 |
+| Rust       | Medium-easy | 59.26%     | `fd-deterministic-multi-key-sorting`                  | 为 fd 增加确定性多关键字排序                     |
+| Rust       | Medium-hard | 44.03%     | `boa-hierarchical-evaluation-cancellation`            | 为 Boa 增加分层 evaluation cancellation          |
+| Rust       | Hard        | 12.80%     | `pest-character-class-coalescing`                     | 将符合条件的 choices 合并为 character classes    |
+| JavaScript | Easy        | 73.17%     | `yjs-map-conflict-detection`                          | 为 `Y.Map` 写入增加确定性冲突检测                |
+| JavaScript | Medium-easy | 65.64%     | `testem-per-launcher-reports`                         | 按 launcher 分割报告并扩展报告模板               |
+| JavaScript | Medium-hard | 29.81%     | `csstree-shorthand-expansion-compression`             | 为 lexer 增加 shorthand 展开和压缩               |
+| JavaScript | Hard        | 24.54%     | `katex-multicolumn-array-spans`                       | 为 array-like 环境增加 `\multicolumn` 列跨度     |
 
-在捕获的 v1.1 数据中，每个选定任务有 159 到 164 个合格的官方 trial。选择 artifact 记录了这 20 个任务在应用合格过滤器后的零官方 error trial。
+历史 task set 的选择 artifact 记录了每个任务 159 到 164 个合格的官方 trial，且在
+应用合格过滤器后没有官方 error trial。两个替代任务尚未在本仓库归档等价的官方 trial
+统计，因此其通过率显示为 `n/a`；补齐该证据前，不应声称当前集合仍严格满足原始
+分位抽样规则。
 
 ### 4.5 执行与评分
 
-每次运行从任务固定的 base commit 和隔离环境开始。Agent 接收任务指令并编辑工作区。然后由官方任务 verifier 评估结果仓库状态。有效 verifier 报告且 reward 为 `1` 是 pass；有效报告且 reward 为 `0` 是任务失败。
+每次运行从任务固定的 base commit 和 Docker image 开始。Agent workspace 从固定镜像提取，Shell/文件操作在任务容器内执行；verifier 在使用同一镜像的新容器中评估最终 patch。有效 verifier 报告且 reward 为 `1` 是 pass；有效报告且 reward 为 `0` 是任务失败。
 
-**当前关键缺口：** 本轮使用 `executionRuntime=local`，不是任务声明中的 Docker 镜像。因此环境依赖（Python、pytest、mocha、Node 模块、Rust 测试依赖等）未在运行前锁定。harness 当前不区分"Agent 完成了正确实现但测试环境不可用"和"Agent 的实现确实有语义错误"——这两种情况都被记为 `reward=0`。
+verifier 前先对未修改代码执行 baseline preflight。baseline 不健康时，该 attempt 记为 infrastructure-invalid，不进入 reward 分母。容器镜像 ID、网络策略、CPU、内存、存储限制、workspace tree 和 patch hash均进入 run artifact。
 
 **基础设施结果不是任务失败。** 非零 verifier 进程退出、缺失报告、malformed reward、不可用镜像、工作区准备失败、超出任务合同的超时、或 artifact 写入失败应标记为 **`infrastructure-invalid`**，并从通过率分母中排除，直到 rerun 或显式报告为缺失。将基础设施失败当作零分会将 Agent 能力与 benchmark 可用性混淆。
 
-下一轮必须将 `infrastructure-invalid` 实现为 verifier 的一等状态。本轮只能通过事后环境审计诊断污染程度。
+`infrastructure-invalid` 是 run state machine 的一等终态，可以在固定上限内重试；报告保留全部 invalid ledger，但只用每个 job 的最终 attempt 决定 scored matrix。
 
 ## 5. SWE-bench Pro 子集（已定义，当前轮次未执行）
 
@@ -189,7 +201,7 @@ Ello 的 round 是完整的内部 agent loop 迭代（观察 → 行动 → 验�
 
 ### 5.3 执行与评分
 
-SWE-bench Pro 任务使用 Docker 镜像提供隔离的测试环境。每次运行从任务固定的 base commit 开始，Agent 生成 patch；verifier 在 Docker 容器内执行 FAIL_TO_PASS 和 PASS_TO_PASS 测试。两类测试全部通过则 reward 为 `1`；任一测试失败则 reward 为 `0`。SWE-bench Pro 的 Docker 隔离在原则上消除了 DeepSWE local runtime 遇到的环境依赖缺失问题，但引入了 Docker daemon 可用性和镜像拉取的基础设施依赖。
+SWE-bench Pro 任务使用 Docker 镜像提供隔离的测试环境。每次运行从任务固定的 base commit 开始，Agent 生成 patch；verifier 在 Docker 容器内执行 FAIL_TO_PASS 和 PASS_TO_PASS 测试。两类测试全部通过则 reward 为 `1`；任一测试失败则 reward 为 `0`。Docker 固定了任务依赖，同时引入 Docker daemon、镜像拉取、容器 runtime 和 storage audit 等基础设施依赖；这些失败必须保持 infrastructure-invalid。
 
 完整任务清单将在首轮 SWE-bench Pro 执行报告中发布。
 
@@ -205,7 +217,7 @@ SWE-bench Pro 任务使用 Docker 镜像提供隔离的测试环境。每次运�
 
 ### 6.2 统计拟合和估计（当前不可执行：仅单 replicate）
 
-此节描述的是多 replicate 轮次使用的统计合同。当前单 replicate 轮次仅做描述性汇总（中位数、P95、比率和 Wilson 区间），不拟合回归模型。
+此节描述的是多 replicate 轮次使用的统计合同。当前单 replicate 轮次仅做描述性汇总（算术平均数、中位数、P95、配对比率和 Wilson 区间），不拟合回归模型。
 
 **配置级结果表**使用所有已发布的 harness-scored 运行。**跨运行关系图**可能在排除极端长尾观测后使用缩减人口，排除条件和阈值必须预先声明、统一应用，并在附带的 CSV 中逐观测记录。阈值将 estimand 从完整经验人口改变为声明的非长尾关系人口。每个统计图和标题必须说明分母和排除规则。
 
@@ -218,7 +230,7 @@ SWE-bench Pro 任务使用 Docker 镜像提供隔离的测试环境。每次运�
 - **DeepSWE：** passes / valid task runs 和通过率，保留 replicate 级结果（当前为单 replicate）。
 - **SWE-bench Pro：** passes / valid task runs 和通过率，保留 replicate 级结果。
 
-对于每次策略比较，报告这些结果指标，同时报告观测的总模型 token、模型 round 和工具调用。还保留任务级分布和严重长尾；仅报告聚合节省可能隐藏昂贵的失败。验证活动可以从可追溯的 test、build、lint 证据中总结，但原始命令计数不应在不同批处理粒度的运行时之间视为等价的原子工作单元。
+对于每次策略比较，报告这些结果指标，同时报告观测的模型 token、模型 round、工具调用和 elapsed。配置级同时展示算术平均数与中位数；Task 级保留三配置并列值和严重长尾。仅报告聚合节省可能隐藏昂贵的失败。验证活动可以从可追溯的 test、build、lint 证据中总结，但原始命令计数不应在不同批处理粒度的运行时之间视为等价的原子工作单元。
 
 对于 Agent 之间的比较，使用相同的任务 revision、模型（当 Agent 比较需要时）、推理强度设置、超时策略、网络策略和 replicate 数量。在解释差异之前发布运行矩阵。
 
@@ -274,7 +286,7 @@ CLI 输出可能因操作系统、locale、文件系统排序、路径分隔符�
 
 ### 9.2 外部有效性
 
-DeepSWE 覆盖五种语言但排除了 Java 和 C++ 等主要生态系统。其官方语料集中在 TypeScript、Go 和 Python，取自成熟的开源仓库；DeepSWE 的作者指出了同样的覆盖限制。[^deepswe-methodology] 等语言抽样进一步偏离了现实世界的语言普遍性。SWE-bench Pro 覆盖 Python、TypeScript、Go 和 JavaScript 四种语言，但同样排除 Java、C++ 等生态，且三十题精选不能代表完整的 731 题排行榜。
+DeepSWE 覆盖五种语言但排除了 Java 和 C++ 等主要生态系统。其官方语料集中在 TypeScript、Go 和 Python，取自成熟的开源仓库；DeepSWE 的作者指出了同样的覆盖限制。[^deepswe-methodology] 本子集的等量语言抽样进一步偏离了现实世界的语言普遍性。SWE-bench Pro 覆盖 Python、TypeScript、Go 和 JavaScript 四种语言，但同样排除 Java、C++ 等生态，且三十题精选不能代表完整的 731 题排行榜。
 
 ### 9.3 选择偏差
 
@@ -334,4 +346,4 @@ DeepSWE 和 SWE-bench Pro 通过使用原始任务而非从已有公共 commit �
 
 [^contamination-paper]: Yiming Yang, Wenjin Yao, Yujia Zhang, Patricio P. B. Gusmao, and others, "Quantifying Contamination in Evaluating Code Generation Capabilities of Language Models," _Proceedings of ACL 2024_, <https://aclanthology.org/2024.acl-long.761/>.
 
-额外实现证据见 [ello-bench 源码](../../packages/ello-bench/src/) 和 [raw 运行证据](../../packages/ello-bench/raw/deep-swe-local-002/)。
+额外实现证据见 [ello-bench 源码](../../packages/ello-bench/src/) 和 [当前发布产物](results/)。

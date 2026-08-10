@@ -8,14 +8,17 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import {
+  cliInput,
+  commandInput,
+  defineCommand,
+  type CommandContext,
+} from '../../command/index.js';
 import type { CodingAgentConfig } from '../../config/index.js';
 import type { EnvironmentFileSystem } from '../../environment/index.js';
 import type { DecideApproval } from '../permissions/policy.js';
 
-import {
-  createCodingToolResult,
-  defineCodingTool,
-} from './runtime/coding-tool.js';
+import { createCommandResult } from './runtime/command-result.js';
 import {
   createSearchProvider,
   type SearchProvider,
@@ -46,226 +49,258 @@ const MAX_SEARCH_FILES = 100_000;
  * Throws:
  * - 当 工具 `search` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
  */
-export function createSearchTools(
+export function createSearchCommands(
   _config: CodingAgentConfig,
   decide: DecideApproval,
   provider: SearchProvider = createSearchProvider(),
 ) {
-  return [
-    defineCodingTool({
-      name: 'grep',
-      capabilities: () => ({
-        concurrencySafe: true,
-        readOnly: true,
-        destructive: false,
-        interruptible: true,
-        telemetryTag: 'search.grep',
-      }),
-      description: `Search UTF-8 file contents with a Unicode regular expression and return 'path:line:text' for matches; context lines use 'path-line-text'.
-'filePath' accepts either a directory or a single file: a directory is walked recursively, a file is searched on its own so you can scan one known file without inventing a glob. 'glob' filters candidate paths relative to the search root. 'context' includes lines before and after each match. 'limit' caps match lines, not context lines; when more matches exist the result reports the next 'offset' so you can page without repeating earlier output.
-The pattern is a JavaScript RegExp with the 'u' flag, matched per line, case sensitive; an invalid pattern fails the call instead of returning nothing. Binary files, files above 2 MiB, symlinked directories, and .git/node_modules/dist/build/coverage are skipped, so a file inside them is only searched when named directly. Traversals above 100000 files fail explicitly instead of returning incomplete results. No match is a success with empty output, not an error.
-Use grep to find where text occurs; use glob to find paths by name without reading contents; use read once you know the file and need a larger exact range. Put independent read, grep, and glob calls directly in the same model response; the runtime schedules safe calls concurrently without a wrapper tool.`,
-      discovery: {
-        aliases: ['search text', 'find content', 'regex'],
-        risk: 'readonly',
+  const grepInput = z
+    .object({
+      pattern: z
+        .string()
+        .min(1)
+        .describe('Regular expression pattern to search for'),
+      filePath: z
+        .string()
+        .default('.')
+        .describe('File or directory to search in'),
+      glob: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Glob filtering paths relative to the search root'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .default(100)
+        .describe('Maximum number of matching lines'),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .default(0)
+        .describe('Matching lines to skip for pagination'),
+      context: z
+        .number()
+        .int()
+        .min(0)
+        .max(20)
+        .default(0)
+        .describe('Context lines before and after each match'),
+    })
+    .strict();
+  const globInput = z
+    .object({
+      pattern: z
+        .string()
+        .min(1)
+        .describe("Glob matched against the whole path, e.g. '**/*.ts'"),
+      filePath: z.string().default('.').describe('Directory to search in'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .default(200)
+        .describe('Maximum number of results'),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .default(0)
+        .describe('Sorted matching paths to skip'),
+    })
+    .strict();
+  const executeTextSearch = async (
+    {
+      pattern,
+      filePath: targetPath,
+      glob,
+      limit,
+      offset,
+      context,
+    }: z.infer<typeof grepInput>,
+    ctx: CommandContext,
+  ) => {
+    const fs = requireFs(ctx);
+    const resolved = resolveRuntimePath(fs, targetPath);
+    const info = await statRuntimePath(fs, targetPath);
+    // 单文件搜索以其所在目录为 root，输出仍是相对路径形式的 'path:line:text'。
+    const root = info.kind === 'directory' ? resolved : path.dirname(resolved);
+    const result = await searchFiles({
+      fs,
+      processes: requireProcesses(ctx),
+      provider,
+      root,
+      pattern,
+      ...(info.kind === 'directory' ? {} : { file: resolved }),
+      ...(glob !== undefined ? { glob } : {}),
+      limit,
+      offset,
+      context,
+      signal: ctx.signal,
+    });
+    return createCommandResult({
+      title: `Search ${pattern}`,
+      output: result.output,
+      metadata: {
+        kind: 'search',
+        summary: `grep ${pattern}`,
+        path: targetPath,
+        pattern,
+        glob,
+        matchCount: result.matchCount,
+        offset,
+        context,
+        truncated: result.truncated,
+        ...(result.nextOffset === undefined
+          ? {}
+          : { nextOffset: result.nextOffset }),
       },
-      input: z
-        .object({
-          pattern: z
-            .string()
-            .min(1)
-            .describe('Regular expression pattern to search for'),
-          filePath: z
-            .string()
-            .default('.')
-            .describe('File or directory to search in'),
-          glob: z
-            .string()
-            .min(1)
-            .optional()
-            .describe(
-              'Glob pattern filtering candidate paths relative to the search root',
-            ),
-          limit: z
-            .number()
-            .int()
-            .min(1)
-            .max(500)
-            .default(100)
-            .describe('Maximum number of matching lines'),
-          offset: z
-            .number()
-            .int()
-            .min(0)
-            .default(0)
-            .describe('Number of matching lines to skip for pagination'),
-          context: z
-            .number()
-            .int()
-            .min(0)
-            .max(20)
-            .default(0)
-            .describe('Context lines before and after each match'),
-        })
-        .strict(),
-      approval: (input, ctx) =>
-        decide(
-          {
-            permission: 'search',
-            patterns: [input.pattern],
-            always: [input.pattern],
-            paths: [input.filePath],
-            metadata: {
-              kind: 'search',
-              pattern: input.pattern,
-              path: input.filePath,
-            },
-          },
-          ctx.agent,
-        ),
-      execute: async (
-        { pattern, filePath: targetPath, glob, limit, offset, context },
-        ctx,
-      ) => {
-        const fs = requireFs(ctx.agent);
-        const resolved = resolveRuntimePath(fs, targetPath);
-        const info = await statRuntimePath(fs, targetPath);
-        // 单文件搜索以其所在目录为 root，输出仍是相对路径形式的 'path:line:text'。
-        const root =
-          info.kind === 'directory' ? resolved : path.dirname(resolved);
-        const result = await searchFiles({
-          fs,
-          processes: requireProcesses(ctx.agent),
-          provider,
-          root,
-          pattern,
-          ...(info.kind === 'directory' ? {} : { file: resolved }),
-          ...(glob !== undefined ? { glob } : {}),
-          limit,
-          offset,
-          context,
-          ...(ctx.abortSignal !== undefined ? { signal: ctx.abortSignal } : {}),
-        });
-        return createCodingToolResult({
-          title: `Search ${pattern}`,
-          output: result.output,
+    });
+  };
+  const executeFileSearch = async (
+    { pattern, filePath: targetPath, limit, offset }: z.infer<typeof globInput>,
+    ctx: CommandContext,
+  ) => {
+    const fs = requireFs(ctx);
+    const root = resolveRuntimePath(fs, targetPath);
+    const files =
+      (await provider.listFiles({
+        processes: requireProcesses(ctx),
+        root,
+        signal: ctx.signal,
+      })) ?? (await walkAllSearchFiles(fs, root, ctx.signal));
+    const matcher = globToRegExp(pattern);
+    const allMatches = files
+      .filter((file) => matcher.test(path.relative(root, file)))
+      .sort((left, right) => left.localeCompare(right));
+    const matches = allMatches.slice(offset, offset + limit);
+    const truncated = offset + matches.length < allMatches.length;
+    const nextOffset = truncated ? offset + matches.length : undefined;
+    const rendered = matches.map((file) => path.relative(root, file));
+    if (nextOffset !== undefined) {
+      rendered.push(`[More paths available. Retry with offset ${nextOffset}.]`);
+    }
+    return createCommandResult({
+      title: `Glob ${pattern}`,
+      output: rendered.join('\n'),
+      metadata: {
+        kind: 'search',
+        path: targetPath,
+        pattern,
+        paths: matches.map((file) => path.relative(root, file)),
+        matchCount: matches.length,
+        offset,
+        truncated,
+        ...(nextOffset === undefined ? {} : { nextOffset }),
+      },
+    });
+  };
+  const searchInput = z
+    .object({
+      kind: z.enum(['text', 'files']).describe('Search contents or paths'),
+      pattern: z.string().min(1).describe('Regular expression or glob pattern'),
+      filePath: z.string().default('.').describe('Search root or file'),
+      glob: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('Optional content-search path filter'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .optional()
+        .describe('Result limit'),
+      offset: z.number().int().min(0).default(0).describe('Result offset'),
+      context: z
+        .number()
+        .int()
+        .min(0)
+        .max(20)
+        .default(0)
+        .describe('Context lines for text search'),
+    })
+    .strict();
+  const searchCommand = defineCommand({
+    name: 'search',
+    summary: 'Search file contents or file paths.',
+    details:
+      "Use kind 'text' for a Unicode regular expression inside files and kind 'files' for a glob matched against paths.",
+    examples: [
+      {
+        description: 'Search text under a directory',
+        frame: {
+          args: ['text', 'TODO', '--file-path', '.'],
+        },
+      },
+    ],
+    aliases: ['find', 'grep', 'glob'],
+    risk: 'readonly',
+    invocation: cliInput(commandInput(searchInput), {
+      positionals: [{ field: 'kind' }, { field: 'pattern' }],
+      options: ['filePath', 'glob', 'limit', 'offset', 'context'],
+    }),
+    effects: {
+      concurrencySafe: true,
+      readOnly: true,
+      destructive: false,
+      interruptible: true,
+      telemetryTag: 'search',
+    },
+    approval: (input, ctx) =>
+      decide(
+        {
+          permission: 'search',
+          patterns: [input.pattern],
+          always: [input.pattern],
+          paths: [input.filePath],
           metadata: {
             kind: 'search',
-            summary: `grep ${pattern}`,
-            path: targetPath,
-            pattern,
-            glob,
-            matchCount: result.matchCount,
-            offset,
-            context,
-            truncated: result.truncated,
-            ...(result.nextOffset === undefined
-              ? {}
-              : { nextOffset: result.nextOffset }),
+            pattern: input.pattern,
+            path: input.filePath,
           },
-        });
-      },
-    }),
-    defineCodingTool({
-      name: 'glob',
-      capabilities: () => ({
-        concurrencySafe: true,
-        readOnly: true,
-        destructive: false,
-        interruptible: true,
-        telemetryTag: 'search.glob',
-      }),
-      description: `Find files by path shape and return paths relative to 'filePath', sorted lexicographically.
-'pattern' must match the whole relative path: '*' matches within one segment, '**/' matches any number of leading directories, so use '**/*.ts' rather than '*.ts' to reach nested files. Only files are returned, never directories. 'filePath' must be a directory; pass a file path to read or grep instead. 'limit' caps returned paths after sorting, so the result stays the lexicographic prefix of all matches.
-Symlinked directories are not traversed and .git, node_modules, dist, build, and coverage are ignored, so build artifacts and dependencies never appear. Traversals above 100000 files fail explicitly instead of returning an incomplete prefix. No match is a success with empty output.
-When more paths exist the result reports the next 'offset' so you can page without repeating earlier paths. Use glob when you know part of a name or extension; use grep when you know text inside the file; use read on a directory path for a single non-recursive listing with sizes. Put independent read, grep, and glob calls directly in the same model response; the runtime schedules safe calls concurrently without a wrapper tool.`,
-      discovery: {
-        aliases: ['find files', 'match paths', 'files'],
-        risk: 'readonly',
-      },
-      input: z
-        .object({
-          pattern: z
-            .string()
-            .min(1)
-            .describe(
-              "Glob pattern matched against the whole relative path, e.g. '**/*.ts'",
-            ),
-          filePath: z.string().default('.').describe('Directory to search in'),
-          limit: z
-            .number()
-            .int()
-            .min(1)
-            .max(1000)
-            .default(200)
-            .describe('Maximum number of results'),
-          offset: z
-            .number()
-            .int()
-            .min(0)
-            .default(0)
-            .describe('Number of sorted matching paths to skip'),
-        })
-        .strict(),
-      approval: (input, ctx) =>
-        decide(
-          {
-            permission: 'search',
-            patterns: [input.pattern],
-            always: [input.pattern],
-            paths: [input.filePath],
-            metadata: {
-              kind: 'search',
-              pattern: input.pattern,
-              path: input.filePath,
-            },
-          },
-          ctx.agent,
-        ),
-      execute: async (
-        { pattern, filePath: targetPath, limit, offset },
+        },
         ctx,
-      ) => {
-        const fs = requireFs(ctx.agent);
-        const root = resolveRuntimePath(fs, targetPath);
-        const files =
-          (await provider.listFiles({
-            processes: requireProcesses(ctx.agent),
-            root,
-            ...(ctx.abortSignal === undefined
-              ? {}
-              : { signal: ctx.abortSignal }),
-          })) ?? (await walkAllSearchFiles(fs, root, ctx.abortSignal));
-        const matcher = globToRegExp(pattern);
-        const allMatches = files
-          .filter((file) => matcher.test(path.relative(root, file)))
-          .sort((left, right) => left.localeCompare(right));
-        const matches = allMatches.slice(offset, offset + limit);
-        const truncated = offset + matches.length < allMatches.length;
-        const nextOffset = truncated ? offset + matches.length : undefined;
-        const rendered = matches.map((file) => path.relative(root, file));
-        if (nextOffset !== undefined) {
-          rendered.push(
-            `[More paths available. Retry with offset ${nextOffset}.]`,
+      ),
+    execution: {
+      kind: 'immediate',
+      run: async (input, ctx) => {
+        if (input.kind === 'files') {
+          if (input.glob !== undefined || input.context !== 0) {
+            throw new Error(
+              '--glob and --context are only valid for search text',
+            );
+          }
+          return executeFileSearch(
+            globInput.parse({
+              pattern: input.pattern,
+              filePath: input.filePath,
+              limit: input.limit ?? 200,
+              offset: input.offset,
+            }),
+            ctx,
           );
         }
-        return createCodingToolResult({
-          title: `Glob ${pattern}`,
-          output: rendered.join('\n'),
-          metadata: {
-            kind: 'search',
-            path: targetPath,
-            pattern,
-            paths: matches.map((file) => path.relative(root, file)),
-            matchCount: matches.length,
-            offset,
-            truncated,
-            ...(nextOffset === undefined ? {} : { nextOffset }),
-          },
-        });
+        return executeTextSearch(
+          grepInput.parse({
+            pattern: input.pattern,
+            filePath: input.filePath,
+            ...(input.glob === undefined ? {} : { glob: input.glob }),
+            limit: input.limit ?? 100,
+            offset: input.offset,
+            context: input.context,
+          }),
+          ctx,
+        );
       },
-    }),
-  ];
+    },
+  });
+  return [searchCommand];
 }
 
 async function searchFiles(input: {

@@ -164,29 +164,47 @@ function updateTool(
   event: AgentTaskEvent,
   payload: Readonly<Record<string, unknown>>,
 ): void {
-  const toolCallId = stringField(payload, 'toolCallId');
-  if (toolCallId === undefined) return;
-  if (event.eventType === 'toolStarted') {
+  if (event.eventType !== 'commandRunEvent') return;
+  const commandEvent = recordField(payload, 'event');
+  const record = recordField(commandEvent, 'record');
+  const toolCallId = stringField(record, 'commandId');
+  const type = stringField(commandEvent, 'type');
+  if (toolCallId === undefined || type === undefined) return;
+  if (type === 'command.started') {
     tools.set(toolCallId, {
       id: toolCallId,
-      name: stringField(payload, 'name') ?? 'tool',
-      input: payload.input,
+      name: stringField(record, 'name') ?? 'command',
+      input: record.input,
       status: 'running',
     });
     return;
   }
   const current = tools.get(toolCallId);
   if (current === undefined) return;
-  if (event.eventType === 'toolCompleted') {
-    tools.set(toolCallId, { ...current, status: 'ok', output: payload.output });
+  if (type === 'command.completed') {
+    tools.set(toolCallId, { ...current, status: 'ok', output: record.output });
   }
-  if (event.eventType === 'toolFailed') {
+  if (
+    type === 'command.failed' ||
+    type === 'command.denied' ||
+    type === 'command.blocked'
+  ) {
     tools.set(toolCallId, {
       ...current,
       status: 'fail',
-      error: { message: stringField(payload, 'message') ?? 'Tool failed.' },
+      error: { message: stringField(record, 'error') ?? 'Command failed.' },
     });
   }
+}
+
+function recordField(
+  value: Readonly<Record<string, unknown>>,
+  key: string,
+): Readonly<Record<string, unknown>> {
+  const field = value[key];
+  return typeof field === 'object' && field !== null && !Array.isArray(field)
+    ? (field as Readonly<Record<string, unknown>>)
+    : {};
 }
 
 function appendDelta(

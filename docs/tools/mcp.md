@@ -1,6 +1,6 @@
 ---
 title: 'MCP：外部工具与资源接入'
-description: '说明 Ello 如何加载 MCP 配置、连接 stdio 或 Streamable HTTP 服务器、注册工具与资源，并复用现有权限和调度机制。'
+description: '说明 Ello 如何加载 MCP 配置、连接 stdio 或 Streamable HTTP 服务器，并通过 Command Run 使用远端工具与资源。'
 keywords:
   ['MCP', 'Model Context Protocol', 'stdio', 'Streamable HTTP', '工具扩展']
 ---
@@ -8,8 +8,9 @@ keywords:
 # MCP：外部工具与资源接入
 
 Ello 通过 [Model Context Protocol](https://modelcontextprotocol.io/) 连接外部工具服务。MCP
-不是一套绕过 Agent 运行时的特殊通道：远端工具和资源会转换为普通 coding tool，继续经过
-输入校验、权限审批、读写锁调度、事件记录和大结果持久化。
+不是绕过 Agent 运行时的特殊通道：远端能力进入内部 Command Catalog，继续经过输入校验、
+权限审批、Environment Gate、Command 事件、Thread 持久化和大结果 artifact 处理。Provider
+始终只看见一个 `command_run` Tool。
 
 ## 配置文件
 
@@ -71,9 +72,14 @@ mcp__<服务器名>__read_resource
 前者使用可选的 `cursor` 翻页，后者接收资源 `uri`。资源内容会保留文本、图片和二进制附件；
 工具结果超过会话输出上限时，Ello 沿用普通工具的 artifact 持久化策略。
 
-当 `tools.routing_enabled` 开启时，MCP 工具属于按需发现的非核心工具。模型先用
-`tool_search` 获取名称和 JSON Schema，再用 `call_tool` 执行目标；关闭路由时，MCP
-工具会直接出现在模型工具列表中。
+MCP 工具始终按需发现，不存在直接暴露给 provider 的兼容模式。模型在 Command Run 中先用
+`command_search` 获取准确名称和完整 JSON Schema，再在后续模型回合通过 `command_invoke` 的结构化
+`input` 执行目标。模型已经知道名称和 schema 时，也可以把 `command_invoke` 放进当前 Command
+Run 的后续 phase；运行时不会把搜索结果插值进尚未编译的 Frame。
+
+`command_search` 与 `command_invoke` 是内部 Command，不是 provider Tool。它们不能发现或递归调用
+`command_run`、`command_search`、`command_invoke`，也不能代理核心 `read`、`search`、`write`、
+`apply_patch` 和 `bash`，因此权限或 Plan mode 限制不能通过 wrapper 绕过。
 
 ## 安全与并发
 

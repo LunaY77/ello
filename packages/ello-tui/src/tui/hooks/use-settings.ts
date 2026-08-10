@@ -8,9 +8,8 @@ import {
 import type { OverlayState } from '../component/OverlayHost.js';
 import { loadSettings, updatedLocalUiConfig } from '../settings/config.js';
 import type { SettingUpdate } from '../settings/types.js';
+import { clearTerminalScrollback } from '../terminal-screen.js';
 import type { ThemeName } from '../theme/index.js';
-
-import { clearTerminalScrollback } from './use-runtime-events.js';
 
 export function useSettings(input: {
   readonly thread: ThreadClient;
@@ -27,6 +26,7 @@ export function useSettings(input: {
         const next = updatedLocalUiConfig(current, update);
         const previousTheme = input.themeName;
         if (next.theme !== current.theme) {
+          // themeEpoch 会重挂 Static 并按新主题重放历史，先清掉旧配色的那一份。
           clearTerminalScrollback();
           input.setThemeEpoch((epoch) => epoch + 1);
           input.setThemeName(next.theme);

@@ -4,9 +4,59 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { normalizeEventCapture } from '../src/infra/rounds.js';
+import {
+  normalizeEventCapture,
+  normalizeEventCaptureSource,
+} from '../src/infra/rounds.js';
 
 describe('round normalization', () => {
+  it('preserves a run-level failure diagnostic without a failed model round', () => {
+    const identity = {
+      runId: 'run-1',
+      turnIndex: 0,
+      modelCallId: 'call-local',
+      agentName: 'build',
+      modelSelector: 'primary_model',
+      configuredModel: 'benchmark-pro',
+      protocol: 'openai',
+      apiModel: 'model',
+    };
+    const source = [
+      capture(1, 'model.started', modelEvent('model.started', 1, identity)),
+      capture(2, 'model.completed', {
+        ...modelEvent('model.completed', 2, identity),
+        response: {
+          finishReason: 'stop',
+          usage: {
+            inputTokens: 10,
+            outputTokens: 4,
+            cacheReadTokens: 3,
+            cacheWriteTokens: 0,
+            toolCalls: 0,
+          },
+        },
+      }),
+      capture(3, 'run.failed', {
+        type: 'run.failed',
+        sequence: 3,
+        runId: 'run-1',
+        occurredAt: '2026-07-23T00:00:03.000Z',
+        error: {
+          name: 'Error',
+          message:
+            'Newest model input message exceeds the available context budget.',
+        },
+      }),
+    ]
+      .map(JSON.stringify)
+      .join('\n');
+
+    const normalized = normalizeEventCaptureSource(source, false);
+    expect(normalized.providerFailure).toBe(false);
+    expect(normalized.providerFailureMessage).toBeNull();
+    expect(normalized.runFailureMessage).toContain('context budget');
+  });
+
   it('normalizes model calls and sums per-call usage', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'ello-bench-rounds-'));
     const eventLogPath = path.join(root, 'events.jsonl');
@@ -27,6 +77,7 @@ describe('round normalization', () => {
         runId: 'run-1',
         occurredAt: '2026-07-23T00:00:00.000Z',
         identity,
+        diagnostics: modelDiagnostics(),
       }),
       capture(2, 'model.completed', {
         type: 'model.completed',
@@ -79,6 +130,7 @@ describe('round normalization', () => {
       reasoningTokens: null,
       toolCalls: 0,
     });
+    expect(normalized.toolsetFingerprints).toEqual(['a'.repeat(64)]);
   });
 
   it('keeps a recovered failed round without failing the completed run', async () => {
@@ -252,7 +304,161 @@ describe('round normalization', () => {
     expect(normalized.rounds[0]?.toolCalls).toMatchObject([{ id: 'tool-1' }]);
     expect(normalized.rounds[1]?.toolCalls).toMatchObject([{ id: 'tool-2' }]);
   });
+
+  it('normalizes physical commands emitted by Command Run', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-bench-rounds-'));
+    const eventLogPath = path.join(root, 'events.jsonl');
+    const identity = {
+      runId: 'run-1',
+      turnIndex: 0,
+      modelCallId: 'call-1',
+      agentName: 'build',
+      modelSelector: 'primary_model',
+      configuredModel: 'benchmark-pro',
+      protocol: 'openai',
+      apiModel: 'model',
+    };
+    const record = {
+      commandRunId: 'command-run:outer-1',
+      commandId: 'command-run:outer-1:0',
+      index: 0,
+      step: 1,
+      name: 'bash',
+      input: { command: 'go test ./...' },
+      inputDigest: 'digest',
+    };
+    const lines = [
+      capture(1, 'model.started', modelEvent('model.started', 1, identity)),
+      capture(2, 'model.completed', {
+        ...modelEvent('model.completed', 2, identity),
+        response: {
+          finishReason: 'tool-calls',
+          usage: {
+            inputTokens: 10,
+            outputTokens: 4,
+            cacheReadTokens: 3,
+            cacheWriteTokens: 0,
+            toolCalls: 1,
+          },
+          toolCalls: [
+            {
+              id: 'outer-1',
+              name: 'command_run',
+              input: { commands: [] },
+            },
+          ],
+        },
+      }),
+      commandEvent(3, 'command_run.started', {
+        commandRunId: 'command-run:outer-1',
+        providerToolCallId: 'outer-1',
+        commands: [],
+      }),
+      commandEvent(4, 'command.started', {
+        record: {
+          ...record,
+          status: 'running',
+          startedAt: '2026-07-23T00:00:04.000Z',
+        },
+      }),
+      commandEvent(5, 'command.completed', {
+        record: {
+          ...record,
+          status: 'completed',
+          startedAt: '2026-07-23T00:00:04.000Z',
+          completedAt: '2026-07-23T00:00:05.000Z',
+        },
+      }),
+      commandEvent(6, 'command_run.completed', {
+        commandRunId: 'command-run:outer-1',
+      }),
+      commandEvent(7, 'command.completed', {
+        record: {
+          ...record,
+          commandId: 'command-run:outer-1:1',
+          index: 1,
+          input: { command: 'go vet ./...' },
+          status: 'completed',
+          startedAt: '2026-07-23T00:00:06.000Z',
+          completedAt: '2026-07-23T00:00:07.000Z',
+        },
+      }),
+      commandEvent(8, 'command.failed', {
+        record: {
+          ...record,
+          commandId: 'command-run:outer-1:2',
+          index: 2,
+          name: 'apply_patch',
+          input: { patch: 'invalid patch' },
+          status: 'failed',
+          completedAt: '2026-07-23T00:00:08.000Z',
+          error: 'Invalid patch.',
+        },
+      }),
+      capture(9, 'run.completed', {
+        type: 'run.completed',
+        sequence: 9,
+        runId: 'run-1',
+        occurredAt: '2026-07-23T00:00:09.000Z',
+      }),
+    ];
+    await writeFile(
+      eventLogPath,
+      `${lines.map(JSON.stringify).join('\n')}\n`,
+      'utf8',
+    );
+
+    const normalized = await normalizeEventCapture({
+      eventLogPath,
+      roundsPath: path.join(root, 'rounds.jsonl'),
+      allowIncomplete: false,
+    });
+
+    expect(normalized.tools).toEqual([
+      expect.objectContaining({
+        id: 'command-run:outer-1:0',
+        name: 'bash',
+        category: 'shell',
+        status: 'completed',
+        command: 'go test ./...',
+        durationMs: 1000,
+      }),
+      expect.objectContaining({
+        id: 'command-run:outer-1:1',
+        status: 'completed',
+        command: 'go vet ./...',
+        durationMs: 1000,
+      }),
+      expect.objectContaining({
+        id: 'command-run:outer-1:2',
+        name: 'apply_patch',
+        status: 'failed',
+        startedAt: null,
+        durationMs: null,
+      }),
+    ]);
+    expect(normalized.rounds[0]?.toolCalls).toHaveLength(3);
+    expect(normalized.usage).toMatchObject({
+      status: 'complete',
+      toolCalls: 3,
+    });
+  });
 });
+
+function commandEvent(
+  sequence: number,
+  type: string,
+  event: Record<string, unknown>,
+) {
+  const occurredAt = `2026-07-23T00:00:${String(sequence).padStart(2, '0')}.000Z`;
+  return capture(sequence, 'command.event', {
+    type: 'command.event',
+    sequence,
+    runId: 'run-1',
+    occurredAt,
+    event: { type, ...event, occurredAt },
+  });
+}
 
 function toolEvent(
   sequence: number,
@@ -284,7 +490,12 @@ function modelEvent(
     runId: identity.runId,
     occurredAt: `2026-07-23T00:00:0${sequence}.000Z`,
     identity,
+    ...(type === 'model.started' ? { diagnostics: modelDiagnostics() } : {}),
   };
+}
+
+function modelDiagnostics() {
+  return { toolsetFingerprint: 'a'.repeat(64) };
 }
 
 function capture(

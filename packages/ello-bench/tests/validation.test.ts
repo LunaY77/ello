@@ -16,6 +16,18 @@ import { normalizeEventCaptureSource } from '../src/infra/rounds.js';
 import { validateRunRoot } from '../src/infra/validation/fs-validation.js';
 
 describe('run root validation', () => {
+  it('uses the recorded container path space when re-auditing file tools', async () => {
+    const fixture = await createFixture();
+    const run = JSON.parse(await readFile(fixture.runPath, 'utf8')) as {
+      workspace: string;
+    };
+
+    expect(run.workspace).not.toBe('/app');
+    await expect(validateRunRoot(fixture.runRoot)).resolves.toMatchObject({
+      valid: true,
+    });
+  });
+
   it('recomputes published reports from terminal attempt evidence', async () => {
     const fixture = await createFixture();
 
@@ -55,7 +67,117 @@ describe('run root validation', () => {
       'escapes run root',
     );
   });
+
+  it('rejects Ello runtime provenance with a mismatched prompt mode', async () => {
+    const fixture = await createFixture();
+    const run = JSON.parse(await readFile(fixture.runPath, 'utf8')) as {
+      agentRuntime: { promptMode: 'rapid' | 'thorough' };
+    };
+    await writeJsonAtomic(fixture.runPath, {
+      ...run,
+      agentRuntime: { ...run.agentRuntime, promptMode: 'thorough' },
+    });
+
+    await expect(validateRunRoot(fixture.runRoot)).rejects.toThrow(
+      'Ello runtime provenance mismatch',
+    );
+  });
+
+  it('accepts a retry created before an interrupted attempt was salvaged', async () => {
+    const fixture = await createFixture();
+    await appendInvalidRetry(fixture, {
+      kind: 'runner',
+      phase: 'resume-interrupted-run',
+      message: 'Runner stopped while attempt was in state verifying.',
+    });
+    await generateSuiteReport(fixture.runRoot);
+
+    await expect(validateRunRoot(fixture.runRoot)).resolves.toMatchObject({
+      valid: true,
+      attempts: 2,
+      completed: 1,
+      invalid: 1,
+    });
+  });
+
+  it('rejects an ordinary retry after a completed attempt', async () => {
+    const fixture = await createFixture();
+    await appendInvalidRetry(fixture, {
+      kind: 'runner',
+      phase: 'manual-retry',
+      message: 'Retry requested after completion.',
+    });
+
+    await expect(validateRunRoot(fixture.runRoot)).rejects.toThrow(
+      'Attempt follows a completed run',
+    );
+  });
 });
+
+async function appendInvalidRetry(
+  fixture: {
+    readonly runRoot: string;
+    readonly runPath: string;
+  },
+  retryReason: {
+    readonly kind: 'runner';
+    readonly phase: string;
+    readonly message: string;
+  },
+): Promise<void> {
+  const previous = RunManifestSchema.parse(
+    JSON.parse(await readFile(fixture.runPath, 'utf8')) as unknown,
+  );
+  const attemptId = sha256(`${previous.attemptId}:retry`).slice(0, 24);
+  const attemptRoot = path.join(
+    path.dirname(path.dirname(fixture.runPath)),
+    `attempt-2-${attemptId}`,
+  );
+  const runPath = path.join(attemptRoot, 'run.json');
+  const failure = {
+    kind: 'runner' as const,
+    phase: 'resume-interrupted-run',
+    message: 'Runner stopped while retry was in state preparing.',
+  };
+  await mkdir(attemptRoot, { recursive: true });
+  await writeJsonAtomic(
+    runPath,
+    RunManifestSchema.parse({
+      schema: previous.schema,
+      attemptId,
+      attempt: 2,
+      retryOf: previous.attemptId,
+      retryReason,
+      job: previous.job,
+      configHash: previous.configHash,
+      status: 'invalid_infrastructure',
+      phase: failure.phase,
+      startedAt: '2026-07-23T00:00:03.000Z',
+      completedAt: '2026-07-23T00:00:04.000Z',
+      attemptRoot,
+      workspace: path.join(attemptRoot, 'workspace'),
+      agentStateRoot: path.join(attemptRoot, 'agent-state'),
+      executionRuntime: 'docker',
+      failure,
+    }),
+  );
+
+  const suitePath = path.join(fixture.runRoot, 'suite-manifest.json');
+  const suite = SuiteManifestSchema.parse(
+    JSON.parse(await readFile(suitePath, 'utf8')) as unknown,
+  );
+  await writeJsonAtomic(
+    suitePath,
+    SuiteManifestSchema.parse({
+      ...suite,
+      updatedAt: '2026-07-23T00:00:04.000Z',
+      attempts: {
+        ...suite.attempts,
+        [previous.job.jobId]: [fixture.runPath, runPath],
+      },
+    }),
+  );
+}
 
 async function createFixture(): Promise<{
   readonly runRoot: string;
@@ -90,6 +212,7 @@ async function createFixture(): Promise<{
     capture(3, 'model.started', {
       occurredAt: '2026-07-23T00:00:00.000Z',
       identity,
+      diagnostics: { toolsetFingerprint: 'a'.repeat(64) },
     }),
     capture(4, 'model.completed', {
       occurredAt: '2026-07-23T00:00:01.000Z',
@@ -177,6 +300,10 @@ async function createFixture(): Promise<{
     rounds: await fileEvidence(roundsPath),
     roundCount: normalized.rounds.length,
     usage: normalized.usage,
+    effectiveTools: {
+      enabled: ['command_run'],
+      toolsetFingerprint: 'a'.repeat(64),
+    },
     threads: [
       {
         threadId: 'thr_main',
@@ -268,6 +395,7 @@ async function createFixture(): Promise<{
     path: verifierProcessPath,
     sha256: sha256(await readFile(verifierProcessPath)),
   };
+  const baselinePreflightProcess = verifierProcess;
   const phaseTimingsPath = path.join(rawRoot, 'phase-timings.json');
   await writeJsonAtomic(phaseTimingsPath, {
     schema: 'ello.benchmark.phase-timings.v1',
@@ -295,6 +423,8 @@ async function createFixture(): Promise<{
     status: 'passed' as const,
     reward: 1 as const,
     verifierProcess,
+    baselinePreflightProcess,
+    baselinePreflightExitCode: 0,
     verifierImage: 'example/image:fixed',
     verifierImageId: 'sha256:image',
     modelPatchSha256: patchSha256,
@@ -338,13 +468,16 @@ async function createFixture(): Promise<{
       agentId: agent.id,
       displayName: agent.displayName,
       agentConfigHash,
-      adapterContractVersion: '1',
+      adapterContractVersion: '2',
       expectedModel: agent.models[agent.primaryModel].apiModel,
       observedModel: agent.models[agent.primaryModel].apiModel,
       configSha256: agentConfigHash,
       kind: agent.kind,
       primaryModel: agent.primaryModel,
       auxiliaryModel: agent.auxiliaryModel,
+      promptMode: agent.promptMode,
+      enabledTools: ['command_run'],
+      toolsetFingerprint: 'a'.repeat(64),
     },
     provenance: {
       scope: 'ello',
@@ -373,6 +506,8 @@ async function createFixture(): Promise<{
       baselineTree: 'b'.repeat(40),
     },
     verifierProcess,
+    baselinePreflightProcess,
+    baselinePreflightExitCode: 0,
     phaseTimingsPath,
     harness,
     outcome: 'passed',
@@ -452,6 +587,10 @@ function elloAgent() {
     },
     primaryModel: 'benchmark-pro',
     auxiliaryModel: 'benchmark-flash',
+    promptMode: 'rapid' as const,
+    features: {
+      subagents: false,
+    },
   };
 }
 

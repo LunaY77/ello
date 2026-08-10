@@ -1,12 +1,18 @@
 import { Box, Text } from 'ink';
+import stringWidth from 'string-width';
 
 import type { UserInputResolution } from '../../api/protocol-types.js';
 import { SubagentActivity } from '../component/SubagentActivity.js';
+import { useTerminalSize } from '../hooks/use-terminal-size.js';
 import { DiffPreview } from '../presenters/index.js';
 import { useTheme, type TuiTheme } from '../theme/index.js';
 import { glyphs } from '../ui/glyphs.js';
 
-import type { HistoryEntry, ToolCallView } from './history-entry.js';
+import type {
+  CommandRunView,
+  HistoryEntry,
+  ToolCallView,
+} from './history-entry.js';
 import { buildToolCardModel } from './tool-card.js';
 
 export function HistoryEntryRenderer({
@@ -61,6 +67,8 @@ function renderHistoryEntryContent(
       return <Text color={theme.accent}>{`loaded [${entry.name}]`}</Text>;
     case 'tool':
       return <HistoryTool tool={entry.tool} cwd={cwd} />;
+    case 'command_run':
+      return <CommandRunGroup run={entry.run} cwd={cwd} />;
     case 'user_input':
       return (
         <Box
@@ -91,6 +99,43 @@ function renderHistoryEntryContent(
     case 'diagnostic':
       return <Text color={theme.error}>{`x ${entry.text}`}</Text>;
   }
+}
+
+export function CommandRunGroup({
+  run,
+  cwd,
+}: {
+  readonly run: CommandRunView;
+  readonly cwd: string;
+}) {
+  const theme = useTheme();
+  const color =
+    run.status === 'running'
+      ? theme.warning
+      : run.status === 'ok'
+        ? theme.success
+        : theme.error;
+  return (
+    <Box flexDirection="column">
+      <Text color={color}>{`Command Run · ${run.status}`}</Text>
+      {run.commands.map((command) => (
+        <Box key={command.id} flexDirection="column" marginLeft={2}>
+          <Text color={toolStatusColor(theme, command.status)}>
+            {`step ${command.step} · ${command.name} · ${command.commandStatus}`}
+          </Text>
+          <HistoryTool tool={command} cwd={cwd} />
+          {command.approval?.status === 'required' ? (
+            <Text color={theme.warning}>
+              {`  approval required${command.approval.reason === undefined ? '' : `: ${command.approval.reason}`}`}
+            </Text>
+          ) : null}
+        </Box>
+      ))}
+      {run.error === undefined ? null : (
+        <Text color={theme.error}>{`  ${run.error}`}</Text>
+      )}
+    </Box>
+  );
 }
 
 function HistoryCompaction({
@@ -154,6 +199,7 @@ function SessionHeader({
   readonly entry: Extract<HistoryEntry, { kind: 'session_header' }>;
 }) {
   const theme = useTheme();
+  const { columns } = useTerminalSize();
   return (
     <Box
       flexDirection="column"
@@ -169,7 +215,7 @@ function SessionHeader({
       </Box>
       <Text>
         <Text color={theme.textMuted}>directory: </Text>
-        <Text color={theme.text}>{compactPath(entry.cwd)}</Text>
+        <Text color={theme.text}>{compactPath(entry.cwd, columns)}</Text>
       </Text>
       <Text>
         <Text color={theme.textMuted}>agent: </Text>
@@ -257,19 +303,28 @@ function toolStatusColor(
   }
 }
 
+/** 分隔线按实际终端宽度补齐；写死长度在窄终端会换行，在宽终端又填不满。 */
 function RunSeparator({ text }: { readonly text: string }) {
   const theme = useTheme();
-  return <Text color={theme.border}>{`─ ${text} ${'─'.repeat(72)}`}</Text>;
+  const { columns } = useTerminalSize();
+  const label = `─ ${text} `;
+  const fill = Math.max(1, columns - 2 - stringWidth(label));
+  return (
+    <Text color={theme.border} wrap="truncate">
+      {`${label}${'─'.repeat(fill)}`}
+    </Text>
+  );
 }
 
-function compactPath(cwd: string): string {
+/** 目录过长时保留尾部；上限跟随终端宽度，避免 header 边框被挤出屏幕。 */
+function compactPath(cwd: string, columns: number): string {
   const home = process.env.HOME;
   const display =
     home !== undefined && cwd.startsWith(home) ? cwd.replace(home, '~') : cwd;
-  if (display.length <= 68) {
-    return display;
-  }
-  return `...${display.slice(-67)}`;
+  // 边框 2 + paddingX 2 + `directory: ` 11。
+  const limit = Math.max(8, columns - 15);
+  if (stringWidth(display) <= limit) return display;
+  return `...${display.slice(-(limit - 3))}`;
 }
 
 function formatPermission(mode: string): string {

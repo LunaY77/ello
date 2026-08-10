@@ -15,12 +15,14 @@ import { applyNotification } from '../../client/event-reducer.js';
 
 import { appendCommittedHistory } from './committed-history-store.js';
 import type {
+  CommandRunView,
   HistoryEntry,
   SubagentRunView,
   ToolCallView,
 } from './history-entry.js';
 import {
   itemToHistoryEntry,
+  itemToCommandRunView,
   itemToSubagentView,
   itemToToolView,
   snapshotToHistoryEntries,
@@ -31,6 +33,7 @@ export interface LiveRunState {
   readonly reasoningText: string;
   readonly compactionText: string;
   readonly runningTools: ReadonlyMap<string, ToolCallView>;
+  readonly runningCommandRuns: ReadonlyMap<string, CommandRunView>;
   readonly runningSubagents: ReadonlyMap<string, SubagentRunView>;
 }
 
@@ -350,6 +353,15 @@ function reduceServerNotification(
       }
       return completeItem(next, notification.params.item);
     }
+    case 'item/updated': {
+      if (notification.params.item.type !== 'commandRun') return next;
+      const runningCommandRuns = new Map(next.live.runningCommandRuns);
+      runningCommandRuns.set(
+        notification.params.item.id,
+        itemToCommandRunView(notification.params.item),
+      );
+      return { ...next, live: { ...next.live, runningCommandRuns } };
+    }
     case 'serverRequest/resolved':
       return state.pendingRequest?.id === notification.params.requestId
         ? omitPendingRequest(next)
@@ -396,6 +408,11 @@ function startLiveItem(state: TuiEventState, item: ThreadItem): TuiEventState {
       live: { ...state.live, reasoningText: item.summary },
     };
   }
+  if (item.type === 'commandRun') {
+    const runningCommandRuns = new Map(state.live.runningCommandRuns);
+    runningCommandRuns.set(item.id, itemToCommandRunView(item));
+    return { ...state, live: { ...state.live, runningCommandRuns } };
+  }
   if (isToolItem(item)) {
     const runningTools = new Map(state.live.runningTools);
     runningTools.set(item.id, itemToToolView(item));
@@ -430,6 +447,10 @@ function completeItem(state: TuiEventState, item: ThreadItem): TuiEventState {
     next = { ...next, live: { ...next.live, reasoningText: '' } };
   } else if (item.type === 'contextCompaction') {
     next = { ...next, live: { ...next.live, compactionText: '' } };
+  } else if (item.type === 'commandRun') {
+    const runningCommandRuns = new Map(next.live.runningCommandRuns);
+    runningCommandRuns.delete(item.id);
+    next = { ...next, live: { ...next.live, runningCommandRuns } };
   } else if (isToolItem(item)) {
     const runningTools = new Map(next.live.runningTools);
     runningTools.delete(item.id);
@@ -449,6 +470,7 @@ function liveStateFromSnapshot(snapshot: ThreadSnapshot): LiveRunState {
   let reasoningText = '';
   let compactionText = '';
   const runningTools = new Map<string, ToolCallView>();
+  const runningCommandRuns = new Map<string, CommandRunView>();
   const runningSubagents = new Map<string, SubagentRunView>();
   for (const turn of snapshot.turns) {
     if (turn.status !== 'inProgress') continue;
@@ -458,6 +480,8 @@ function liveStateFromSnapshot(snapshot: ThreadSnapshot): LiveRunState {
         assistantText = item.text;
       else if (item.type === 'reasoning') reasoningText = item.summary;
       else if (item.type === 'contextCompaction') compactionText = item.summary;
+      else if (item.type === 'commandRun')
+        runningCommandRuns.set(item.id, itemToCommandRunView(item));
       else if (isToolItem(item))
         runningTools.set(item.id, itemToToolView(item));
       else if (item.type === 'subagent')
@@ -470,6 +494,7 @@ function liveStateFromSnapshot(snapshot: ThreadSnapshot): LiveRunState {
     reasoningText,
     compactionText,
     runningTools,
+    runningCommandRuns,
     runningSubagents,
   };
 }
@@ -480,6 +505,7 @@ function emptyLiveState(): LiveRunState {
     reasoningText: '',
     compactionText: '',
     runningTools: new Map(),
+    runningCommandRuns: new Map(),
     runningSubagents: new Map(),
   };
 }

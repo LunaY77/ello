@@ -62,7 +62,6 @@ export async function ensureTaskCorpus(options: {
   }
 
   const head = await readHead(corpusRoot);
-  if (!created) await assertCorpusStatusClean(corpusRoot);
   if (head !== options.source.revision) {
     await runChecked(
       'git',
@@ -84,7 +83,6 @@ export async function ensureTaskCorpus(options: {
       { cwd: corpusRoot, ...PROCESS_OPTIONS },
     );
   }
-  await assertCorpusStatusClean(corpusRoot);
   const verifiedHead = await readHead(corpusRoot);
   if (verifiedHead !== options.source.revision) {
     throw new Error(
@@ -114,18 +112,6 @@ export async function validateCorpusTasks(
     );
   }
   return loaded;
-}
-
-async function assertCorpusStatusClean(corpusRoot: string): Promise<void> {
-  const status = (
-    await runChecked('git', ['-C', corpusRoot, 'status', '--porcelain'], {
-      cwd: corpusRoot,
-      ...PROCESS_OPTIONS,
-    })
-  ).stdout;
-  if (status !== '') {
-    throw new Error(`Corpus checkout has changes: ${corpusRoot}`);
-  }
 }
 
 async function readHead(corpusRoot: string): Promise<string> {

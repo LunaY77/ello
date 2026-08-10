@@ -17,6 +17,6 @@ export {
   type UserInputResolution,
 } from './schema.js';
 export {
-  createRequestUserInputTool,
-  REQUEST_USER_INPUT_TOOL_NAME,
+  createRequestUserInputCommand,
+  REQUEST_USER_INPUT_COMMAND_NAME,
 } from './tool.js';

@@ -66,18 +66,27 @@ export async function writeBenchmarkAgentConfig(options: {
       enabled: options.agent.features.subagents,
       cwd_policy: 'allowed_paths',
     },
-    tools: {
+    commands: {
       disabled: [],
       need_approval: [],
-      routing_enabled: false,
       search: { result_limit: 6, max_result_bytes: 24_000 },
     },
     context: {
+      prompt_mode: options.agent.promptMode,
       instructions: {
         global: [],
         project: ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'],
         extra: [],
         nearby: true,
+      },
+      compaction: {
+        auto: true,
+        tail_turns: 2,
+        preserve_recent_tokens: 20_000,
+        threshold_percent: 90,
+        prune_tool_output: false,
+        tool_output_max_chars: 2_000,
+        split_turns: true,
       },
       memory: {
         enabled: false,

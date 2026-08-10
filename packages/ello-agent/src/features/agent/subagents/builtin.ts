@@ -35,7 +35,7 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
       model: 'auxiliary_model',
       source: 'builtin',
       hidden: true,
-      tools: [],
+      commands: [],
       description: 'Internal session title generator.',
       prompt: renderPromptTemplate('title'),
       maxTurns: 4,
@@ -46,7 +46,7 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
       model: 'auxiliary_model',
       source: 'builtin',
       hidden: true,
-      tools: [],
+      commands: [],
       description: 'Internal human-facing session summarizer.',
       prompt: renderPromptTemplate('summary'),
       maxTurns: 4,
@@ -57,7 +57,7 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
       model: 'auxiliary_model',
       source: 'builtin',
       hidden: true,
-      tools: [
+      commands: [
         'memory_list',
         'memory_read',
         'memory_search',
@@ -73,7 +73,7 @@ export function builtinAgents(): readonly CodingAgentDefinition[] {
       model: 'auxiliary_model',
       source: 'builtin',
       hidden: true,
-      tools: [
+      commands: [
         'memory_list',
         'memory_read',
         'memory_search',

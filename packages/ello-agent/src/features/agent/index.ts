@@ -171,7 +171,7 @@ function agentRunRequest(
 export type {
   AgentDelegationContext,
   AgentRunContextParts,
-  AgentRunTools,
+  AgentRunCommands,
   AgentFeature,
   AgentInteraction,
   AgentRunGoal,
@@ -184,7 +184,7 @@ export type {
   AgentRunResult,
   AgentRuntime,
   CreateAgentFeatureInput,
-  CreateAgentTools,
+  CreateAgentCommands,
   LoadAgentContext,
   PermissionSessionView,
   ResolvedAgentDefinition,
@@ -192,16 +192,20 @@ export type {
   ResolveAgentDefinition,
   ResolveAgentModel,
 } from './contracts.js';
-export { PLAN_EXIT_TOOL_NAME } from './contracts.js';
+export { PLAN_EXIT_COMMAND_NAME } from './contracts.js';
 export { createAgentRoutes } from './routes.js';
-export { createCodingSystemPromptSection } from './context/prompts.js';
+export {
+  createCodingSystemPromptSection,
+  renderCodingSystemPrompt,
+  type CodingSystemPromptRuntime,
+} from './context/prompts.js';
 export { createAgentRegistry } from './subagents/registry.js';
 export {
   AgentTaskService,
   AgentTaskStore,
   AgentTaskRpcFeature,
   createAgentTaskEventPreparer,
-  createSubagentTools,
+  createSubagentCommands,
   type AgentTask,
 } from './subagents/index.js';
 export {
@@ -210,8 +214,8 @@ export {
 } from './context/source-registry.js';
 export { renderPromptTemplate } from './context/prompts.js';
 export {
-  createRequestUserInputTool,
-  REQUEST_USER_INPUT_TOOL_NAME,
+  createRequestUserInputCommand,
+  REQUEST_USER_INPUT_COMMAND_NAME,
   UserInputRequestSchema,
   validateUserInputResolution,
 } from './user-input/index.js';

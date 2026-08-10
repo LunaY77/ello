@@ -16,6 +16,7 @@ import type {
 import type { ThreadClientEvent } from '../../src/client/client-events.js';
 import { ThreadClient } from '../../src/client/thread-client.js';
 import { App } from '../../src/tui/App.js';
+import { mountTerminal } from '../support/terminal-harness.js';
 
 const createdAt = '2026-07-18T00:00:00.000Z';
 const roots: string[] = [];
@@ -693,6 +694,75 @@ describe('App typed client behavior', () => {
       }),
     );
     view.unmount();
+  });
+
+  it('长流式输出不会让 dynamic frame 顶到终端高度', async () => {
+    // 回归：Ink 在 frame 高度达到终端高度时会每帧 clearTerminal + 重写整个 Static
+    // 历史，这就是 TUI 上的闪屏。live 区的行数预算要扣掉 dock 的真实开销（包括
+    // 运行中 Composer 多出来的 `Enter steers this run` 那一行）。
+    const harness = createThreadHarness(snapshot());
+    const terminal = await mountTerminal(<App thread={harness.thread} />, {
+      columns: 100,
+      rows: 24,
+    });
+    try {
+      await waitForCatalogs(harness);
+      const turn: Turn = {
+        id: 'turn_stream',
+        threadId: 'thr_1',
+        status: 'inProgress',
+        items: [],
+        startedAt: createdAt,
+      };
+      const item = {
+        id: 'message_stream',
+        threadId: 'thr_1',
+        turnId: turn.id,
+        type: 'agentMessage' as const,
+        text: '',
+        phase: 'commentary' as const,
+        status: 'inProgress' as const,
+        createdAt,
+      };
+      harness.emit(notification('turn/started', 2, { turnId: turn.id, turn }));
+      harness.emit(
+        notification('thread/status/changed', 3, {
+          status: 'running',
+          activeFlags: ['turn'],
+        }),
+      );
+      harness.emit(
+        notification('item/started', 4, {
+          turnId: turn.id,
+          itemId: item.id,
+          item,
+        }),
+      );
+
+      const start = terminal.writes.length;
+      for (let line = 0; line < 80; line += 1) {
+        harness.emit(
+          notification('item/agentMessage/delta', 5 + line, {
+            turnId: turn.id,
+            itemId: item.id,
+            delta: `streamed line ${line}\n`,
+          }),
+        );
+        await terminal.flush();
+      }
+      const streamed = terminal.writes.slice(start).join('');
+
+      const screen = terminal.screen.lines().join('\n');
+      // 先确认渲染没抛错，否则下面的断言会去比对 React 的错误栈。
+      expect(screen).not.toContain('react-reconciler');
+
+      expect(streamed).not.toContain('\u001B[2J');
+      // composer 与 footer 都必须还在屏幕上，没有被压扁。
+      expect(screen).toContain('working');
+      expect(screen).toContain('cache');
+    } finally {
+      terminal.stop();
+    }
   });
 });
 

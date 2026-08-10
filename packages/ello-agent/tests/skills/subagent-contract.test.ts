@@ -23,7 +23,7 @@ import {
   AgentTaskRpcFeature,
   createAgentRegistry,
   createAgentTaskEventPreparer,
-  createSubagentTools,
+  createSubagentCommands,
   deriveSubagentPermission,
   type CreateAgentTask,
   type CodingAgentDefinition,
@@ -147,9 +147,9 @@ description: 项目专用探索代理
 mode: subagent
 model: primary_model
 max-turns: 6
-tools:
+commands:
   - read
-  - grep
+  - search
 ---
 
 只读取并分析项目。
@@ -167,7 +167,7 @@ tools:
       source: 'project',
       description: '项目专用探索代理',
       model: 'primary_model',
-      tools: ['read', 'grep'],
+      commands: ['read', 'search'],
       prompt: '只读取并分析项目。',
     });
   });
@@ -224,14 +224,14 @@ unknown-field: true
 
     expect(registry.delegatable()).toEqual([]);
     expect(
-      createSubagentTools({
+      createSubagentCommands({
         request: parentRequest(cwd),
         definition: {
           config,
           definition: registry.get('build'),
           agentRegistry: registry,
         },
-        parentToolNames: [],
+        parentCommandNames: [],
         service: {} as AgentTaskService,
         approval: () => () => ({ action: 'auto' }),
       }),
@@ -282,7 +282,7 @@ unknown-field: true
 
     const delegated = deriveSubagentPermission([], {
       ...subagentDefinition,
-      tools: ['delegate_to_subagent'],
+      commands: ['delegate_to_subagent'],
     });
     expect(
       delegated.some((rule) => rule.pattern === 'delegate_to_subagent'),
@@ -290,7 +290,7 @@ unknown-field: true
 
     const tasked = deriveSubagentPermission([], {
       ...subagentDefinition,
-      tools: ['task_list'],
+      commands: ['task_list'],
     });
     expect(tasked.some((rule) => rule.permission === 'task')).toBe(false);
   });
@@ -312,7 +312,7 @@ describe('Subagent 后台任务契约', () => {
       goal: null,
       permission: { rules: () => [], externalPaths: () => [] },
     };
-    const tools = createSubagentTools({
+    const tools = createSubagentCommands({
       request,
       definition: {
         config: {
@@ -322,14 +322,13 @@ describe('Subagent 后台任务契约', () => {
         definition: registry.get('build'),
         agentRegistry: registry,
       },
-      parentToolNames: [],
+      parentCommandNames: [],
       service: {} as AgentTaskService,
       approval: () => () => ({ action: 'auto' }),
     });
-    const delegate = tools.find((tool) => tool.name === 'delegate_to_subagent');
-    const taskOutput = tools.find((tool) => tool.name === 'task_output');
-    if (delegate === undefined) throw new Error('主代理缺少委派工具。');
-    if (taskOutput === undefined) throw new Error('主代理缺少任务输出工具。');
+    const delegate = testCommand(tools, 'delegate_to_subagent');
+    const taskOutput = testCommand(tools, 'task_output');
+    const taskStop = testCommand(tools, 'task_stop');
 
     expect(delegate.description).toContain('Available subagents:');
     expect(delegate.description).toContain('- explore:');
@@ -362,6 +361,12 @@ describe('Subagent 后台任务契约', () => {
         timeout_ms: 180_001,
       }).success,
     ).toBe(false);
+    await expect(
+      taskStop.execute(
+        { task_id: '830f1bc6-82b0-4dcd-90b0-6a993b2e29a6' },
+        agentToolContext,
+      ),
+    ).rejects.toThrow('is a persisted task-board ID; use task_get to read it');
   });
 
   it('fork 保留父级委派工具 schema，但默认深度明确拒绝递归', async () => {
@@ -386,7 +391,7 @@ describe('Subagent 后台任务契约', () => {
         contextMode: 'fork',
         executionMode: 'background',
         maxTurns: 4,
-        exactToolNames: [
+        exactCommandNames: [
           'read',
           'delegate_to_subagent',
           'task_output',
@@ -402,23 +407,20 @@ describe('Subagent 后台任务契约', () => {
       definition: registry.get('explore'),
       agentRegistry: registry,
     };
-    const tools = createSubagentTools({
+    const tools = createSubagentCommands({
       request,
       definition,
-      parentToolNames: request.delegation!.exactToolNames!,
+      parentCommandNames: request.delegation!.exactCommandNames!,
       service: {} as AgentTaskService,
       approval: () => () => ({ action: 'auto' }),
     });
-    const delegate = tools.find((tool) => tool.name === 'delegate_to_subagent');
+    const delegate = testCommand(tools, 'delegate_to_subagent');
 
     expect(tools.map((tool) => tool.name)).toEqual([
       'delegate_to_subagent',
       'task_output',
       'task_stop',
     ]);
-    if (delegate === undefined || !('execute' in delegate)) {
-      throw new Error('fork 缺少可执行的委派工具 schema。');
-    }
     await expect(
       delegate.execute(
         {
@@ -439,7 +441,7 @@ describe('Subagent 后台任务契约', () => {
     const start = vi.fn();
     const controller = new AbortController();
     controller.abort('client interrupt');
-    const tools = createSubagentTools({
+    const tools = createSubagentCommands({
       request: parentRequest('/workspace'),
       definition: {
         config: {
@@ -449,7 +451,7 @@ describe('Subagent 后台任务契约', () => {
         definition: registry.get('build'),
         agentRegistry: registry,
       },
-      parentToolNames: [],
+      parentCommandNames: [],
       service: { start } as unknown as AgentTaskService,
       approval: () => () => ({ action: 'auto' }),
     });
@@ -478,14 +480,14 @@ describe('Subagent 后台任务契约', () => {
     const store = await createTaskStore();
     const service = createTaskService(store, new Map());
     const delegate = requireDelegateTool(
-      createSubagentTools({
+      createSubagentCommands({
         request: parentRequest(parentCwd),
         definition: {
           config,
           definition: registry.get('build'),
           agentRegistry: registry,
         },
-        parentToolNames: [],
+        parentCommandNames: [],
         service,
         approval: () => () => ({ action: 'auto' }),
       }),
@@ -515,14 +517,14 @@ describe('Subagent 后台任务契约', () => {
     const registry = await createAgentRegistry(config);
     const start = vi.fn();
     const delegate = requireDelegateTool(
-      createSubagentTools({
+      createSubagentCommands({
         request: parentRequest(parentCwd),
         definition: {
           config,
           definition: registry.get('build'),
           agentRegistry: registry,
         },
-        parentToolNames: [],
+        parentCommandNames: [],
         service: { start } as unknown as AgentTaskService,
         approval: () => () => ({ action: 'auto' }),
       }),
@@ -552,14 +554,14 @@ describe('Subagent 后台任务契约', () => {
     const registry = await createAgentRegistry(config);
     const start = vi.fn();
     const delegate = requireDelegateTool(
-      createSubagentTools({
+      createSubagentCommands({
         request: parentRequest(parentCwd),
         definition: {
           config,
           definition: registry.get('build'),
           agentRegistry: registry,
         },
-        parentToolNames: [],
+        parentCommandNames: [],
         service: { start } as unknown as AgentTaskService,
         approval: () => () => ({ action: 'auto' }),
       }),
@@ -567,7 +569,9 @@ describe('Subagent 后台任务契约', () => {
 
     await expect(
       delegate.execute(delegateInput({ cwd: outside }), agentToolContext),
-    ).rejects.toThrow('outside the allowed paths');
+    ).rejects.toThrow(
+      `outside the allowed paths: ${outside}. Authorized cwd roots: ${parentCwd}, ${root}`,
+    );
     await expect(
       delegate.execute(delegateInput({ cwd: linkedOutside }), agentToolContext),
     ).rejects.toThrow('outside the allowed paths');
@@ -685,24 +689,31 @@ describe('Subagent 后台任务契约', () => {
     const output = '大段工具输出'.repeat(8_000);
 
     run.emit({
-      type: 'toolStarted',
-      toolCallId: 'tool_large_output',
-      name: 'bash',
-      input: { command: 'generate-output' },
-      occurredAt: new Date().toISOString(),
+      type: 'commandRunEvent',
+      event: {
+        type: 'command.started',
+        record: commandRecord('running'),
+        occurredAt: new Date().toISOString(),
+      },
     });
     run.emit({
-      type: 'toolCompleted',
-      toolCallId: 'tool_large_output',
-      output,
-      occurredAt: new Date().toISOString(),
+      type: 'commandRunEvent',
+      event: {
+        type: 'command.completed',
+        record: { ...commandRecord('completed'), output },
+        occurredAt: new Date().toISOString(),
+      },
     });
     run.complete();
     await started.completion;
 
     const completed = store
       .events(started.task.id)
-      .find((event) => event.eventType === 'toolCompleted');
+      .find(
+        (event) =>
+          event.eventType === 'command.completed' &&
+          JSON.stringify(event.payload).includes('tool_large_output'),
+      );
     const artifactId = artifactIdFromEvent(completed?.payload);
     expect(Buffer.byteLength(JSON.stringify(completed?.payload))).toBeLessThan(
       8 * 1024,
@@ -1098,12 +1109,31 @@ function parentRequest(cwd: string): AgentRunRequest {
   };
 }
 
-function requireDelegateTool(tools: ReturnType<typeof createSubagentTools>) {
-  const delegate = tools.find((tool) => tool.name === 'delegate_to_subagent');
-  if (delegate === undefined || !('execute' in delegate)) {
-    throw new Error('主代理缺少可执行的委派工具。');
+function requireDelegateTool(tools: ReturnType<typeof createSubagentCommands>) {
+  return testCommand(tools, 'delegate_to_subagent');
+}
+
+function testCommand(
+  commands: ReturnType<typeof createSubagentCommands>,
+  name: string,
+) {
+  const command = commands.find((candidate) => candidate.name === name);
+  if (command === undefined || command.execution.kind !== 'immediate') {
+    throw new Error(`缺少可执行的 Command: ${name}`);
   }
-  return delegate;
+  return {
+    description: [command.summary, command.details]
+      .filter((value): value is string => value !== undefined)
+      .join(' '),
+    input: command.invocation.input.schema,
+    execute: (input: unknown, context: typeof agentToolContext) =>
+      command.execution.kind === 'immediate'
+        ? command.execution.run(
+            command.invocation.input.schema.parse(input),
+            context,
+          )
+        : undefined,
+  };
 }
 
 function delegateInput(overrides: { readonly cwd?: string } = {}) {
@@ -1141,7 +1171,7 @@ function taskInput(overrides: Partial<CreateAgentTask> = {}): CreateAgentTask {
     maxTurns: 4,
     depth: 1,
     sidechain: [],
-    toolNames: ['read', 'grep'],
+    commandNames: ['read', 'search'],
     permissionRules: [],
     externalPaths: [],
     ...overrides,
@@ -1211,7 +1241,7 @@ const EMPTY_USAGE = {
 const agentToolContext = {
   runId: 'run-parent',
   turnIndex: 0,
-  toolCallId: 'tool-parent',
+  commandId: 'tool-parent',
   environment: createTestEnvironmentHandle(),
   metadata: {},
   signal: new AbortController().signal,
@@ -1256,6 +1286,8 @@ class FakeTaskRun implements AgentRun {
     this.queue.push(event);
   }
 
+  acknowledgeCompaction(): void {}
+
   complete(): void {
     this.finish({ status: 'completed', usage: EMPTY_USAGE });
   }
@@ -1281,15 +1313,39 @@ class FakeTaskRun implements AgentRun {
   }
 }
 
+function commandRecord(status: 'running' | 'completed') {
+  const occurredAt = new Date().toISOString();
+  return {
+    commandRunId: 'command-run:large-output',
+    commandId: 'tool_large_output',
+    index: 0,
+    step: 1,
+    name: 'bash',
+    input: { command: 'generate-output' },
+    inputDigest: 'a'.repeat(64),
+    status,
+    startedAt: occurredAt,
+    ...(status === 'completed' ? { completedAt: occurredAt } : {}),
+  } as const;
+}
+
 function artifactIdFromEvent(payload: unknown): string {
   if (
     typeof payload !== 'object' ||
     payload === null ||
-    !('output' in payload)
+    !('event' in payload)
   ) {
-    throw new Error('工具完成事件缺少 output。');
+    throw new Error('Command 完成事件缺少 event。');
   }
-  const output = (payload as { readonly output?: unknown }).output;
+  const event = (payload as { readonly event?: unknown }).event;
+  if (typeof event !== 'object' || event === null || !('record' in event)) {
+    throw new Error('Command 完成事件缺少 record。');
+  }
+  const record = (event as { readonly record?: unknown }).record;
+  if (typeof record !== 'object' || record === null || !('output' in record)) {
+    throw new Error('Command record 缺少 output。');
+  }
+  const output = (record as { readonly output?: unknown }).output;
   if (
     typeof output !== 'object' ||
     output === null ||

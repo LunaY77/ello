@@ -5,6 +5,11 @@
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
 import type {
+  CommandCapabilities,
+  CommandRunEvent,
+} from '../../command/index.js';
+
+import type {
   AgentError,
   AgentFinishReason,
   AgentRunContext,
@@ -23,11 +28,7 @@ import type {
 } from './model.js';
 import type { AgentTraceEvent, InternalAgentRunContext } from './run-state.js';
 import type { AgentEventStream } from './stream.js';
-import type {
-  AgentApprovalRequest,
-  AgentToolCall,
-  AgentToolCapabilities,
-} from './tools.js';
+import type { AgentApprovalRequest, AgentToolCall } from './tools.js';
 
 export interface AgentEventMetadata {
   readonly runId: string;
@@ -68,6 +69,11 @@ export type EngineEvent =
       readonly type: 'queue.drained';
       readonly queue: string;
       readonly count: number;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'messages.appended';
+      readonly turnIndex: number;
+      readonly messages: readonly AgentMessage[];
     })
   | (AgentEventMetadata & {
       readonly type: 'message.started';
@@ -129,7 +135,7 @@ export type EngineEvent =
       readonly toolCallId: string;
       readonly name: string;
       readonly input: unknown;
-      readonly invocation?: AgentToolCapabilities & {
+      readonly invocation?: CommandCapabilities & {
         readonly physicalName: string;
       };
     })
@@ -157,6 +163,10 @@ export type EngineEvent =
       readonly turnIndex: number;
       readonly toolCallId: string;
       readonly error: AgentError;
+    })
+  | (AgentEventMetadata & {
+      readonly type: 'command.event';
+      readonly event: CommandRunEvent;
     })
   | (AgentEventMetadata & {
       readonly type: 'context.compaction.started';
@@ -338,6 +348,8 @@ export interface MessageCompactor {
     readonly messages: ReadonlyArray<AgentMessage>;
     readonly contextWindow: number;
     readonly signal: AbortSignal;
+    /** admission 已经超限时由 Context Management 显式要求一次 checkpoint。 */
+    readonly force?: boolean;
     readonly compact: ModelCompactor['compact'];
     readonly onStart?: (input: {
       readonly beforeMessageCount: number;
@@ -560,7 +572,7 @@ function toTraceEvent(
         sequence: event.sequence,
         occurredAt: event.occurredAt,
         toolCallId: event.item.toolCallId,
-        toolName: event.item.toolName,
+        toolName: event.item.commandName,
       };
     case 'tool.completed':
       return {
@@ -598,11 +610,13 @@ function toTraceEvent(
       };
     case 'context.compaction.started':
     case 'context.compaction':
+    case 'command.event':
     case 'model.started':
     case 'model.first_token':
     case 'model.completed':
     case 'model.failed':
     case 'queue.drained':
+    case 'messages.appended':
     case 'message.started':
     case 'message.delta':
     case 'reasoning.started':
@@ -659,6 +673,7 @@ async function emitSingleObserverEvent(
       return;
     case 'turn.completed':
     case 'queue.drained':
+    case 'messages.appended':
     case 'message.started':
     case 'message.delta':
     case 'reasoning.started':
@@ -675,6 +690,7 @@ async function emitSingleObserverEvent(
     case 'context.compaction':
     case 'run.interrupted':
     case 'run.completed':
+    case 'command.event':
       return;
     default:
       event satisfies never;

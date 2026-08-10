@@ -8,7 +8,13 @@ import type { ThreadItem } from './resources.js';
 
 export type ToolThreadItem = Extract<
   ThreadItem,
-  { readonly type: 'commandExecution' | 'fileChange' | 'toolCall' }
+  {
+    readonly type:
+      | 'commandExecution'
+      | 'fileChange'
+      | 'toolCall'
+      | 'commandRun';
+  }
 >;
 
 export type ThreadItemKind = 'message' | 'tool' | 'subagent' | 'system';
@@ -27,6 +33,7 @@ export function isToolItem(item: ThreadItem): item is ToolThreadItem {
     case 'commandExecution':
     case 'fileChange':
     case 'toolCall':
+    case 'commandRun':
       return true;
     case 'userMessage':
     case 'agentMessage':

