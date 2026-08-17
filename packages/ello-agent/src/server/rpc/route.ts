@@ -106,8 +106,6 @@ export const CLIENT_METHOD_CAPABILITIES = {
   'agent/task/read': 'read',
   'agent/task/steer': 'submit',
   'agent/task/stop': 'write',
-  'agent/task/resume': 'write',
-  'agent/task/background': 'write',
   'tool/list': 'read',
   'skills/list': 'read',
   'skills/get': 'read',

@@ -115,7 +115,7 @@ export function createTaskCommands(
     defineCommand({
       name: 'task_get',
       summary:
-        'Get one persisted task-board task. Subagent job ids belong to task_output and task_stop.',
+        'Get one persisted task-board task. Subagent job ids belong to get_agent and stop_agent.',
       aliases: ['task details'],
       risk: 'readonly',
       invocation: cliInput(commandInput(idInput), {
@@ -207,7 +207,7 @@ export function createTaskCommands(
 
 function unknownPersistedTask(id: string): Error {
   const guidance = id.startsWith('job_')
-    ? 'This is a subagent task ID; use task_output to read it or task_stop to stop it.'
+    ? 'This is a Subagent job ID; use get_agent to read it or stop_agent to stop it.'
     : 'Use task_list to find persisted task UUIDs or board sequences.';
   return new Error(`Unknown persisted task '${id}'. ${guidance}`);
 }

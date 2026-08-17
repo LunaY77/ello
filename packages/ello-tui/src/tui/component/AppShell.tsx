@@ -35,7 +35,10 @@ export interface AppShellProps {
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
   readonly agentSwitcher?: ReactNode;
-  readonly agentTranscript?: ReactNode;
+  readonly agentTranscript?: (viewport: {
+    readonly maxRows: number;
+    readonly textWidth: number;
+  }) => ReactNode;
   /** Composer 文本占用的视觉行数，用于扣减 live 区预算。 */
   readonly composerRows?: number;
   /** Agent switcher 行数；0 表示不渲染。 */
@@ -63,7 +66,10 @@ export function AppShell(props: AppShellProps) {
   return (
     <Box flexDirection="column" width="100%" paddingX={1}>
       <Box flexDirection="column" flexShrink={0} width={mainWidth}>
-        {props.agentTranscript ?? (
+        {props.agentTranscript?.({
+          maxRows: liveRows,
+          textWidth: mainWidth,
+        }) ?? (
           <LiveViewport
             cwd={props.cwd}
             assistantText={props.liveAssistantText}

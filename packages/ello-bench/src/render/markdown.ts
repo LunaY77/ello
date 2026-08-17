@@ -145,12 +145,12 @@ function resourceSummary(
   statistic: ResourceStatistic,
 ): string[] {
   return [
-    '| agent | elapsed | rounds | tools | input | non-cache input | cache read | cache write | cache hit rate | output | reasoning | main input | subagent input |',
-    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    '| agent | elapsed | rounds | tools | input | non-cache input | cache read | cache write | cache hit rate | output | reasoning | main input | subagent input | combined input | main output | subagent output | combined output | main tools | subagent tools | combined tools |',
+    '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
     ...report.agents.map((agent) => {
       const resources = agent.resources;
       const threads = resources.threadUsage;
-      return `| ${escapeCell(agent.agentId)} | ${seconds(statisticValue(resources.elapsedMs, statistic))} | ${count(statisticValue(resources.rounds, statistic))} | ${count(statisticValue(resources.toolCalls, statistic))} | ${count(statisticValue(resources.inputTokens, statistic))} | ${count(statisticValue(resources.nonCachedInputTokens, statistic))} | ${count(statisticValue(resources.cacheReadTokens, statistic))} | ${count(statisticValue(resources.cacheWriteTokens, statistic))} | ${percent(statisticValue(resources.cacheHitRate, statistic))} | ${count(statisticValue(resources.outputTokens, statistic))} | ${count(statisticValue(resources.reasoningTokens, statistic))} | ${count(statisticValue(threads?.mainInputTokens, statistic))} | ${count(statisticValue(threads?.subagentInputTokens, statistic))} |`;
+      return `| ${escapeCell(agent.agentId)} | ${seconds(statisticValue(resources.elapsedMs, statistic))} | ${count(statisticValue(resources.rounds, statistic))} | ${count(statisticValue(resources.toolCalls, statistic))} | ${count(statisticValue(resources.inputTokens, statistic))} | ${count(statisticValue(resources.nonCachedInputTokens, statistic))} | ${count(statisticValue(resources.cacheReadTokens, statistic))} | ${count(statisticValue(resources.cacheWriteTokens, statistic))} | ${percent(statisticValue(resources.cacheHitRate, statistic))} | ${count(statisticValue(resources.outputTokens, statistic))} | ${count(statisticValue(resources.reasoningTokens, statistic))} | ${count(statisticValue(threads?.mainInputTokens, statistic))} | ${count(statisticValue(threads?.subagentInputTokens, statistic))} | ${count(statisticValue(threads?.combinedInputTokens, statistic))} | ${count(statisticValue(threads?.mainOutputTokens, statistic))} | ${count(statisticValue(threads?.subagentOutputTokens, statistic))} | ${count(statisticValue(threads?.combinedOutputTokens, statistic))} | ${count(statisticValue(threads?.mainToolCalls, statistic))} | ${count(statisticValue(threads?.subagentToolCalls, statistic))} | ${count(statisticValue(threads?.combinedToolCalls, statistic))} |`;
     }),
   ];
 }

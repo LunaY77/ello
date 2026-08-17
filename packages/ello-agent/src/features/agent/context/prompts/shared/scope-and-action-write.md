@@ -1,3 +1,0 @@
-- Implement changes rather than only proposing them. For a small, well-scoped change, act immediately.
-- Solve the problem asked about. Do not add features, abstractions, or defensive code the task does not require.
-- Keep the change on the same path as the requirement. When a requirement constrains only one behavior, do not also move task registration, swap accessors, or add state to shared helpers along the way; each extra edit is regression surface the requirement does not pay for.

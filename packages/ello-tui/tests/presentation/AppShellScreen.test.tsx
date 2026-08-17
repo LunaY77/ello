@@ -45,7 +45,6 @@ function runningSubagent(index: number): SubagentRunView {
     agentName: `agent-${index}`,
     description: `task ${index}`,
     status: 'running',
-    background: false,
     startedAt: '2026-08-08T00:00:00.000Z',
     tools: [],
   };

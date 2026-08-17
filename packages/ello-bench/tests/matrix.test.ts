@@ -34,7 +34,7 @@ describe('benchmark matrix', () => {
     ).toThrow();
   });
 
-  it('uses the fixed twenty-task declaration in the example config', async () => {
+  it('uses the fixed full DeepSWE task declaration in the example config', async () => {
     const config = await loadBenchmarkConfig(EXAMPLE_CONFIG_PATH);
 
     expect(config.suite.source.repository).toBe(DEEP_SWE_SOURCE_REPOSITORY);
@@ -65,20 +65,41 @@ describe('benchmark matrix', () => {
     );
     expect(config.suite.taskSetHash).toBe(DEEP_SWE_TASK_SET_HASH);
     expect(DEEP_SWE_TASK_SET_HASH).toBe(sha256(stableJson(DEEP_SWE_TASKS)));
-    expect(config.tasks).toHaveLength(20);
-    expect(new Set(config.tasks.map((task) => task.taskId))).toHaveLength(20);
+    expect(config.tasks).toHaveLength(113);
+    expect(new Set(config.tasks.map((task) => task.taskId))).toHaveLength(113);
+    expect(config.suite.selectedTaskCount).toBe(113);
+    expect(config.suite.upstreamTaskCount).toBe(113);
     expect(config.tasks.map((task) => task.taskId)).toEqual(
       expect.arrayContaining([
         'cattrs-partial-structuring-recovery',
         'httpx-streaming-json-iteration',
-      ]),
-    );
-    expect(config.tasks.map((task) => task.taskId)).not.toEqual(
-      expect.arrayContaining([
         'narwhals-rolling-window-suite',
         'langchain-request-coalescing',
       ]),
     );
+    expect(
+      config.tasks.reduce<Record<string, number>>((counts, task) => {
+        counts[task.language] = (counts[task.language] ?? 0) + 1;
+        return counts;
+      }, {}),
+    ).toEqual({
+      go: 34,
+      python: 34,
+      typescript: 35,
+      rust: 5,
+      javascript: 5,
+    });
+    expect(
+      config.tasks.reduce<Record<string, number>>((counts, task) => {
+        counts[task.difficultyBand] = (counts[task.difficultyBand] ?? 0) + 1;
+        return counts;
+      }, {}),
+    ).toEqual({
+      easy: 26,
+      'medium-easy': 29,
+      'medium-hard': 27,
+      hard: 31,
+    });
   });
 
   it('loads the fixed thirty-task SWE-bench Pro declaration', async () => {
@@ -125,9 +146,9 @@ describe('benchmark matrix', () => {
     const second = createPlan(config, selection);
 
     expect(first).toEqual(second);
-    expect(first.jobs).toHaveLength(60);
-    expect(new Set(first.jobs.map((job) => job.jobId))).toHaveLength(60);
-    expect(expandJobs(config, selection)).toHaveLength(60);
+    expect(first.jobs).toHaveLength(339);
+    expect(new Set(first.jobs.map((job) => job.jobId))).toHaveLength(339);
+    expect(expandJobs(config, selection)).toHaveLength(339);
     expect(new Set(first.jobs.map((job) => job.agentId))).toEqual(
       new Set(config.agents.map((agent) => agent.id)),
     );

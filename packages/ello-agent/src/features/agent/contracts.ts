@@ -57,19 +57,19 @@ export interface AgentRunGoal {
   readonly updatedAt: string;
 }
 
-/** 子代理运行附带的父子关系和可恢复运行边界。 */
+/** Subagent 运行附带的 Primary 归属与运行边界。 */
 export interface AgentDelegationContext {
   readonly taskId: string;
   readonly agentId: string;
   readonly rootThreadId: string;
-  readonly parentTaskId?: string;
-  readonly depth: number;
-  readonly contextMode: 'fresh' | 'fork';
-  readonly executionMode: 'foreground' | 'background';
   readonly maxTurns: number;
   readonly modelSelector?: 'primary_model' | 'auxiliary_model';
-  /** fork 使用父级 exact Commands；普通命名子代理省略并重新按 definition 装配。 */
-  readonly exactCommandNames?: readonly string[];
+}
+
+/** 已从持久队列保留、等待 Primary 模型输入确认消费的一批通知。 */
+export interface AgentTaskNotificationInput {
+  readonly notificationIds: readonly string[];
+  readonly text: string;
 }
 
 export type AgentInteraction =
@@ -311,7 +311,15 @@ export interface BuiltAgent {
    */
   readonly waitForTaskNotification?: (
     signal: AbortSignal,
-  ) => Promise<string | undefined>;
+  ) => Promise<AgentTaskNotificationInput | undefined>;
+  readonly acknowledgeTaskNotifications?: (
+    notificationIds: readonly string[],
+  ) => void;
+  readonly releaseTaskNotifications?: (
+    notificationIds: readonly string[],
+  ) => void;
+  readonly acknowledgeSystemTaskNotifications?: () => void;
+  readonly releaseSystemTaskNotifications?: () => void;
   /**
    * 读取当前主 Agent 最近一次完整模型请求派生的压缩能力。
    *
@@ -567,7 +575,17 @@ export interface AgentRunCommands {
   /** 主 Agent 自然停止时等待后台任务通知；child run 不提供该能力。 */
   readonly waitForTaskNotification?: (
     signal: AbortSignal,
-  ) => Promise<string | undefined>;
+  ) => Promise<AgentTaskNotificationInput | undefined>;
+  /** 模型请求开始后确认当前动态 System Section 中的通知。 */
+  readonly acknowledgeSystemTaskNotifications?: () => void;
+  /** 模型请求未开始即结束时释放当前动态 System Section 中的通知。 */
+  readonly releaseSystemTaskNotifications?: () => void;
+  readonly acknowledgeTaskNotifications?: (
+    notificationIds: readonly string[],
+  ) => void;
+  readonly releaseTaskNotifications?: (
+    notificationIds: readonly string[],
+  ) => void;
   /**
    * 读取 execution tools 当前使用的 session mode。
    *

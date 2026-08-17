@@ -206,6 +206,7 @@ export {
   AgentTaskRpcFeature,
   createAgentTaskEventPreparer,
   createSubagentCommands,
+  renderTaskPacket,
   type AgentTask,
 } from './subagents/index.js';
 export {

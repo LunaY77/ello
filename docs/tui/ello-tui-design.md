@@ -18,7 +18,7 @@ typed JSON-RPC 访问。
 - rewind / resume / clear 会重置 terminal scrollback，再从当前 active path 重放历史。
 - dynamic frame 必须矮于终端高度，靠内容行数预算而不是布局高度实现，见 §3.1。
 - `SubagentActivity` 负责主 Thread 中的有界委派摘要；`AgentSwitcher` 固定在完整 footer
-  下方，`AgentTranscript` 负责 child 详情，三者通过公开任务协议读取 Server 投影。
+  下方，`AgentTranscript` 负责 Subagent 详情，三者通过公开 Agent 投影读取 Server 状态。
 
 ## 2. 目录结构
 
@@ -126,7 +126,7 @@ bottom dock
   overlay
   composer
   footer: model / mode / context XX% left / plan hints / goal ··· cache / token usage
-  agent switcher: main / child status / elapsed / token
+  agent switcher: main / Subagent status / elapsed / token
 ```
 
 `AppShell` 只渲染 dynamic viewport 和 dock：
@@ -169,7 +169,7 @@ bottom dock
 - `dockRows()` 的输入由 `App.tsx` 提供：`composerRowCount()`（含运行中的 `Enter steers this
 run`、`Steer @target` 和补全候选行）、`agentSwitcherRows()`、overlay 是否打开。
 - dock 中所有列表都必须有界：`InlineSelect` 的 `visibleRows` 默认 `DEFAULT_VISIBLE_ROWS`，
-  Agent switcher 最多 `AGENT_SWITCHER_MAX_TASK_ROWS` 个 child 行并显示 `… +N more`。
+  Agent switcher 最多 `AGENT_SWITCHER_MAX_TASK_ROWS` 个 Subagent 行并显示 `… +N more`。
 - footer 三行只截断不换行，否则窄终端下会顶高 frame。
 - `dockFitsTerminal()` 为 false 时（很矮的终端 + overlay + 多 child）是显式承认的降级边界：
   live 区让到 0 行仍装不下，此时接受整屏重绘。
@@ -220,7 +220,7 @@ diagnostic
 - running tools 交给 `ToolActivityList`。
 - running subagents 使用 `agentName(description)` 标题，逐行简要展示最近 4 个 tool call。
 - 超过 4 个 subagent tool call 时显示 `… +N tool uses`；同一 toolCallId 的 delta 不重复计数。
-- subagent 完成后显示 Done、tool count、token、elapsed 和最多 3 行最终消息预览，再一次性进入
+- Subagent 完成后显示 Done、tool count、token、elapsed 和最多 3 行结构化结果摘要，再一次性进入
   committed history。
 - 运行中显示 `working Ns`。
 - 中断后显示 `interrupted: ...`。
@@ -285,6 +285,8 @@ approval mode 颜色：
 - `Esc`：交给 `onEscape()`。
 - mouse tracking escape sequence 不写入输入。
 - `isActive=false` 时不接收输入。
+- 查看运行中的 Subagent 时，composer 显示 `Steer @<name>`，提交内容通过公开
+  `agent/task/steer` 发送给该 Subagent；终态 Subagent 不接受 steer。
 
 ### 7.1 终端宽度与视觉行
 
@@ -423,7 +425,7 @@ headline 规则：
 - `glob`：`Glob <pattern> in <path>`。
 - `bash` / `kind=shell`：`Ran <command>`。
 - `web_fetch` / `kind=network`：`Fetched <url>`。
-- `delegate_to_subagent` / `kind=task`：`Delegate <agent>`。
+- `spawn_agent` / `kind=task`：`Spawn <agent>`。
 - 其它：`Humanized Tool Name <summary>`。
 
 状态和详情：
@@ -610,7 +612,9 @@ TUI 测试必须覆盖：
 - `AgentTaskViews.test.tsx`
   - Agent 列表位于 footer 之后；
   - composer 最后一个视觉行按 `↓` 进入列表；
-  - `x` 停止高亮 child；
+  - `x` 停止高亮 Subagent；
+  - 已提交 transcript 进入 shell scrollback，运行增量服从 live viewport 高度预算；
+  - `<agent-result>` envelope 不直接显示，改为结构化结果；
   - `Ctrl+C` 使用 root 级联中断。
 - `theme.test.ts`
   - theme token。
@@ -638,18 +642,22 @@ TUI 测试必须覆盖：
 
 ## 16. Subagent 导航合同
 
-Subagent 产品闭环采用 bottom dock 底部的 Agent switcher，而不是把运行任务藏进 `/tasks`：
+Subagent 产品闭环采用 bottom dock 底部的 Agent switcher，而不是把运行实例藏进 `/tasks`。
+所有 Subagent 都由 Primary 直接创建并始终异步运行；列表是扁平的，不表达递归任务树：
 
-- 默认显示 `main` 与 child 的状态、说明、耗时和 token；
+- 默认显示 `main` 与 Subagent 的状态、说明、耗时和 token；
 - Agent switcher 位于完整 footer 的 cache/token 行之后，不显示方向提示文字；
 - composer 光标位于最后一个视觉行时使用 `↓` 进入选择态，`↑` / `↓` 移动，`Enter` 切换完整
   transcript；
-- `x` 停止选中的活动 child 子树，`Esc` 返回 composer；
+- `x` 停止选中的活动 Subagent，`Esc` 返回 composer；
 - `SubagentActivity` 最多展示 4 个工具调用，完成后展示有界结果文本；
-- 工具轨迹展开快捷键不属于本设计范围，完整过程进入 child transcript 查看；
-- `Ctrl+C` 通过 Server root cancellation 一次性中断 main 和全部活动 child；
-- foreground task 可以用 `Ctrl+B` 单向转入 background；
-- task tree/detail/event 必须通过 typed JSON-RPC 和 snapshot barrier 提供；
+- 已提交的 Subagent transcript 进入 shell scrollback，运行增量与 running tool 进入有界
+  live viewport；
+- 详情页隐藏成功结果的内部 `<agent-result>` JSON，改为展示结构化 result 的状态、摘要和证据；
+- 用户可以在运行中的 Subagent 详情页直接 steer；Subagent 不能 spawn、inspect、wait 或 stop
+  其它 Subagent；
+- `Ctrl+C` 通过 Server root cancellation 一次性中断 main 和全部活动 Subagent；
+- Agent list/detail/event 必须通过 typed JSON-RPC 和 snapshot barrier 提供；
 - TUI 查看任务与父模型 notification delivery 使用不同消费状态。
 
 完整状态机、协议草案、窄终端布局和验收矩阵见

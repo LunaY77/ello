@@ -1,17 +1,20 @@
 /**
  * 本文件把持久任务与当前进程的 AgentRun 连接起来。
  *
- * Store 是事实源；Service 只保留可中断 run、前台交付门和实时订阅。进程重启后这些句柄
- * 会消失，数据库中的 recovered 状态、transcript 和通知仍然完整。
+ * Store 是事实源；Service 只保留可中断 run、通知保留和实时订阅。进程重启后这些句柄
+ * 会消失，未确认通知仍由数据库重新投递。
  */
 import { renderPromptTemplate } from '../context/prompts.js';
 import type {
   AgentInteraction,
   AgentRun,
   AgentRunEvent,
+  AgentRunResult,
 } from '../contracts.js';
 import type { AgentMessage } from '../engine/index.js';
 
+import type { AgentTaskResult } from './task-result.js';
+import { parseAgentTaskResult, salvageAgentTaskResult } from './task-result.js';
 import {
   AgentTaskStore,
   type AgentTask,
@@ -36,7 +39,17 @@ export type PrepareAgentTaskEvent = (
 export interface StartedAgentTask {
   readonly task: AgentTask;
   readonly completion: Promise<AgentTask>;
-  readonly delivery: Promise<AgentTask>;
+}
+
+export interface AgentWaitResult {
+  readonly task: AgentTask;
+  readonly waitStatus: 'completed' | 'timed_out';
+}
+
+/** 一批已为某个 Primary run 保留、但尚未确认模型消费的持久通知。 */
+export interface AgentTaskNotificationDelivery {
+  readonly notificationIds: readonly string[];
+  readonly text: string;
 }
 
 /** task 投影或 transcript 变化的进程内订阅函数。 */
@@ -56,17 +69,11 @@ export type CancelAgentTaskInteractions = (
   reason: string,
 ) => Promise<void>;
 
-interface DeliveryGate {
-  readonly promise: Promise<AgentTask>;
-  /** 首次调用时完成前台交付，后续竞态调用保持幂等。 */
-  resolve(task: AgentTask): void;
-}
-
 /** 进程级子代理任务服务。 */
 export class AgentTaskService {
   private readonly runs = new Map<string, AgentRun>();
   private readonly completions = new Map<string, Promise<AgentTask>>();
-  private readonly deliveries = new Map<string, DeliveryGate>();
+  private readonly ownedTaskIds = new Set<string>();
   private readonly listeners = new Map<string, Set<AgentTaskChangeListener>>();
   private notifier:
     | ((
@@ -79,6 +86,7 @@ export class AgentTaskService {
   private interactionCanceller: CancelAgentTaskInteractions | undefined;
   private readonly cancellingTasks = new Set<string>();
   private readonly cancellingRoots = new Set<string>();
+  private readonly reservedNotifications = new Set<string>();
   private closing = false;
 
   /**
@@ -94,6 +102,7 @@ export class AgentTaskService {
     private readonly launch: LaunchAgentTask,
     private readonly prepareEvent: PrepareAgentTaskEvent = (_task, event) =>
       Promise.resolve(event),
+    private readonly closeTimeoutMs = 5_000,
   ) {}
 
   /** 收口上次进程遗留的 running 任务。 */
@@ -162,65 +171,83 @@ export class AgentTaskService {
       throw new Error('Agent task cannot start while its tree is cancelling.');
     }
     const change = this.store.createChange(input);
+    this.ownedTaskIds.add(change.task.id);
     this.publish(change);
-    const gate = createDeliveryGate();
-    this.deliveries.set(change.task.id, gate);
     const completion = this.launchTask(change.task.id);
-    if (change.task.executionMode === 'background') gate.resolve(change.task);
-    return { task: change.task, completion, delivery: gate.promise };
+    return { task: change.task, completion };
   }
 
-  /** 从 terminal/recovered task 的 sidechain 创建一个新任务。 */
-  resume(
-    taskId: string,
-    rootThreadId: string,
-    prompt: string,
-    options: {
-      readonly name?: string;
-      readonly description?: string;
-      readonly executionMode?: 'foreground' | 'background';
-    } = {},
-  ): StartedAgentTask {
-    const previous = this.store.requireForRoot(taskId, rootThreadId);
-    if (!isTerminalAgentTaskStatus(previous.status)) {
-      throw new Error(`Agent task ${taskId} is still ${previous.status}.`);
-    }
-    return this.start({
-      rootThreadId: previous.rootThreadId,
-      ...(previous.parentTaskId === undefined
-        ? {}
-        : { parentTaskId: previous.parentTaskId }),
-      resumeFromTaskId: previous.id,
-      ...(options.name === undefined ? {} : { name: options.name }),
-      description: options.description ?? previous.description,
-      definitionName: previous.definitionName,
-      ...(previous.modelSelector === undefined
-        ? {}
-        : { modelSelector: previous.modelSelector }),
-      contextMode: previous.contextMode,
-      executionMode: options.executionMode ?? 'background',
-      prompt,
-      cwd: previous.cwd,
-      isolation: previous.isolation,
-      maxTurns: previous.maxTurns,
-      depth: previous.depth,
-      sidechain: previous.sidechain,
-      commandNames: previous.commandNames,
-      permissionRules: previous.permissionRules,
-      externalPaths: previous.externalPaths,
-    });
-  }
-
-  /** 查询任务；可选择等待当前进程中的运行完成。 */
-  async output(
+  /** 在明确的依赖屏障等待任务进入终态。 */
+  async wait(
     selector: string,
     rootThreadId: string,
-    waitMs: number,
-  ): Promise<AgentTask> {
+    signal: AbortSignal,
+    timeoutMs: number,
+  ): Promise<AgentWaitResult> {
     const task = this.store.requireForRoot(selector, rootThreadId);
+    if (isTerminalAgentTaskStatus(task.status)) {
+      return { task, waitStatus: 'completed' };
+    }
+    const waitController = new AbortController();
+    const abortWait = () => waitController.abort(signal.reason);
+    signal.addEventListener('abort', abortWait, { once: true });
+    if (signal.aborted) abortWait();
     const completion = this.completions.get(task.id);
-    if (completion === undefined || waitMs === 0) return task;
-    return await waitFor(completion, waitMs, task);
+    const waiting =
+      completion !== undefined
+        ? waitWithSignal(completion, waitController.signal)
+        : this.waitForTerminalTask(task, rootThreadId, waitController.signal);
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        waiting.then((completed) => ({
+          task: completed,
+          waitStatus: 'completed' as const,
+        })),
+        new Promise<AgentWaitResult>((resolve) => {
+          timer = setTimeout(
+            () =>
+              resolve({
+                task: this.store.require(task.id),
+                waitStatus: 'timed_out',
+              }),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener('abort', abortWait);
+      if (!waitController.signal.aborted) {
+        waitController.abort(new Error('Agent dependency barrier closed.'));
+      }
+    }
+  }
+
+  private waitForTerminalTask(
+    task: AgentTask,
+    rootThreadId: string,
+    signal: AbortSignal,
+  ): Promise<AgentTask> {
+    return new Promise<AgentTask>((resolve, reject) => {
+      let unsubscribe: () => void = () => undefined;
+      const finish = () => {
+        const latest = this.store.require(task.id);
+        if (isTerminalAgentTaskStatus(latest.status)) {
+          unsubscribe();
+          signal.removeEventListener('abort', abort);
+          resolve(latest);
+        }
+      };
+      const abort = () => {
+        unsubscribe();
+        reject(signal.reason ?? new Error('Agent wait interrupted.'));
+      };
+      unsubscribe = this.subscribe(rootThreadId, () => finish());
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+      else finish();
+    });
   }
 
   /** 向 running task 追加幂等 steer。 */
@@ -248,45 +275,29 @@ export class AgentTaskService {
     return change.task;
   }
 
-  /** 将 foreground task 单向转为 background，并释放父工具调用。 */
-  background(selector: string, rootThreadId: string): AgentTask {
-    const task = this.store.requireForRoot(selector, rootThreadId);
-    const change = this.store.background(task.id);
-    if (change.task.revision !== task.revision) {
-      this.publish(change);
-      this.deliveries.get(task.id)?.resolve(change.task);
-    }
-    return change.task;
-  }
-
-  /** 停止 queued/running 任务及全部活动后代；终态调用保持幂等。 */
+  /** 停止 queued/running 任务；终态调用保持幂等。 */
   async stop(selector: string, rootThreadId: string): Promise<AgentTask> {
     const task = this.store.requireForRoot(selector, rootThreadId);
     if (isTerminalAgentTaskStatus(task.status)) return task;
-    const subtree = this.activeSubtree(task);
-    for (const member of subtree) this.cancellingTasks.add(member.id);
+    this.cancellingTasks.add(task.id);
     try {
       await this.cancelInteractions(
         task.rootThreadId,
-        subtree.map((member) => member.id),
+        [task.id],
         'Agent task stopped by user.',
       );
-      for (const member of [...subtree].sort((a, b) => b.depth - a.depth)) {
-        this.stopTask(
-          member,
-          member.id === task.id
-            ? 'Parent stopped the task.'
-            : `Ancestor task ${task.id} was stopped.`,
-          `agent task tree ${task.id} stopped`,
-        );
-      }
+      this.stopTask(
+        task,
+        'Primary stopped the Agent.',
+        `agent task ${task.id} stopped`,
+      );
       return this.store.require(task.id);
     } finally {
-      for (const member of subtree) this.cancellingTasks.delete(member.id);
+      this.cancellingTasks.delete(task.id);
     }
   }
 
-  /** root Turn 中断时停止整棵活动任务树。 */
+  /** root Turn 中断时停止该 Primary 创建的全部活动任务。 */
   async stopRoot(
     rootThreadId: string,
     reason: string,
@@ -302,7 +313,7 @@ export class AgentTaskService {
         active.map((task) => task.id),
         reason,
       );
-      for (const task of [...active].sort((a, b) => b.depth - a.depth)) {
+      for (const task of active) {
         this.stopTask(task, reason, reason);
       }
       return active.map((task) => this.store.require(task.id));
@@ -312,91 +323,107 @@ export class AgentTaskService {
     }
   }
 
-  /** 写入单个任务的 killed 终态，并收口当前进程中的交付门与 run。 */
+  /** 写入单个任务的 stopped 终态并中断当前进程中的 run。 */
   private stopTask(
     task: AgentTask,
     errorMessage: string,
     interruptReason: string,
   ): AgentTask {
+    const result: AgentTaskResult = {
+      status: 'stopped',
+      summary: 'Subagent execution stopped before completion.',
+      reason: errorMessage,
+      partialWork: [],
+      evidence: [],
+    };
     const change = this.store.settleChange(task.id, {
-      status: 'killed',
+      result,
       errorMessage,
       sidechain: task.sidechain,
     });
     this.publish(change);
     this.runs.get(task.id)?.interrupt(interruptReason);
-    this.deliveries.get(task.id)?.resolve(change.task);
     this.notify(change.task);
     return change.task;
   }
 
-  /** 读取并消费父线程的完成通知。 */
-  takeNotifications(rootThreadId: string): string {
-    const notifications = this.store.pendingNotifications(rootThreadId);
-    if (notifications.length === 0) return '';
+  /** 为父线程保留一批完成通知；保留本身不改变数据库 delivered 状态。 */
+  takeNotifications(
+    rootThreadId: string,
+  ): AgentTaskNotificationDelivery | undefined {
+    const notifications = this.store
+      .pendingNotifications(rootThreadId)
+      .filter(
+        (notification) => !this.reservedNotifications.has(notification.id),
+      );
+    if (notifications.length === 0) return undefined;
     const entries = notifications.map((notification) => ({
       notification,
       task: this.store.require(notification.taskId),
     }));
-    this.store.markNotificationsDelivered(
-      notifications.map((notification) => notification.id),
+    const notificationIds = notifications.map(
+      (notification) => notification.id,
     );
-    return renderNotifications(entries);
+    for (const id of notificationIds) this.reservedNotifications.add(id);
+    return { notificationIds, text: renderNotifications(entries) };
   }
 
   /** 主 run 自然停止时等待下一批后台任务通知；没有活动后台任务时立即返回。 */
   async waitForNotification(
     rootThreadId: string,
     signal: AbortSignal,
-  ): Promise<string | undefined> {
+  ): Promise<AgentTaskNotificationDelivery | undefined> {
     while (!signal.aborted) {
       const notification = this.takeNotifications(rootThreadId);
-      if (notification !== '') return notification;
-      const hasActiveBackgroundTask = this.store
+      if (notification !== undefined) return notification;
+      const hasActiveTask = this.store
         .list(rootThreadId)
-        .some(
-          (task) =>
-            task.executionMode === 'background' &&
-            !isTerminalAgentTaskStatus(task.status),
-        );
-      if (!hasActiveBackgroundTask) return undefined;
+        .some((task) => !isTerminalAgentTaskStatus(task.status));
+      if (!hasActiveTask) return undefined;
       await this.waitForTaskChange(rootThreadId, signal);
     }
     return undefined;
   }
 
-  /** foreground tool_result 已携带终态时消费对应通知，避免下一轮重复注入。 */
-  acknowledge(taskId: string): void {
-    const task = this.store.require(taskId);
-    const notification = this.store
-      .pendingNotifications(task.rootThreadId)
-      .find((candidate) => candidate.taskId === taskId);
-    if (notification !== undefined) {
-      this.store.markNotificationsDelivered([notification.id]);
-    }
+  /** 模型输入已经消费通知后，原子确认并释放进程内保留。 */
+  acknowledgeNotifications(notificationIds: readonly string[]): void {
+    this.store.markNotificationsDelivered(notificationIds);
+    for (const id of notificationIds) this.reservedNotifications.delete(id);
+  }
+
+  /** 模型输入未消费时释放保留，使同进程后续 run 可重新投递。 */
+  releaseNotifications(notificationIds: readonly string[]): void {
+    for (const id of notificationIds) this.reservedNotifications.delete(id);
   }
 
   /** 停止当前进程拥有的全部子任务并等待运行收口。 */
   async close(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
-    for (const [taskId, run] of this.runs) {
+    for (const taskId of this.ownedTaskIds) {
       const current = this.store.require(taskId);
       if (!isTerminalAgentTaskStatus(current.status)) {
+        const result: AgentTaskResult = {
+          status: 'stopped',
+          summary: 'Subagent execution stopped during Server shutdown.',
+          reason: 'Agent task service closed.',
+          partialWork: [],
+          evidence: [],
+        };
         const change = this.store.settleChange(taskId, {
-          status: 'killed',
+          result,
           errorMessage: 'Agent task service closed.',
           sidechain: current.sidechain,
         });
         this.publish(change);
-        this.deliveries.get(taskId)?.resolve(change.task);
       }
-      run.interrupt('agent task service closing');
+      this.runs.get(taskId)?.interrupt('agent task service closing');
     }
-    await Promise.allSettled(this.completions.values());
+    await waitForClose(this.completions.values(), this.closeTimeoutMs);
     this.runs.clear();
     this.completions.clear();
-    this.deliveries.clear();
+    this.ownedTaskIds.clear();
+    this.reservedNotifications.clear();
     this.listeners.clear();
   }
 
@@ -408,7 +435,7 @@ export class AgentTaskService {
     void completion.finally(() => {
       this.completions.delete(taskId);
       this.runs.delete(taskId);
-      this.deliveries.delete(taskId);
+      this.ownedTaskIds.delete(taskId);
     });
     return completion;
   }
@@ -424,7 +451,7 @@ export class AgentTaskService {
       const run = await this.launch(task);
       this.runs.set(task.id, run);
       const current = this.store.require(task.id);
-      if (current.status === 'killed') {
+      if (current.status === 'stopped') {
         run.interrupt('agent task stopped before the child run was ready');
       } else if (this.closing) {
         run.interrupt('agent task service closing');
@@ -437,8 +464,10 @@ export class AgentTaskService {
               sidechain.push(...event.messages);
             const persistedEvent = await this.prepareEvent(task, event);
             const change = this.persistRunEvent(task.id, persistedEvent);
+            if (change === undefined) continue;
             this.publish(change);
             if (event.type === 'interactionRequired') {
+              if (isTerminalAgentTaskStatus(change.task.status)) continue;
               await this.forwardInteraction(task, event.interaction, run);
             }
             if (event.type === 'contextCompacted') {
@@ -457,51 +486,36 @@ export class AgentTaskService {
       const latest = this.store.require(task.id);
       if (isTerminalAgentTaskStatus(latest.status)) return latest;
       const output = lastMessage.trim();
-      const change =
-        result.status === 'completed' && output !== ''
-          ? this.store.settleChange(task.id, {
-              status: 'completed',
-              output,
-              usage: result.usage,
-              sidechain,
-            })
-          : result.status === 'completed'
-            ? this.store.settleChange(task.id, {
-                status: 'failed',
-                errorMessage: 'Agent task completed without a final answer.',
-                usage: result.usage,
-                sidechain,
-              })
-            : result.status === 'interrupted'
-              ? this.store.settleChange(task.id, {
-                  status: 'killed',
-                  errorMessage: result.reason,
-                  usage: result.usage,
-                  sidechain,
-                })
-              : this.store.settleChange(task.id, {
-                  status: 'failed',
-                  errorMessage: result.error.message,
-                  usage: result.usage,
-                  sidechain,
-                });
+      const terminal = terminalResult(result, output);
+      const change = this.store.settleChange(task.id, {
+        result: terminal.result,
+        ...(output === '' ? {} : { output }),
+        ...(terminal.errorMessage === undefined
+          ? {}
+          : { errorMessage: terminal.errorMessage }),
+        usage: result.usage,
+        sidechain,
+      });
       this.publish(change);
-      this.deliveries.get(task.id)?.resolve(change.task);
       this.notify(change.task);
-      if (change.task.status === 'killed') {
-        await this.stopDescendants(change.task, change.task.errorMessage ?? '');
-      }
       return change.task;
     } catch (error) {
       const latest = this.store.require(task.id);
       if (isTerminalAgentTaskStatus(latest.status)) return latest;
-      const change = this.store.settleChange(task.id, {
+      const message = errorMessage(error);
+      const failure: AgentTaskResult = {
         status: 'failed',
-        errorMessage: errorMessage(error),
+        summary: 'Subagent execution failed.',
+        error: message,
+        evidence: [],
+        retryable: false,
+      };
+      const change = this.store.settleChange(task.id, {
+        result: failure,
+        errorMessage: message,
         sidechain,
       });
       this.publish(change);
-      this.deliveries.get(task.id)?.resolve(change.task);
       this.notify(change.task);
       return change.task;
     }
@@ -510,7 +524,10 @@ export class AgentTaskService {
   private persistRunEvent(
     taskId: string,
     event: AgentRunEvent,
-  ): AgentTaskChange {
+  ): AgentTaskChange | undefined {
+    if (isTerminalAgentTaskStatus(this.store.require(taskId).status)) {
+      return undefined;
+    }
     const commandEvent =
       event.type === 'commandRunEvent' ? event.event : undefined;
     if (commandEvent?.type === 'command.started') {
@@ -598,63 +615,7 @@ export class AgentTaskService {
   }
 
   private isCreationBlocked(input: CreateAgentTask): boolean {
-    if (this.cancellingRoots.has(input.rootThreadId)) return true;
-    let parentTaskId = input.parentTaskId;
-    while (parentTaskId !== undefined) {
-      if (this.cancellingTasks.has(parentTaskId)) return true;
-      parentTaskId = this.store.get(parentTaskId)?.parentTaskId;
-    }
-    return false;
-  }
-
-  private activeSubtree(root: AgentTask): readonly AgentTask[] {
-    const descendants = new Set([root.id]);
-    const tasks = this.store.list(root.rootThreadId);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const task of tasks) {
-        if (
-          task.parentTaskId !== undefined &&
-          descendants.has(task.parentTaskId) &&
-          !descendants.has(task.id)
-        ) {
-          descendants.add(task.id);
-          changed = true;
-        }
-      }
-    }
-    return tasks.filter(
-      (task) =>
-        descendants.has(task.id) && !isTerminalAgentTaskStatus(task.status),
-    );
-  }
-
-  private async stopDescendants(
-    parent: AgentTask,
-    reason: string,
-  ): Promise<void> {
-    const descendants = this.activeSubtree(parent).filter(
-      (task) => task.id !== parent.id,
-    );
-    if (descendants.length === 0) return;
-    for (const task of descendants) this.cancellingTasks.add(task.id);
-    try {
-      await this.cancelInteractions(
-        parent.rootThreadId,
-        descendants.map((task) => task.id),
-        reason,
-      );
-      for (const task of [...descendants].sort((a, b) => b.depth - a.depth)) {
-        this.stopTask(
-          task,
-          `Ancestor task ${parent.id} was stopped.`,
-          `ancestor task ${parent.id} stopped`,
-        );
-      }
-    } finally {
-      for (const task of descendants) this.cancellingTasks.delete(task.id);
-    }
+    return this.cancellingRoots.has(input.rootThreadId);
   }
 
   private cancelInteractions(
@@ -695,19 +656,24 @@ export class AgentTaskService {
 
   private notify(task: AgentTask): void {
     const notifier = this.notifier;
-    if (notifier === undefined || task.executionMode === 'foreground') return;
+    if (notifier === undefined) return;
     const notification = this.store
       .pendingNotifications(task.rootThreadId)
-      .find((candidate) => candidate.taskId === task.id);
+      .find(
+        (candidate) =>
+          candidate.taskId === task.id &&
+          !this.reservedNotifications.has(candidate.id),
+      );
+    if (notification === undefined) return;
+    this.reservedNotifications.add(notification.id);
     if (
-      notification !== undefined &&
-      notifier(
+      !notifier(
         task.rootThreadId,
         notification.id,
         renderNotifications([{ notification, task }]),
       )
     ) {
-      this.store.markNotificationsDelivered([notification.id]);
+      this.reservedNotifications.delete(notification.id);
     }
   }
 }
@@ -739,22 +705,6 @@ function singleLine(value: string): string {
   return normalized.length <= 240 ? normalized : `${normalized.slice(0, 239)}…`;
 }
 
-function createDeliveryGate(): DeliveryGate {
-  let settled = false;
-  let resolvePromise: (task: AgentTask) => void = () => undefined;
-  const promise = new Promise<AgentTask>((resolve) => {
-    resolvePromise = resolve;
-  });
-  return {
-    promise,
-    resolve(task) {
-      if (settled) return;
-      settled = true;
-      resolvePromise(task);
-    },
-  };
-}
-
 function renderNotifications(
   entries: readonly {
     readonly notification: AgentTaskNotification;
@@ -770,12 +720,8 @@ function renderNotifications(
         `  <task-id>${notification.taskId}</task-id>`,
         `  <status>${notification.status}</status>`,
         `  <summary>${escapeXml(notification.summary)}</summary>`,
-        ...(notification.result === undefined
-          ? []
-          : [
-              `  <result>${escapeXml(notification.result)}</result>`,
-              `  <how-to-consume>${escapeXml(reportContract)}</how-to-consume>`,
-            ]),
+        `  <result>${escapeXml(JSON.stringify(notification.result))}</result>`,
+        `  <how-to-consume>${escapeXml(reportContract)}</how-to-consume>`,
         '</task-notification>',
       ].join('\n');
     })
@@ -797,22 +743,116 @@ function escapeXml(value: string): string {
     .replaceAll('>', '&gt;');
 }
 
-async function waitFor(
+async function waitWithSignal(
   completion: Promise<AgentTask>,
-  waitMs: number,
-  fallback: AgentTask,
+  signal: AbortSignal,
 ): Promise<AgentTask> {
+  if (signal.aborted)
+    throw signal.reason ?? new Error('Agent wait interrupted.');
+  return await new Promise<AgentTask>((resolve, reject) => {
+    let settled = false;
+    const finish = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      action();
+    };
+    const abort = () =>
+      finish(() =>
+        reject(signal.reason ?? new Error('Agent wait interrupted.')),
+      );
+    signal.addEventListener('abort', abort, { once: true });
+    void completion.then(
+      (task) => finish(() => resolve(task)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
+}
+
+async function waitForClose(
+  completions: Iterable<Promise<AgentTask>>,
+  timeoutMs: number,
+): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
   try {
-    return await Promise.race([
-      completion,
-      new Promise<AgentTask>((resolve) => {
-        timer = setTimeout(() => resolve(fallback), waitMs);
+    await Promise.race([
+      Promise.allSettled([...completions]),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
       }),
     ]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+function terminalResult(
+  result: AgentRunResult,
+  output: string,
+): { readonly result: AgentTaskResult; readonly errorMessage?: string } {
+  if (result.status === 'interrupted') {
+    return {
+      result: {
+        status: 'stopped',
+        summary: 'Subagent execution was interrupted.',
+        reason: result.reason,
+        partialWork: [],
+        evidence: [],
+      },
+      errorMessage: result.reason,
+    };
+  }
+  if (result.status === 'failed') {
+    return {
+      result: {
+        status: 'failed',
+        summary: 'Subagent execution failed.',
+        error: result.error.message,
+        evidence: [],
+        retryable: false,
+      },
+      errorMessage: result.error.message,
+    };
+  }
+  if (output === '') {
+    const message = 'Agent task completed without a final answer.';
+    return {
+      result: {
+        status: 'failed',
+        summary: 'Subagent returned no structured result.',
+        error: message,
+        evidence: [],
+        retryable: true,
+      },
+      errorMessage: message,
+    };
+  }
+  try {
+    return { result: parseAgentTaskResult(output) };
+  } catch (error) {
+    const message = errorMessage(error);
+    const diagnostic = `${message}\nRaw Subagent output:\n${boundedRawOutput(output)}`;
+    const salvaged = salvageAgentTaskResult(output);
+    return {
+      result: {
+        status: 'failed',
+        summary:
+          salvaged?.summary ??
+          'Subagent returned an invalid structured result.',
+        error: diagnostic,
+        evidence: salvaged?.evidence ?? [],
+        retryable: true,
+      },
+      errorMessage: diagnostic,
+    };
+  }
+}
+
+function boundedRawOutput(output: string): string {
+  const limit = 8_000;
+  return output.length <= limit
+    ? output
+    : `${output.slice(0, limit)}\n… [truncated]`;
 }
 
 function errorMessage(error: unknown): string {

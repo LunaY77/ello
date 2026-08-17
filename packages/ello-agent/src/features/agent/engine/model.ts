@@ -157,6 +157,17 @@ export interface AgentModelResponse {
   readonly provider: unknown;
 }
 
+/**
+ * 单次模型调用允许消耗的最大输出 token 数。
+ *
+ * Provider 的 reasoning 通常计入 output token；过大的配置会让单个回合长期占用
+ * runner，即使模型最终仍能返回合法响应。调用边界统一收紧，bench 与其它运行入口
+ * 不会因为配置漂移重新放大单回合预算。
+ */
+export const MAX_MODEL_OUTPUT_TOKENS = 65_536;
+/** 单次流式响应允许归档的 reasoning 字符数，约等于 65K token 的保守上界。 */
+export const MAX_REASONING_CHARS_PER_CALL = 262_144;
+
 export type AgentModelEvent =
   /**
    * 模型产出的第一段内容已到达。reasoning 与 tool-call 增量不经过
@@ -196,6 +207,8 @@ export type MaybePromise<T> = T | Promise<T>;
 export interface ModelCallResult {
   readonly response?: AgentModelResponse;
   readonly stopReason?: 'interrupted';
+  /** 当前流因 reasoning 预算耗尽而重试；不代表整个 run 终止。 */
+  readonly retryTurn?: boolean;
 }
 
 /**
@@ -245,7 +258,10 @@ async function callModelAttempt(
     messageId,
     role: 'assistant',
   });
-  const request = createModelRequest(run, input);
+  const modelAbortController = new AbortController();
+  const abortModelWithRun = (): void => modelAbortController.abort();
+  run.signal.addEventListener('abort', abortModelWithRun, { once: true });
+  const request = createModelRequest(run, input, modelAbortController.signal);
   const identity = {
     ...run.config.modelCall,
     runId: run.runId,
@@ -269,6 +285,7 @@ async function callModelAttempt(
   let reasoningId: string | undefined;
   let reasoningText = '';
   let reasoningCompleted = false;
+  let reasoningBudgetExceeded = false;
   const completeReasoning = async (): Promise<void> => {
     if (reasoningId === undefined || reasoningCompleted) return;
     reasoningCompleted = true;
@@ -278,6 +295,23 @@ async function callModelAttempt(
       reasoningId,
       text: reasoningText,
     });
+  };
+  const retryAfterReasoningBudget = async (): Promise<ModelCallResult> => {
+    await completeReasoning();
+    await run.events.emit({
+      type: 'model.interrupted',
+      identity,
+      diagnostics: modelCallDiagnostics(diagnostics),
+      startedAt,
+      reason: 'reasoning-budget',
+      reasoningChars: reasoningText.length,
+    });
+    run.runControl.pushSteering({
+      role: 'user',
+      content:
+        'The previous model response used the reasoning budget before producing an actionable result. Continue from the current evidence, make the next concrete change or verification, and do not repeat unchanged investigation.',
+    });
+    return { retryTurn: true };
   };
   try {
     for await (const event of run.modelAdapter.stream(request)) {
@@ -323,13 +357,24 @@ async function callModelAttempt(
               reasoningId,
             });
           }
-          reasoningText += event.text;
-          await run.events.emit({
-            type: 'reasoning.delta',
-            turnIndex: run.state.turn,
-            reasoningId,
-            text: event.text,
-          });
+          {
+            const remaining =
+              MAX_REASONING_CHARS_PER_CALL - reasoningText.length;
+            const text = event.text.slice(0, Math.max(0, remaining));
+            if (text !== '') {
+              reasoningText += text;
+              await run.events.emit({
+                type: 'reasoning.delta',
+                turnIndex: run.state.turn,
+                reasoningId,
+                text,
+              });
+            }
+            if (text.length < event.text.length) {
+              reasoningBudgetExceeded = true;
+              modelAbortController.abort();
+            }
+          }
           break;
         case 'final':
           finalResponse = event.response;
@@ -338,6 +383,10 @@ async function callModelAttempt(
           event satisfies never;
           throw new Error(`Unhandled model event: ${String(event)}`);
       }
+      if (reasoningBudgetExceeded) break;
+    }
+    if (reasoningBudgetExceeded) {
+      return retryAfterReasoningBudget();
     }
     if (finalResponse === null) {
       throw new ModelAdapterProtocolError(
@@ -364,6 +413,9 @@ async function callModelAttempt(
     return { response: finalResponse };
   } catch (error) {
     await completeReasoning();
+    if (reasoningBudgetExceeded) {
+      return retryAfterReasoningBudget();
+    }
     if (run.signal.aborted || isAbortError(error)) {
       interruptRunState(run);
       return { stopReason: 'interrupted' };
@@ -384,6 +436,8 @@ async function callModelAttempt(
       return callModelAttempt(run, input, retryAttempt + 1);
     }
     throw error;
+  } finally {
+    run.signal.removeEventListener('abort', abortModelWithRun);
   }
 }
 
@@ -407,7 +461,13 @@ function modelCallDiagnostics(
 function createModelRequest(
   run: RunState,
   input: ModelInput,
+  signal: AbortSignal = run.signal,
 ): AgentModelRequest {
+  const modelSettings = {
+    ...(run.config.modelSettings ?? {}),
+    ...(run.options.modelSettings ?? {}),
+  };
+  const configuredOutputTokens = modelSettings.maxOutputTokens;
   return {
     runId: run.runId,
     model: run.config.model,
@@ -424,10 +484,13 @@ function createModelRequest(
       ? {}
       : { providerOptions: input.providerOptions }),
     modelSettings: {
-      ...(run.config.modelSettings ?? {}),
-      ...(run.options.modelSettings ?? {}),
+      ...modelSettings,
+      maxOutputTokens:
+        configuredOutputTokens === undefined
+          ? MAX_MODEL_OUTPUT_TOKENS
+          : Math.min(configuredOutputTokens, MAX_MODEL_OUTPUT_TOKENS),
     },
-    signal: run.signal,
+    signal,
   };
 }
 

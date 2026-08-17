@@ -421,8 +421,60 @@ export const AgentTaskStatusSchema = z.enum([
   'running',
   'completed',
   'failed',
-  'killed',
-  'recovered',
+  'blocked',
+  'stopped',
+]);
+
+export const AgentTaskPacketSchema = z
+  .object({
+    objective: z.string().min(1),
+    scope: z.string().min(1),
+    knownFacts: z.array(z.string().min(1)).readonly(),
+    constraints: z.array(z.string().min(1)).readonly(),
+    expectedOutcome: z.string().min(1),
+    acceptanceEvidence: z.array(z.string().min(1)).min(1).readonly(),
+  })
+  .strict();
+
+const AgentTaskEvidenceSchema = z.array(z.string().min(1)).readonly();
+
+export const AgentTaskResultSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('completed'),
+      summary: z.string().min(1),
+      evidence: AgentTaskEvidenceSchema,
+      remainingRisks: AgentTaskEvidenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('failed'),
+      summary: z.string().min(1),
+      error: z.string().min(1),
+      evidence: AgentTaskEvidenceSchema,
+      retryable: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('blocked'),
+      summary: z.string().min(1),
+      blockingReason: z.string().min(1),
+      questionForUser: z.string().min(1),
+      completedWork: AgentTaskEvidenceSchema,
+      evidence: AgentTaskEvidenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('stopped'),
+      summary: z.string().min(1),
+      reason: z.string().min(1),
+      partialWork: AgentTaskEvidenceSchema,
+      evidence: AgentTaskEvidenceSchema,
+    })
+    .strict(),
 ]);
 
 export const AgentTaskToolSummarySchema = z
@@ -442,16 +494,12 @@ export const AgentTaskSummarySchema = z
     taskId: OpaqueIdSchema,
     agentId: OpaqueIdSchema,
     rootThreadId: OpaqueIdSchema,
-    parentTaskId: OpaqueIdSchema.optional(),
-    resumeFromTaskId: OpaqueIdSchema.optional(),
     name: z.string().min(1).optional(),
     definitionName: z.string().min(1),
     description: z.string().min(1),
-    contextMode: z.enum(['fresh', 'fork']),
-    executionMode: z.enum(['foreground', 'background']),
     status: AgentTaskStatusSchema,
     cwd: z.string().min(1),
-    isolation: z.enum(['shared', 'worktree', 'container']),
+    isolation: z.literal('shared'),
     revision: NonNegativeIntegerSchema,
     eventSequence: NonNegativeIntegerSchema,
     usage: UsageSchema.optional(),
@@ -498,9 +546,10 @@ export const AgentTaskTreeSnapshotSchema = z
 export const AgentTaskDetailSchema = z
   .object({
     task: AgentTaskSummarySchema,
-    prompt: z.string(),
+    taskPacket: AgentTaskPacketSchema,
     output: z.string().optional(),
     error: z.string().optional(),
+    result: AgentTaskResultSchema.optional(),
     events: z.array(AgentTaskEventSchema).readonly(),
   })
   .strict();
@@ -517,6 +566,8 @@ export type Goal = z.infer<typeof GoalSchema>;
 export type Plan = z.infer<typeof PlanSchema>;
 export type ThreadSettings = z.infer<typeof ThreadSettingsSchema>;
 export type AgentTaskStatus = z.infer<typeof AgentTaskStatusSchema>;
+export type AgentTaskPacket = z.infer<typeof AgentTaskPacketSchema>;
+export type AgentTaskResult = z.infer<typeof AgentTaskResultSchema>;
 export type AgentTaskToolSummary = z.infer<typeof AgentTaskToolSummarySchema>;
 export type AgentTaskSummary = z.infer<typeof AgentTaskSummarySchema>;
 export type AgentTaskEvent = z.infer<typeof AgentTaskEventSchema>;

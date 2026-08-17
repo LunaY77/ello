@@ -150,9 +150,9 @@ Ello 保存 redacted EngineEvent JSONL，Claude Code adapter 保存 stream-json 
 
 ## 发布 Artifact
 
-`docs/benchmark/results/` 是从完整 run root 派生的发布子集：聚合报告、suite JSON、图表，以及 `tasks/deep-swe/<task>/<agent>/` 下的 patch、结构化 verifier 结果与运行 manifest。逐 attempt 的 stdout/stderr、evidence、tool audit 和 phase timing 留在 ignored raw run，避免把诊断体积复制进 Git；发布 manifest 去除本机绝对路径，并记录每个公开文件的 SHA-256。
+`docs/benchmark/results/` 是从完整 run root 派生的发布子集：聚合报告、suite/agent/comparison JSON 和图表。逐 task instruction、patch、harness、attempt manifest，以及 stdout/stderr、evidence、tool audit 和 phase timing 都留在 ignored raw run，避免把数百个诊断文件复制进 Git。
 
-归档脚本在写入前要求 60 个 job 都有权威 `completed` verdict，并使用与报告一致的“最后一个 completed attempt”选择规则；它不会把 evidence coverage 不足伪装成完整资源矩阵。`suite-report.json.publishable` 仍由 complete matrix、complete usage 和 tool audit 三个配置 gate 决定。
+发布报告使用与运行时一致的权威 attempt 选择规则，并把 scored job 与 infrastructure-invalid job 分开。
 
 ## 验证入口
 
@@ -164,7 +164,6 @@ pnpm --filter @ello/bench build
 
 pnpm --filter @ello/bench bench report --run-root <run-root>
 pnpm --filter @ello/bench bench validate --run-root <run-root>
-pnpm --filter @ello/bench bench:archive-docs -- --run-root <run-root>
 ```
 
 单元测试、typecheck 和 lint 不应访问 provider、启动真实 benchmark 或消耗付费资源；`run`、`report` 后的 raw validation 和发布归档是独立验收步骤。

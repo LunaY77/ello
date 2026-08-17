@@ -31,13 +31,20 @@ afterEach(async () => {
 });
 
 describe('App typed client behavior', () => {
-  it('composer 下方可选择 child、进入 transcript、steer 并原地后台化', async () => {
+  it('composer 下方可选择 Agent、进入 transcript 并 steer', async () => {
     const task = agentTask();
     const harness = createThreadHarness(snapshot(), {
       agentTasks: [task],
       agentDetail: {
         task,
-        prompt: '检查取消链路',
+        taskPacket: {
+          objective: '检查取消链路',
+          scope: '/workspace',
+          knownFacts: [],
+          constraints: [],
+          expectedOutcome: '返回检查结果',
+          acceptanceEvidence: ['包含入口证据'],
+        },
         events: [
           {
             rootThreadId: 'thr_1',
@@ -76,10 +83,6 @@ describe('App typed client behavior', () => {
         '继续检查测试',
         task.taskId,
       ),
-    );
-    view.stdin.write('\x02');
-    await vi.waitFor(() =>
-      expect(harness.agentBackground).toHaveBeenCalledWith(task.taskId),
     );
     view.unmount();
   });
@@ -777,7 +780,6 @@ interface ThreadHarness {
   readonly steerInput: ReturnType<typeof vi.fn>;
   readonly agentRead: ReturnType<typeof vi.fn>;
   readonly agentSteer: ReturnType<typeof vi.fn>;
-  readonly agentBackground: ReturnType<typeof vi.fn>;
   readonly agentStop: ReturnType<typeof vi.fn>;
   readonly createAgentTaskClient: ReturnType<typeof vi.fn>;
   emit(notification: ServerNotification): void;
@@ -934,7 +936,6 @@ function createThreadHarness(
     return options.agentDetail;
   });
   const agentSteer = vi.fn(async () => options.agentTasks?.[0]);
-  const agentBackground = vi.fn(async () => options.agentTasks?.[0]);
   const agentStop = vi.fn(async () => options.agentTasks?.[0]);
   const agentTaskSnapshot = {
     rootThreadId: initialSnapshot.thread.id,
@@ -953,7 +954,6 @@ function createThreadHarness(
     detail: () => undefined,
     read: agentRead,
     steer: agentSteer,
-    background: agentBackground,
     stop: agentStop,
   }));
   const thread = {
@@ -985,7 +985,6 @@ function createThreadHarness(
     steerInput,
     agentRead,
     agentSteer,
-    agentBackground,
     agentStop,
     createAgentTaskClient,
     emit: (notification: ServerNotification) => {
@@ -1039,8 +1038,6 @@ function agentTask(): AgentTaskSummary {
     name: 'reader',
     definitionName: 'explore',
     description: '检查取消链路',
-    contextMode: 'fresh',
-    executionMode: 'foreground',
     status: 'running',
     cwd: '/workspace',
     isolation: 'shared',

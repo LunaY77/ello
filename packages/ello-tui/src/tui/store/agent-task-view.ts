@@ -8,7 +8,6 @@ export function agentTaskToRunView(task: AgentTaskSummary): SubagentRunView {
     revision: task.revision,
     agentName: task.name ?? task.definitionName,
     description: task.description,
-    background: task.executionMode === 'background',
     status: task.status,
     startedAt: task.startedAt ?? task.createdAt,
     ...(task.completedAt === undefined

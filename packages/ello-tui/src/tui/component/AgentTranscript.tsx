@@ -1,86 +1,187 @@
-import { Box, Text, useStdout } from 'ink';
+import { Box, Static, Text } from 'ink';
 
 import type {
   AgentTaskDetail,
   AgentTaskEvent,
+  AgentTaskResult,
   AgentTaskSummary,
 } from '../../api/protocol-types.js';
 import type { ToolCallView } from '../store/history-entry.js';
 import { useTheme } from '../theme/index.js';
 
+import { LiveViewport } from './LiveViewport.js';
 import { ToolActivityList } from './ToolActivityList.js';
 
-/** 子代理详情视图，复用主界面的文本、reasoning 和 tool 视觉语言。 */
-export function AgentTranscript({
+type TranscriptLine = {
+  readonly id: string;
+  readonly role: 'user' | 'assistant' | 'reasoning';
+  readonly text: string;
+};
+
+type StaticTranscriptItem =
+  | {
+      readonly id: string;
+      readonly kind: 'header';
+      readonly task: AgentTaskSummary;
+      readonly taskPacket: AgentTaskDetail['taskPacket'];
+    }
+  | ({ readonly kind: 'line' } & TranscriptLine)
+  | { readonly id: string; readonly kind: 'tool'; readonly tool: ToolCallView }
+  | {
+      readonly id: string;
+      readonly kind: 'result';
+      readonly result: AgentTaskResult;
+    }
+  | { readonly id: string; readonly kind: 'error'; readonly error: string };
+
+interface TranscriptProjection {
+  readonly committed: readonly StaticTranscriptItem[];
+  readonly runningTools: readonly ToolCallView[];
+  readonly liveReasoning: string;
+}
+
+/**
+ * 已提交的 Subagent transcript 进入 shell scrollback，与主会话历史使用相同的 Static 边界。
+ * 最终 `<agent-result>` envelope 由 Server 投影成结构化 result，TUI 不直接显示内部 JSON。
+ */
+export function AgentTranscriptHistoryOutput({
   task,
   detail,
+  resetKey,
 }: {
   readonly task: AgentTaskSummary;
   readonly detail?: AgentTaskDetail;
+  readonly resetKey: number;
+}) {
+  if (detail === undefined) return null;
+  const projection = project(detail.events);
+  const items: StaticTranscriptItem[] = [
+    {
+      id: `${task.taskId}:header`,
+      kind: 'header',
+      task,
+      taskPacket: detail.taskPacket,
+    },
+    ...projection.committed,
+  ];
+  if (detail.result !== undefined) {
+    items.push({
+      id: `${task.taskId}:result:${task.revision}`,
+      kind: 'result',
+      result: detail.result,
+    });
+  } else if (detail.error !== undefined) {
+    items.push({
+      id: `${task.taskId}:error:${task.revision}`,
+      kind: 'error',
+      error: detail.error,
+    });
+  }
+  return (
+    <Static key={`${resetKey}:${task.taskId}`} items={items}>
+      {(item) => (
+        <StaticTranscriptRow key={item.id} item={item} cwd={task.cwd} />
+      )}
+    </Static>
+  );
+}
+
+/** 运行中的 Subagent 增量复用统一 live viewport，严格服从 dynamic frame 行数预算。 */
+export function AgentTranscript({
+  task,
+  detail,
+  maxRows,
+  textWidth,
+}: {
+  readonly task: AgentTaskSummary;
+  readonly detail?: AgentTaskDetail;
+  readonly maxRows: number;
+  readonly textWidth: number;
 }) {
   const theme = useTheme();
-  const { stdout } = useStdout();
-  const narrow = (stdout.columns ?? 100) < 60;
-  const transcript =
-    detail === undefined ? emptyTranscript() : project(detail.events);
+  if (detail === undefined) {
+    return <Text color={theme.textMuted}>Loading transcript...</Text>;
+  }
+  if (maxRows <= 0) return null;
+  const projection = project(detail.events);
   return (
-    <Box flexDirection="column" width="100%">
-      <Box
-        flexDirection={narrow ? 'column' : 'row'}
-        gap={narrow ? 0 : 1}
-        marginBottom={1}
-      >
-        <Text
-          color={theme.accent}
-        >{`@${task.name ?? task.definitionName}`}</Text>
-        <Text color={theme.textMuted}>{task.definitionName}</Text>
-        <Text color={theme.textMuted}>{task.contextMode}</Text>
-        <Text color={theme.textMuted}>{task.executionMode}</Text>
-        <Text color={theme.textMuted}>{task.isolation}</Text>
-        {task.parentTaskId === undefined ? null : (
-          <Text color={theme.textMuted}>{`parent:${task.parentTaskId}`}</Text>
-        )}
-        <Text color={statusColor(task.status, theme)}>{task.status}</Text>
-      </Box>
-      <Text color={theme.textMuted} wrap="truncate-middle">
-        {task.cwd}
-      </Text>
-      {detail === undefined ? (
-        <Text color={theme.textMuted}>Loading transcript...</Text>
-      ) : null}
-      {transcript.lines.map((line) => (
-        <Box key={line.id} marginTop={1} flexDirection="column">
-          {line.kind === 'reasoning' ? (
-            <AgentReasoningText text={line.text} />
-          ) : (
-            <Text color={theme.text}>
-              {line.kind === 'user' ? `> ${line.text}` : `* ${line.text}`}
-            </Text>
-          )}
-        </Box>
-      ))}
-      {transcript.liveReasoning !== '' ? (
-        <AgentReasoningText text={transcript.liveReasoning} />
-      ) : null}
-      {transcript.liveMessage !== '' ? (
-        <Text color={theme.text}>{`* ${transcript.liveMessage}`}</Text>
-      ) : null}
-      <ToolActivityList tools={transcript.tools} cwd={task.cwd} expanded />
-      {detail?.error !== undefined ? (
-        <Text color={theme.error}>{detail.error}</Text>
-      ) : null}
-      {detail?.output !== undefined && transcript.lines.length === 0 ? (
-        <Text color={theme.text}>{detail.output}</Text>
-      ) : null}
-      {task.status === 'running' ? (
-        <Text color={theme.warning}>working</Text>
-      ) : null}
-      {task.status === 'running' && task.executionMode === 'foreground' ? (
-        <Text
-          color={theme.textMuted}
-        >{`${backgroundShortcut()} to background`}</Text>
+    <Box flexDirection="column">
+      <Text color={statusColor(task.status, theme)}>{task.status}</Text>
+      {maxRows > 1 && task.status !== 'queued' ? (
+        <LiveViewport
+          cwd={task.cwd}
+          assistantText=""
+          reasoningText={projection.liveReasoning}
+          compactionText=""
+          runningTools={projection.runningTools}
+          runningCommandRuns={[]}
+          runningSubagents={[]}
+          running={task.status === 'running'}
+          maxRows={maxRows - 1}
+          textWidth={textWidth}
+        />
       ) : null}
     </Box>
+  );
+}
+
+function StaticTranscriptRow({
+  item,
+  cwd,
+}: {
+  readonly item: StaticTranscriptItem;
+  readonly cwd: string;
+}) {
+  const theme = useTheme();
+  if (item.kind === 'header') {
+    const label = item.task.name ?? item.task.definitionName;
+    return (
+      <Box flexDirection="column" marginBottom={1}>
+        <Box gap={1}>
+          <Text color={theme.accent}>{`@${label}`}</Text>
+          <Text color={theme.textMuted}>{item.task.definitionName}</Text>
+          <Text color={theme.textMuted}>{item.task.isolation}</Text>
+        </Box>
+        <Text color={theme.text}>{item.task.description}</Text>
+        <Text color={theme.textMuted} wrap="truncate-middle">
+          {item.task.cwd}
+        </Text>
+        <Text
+          color={theme.textMuted}
+        >{`Task: ${item.taskPacket.objective}`}</Text>
+        <Text color={theme.textMuted}>{`Scope: ${item.taskPacket.scope}`}</Text>
+      </Box>
+    );
+  }
+  if (item.kind === 'line') {
+    return (
+      <Box marginBottom={1}>
+        <TranscriptLineRow line={item} />
+      </Box>
+    );
+  }
+  if (item.kind === 'tool') {
+    return <ToolActivityList tools={[item.tool]} cwd={cwd} expanded />;
+  }
+  if (item.kind === 'error') {
+    return (
+      <Box marginBottom={1}>
+        <Text color={theme.error}>{item.error}</Text>
+      </Box>
+    );
+  }
+  return <StructuredResult result={item.result} />;
+}
+
+function TranscriptLineRow({ line }: { readonly line: TranscriptLine }) {
+  const theme = useTheme();
+  if (line.role === 'reasoning') {
+    return <AgentReasoningText text={line.text} />;
+  }
+  return (
+    <Text color={theme.text}>
+      {line.role === 'user' ? `> ${line.text}` : `* ${line.text}`}
+    </Text>
   );
 }
 
@@ -100,42 +201,77 @@ function AgentReasoningText({ text }: { readonly text: string }) {
   );
 }
 
-function backgroundShortcut(): string {
-  return process.env.TMUX === undefined ? 'Ctrl+B' : 'Ctrl+B Ctrl+B';
+function StructuredResult({ result }: { readonly result: AgentTaskResult }) {
+  const theme = useTheme();
+  const details = resultDetails(result);
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text bold color={statusColor(result.status, theme)}>
+        {`${statusLabel(result.status)}: ${result.summary}`}
+      </Text>
+      {details.map((detail) => (
+        <Text key={detail} color={theme.text}>
+          {detail}
+        </Text>
+      ))}
+    </Box>
+  );
 }
 
-interface TranscriptProjection {
-  readonly lines: ReadonlyArray<{
-    readonly id: string;
-    readonly kind: 'user' | 'assistant' | 'reasoning';
-    readonly text: string;
-  }>;
-  readonly tools: readonly ToolCallView[];
-  readonly liveMessage: string;
-  readonly liveReasoning: string;
+function resultDetails(result: AgentTaskResult): readonly string[] {
+  switch (result.status) {
+    case 'completed':
+      return [
+        ...result.evidence.map((item) => `Evidence: ${item}`),
+        ...result.remainingRisks.map((item) => `Risk: ${item}`),
+      ];
+    case 'failed':
+      return [
+        result.error,
+        ...result.evidence.map((item) => `Evidence: ${item}`),
+      ];
+    case 'blocked':
+      return [
+        result.blockingReason,
+        `Question: ${result.questionForUser}`,
+        ...result.completedWork.map((item) => `Completed: ${item}`),
+        ...result.evidence.map((item) => `Evidence: ${item}`),
+      ];
+    case 'stopped':
+      return [
+        result.reason,
+        ...result.partialWork.map((item) => `Partial: ${item}`),
+        ...result.evidence.map((item) => `Evidence: ${item}`),
+      ];
+  }
 }
 
 function project(events: readonly AgentTaskEvent[]): TranscriptProjection {
-  const lines: Array<TranscriptProjection['lines'][number]> = [];
+  const committed: StaticTranscriptItem[] = [];
   const tools = new Map<string, ToolCallView>();
-  const messageDeltas = new Map<string, string>();
   const reasoningDeltas = new Map<string, string>();
   for (const event of events) {
     const payload = objectPayload(event);
     if (event.eventType === 'steer.queued') {
       const text = stringField(payload, 'text');
-      if (text !== undefined)
-        lines.push({ id: eventId(event), kind: 'user', text });
-    }
-    if (event.eventType === 'messageDelta') {
-      appendDelta(messageDeltas, payload, 'messageId');
+      if (text !== undefined) {
+        committed.push({
+          id: eventId(event),
+          kind: 'line',
+          role: 'user',
+          text,
+        });
+      }
     }
     if (event.eventType === 'messageCompleted') {
-      const id = stringField(payload, 'messageId');
       const text = stringField(payload, 'text');
-      if (id !== undefined) messageDeltas.delete(id);
-      if (text !== undefined && text.trim() !== '') {
-        lines.push({ id: eventId(event), kind: 'assistant', text });
+      if (text !== undefined && text.trim() !== '' && !isResultEnvelope(text)) {
+        committed.push({
+          id: eventId(event),
+          kind: 'line',
+          role: 'assistant',
+          text,
+        });
       }
     }
     if (event.eventType === 'reasoningDelta') {
@@ -146,21 +282,26 @@ function project(events: readonly AgentTaskEvent[]): TranscriptProjection {
       const text = stringField(payload, 'text');
       if (id !== undefined) reasoningDeltas.delete(id);
       if (text !== undefined && text.trim() !== '') {
-        lines.push({ id: eventId(event), kind: 'reasoning', text });
+        committed.push({
+          id: eventId(event),
+          kind: 'line',
+          role: 'reasoning',
+          text,
+        });
       }
     }
-    updateTool(tools, event, payload);
+    updateTool(tools, committed, event, payload);
   }
   return {
-    lines,
-    tools: [...tools.values()],
-    liveMessage: [...messageDeltas.values()].join(''),
+    committed,
+    runningTools: [...tools.values()],
     liveReasoning: [...reasoningDeltas.values()].join(''),
   };
 }
 
 function updateTool(
   tools: Map<string, ToolCallView>,
+  committed: StaticTranscriptItem[],
   event: AgentTaskEvent,
   payload: Readonly<Record<string, unknown>>,
 ): void {
@@ -182,19 +323,35 @@ function updateTool(
   const current = tools.get(toolCallId);
   if (current === undefined) return;
   if (type === 'command.completed') {
-    tools.set(toolCallId, { ...current, status: 'ok', output: record.output });
+    committed.push({
+      id: eventId(event),
+      kind: 'tool',
+      tool: { ...current, status: 'ok', output: record.output },
+    });
+    tools.delete(toolCallId);
+    return;
   }
   if (
     type === 'command.failed' ||
     type === 'command.denied' ||
-    type === 'command.blocked'
+    type === 'command.blocked' ||
+    type === 'command.interrupted'
   ) {
-    tools.set(toolCallId, {
-      ...current,
-      status: 'fail',
-      error: { message: stringField(record, 'error') ?? 'Command failed.' },
+    committed.push({
+      id: eventId(event),
+      kind: 'tool',
+      tool: {
+        ...current,
+        status: 'fail',
+        error: { message: stringField(record, 'error') ?? 'Command failed.' },
+      },
     });
+    tools.delete(toolCallId);
   }
+}
+
+function isResultEnvelope(text: string): boolean {
+  return /^\s*<agent-result>[\s\S]*<\/agent-result>\s*$/u.test(text);
 }
 
 function recordField(
@@ -239,17 +396,26 @@ function eventId(event: AgentTaskEvent): string {
   return `${event.taskId}:${event.sequence}`;
 }
 
-function emptyTranscript(): TranscriptProjection {
-  return { lines: [], tools: [], liveMessage: '', liveReasoning: '' };
-}
-
 function statusColor(
   status: AgentTaskSummary['status'],
   theme: ReturnType<typeof useTheme>,
 ): string {
   if (status === 'completed') return theme.success;
-  if (status === 'failed' || status === 'killed') return theme.error;
-  if (status === 'recovered') return theme.warning;
+  if (status === 'failed') return theme.error;
+  if (status === 'stopped' || status === 'blocked') return theme.warning;
   if (status === 'running') return theme.warning;
   return theme.info;
+}
+
+function statusLabel(status: AgentTaskResult['status']): string {
+  switch (status) {
+    case 'completed':
+      return 'Done';
+    case 'failed':
+      return 'Failed';
+    case 'blocked':
+      return 'Blocked';
+    case 'stopped':
+      return 'Stopped';
+  }
 }

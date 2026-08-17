@@ -645,9 +645,11 @@ describe('CommandRunRuntime', () => {
     expect(maxActive).toBe(1);
   });
 
-  it('gates dynamic capability, validation, approval, and execution across Handles', async () => {
+  it('gates validation, approval and execution across Handles while resolving capabilities outside the gate', async () => {
     let active = 0;
     let maxActive = 0;
+    let resolvingCapabilities = 0;
+    let maxResolvingCapabilities = 0;
     const visit = async () => {
       active += 1;
       maxActive = Math.max(maxActive, active);
@@ -665,9 +667,16 @@ describe('CommandRunRuntime', () => {
         })
         .strict(),
       effects: async () => {
-        await visit();
+        resolvingCapabilities += 1;
+        maxResolvingCapabilities = Math.max(
+          maxResolvingCapabilities,
+          resolvingCapabilities,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        resolvingCapabilities -= 1;
         return {
           logicalName: 'write',
+          usesEnvironment: true,
           concurrencySafe: false,
           readOnly: false,
           destructive: true,
@@ -713,6 +722,80 @@ describe('CommandRunRuntime', () => {
     ]);
 
     expect(maxActive).toBe(1);
+    // 能力声明是纯元数据；在 gate 内解析会让每次准备都成为全局写屏障并饿死并行 Agent。
+    expect(maxResolvingCapabilities).toBe(2);
+  });
+
+  it('keeps a barrier Command that declares no Environment use from blocking other Handles', async () => {
+    let releaseBarrier: (() => void) | undefined;
+    const barrierMayFinish = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
+    let barrierStarted = false;
+    let writes = 0;
+    const waitBarrier = immediateCommand({
+      name: 'read',
+      readOnly: true,
+      schema: z.object({ filePath: z.string() }).strict(),
+      effects: () => ({
+        usesEnvironment: false,
+        concurrencySafe: true,
+        readOnly: true,
+        destructive: false,
+        interruptible: true,
+        telemetryTag: 'agent.wait',
+      }),
+      run: async () => {
+        barrierStarted = true;
+        await barrierMayFinish;
+        return { waitStatus: 'completed' };
+      },
+    });
+    const write = immediateCommand({
+      name: 'write',
+      schema: z
+        .object({
+          filePath: z.string(),
+          content: z.string(),
+          expectedDigest: z.string().optional(),
+          reason: z.string().optional(),
+        })
+        .strict(),
+      run: async () => {
+        writes += 1;
+        return { written: true };
+      },
+    });
+    const runtime = createCommandRunRuntime({
+      commands: coreCommands([waitBarrier, write]),
+      search: { resultLimit: 6, maxResultBytes: 24_000 },
+    });
+    const barrier = consume(
+      runtime.start({
+        providerToolCallId: 'outer-barrier',
+        context: createContext(),
+        input: {
+          commands: [{ step: 1, command: 'read', args: ['job_1'] }],
+        },
+      }),
+    );
+    await expect.poll(() => barrierStarted).toBe(true);
+
+    // Subagent 在 Primary 的屏障期间必须继续推进，包括独占的写入。
+    const child = await consume(
+      runtime.start({
+        providerToolCallId: 'inner-write',
+        context: createContext(),
+        input: {
+          commands: [{ step: 1, command: 'write', args: ['a'], body: 'a' }],
+        },
+      }),
+    );
+
+    expect(child.transition.type).toBe('completed');
+    expect(writes).toBe(1);
+    releaseBarrier?.();
+    expect((await barrier).transition.type).toBe('completed');
   });
 
   it('rejects the whole batch before side effects when any frame fails compilation', async () => {
@@ -1348,7 +1431,7 @@ describe('CommandRunRuntime', () => {
       'activate_skill',
       'get_goal',
       'task_create',
-      'delegate_to_subagent',
+      'spawn_agent',
     ] as const;
     const calls: string[] = [];
     const tools = names.map((name) =>

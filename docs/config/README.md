@@ -109,6 +109,10 @@ none | minimal | low | medium | high | xhigh | max
 协议会由各自 provider 转换为对应的 thinking/reasoning 参数；设为 `none` 可显式关闭。
 `max` 表示当前 SDK 可表达的最高档位；运行时会映射为 provider 的最高 reasoning 设置。
 
+运行时还会对每次模型调用施加安全上限：实际发送给 provider 的
+`maxOutputTokens` 不超过 `65,536`，单次流式 reasoning 超过 `262,144` 个字符时会中断
+该调用并在下一回合继续。配置值可以低于这些上限；更高的值不会放大单次调用的占用。
+
 协议专属字段：
 
 | 协议                | 必需字段                                        |

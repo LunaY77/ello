@@ -1,0 +1,41 @@
+{
+  "leftAgentId": "ello-ds",
+  "rightAgentId": "ello-ds-sa",
+  "matchedRuns": 103,
+  "excludedPairs": 10,
+  "wins": 17,
+  "ties": 72,
+  "losses": 14,
+  "pairedPassRateDelta": 0.029126213592232997,
+  "taskMacroDelta": 0.02912621359223301,
+  "durationRatio": {
+    "count": 102,
+    "mean": 1.0609055956738151,
+    "median": 1.0012094060841086,
+    "p95": 1.5521187612982368
+  },
+  "inputTokenRatio": {
+    "count": 75,
+    "mean": 1.260643103307901,
+    "median": 1.0474423712583967,
+    "p95": 2.366929248837933
+  },
+  "outputTokenRatio": {
+    "count": 75,
+    "mean": 0.9922652876160477,
+    "median": 0.9401409344308059,
+    "p95": 1.4196028175816686
+  },
+  "toolCallRatio": {
+    "count": 102,
+    "mean": 1.0777754891391904,
+    "median": 1.0145749467203409,
+    "p95": 1.5908636363636364
+  },
+  "resourceCoverage": {
+    "durationPairs": 102,
+    "inputTokenPairs": 75,
+    "outputTokenPairs": 75,
+    "toolCallPairs": 102
+  }
+}

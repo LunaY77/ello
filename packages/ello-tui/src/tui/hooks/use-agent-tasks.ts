@@ -64,8 +64,23 @@ export function useAgentTasks(
           if (isTerminalTask(task)) onTaskTerminal(task);
         }
         stopClientListener = created.subscribe((event) => {
-          if (event.type === 'snapshot') setTree(event.snapshot);
           if (event.type === 'snapshot') {
+            setTree(event.snapshot);
+            const tasks = new Map(
+              event.snapshot.tasks.map((task) => [task.taskId, task]),
+            );
+            setDetails(
+              (current) =>
+                new Map(
+                  [...current].filter(([taskId, detail]) => {
+                    const task = tasks.get(taskId);
+                    return (
+                      task !== undefined &&
+                      task.eventSequence === detail.task.eventSequence
+                    );
+                  }),
+                ),
+            );
             for (const task of event.snapshot.tasks) {
               if (isTerminalTask(task)) onTaskTerminal(task);
             }
@@ -128,11 +143,8 @@ export function useAgentTasks(
       setFocus('composer');
       return;
     }
-    const task = tree.tasks.find(
-      (candidate) => candidate.taskId === activeView.taskId,
-    );
-    activate(task?.parentTaskId ?? 'main');
-  }, [activate, activeView, tree.tasks]);
+    activate('main');
+  }, [activate, activeView]);
 
   const activeTask =
     activeView.kind === 'task'

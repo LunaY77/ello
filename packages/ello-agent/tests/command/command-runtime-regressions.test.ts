@@ -186,7 +186,7 @@ describe('Command runtime regressions', () => {
 
   it('explains that command_search options require named flag/value args', async () => {
     const { transition } = await execute(
-      runtimeFor({}, [discoverableCommand('delegate_to_subagent')]),
+      runtimeFor({}, [discoverableCommand('spawn_agent')]),
       'outer-search-positionals',
       [
         {

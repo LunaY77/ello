@@ -2,6 +2,7 @@ export type {
   AppServerErrorType,
   AgentTaskDetail,
   AgentTaskEvent,
+  AgentTaskResult,
   AgentTaskStatus,
   AgentTaskSummary,
   AgentTaskTreeSnapshot,

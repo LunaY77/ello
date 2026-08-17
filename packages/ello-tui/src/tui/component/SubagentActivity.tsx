@@ -26,7 +26,7 @@ export function SubagentActivity({
   const terminal = isTerminal(run.status);
   const preview = terminal
     ? previewLines(
-        run.status === 'completed' ? run.output : run.error,
+        run.output ?? run.error,
         Math.max(1, (stdout.columns ?? 100) - 8),
       )
     : [];
@@ -174,10 +174,10 @@ function statusLabel(status: SubagentRunView['status']): string {
     case 'failed':
     case 'fail':
       return 'Failed';
-    case 'killed':
+    case 'stopped':
       return 'Stopped';
-    case 'recovered':
-      return 'Recovered';
+    case 'blocked':
+      return 'Blocked';
     case 'queued':
       return 'Queued';
     case 'running':
@@ -190,7 +190,8 @@ function statusColor(
   theme: ReturnType<typeof useTheme>,
 ): string {
   if (run.status === 'failed' || run.status === 'fail') return theme.error;
-  if (run.status === 'killed') return theme.warning;
+  if (run.status === 'stopped' || run.status === 'blocked')
+    return theme.warning;
   if (run.status === 'completed') return theme.success;
   if (run.status === 'running') return theme.warning;
   if (run.status === 'queued') return theme.info;

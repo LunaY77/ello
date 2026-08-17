@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 
 import {
   EventCaptureSchema,
@@ -22,13 +23,59 @@ export interface NormalizedRounds {
   readonly toolsetFingerprints: readonly string[];
 }
 
+/**
+ * 逐行读取 event capture，不把整个日志读成一个字符串。
+ *
+ * 长会话的 event log 会到几百 MB，一次性 `readFile(path, 'utf8')` 在超过 V8 的单字符串
+ * 上限（0x1fffffe8 字符 ≈ 512 MiB）时直接抛错，证据会整份丢失。
+ *
+ * Args:
+ * - `eventLogPath`: engine event capture 的 JSON Lines 路径。
+ *
+ * Returns:
+ * - Promise 兑现为按文件顺序解析出的 capture 列表。
+ *
+ * Throws:
+ * - 任一行不是合法 capture 时抛错，并带上从 1 开始的行号。
+ */
+export async function readEventCaptures(
+  eventLogPath: string,
+): Promise<EventCapture[]> {
+  const captures: EventCapture[] = [];
+  await forEachEventCapture(eventLogPath, (capture) => {
+    captures.push(capture);
+  });
+  return captures;
+}
+
+/** 对超大 event log 逐行回调，调用方无需保留全部 capture。 */
+export async function forEachEventCapture(
+  eventLogPath: string,
+  visit: (capture: EventCapture, lineNumber: number) => void,
+): Promise<void> {
+  const lines = createInterface({
+    input: createReadStream(eventLogPath, { encoding: 'utf8' }),
+    crlfDelay: Number.POSITIVE_INFINITY,
+  });
+  let lineNumber = 0;
+  try {
+    for await (const line of lines) {
+      lineNumber += 1;
+      if (line === '') continue;
+      visit(parseEventCaptureLine(line, lineNumber), lineNumber);
+    }
+  } finally {
+    lines.close();
+  }
+}
+
 export async function normalizeEventCapture(options: {
   readonly eventLogPath: string;
   readonly roundsPath: string;
   readonly allowIncomplete: boolean;
 }): Promise<NormalizedRounds> {
-  const normalized = normalizeEventCaptureSource(
-    await readFile(options.eventLogPath, 'utf8'),
+  const normalized = normalizeEventCaptures(
+    await readEventCaptures(options.eventLogPath),
     options.allowIncomplete,
   );
   await writeJsonLines(options.roundsPath, normalized.rounds);
@@ -39,11 +86,18 @@ export function normalizeEventCaptureSource(
   source: string,
   allowIncomplete: boolean,
 ): NormalizedRounds {
-  const captures = parseJsonLines(source);
+  return normalizeEventCaptures(parseJsonLines(source), allowIncomplete);
+}
+
+export function normalizeEventCaptures(
+  captures: readonly EventCapture[],
+  allowIncomplete: boolean,
+): NormalizedRounds {
   const starts = new Map<string, EventCapture>();
   const order: string[] = [];
   const completed = new Map<string, EventCapture>();
   const failed = new Map<string, EventCapture>();
+  const interrupted = new Map<string, EventCapture>();
   for (const capture of captures) {
     if (capture.event === 'model.started') {
       const id = modelCallId(capture);
@@ -63,6 +117,12 @@ export function normalizeEventCaptureSource(
         throw new Error(`Duplicate model terminal event: ${id}`);
       }
       failed.set(id, capture);
+    } else if (capture.event === 'model.interrupted') {
+      const id = modelCallId(capture);
+      if (completed.has(id) || failed.has(id) || interrupted.has(id)) {
+        throw new Error(`Duplicate model terminal event: ${id}`);
+      }
+      interrupted.set(id, capture);
     }
   }
   if (order.length === 0)
@@ -78,7 +138,7 @@ export function normalizeEventCaptureSource(
   const rounds = order.map((id, index) => {
     const start = starts.get(id);
     if (start === undefined) throw new Error(`Missing model start: ${id}`);
-    const terminal = completed.get(id) ?? failed.get(id);
+    const terminal = completed.get(id) ?? failed.get(id) ?? interrupted.get(id);
     if (terminal === undefined && !allowIncomplete) {
       throw new Error(`Incomplete model call without client timeout: ${id}`);
     }
@@ -92,7 +152,11 @@ export function normalizeEventCaptureSource(
         : [],
     );
   });
-  for (const id of [...completed.keys(), ...failed.keys()]) {
+  for (const id of [
+    ...completed.keys(),
+    ...failed.keys(),
+    ...interrupted.keys(),
+  ]) {
     if (!starts.has(id))
       throw new Error(`Model terminal event has no start: ${id}`);
   }
@@ -212,6 +276,24 @@ function createRound(
       usage: {
         status: 'unavailable',
         reason: 'Ello provider failure did not return complete usage evidence.',
+      },
+      durationMs,
+    });
+  }
+  if (terminal.event === 'model.interrupted') {
+    const reason = requiredString(
+      terminal.payload.reason,
+      'model interruption reason',
+    );
+    return RoundSchema.parse({
+      ...base,
+      completedAt,
+      status: 'incomplete',
+      error: `Ello model call interrupted: ${reason}.`,
+      usage: {
+        status: 'unavailable',
+        reason:
+          'Ello model call was interrupted before terminal usage evidence.',
       },
       durationMs,
     });
@@ -525,16 +607,23 @@ function patchPaths(source: string, allowEmpty: boolean): string[] {
 }
 
 function parseJsonLines(source: string): EventCapture[] {
-  const lines = source.split(/\r?\n/u).filter((line) => line !== '');
-  return lines.map((line, index) => {
-    try {
-      return EventCaptureSchema.parse(JSON.parse(line) as unknown);
-    } catch (error) {
-      throw new Error(`Invalid event capture line ${index + 1}.`, {
-        cause: error,
-      });
-    }
-  });
+  const lines = source.split(/\r?\n/u);
+  const captures: EventCapture[] = [];
+  for (const [index, line] of lines.entries()) {
+    if (line === '') continue;
+    captures.push(parseEventCaptureLine(line, index + 1));
+  }
+  return captures;
+}
+
+function parseEventCaptureLine(line: string, lineNumber: number): EventCapture {
+  try {
+    return EventCaptureSchema.parse(JSON.parse(line) as unknown);
+  } catch (error) {
+    throw new Error(`Invalid event capture line ${lineNumber}.`, {
+      cause: error,
+    });
+  }
 }
 
 function modelCallId(capture: EventCapture): string {

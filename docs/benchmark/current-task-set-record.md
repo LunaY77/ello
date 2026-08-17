@@ -1,174 +1,92 @@
 # 当前 Benchmark 证据记录
 
-状态：`deep-swe-0809-03`，DeepSWE v1.1 三配置单次重复对比。本文以 verifier reward 为能力结果，以规范化 Agent evidence 为资源结果。
+状态：`deep-swe-0816-01`，DeepSWE v1.1 完整任务集、五配置、单次重复运行。本文以 verifier reward 为能力结果，以规范化 Agent evidence 为资源结果；invalid infrastructure attempt 不进入能力分母。
 
 ## 1. 结论摘要
 
-本轮固定使用同一个 `deepseek-v4-flash-official` API model、High reasoning effort、20 个 DeepSWE 任务和任务各自的固定 Docker/verifier 环境，对比 Ello Rapid、Ello Thorough 与 Claude Code 三个完整 Agent 配置。
+本轮固定使用同一个 `deepseek-v4-flash-official` API model、High reasoning effort、完整 113 个 DeepSWE v1.1 task，以及各 task 固定的 Docker/verifier 环境。矩阵包含 Ello Rapid、Ello Rapid + Subagent、Ello Thorough、Ello Thorough + Subagent 和 Claude Code 五个完整 Agent 配置。
 
-本轮 60/60 个 job 均已完成并取得 verifier score，最终结果如下：
+- 计划 565 个 job，520 个 job 取得有效 verifier score，45 个 job 为 `invalid_infrastructure`；这 45 个不计为任务失败。
+- 每个配置约有 100 个有效观测：Ello Rapid 104、Rapid + Subagent 103、Thorough 103、Thorough + Subagent 103、Claude Code 107。
+- Ello Rapid：46/104，通过率 **44.2%**；Claude Code：48/107，通过率 **44.9%**。边际通过率基本持平。
+- 在同 task 配对的 Rapid vs Claude Code 中，Rapid 为 18 胜、66 平、20 负，配对通过率差 **-1.9 个百分点**（104 个 matched，9 个 excluded）。
+- Rapid 的资源消耗在可比配对上更低：elapsed 中位数 **-12.1%**、模型轮次 **-22.8%**、规范化 Command/Tool 调用 **-29.2%**、input token **-35.4%**。
 
-- Ello Rapid：13/20，通过率 **65.0%**。
-- Ello Thorough：13/20，通过率 **65.0%**。
-- Claude Code：9/20，通过率 **45.0%**。
-- 两个 Ello 配置对 Claude Code 均为 6 胜、12 平、2 负，配对通过率高 **20.0 个百分点**。
-- 在资源证据同时可用的配对任务上，Ello Rapid / Claude Code 的耗时比中位数为 **0.310**（n=17），模型轮次比为 **0.317**（n=17），工具调用比为 **0.293**（n=17），input token 比为 **0.255**（n=7）。
-
-这些数字支持“在本任务集、本模型服务和本次单次重复中，Ello Rapid 的 verifier 结果与资源效率均优于 Claude Code”这一描述。它们不证明 Command Run、Backward Reasoning 或其他单项机制各自造成了多少差异。
+本轮结果显示：Ello Rapid 与 Claude Code 的 verifier 能力结果相近，而 Rapid 使用了更少的运行时资源。
 
 ## 2. 分析范围
 
-| 字段              | 值                                                                 |
-| ----------------- | ------------------------------------------------------------------ |
-| run id            | `deep-swe-0809-03`                                                 |
-| benchmark         | DeepSWE v1.1 curated                                               |
-| 上游 revision     | `a40d7298b18999c2d9b0ded7d6928e3ee26b5524`                         |
-| 上游任务数        | 113                                                                |
-| 固定任务数        | 20                                                                 |
-| replicate         | 每个 task × agent 各 1 次                                          |
-| 计划 job          | 60                                                                 |
-| execution runtime | Docker                                                             |
-| config hash       | `fc271cae81f03702891c781b8e3a9a6110a86ca456a5266b5587b1ac84b4d36b` |
-| plan hash         | `57469551f63b0d5e82d19a1905899672758325343484034d7c19f40094ce03a5` |
-| task set hash     | `cb823ea5f58aebf80baa78f704d6c57ec3418db08c4399bb754b234b6895220a` |
-| report generated  | `2026-08-09T21:18:40.370Z`                                         |
-| raw validation    | valid；136 attempts（64 completed，72 infrastructure-invalid）     |
-
-每个任务先在未修改代码上运行 baseline preflight，再在独立 verifier 容器中应用 `model.patch` 并执行新测试。只有 baseline 健康、verifier 正常给出 reward 的最终 attempt 才进入通过率。
-
-Attempt 数量大于 60 是因为保留了 infrastructure retry，以及 4 个在后续重试创建后才从已落盘 verifier report 收割出的早期 completed attempt。报告按每个 job 的最后一个 completed 结果形成 60-job 权威矩阵；raw validator 已核对 retry lineage、artifact checksum 和发布报告一致性。
+| 字段              | 值                                                                      |
+| ----------------- | ----------------------------------------------------------------------- |
+| run id            | `deep-swe-0816-01`                                                      |
+| benchmark         | DeepSWE v1.1                                                            |
+| 上游 revision     | `a40d7298b18999c2d9b0ded7d6928e3ee26b5524`                              |
+| 上游任务数        | 113                                                                     |
+| 固定任务数        | 113（完整任务集）                                                       |
+| replicate         | 每个 task × agent 各 1 次                                               |
+| 配置数            | 5                                                                       |
+| 计划 job          | 565                                                                     |
+| scored job        | 520                                                                     |
+| invalid job       | 45                                                                      |
+| execution runtime | Docker                                                                  |
+| config hash       | `122ddb17b85c0071c03d1cf4bc5edf01aff82f1d3efbda04c34334ddce904d08`      |
+| plan hash         | `565ff12e482a8172df758f1891d0653cb6fbcce5ad094a2e60bef0a94de1147b`      |
+| task set hash     | `11f4e80cf1cf74f393e6361f71872596a8d5ff6be743b7214457acd4a847a218`      |
+| report generated  | `2026-08-17T05:42:54.688Z`                                              |
+| raw validation    | valid；855 attempts（520 completed，335 invalid attempts）；report true |
 
 ## 3. 配置
 
-| 配置          | Agent runtime       | Prompt mode      | Provider-visible tool  | 模型                         | Reasoning | Subagent |
-| ------------- | ------------------- | ---------------- | ---------------------- | ---------------------------- | --------- | -------- |
-| Ello Rapid    | Ello                | `rapid`          | `command_run`          | `deepseek-v4-flash-official` | High      | disabled |
-| Ello Thorough | Ello                | `thorough`       | `command_run`          | `deepseek-v4-flash-official` | High      | disabled |
-| Claude Code   | Claude Code 2.1.220 | Claude Code 内置 | Claude Code 内置工具集 | `deepseek-v4-flash-official` | High      | n/a      |
+| 配置                     | Agent runtime       | Prompt mode      | Provider-visible tool  | 模型                         | Reasoning | Subagent |
+| ------------------------ | ------------------- | ---------------- | ---------------------- | ---------------------------- | --------- | -------- |
+| Ello Rapid               | Ello                | `rapid`          | `command_run`          | `deepseek-v4-flash-official` | High      | disabled |
+| Ello Rapid + Subagent    | Ello                | `rapid`          | `command_run`          | `deepseek-v4-flash-official` | High      | enabled  |
+| Ello Thorough            | Ello                | `thorough`       | `command_run`          | `deepseek-v4-flash-official` | High      | disabled |
+| Ello Thorough + Subagent | Ello                | `thorough`       | `command_run`          | `deepseek-v4-flash-official` | High      | enabled  |
+| Claude Code              | Claude Code 2.1.220 | Claude Code 内置 | Claude Code 内置工具集 | `deepseek-v4-flash-official` | High      | n/a      |
 
-三者固定了模型配置、reasoning 标签、任务、容器资源和 verifier，但不是单变量 A/B test：Agent loop、system prompt、Command/Tool 协议、上下文策略和错误恢复均不同。Rapid 与 Thorough 使用相同 Ello runtime，仅 prompt policy 不同；本轮关闭了 Ello subagent，因此不能用这些结果评价多 Agent 协作。
+五个条目分别代表完整的 Agent 配置；Rapid/Thorough 与其 Subagent 版本分别统计。
 
 ## 4. Verifier 结果
 
 ### 4.1 边际通过率
 
-| Agent         | 有效 job | 通过 |    通过率 | Wilson 95% CI | Infrastructure invalid |
-| ------------- | -------: | ---: | --------: | ------------- | ---------------------: |
-| Ello Rapid    |       20 |   13 | **65.0%** | 43.3% - 81.9% |                      0 |
-| Ello Thorough |       20 |   13 | **65.0%** | 43.3% - 81.9% |                      0 |
-| Claude Code   |       20 |    9 |     45.0% | 25.8% - 65.8% |                      0 |
+| Agent                    | 有效 job | 通过 |    通过率 | 95% Wilson CI | invalid |
+| ------------------------ | -------: | ---: | --------: | ------------- | ------: |
+| Ello Rapid               |      104 |   46 | **44.2%** | 35.1% - 53.8% |       9 |
+| Ello Rapid + Subagent    |      103 |   43 | **41.7%** | 32.7% - 51.4% |      10 |
+| Ello Thorough            |      103 |   44 | **42.7%** | 33.6% - 52.4% |      10 |
+| Ello Thorough + Subagent |      103 |   41 | **39.8%** | 30.9% - 49.5% |      10 |
+| Claude Code              |      107 |   48 | **44.9%** | 35.8% - 54.3% |       6 |
 
-### 4.2 配对结果
+### 4.2 与 Claude Code 的配对结果
 
-| 对比                         | matched | excluded | 左侧胜 |  平 | 左侧负 |       配对差 |
-| ---------------------------- | ------: | -------: | -----: | --: | -----: | -----------: |
-| Ello Rapid vs Ello Thorough  |      20 |        0 |      2 |  16 |      2 |       0.0 pp |
-| Ello Rapid vs Claude Code    |      20 |        0 |      6 |  12 |      2 | **+20.0 pp** |
-| Ello Thorough vs Claude Code |      20 |        0 |      6 |  12 |      2 | **+20.0 pp** |
+| 对比                                    | matched | excluded | 左侧胜 |  平 | 左侧负 | 配对通过率差 |
+| --------------------------------------- | ------: | -------: | -----: | --: | -----: | -----------: |
+| Ello Rapid vs Claude Code               |     104 |        9 |     18 |  66 |     20 |  **-1.9 pp** |
+| Ello Rapid + Subagent vs Claude Code    |     103 |       10 |     20 |  59 |     24 |  **-3.9 pp** |
+| Ello Thorough vs Claude Code            |     103 |       10 |     19 |  62 |     22 |  **-2.9 pp** |
+| Ello Thorough + Subagent vs Claude Code |     103 |       10 |     15 |  67 |     21 |  **-5.8 pp** |
 
-配对差是同 task、同 replicate 的 reward 差平均值。20 题样本仍然很小，置信区间明显重叠；该表是描述性证据，不是跨模型、跨任务分布的显著性声明。
+配对差为同 task、同 replicate 的 binary reward 差平均值。本轮每个 `task × agent` 运行一次。
 
-### 4.3 逐 Task 结果
+### 4.3 Invalid 的主要边界
 
-| Task                                                  | Ello Rapid | Ello Thorough | Claude Code | 产物                                                                                |
-| ----------------------------------------------------- | ---------- | ------------- | ----------- | ----------------------------------------------------------------------------------- |
-| `actionlint-action-pinning-lint`                      | 通过       | 通过          | 通过        | [查看](results/tasks/deep-swe/actionlint-action-pinning-lint/)                      |
-| `abs-stepped-slices`                                  | 通过       | 通过          | 通过        | [查看](results/tasks/deep-swe/abs-stepped-slices/)                                  |
-| `yaegi-go-embed-directives`                           | 通过       | 通过          | 失败        | [查看](results/tasks/deep-swe/yaegi-go-embed-directives/)                           |
-| `dasel-html-document-format`                          | 失败       | 失败          | 失败        | [查看](results/tasks/deep-swe/dasel-html-document-format/)                          |
-| `cattrs-partial-structuring-recovery`                 | 失败       | 通过          | 通过        | [查看](results/tasks/deep-swe/cattrs-partial-structuring-recovery/)                 |
-| `numba-stencil-boundary-modes`                        | 失败       | 失败          | 失败        | [查看](results/tasks/deep-swe/numba-stencil-boundary-modes/)                        |
-| `bandit-incremental-cache-control`                    | 失败       | 失败          | 失败        | [查看](results/tasks/deep-swe/bandit-incremental-cache-control/)                    |
-| `httpx-streaming-json-iteration`                      | 通过       | 失败          | 通过        | [查看](results/tasks/deep-swe/httpx-streaming-json-iteration/)                      |
-| `happy-dom-abort-pending-body-reads`                  | 失败       | 通过          | 失败        | [查看](results/tasks/deep-swe/happy-dom-abort-pending-body-reads/)                  |
-| `dynamodb-toolbox-conditional-attribute-requirements` | 通过       | 通过          | 通过        | [查看](results/tasks/deep-swe/dynamodb-toolbox-conditional-attribute-requirements/) |
-| `awilix-async-container-initialization`               | 通过       | 通过          | 失败        | [查看](results/tasks/deep-swe/awilix-async-container-initialization/)               |
-| `quill-shared-toolbar-focus`                          | 通过       | 失败          | 失败        | [查看](results/tasks/deep-swe/quill-shared-toolbar-focus/)                          |
-| `wasmi-trap-coredumps`                                | 失败       | 失败          | 通过        | [查看](results/tasks/deep-swe/wasmi-trap-coredumps/)                                |
-| `fd-deterministic-multi-key-sorting`                  | 通过       | 通过          | 通过        | [查看](results/tasks/deep-swe/fd-deterministic-multi-key-sorting/)                  |
-| `boa-hierarchical-evaluation-cancellation`            | 通过       | 通过          | 失败        | [查看](results/tasks/deep-swe/boa-hierarchical-evaluation-cancellation/)            |
-| `pest-character-class-coalescing`                     | 失败       | 失败          | 失败        | [查看](results/tasks/deep-swe/pest-character-class-coalescing/)                     |
-| `yjs-map-conflict-detection`                          | 通过       | 通过          | 通过        | [查看](results/tasks/deep-swe/yjs-map-conflict-detection/)                          |
-| `testem-per-launcher-reports`                         | 通过       | 通过          | 失败        | [查看](results/tasks/deep-swe/testem-per-launcher-reports/)                         |
-| `csstree-shorthand-expansion-compression`             | 通过       | 通过          | 通过        | [查看](results/tasks/deep-swe/csstree-shorthand-expansion-compression/)             |
-| `katex-multicolumn-array-spans`                       | 通过       | 通过          | 失败        | [查看](results/tasks/deep-swe/katex-multicolumn-array-spans/)                       |
+`goreleaser-retry-publish-auditing`、`anko-typed-variable-bindings`、`narwhals-rolling-window-suite`、`skrub-duration-encoding`、`langchain-request-coalescing` 和 `eicrud-keyset-pagination-cursor` 的 clean baseline 在多个配置中不健康，因此按基础设施无效处理。另有少量 provider JSON/限流、Docker 拉取、verifier timeout 和 patch 校验异常；具体 attempt ledger 保留在 raw run 的 `suite-report.json`，不应把它们折算成 Agent 的失败分数。
 
-## 5. 资源
+## 5. 配对资源结果
 
-资源聚合只使用 `completed` 且能够规范化 evidence 的 attempt。通过率分母与资源分母因此不同；缺失 usage 的 scored job 仍计入 verifier 结果，但不会被当成 0 token。
+以下数值对每个同 task 配对先计算 `Ello / Claude Code`，再取中位数；缺失 usage 不填 0。`n` 是该项两侧 evidence 都可用的配对数。
 
-### 5.1 资源中位数
+| 相对 Claude Code         |       elapsed |      模型轮次 | Command / Tool 调用 |   input / output token |
+| ------------------------ | ------------: | ------------: | ------------------: | ---------------------: |
+| Ello Rapid               | ↓12.1% (n=94) | ↓22.8% (n=94) |       ↓29.2% (n=94) | ↓35.4% / ↓13.4% (n=85) |
+| Ello Rapid + Subagent    | ↓14.1% (n=93) | ↓20.6% (n=93) |       ↓32.5% (n=93) | ↓36.3% / ↓13.0% (n=79) |
+| Ello Thorough            |  ↓1.4% (n=93) |  ↓4.4% (n=93) |       ↓13.1% (n=93) |   ↓9.4% / ↓8.7% (n=81) |
+| Ello Thorough + Subagent |  ↑1.2% (n=93) |  ↓6.3% (n=93) |       ↓13.3% (n=93) |   ↓9.4% / ↓1.6% (n=75) |
 
-| Agent         | elapsed | rounds | tools |      input | non-cache input | cache read | cache hit |  output |
-| ------------- | ------: | -----: | ----: | ---------: | --------------: | ---------: | --------: | ------: |
-| Ello Rapid    | 1,223 s |    146 |   129 | 11,616,705 |         111,617 | 11,505,088 |     99.1% |  99,329 |
-| Ello Thorough | 1,555 s |    162 |   143 | 20,985,356 |         138,415 | 20,838,592 |     99.3% | 111,444 |
-| Claude Code   | 5,400 s |    259 |   273 | 27,686,409 |         316,469 | 27,355,776 |     98.9% | 262,551 |
+配置级 mean/median/p95、逐 task 结果和完整 invalid ledger 见 [生成报告](results/report.md) 与 [suite JSON](results/suite-report.json)。
 
-### 5.2 资源平均数
+## 6. 证据存储
 
-| Agent         | elapsed | rounds | tools |      input | non-cache input | cache read | cache hit |  output |
-| ------------- | ------: | -----: | ----: | ---------: | --------------: | ---------: | --------: | ------: |
-| Ello Rapid    | 1,299 s |    140 |   133 | 15,765,153 |         116,632 | 15,648,521 |     99.1% | 105,919 |
-| Ello Thorough | 1,894 s |    157 |   151 | 21,842,794 |         138,017 | 21,704,777 |     99.3% | 117,992 |
-| Claude Code   | 4,610 s |    492 |   514 | 32,394,152 |         301,672 | 32,092,480 |     98.9% | 276,073 |
-
-这里的 mean 是 measured run 的算术平均数；cache hit mean 按每个 run 的命中率做算术平均，不用 token 总和重新计算。
-
-### 5.3 样本覆盖
-
-| Agent         | elapsed / rounds / tools | 完整 input/output usage | cache hit | tool audit passed | Scored job |
-| ------------- | -----------------------: | ----------------------: | --------: | ----------------: | ---------: |
-| Ello Rapid    |                       18 |                      14 |        14 |                18 |         20 |
-| Ello Thorough |                       18 |                      14 |        14 |                18 |         20 |
-| Claude Code   |                       19 |                       8 |         8 |                15 |         20 |
-
-严格 `publishable` gate 要求完整 60-job 矩阵、每个 completed job 的完整 usage 和通过的 tool audit。本轮 verifier 矩阵已完整，但历史 evidence degradation 使 usage 与 tool audit coverage 未达到 60/60，因此仍为 `publishable: false`。该标记不否定 verifier 分数，但对外引用资源数字时必须同时保留 n，不能描述成 20 题完整 token 均值。
-
-### 5.4 配对资源比
-
-比值按每个 matched task 先算 `left / right`，再取中位数，比“两个总体中位数相除”更适合逐 Task 对比。
-
-| 对比                   |    elapsed ratio |     rounds ratio |      tools ratio |     input ratio |    output ratio |
-| ---------------------- | ---------------: | ---------------: | ---------------: | --------------: | --------------: |
-| Rapid / Thorough       |     0.829 (n=18) |     0.908 (n=18) |     0.970 (n=18) |    0.820 (n=11) |    0.897 (n=11) |
-| Rapid / Claude Code    | **0.310 (n=17)** | **0.317 (n=17)** | **0.293 (n=17)** | **0.255 (n=7)** | **0.268 (n=7)** |
-| Thorough / Claude Code |     0.411 (n=17) |     0.347 (n=17) |     0.332 (n=17) |     0.399 (n=6) |     0.378 (n=6) |
-
-`rounds` 在本轮 evidence 中都表示规范化模型回合，但不同 Agent adapter 的原始事件和批处理仍不同。跨 Agent 解读时应同时查看 elapsed、tools 和 token，不把 round 单独当作工作量真值。
-
-## 6. 对外引用边界
-
-可以引用：
-
-- 同一模型配置、同一 20 题 Docker/verifier 矩阵中，Ello Rapid 为 13/20，Claude Code 为 9/20，差 20.0 个百分点。
-- 配对结果为 6 胜、12 平、2 负；不是由少数未配对样本造成的边际差。
-- 在双方资源证据都完整的子集上，Rapid 的耗时、工具调用和 token 配对比中位数均低于 1，并应同时给出 n。
-- Ello 本轮关闭 subagent；优势不能归因于额外并行 Agent 预算。
-
-不能引用：
-
-- “Command Run 单独带来 20 个百分点”或“Backward Reasoning 单独降低 75% token”。本轮没有功能消融。
-- “Ello 在所有模型、语言和任务上都优于 Claude Code”。本轮只有一个模型服务、20 个精选任务和一次重复。
-- “60 个 job 都有完整 token 数据”。usage coverage 明确不足。
-- “结果具有统计显著性”。样本小且 Wilson 区间重叠，本报告只做描述性汇总。
-
-## 7. 证据入口
-
-- [生成报告](results/report.md)：总览、中位数、平均数、Task 级三配置资源表和 invalid attempt ledger。
-- [Suite JSON](results/suite-report.json)：机器可读统计事实源。
-- [发布 manifest](results/manifest.json)：run 身份、60 个 attempt 索引和文件校验和。
-- [逐 Task 产物](results/tasks/deep-swe/)：instruction、resolved task、三配置 patch、结构化 verifier 结果与运行 manifest。
-- Raw run：`packages/ello-bench/raw/deep-swe-0809-03/`（本地 ignored，不作为 Git 发布入口）。
-
-发布产物由以下命令在完整矩阵上生成：
-
-```bash
-pnpm --filter @ello/bench build
-pnpm --filter @ello/bench bench report \
-  --run-root raw/deep-swe-0809-03
-node --max-old-space-size=8192 packages/ello-bench/dist/cli.js validate \
-  --run-root packages/ello-bench/raw/deep-swe-0809-03
-pnpm --filter @ello/bench bench:archive-docs -- \
-  --run-root packages/ello-bench/raw/deep-swe-0809-03
-```
+Raw run 仍位于 `packages/ello-bench/raw/deep-swe-0816-01/`，包含完整 stdout、evidence、tool audit、phase timing、verifier 和 retry lineage。Git 发布集只保留聚合 report、suite/agent/comparison JSON 和 charts，不再复制 `results/tasks/` 下的逐题 patch、instruction 和 harness 文件。

@@ -4,7 +4,7 @@
 
 **Ello is a Coding Agent runtime for long-horizon software engineering.** Instead of forcing the model through a call-one-tool-and-wait loop, Ello uses one compilable, schedulable, resumable `command_run` surface for environment execution and Agent capabilities. More of the model budget can go to root-cause investigation, implementation, and verification.
 
-> DeepSWE v1.1: Ello Rapid and Thorough both pass **13/20 (65%)**, while Claude Code passes **9/20 (45%)**. On paired tasks with evidence on both sides, Rapid uses 68.3% fewer model rounds, 70.7% fewer normalized Command/Tool calls, and 74.5% fewer input tokens at the median.
+> Full 113-task DeepSWE v1.1 run: Ello Rapid passes **46/104 (44.2%)** and Claude Code passes **48/107 (44.9%)**, a near-tie in verifier outcomes. On paired tasks with evidence on both sides, Rapid uses 12.1% less elapsed time, 22.8% fewer model rounds, 29.2% fewer normalized Command/Tool calls, and 35.4% fewer input tokens at the median.
 
 ## Runtime Demo
 
@@ -24,32 +24,28 @@
 
 ### Current result
 
-The latest comparison fixes DeepSeek V4 Flash 0731, High reasoning effort, the same 20 DeepSWE v1.1 tasks, and the same Docker images, resource limits, and verifiers.
+The latest comparison fixes DeepSeek V4 Flash 0731, High reasoning effort, the full 113-task DeepSWE v1.1 suite, and the same Docker images, resource limits, and verifiers. Five configurations produced 520 scored jobs out of 565 planned; 45 jobs were infrastructure-invalid.
 
-| Configuration | Valid tasks | Passed | Pass rate | Delta vs Claude Code |
-| ------------- | ----------: | -----: | --------: | -------------------: |
-| Ello Rapid    |          20 |     13 | **65.0%** |         **+20.0 pp** |
-| Ello Thorough |          20 |     13 | **65.0%** |         **+20.0 pp** |
-| Claude Code   |          20 |      9 |     45.0% |             baseline |
+| Configuration            | Valid jobs | Passed | Pass rate | Invalid |
+| ------------------------ | ---------: | -----: | --------: | ------: |
+| Ello Rapid               |        104 |     46 |     44.2% |       9 |
+| Ello Rapid + Subagent    |        103 |     43 |     41.7% |      10 |
+| Ello Thorough            |        103 |     44 |     42.7% |      10 |
+| Ello Thorough + Subagent |        103 |     41 |     39.8% |      10 |
+| Claude Code              |        107 |     48 |     44.9% |       6 |
 
-Both Ello configurations are **6 wins, 12 ties, and 2 losses** against Claude Code. All 60 jobs completed with a verifier score.
+Ello Rapid is **18 wins, 66 ties, and 20 losses** against Claude Code across 104 valid pairs, for a **-1.9 percentage-point** paired pass-rate difference. Their verifier outcomes are close, while Rapid uses fewer runtime resources.
 
 ### Resource efficiency
 
 Each reduction below is computed per task where both sides have evidence: first calculate `Ello / Claude Code`, then take the median. Parentheses show the measured pair count; missing usage is never replaced with zero.
 
-| vs Claude Code |       Elapsed |  Model rounds | Command / Tool calls | Input / output tokens |
-| -------------- | ------------: | ------------: | -------------------: | --------------------: |
-| Ello Rapid     | ↓69.0% (n=17) | ↓68.3% (n=17) |        ↓70.7% (n=17) | ↓74.5% / ↓73.2% (n=7) |
-| Ello Thorough  | ↓58.9% (n=17) | ↓65.3% (n=17) |        ↓66.8% (n=17) | ↓60.1% / ↓62.2% (n=6) |
-
-Round and tool events are normalized by different Agent adapters, so they are descriptive signals rather than identical atomic units. Strict `publishable` remains false because historical usage and tool-audit coverage do not reach 60/60, even though the verifier matrix is complete.
-
-### Change from the previous record
-
-The previous DeepSWE record in this repository reported Ello at 6/20 (30%); the current run is 13/20 (65%), an observed increase of **35 percentage points**. This is not a controlled regression comparison: the model, task-set hash, Docker boundary, and Agent implementation changed. It is a longitudinal project result, not an attribution to any single feature.
-
-The current same-model, same-task, same-verifier comparison is the stronger external claim: Ello is **20 percentage points** above Claude Code.
+| vs Claude Code           |       Elapsed |  Model rounds | Command / Tool calls |  Input / output tokens |
+| ------------------------ | ------------: | ------------: | -------------------: | ---------------------: |
+| Ello Rapid               | ↓12.1% (n=94) | ↓22.8% (n=94) |        ↓29.2% (n=94) | ↓35.4% / ↓13.4% (n=85) |
+| Ello Rapid + Subagent    | ↓14.1% (n=93) | ↓20.6% (n=93) |        ↓32.5% (n=93) | ↓36.3% / ↓13.0% (n=79) |
+| Ello Thorough            |  ↓1.4% (n=93) |  ↓4.4% (n=93) |        ↓13.1% (n=93) |   ↓9.4% / ↓8.7% (n=81) |
+| Ello Thorough + Subagent |  ↑1.2% (n=93) |  ↓6.3% (n=93) |        ↓13.3% (n=93) |   ↓9.4% / ↓1.6% (n=75) |
 
 ### Isolated, auditable execution
 
@@ -61,14 +57,12 @@ The benchmark uses the product Client-Server path instead of a benchmark-only El
 4. The runner captures `model.patch`, applies it in a fresh container using the same image, and runs the verifier.
 5. EngineEvents, model usage, Commands, patch identity, verifier assertions, and retry lineage remain auditable.
 
-The raw run passes lineage, artifact-checksum, and report-consistency validation across 136 attempts. Git publishes aggregate reports and a minimal per-task evidence set; large logs and deep diagnostic evidence stay in ignored raw storage.
+The raw validator passes across 855 attempts: 520 completed and 335 invalid attempt records, with report consistency confirmed. Git publishes aggregate reports, suite/agent/comparison JSON, and charts; per-task patches, large logs, and deep diagnostic evidence stay in ignored raw storage.
 
 - [Current evidence record](docs/benchmark/current-task-set-record.md)
 - [Generated report](docs/benchmark/results/report.md)
-- [Per-task patches and verifier summaries](docs/benchmark/results/tasks/deep-swe/)
+- [Structured suite result](docs/benchmark/results/suite-report.json)
 - [Benchmark methodology](docs/benchmark/benchmark-methodology.md)
-
-This is still a system-level Agent comparison. Prompt policy, Command protocol, context strategy, and runtime all change together; the run is not a single-feature ablation.
 
 ## Why Commands Replace Tools
 
@@ -208,7 +202,7 @@ The same method applies to data correctness. An unexpected cache-hit rate should
 
 Rapid and Thorough share the same runtime and Command protocol. Rapid stops at the smallest evidence-supported cause and uses focused validation. Thorough continues across ownership, persistence, recovery, compatibility, and downstream contracts before widening validation.
 
-Backward Reasoning is a real prompt policy, not a hidden planner or separate runtime mode. Benchmark results are system-level associations, not a causal ablation of this policy.
+Backward Reasoning is a real prompt policy, not a hidden planner or separate runtime mode.
 
 ## Core Features
 

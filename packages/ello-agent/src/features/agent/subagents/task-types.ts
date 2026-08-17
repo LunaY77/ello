@@ -11,32 +11,20 @@ import {
 } from '../../config/index.js';
 import type { AgentMessage, AgentUsage } from '../engine/index.js';
 
-export const AgentTaskContextModeSchema = z.enum(['fresh', 'fork']);
-export type AgentTaskContextMode = z.infer<typeof AgentTaskContextModeSchema>;
-
-export const AgentTaskExecutionModeSchema = z.enum([
-  'foreground',
-  'background',
-]);
-export type AgentTaskExecutionMode = z.infer<
-  typeof AgentTaskExecutionModeSchema
->;
+import { AgentTaskPacketSchema, type AgentTaskPacket } from './task-packet.js';
+import { AgentTaskResultSchema, type AgentTaskResult } from './task-result.js';
 
 export const AgentTaskStatusSchema = z.enum([
   'queued',
   'running',
   'completed',
   'failed',
-  'killed',
-  'recovered',
+  'blocked',
+  'stopped',
 ]);
 export type AgentTaskStatus = z.infer<typeof AgentTaskStatusSchema>;
 
-export const AgentTaskIsolationSchema = z.enum([
-  'shared',
-  'worktree',
-  'container',
-]);
+export const AgentTaskIsolationSchema = z.enum(['shared']);
 export type AgentTaskIsolation = z.infer<typeof AgentTaskIsolationSchema>;
 
 export const AgentUsageSchema = z
@@ -90,20 +78,15 @@ export interface AgentTask {
   readonly id: string;
   readonly agentId: string;
   readonly rootThreadId: string;
-  readonly parentTaskId?: string;
-  readonly resumeFromTaskId?: string;
   readonly name?: string;
   readonly description: string;
   readonly definitionName: string;
   readonly modelSelector?: 'primary_model' | 'auxiliary_model';
-  readonly contextMode: AgentTaskContextMode;
-  readonly executionMode: AgentTaskExecutionMode;
   readonly status: AgentTaskStatus;
-  readonly prompt: string;
+  readonly taskPacket: AgentTaskPacket;
   readonly cwd: string;
-  readonly isolation: AgentTaskIsolation;
+  readonly isolation: 'shared';
   readonly maxTurns: number;
-  readonly depth: number;
   readonly revision: number;
   readonly eventSequence: number;
   readonly currentTool?: AgentTaskCurrentTool;
@@ -113,9 +96,9 @@ export interface AgentTask {
   readonly errorPreview?: string;
   readonly output?: string;
   readonly errorMessage?: string;
+  readonly result?: AgentTaskResult;
   readonly usage?: AgentUsage;
   readonly sidechain: readonly AgentMessage[];
-  readonly commandNames: readonly string[];
   readonly permissionRules: readonly PermissionRule[];
   readonly externalPaths: readonly string[];
   readonly createdAt: string;
@@ -139,6 +122,7 @@ export type CreateAgentTask = Omit<
   | 'errorPreview'
   | 'output'
   | 'errorMessage'
+  | 'result'
   | 'usage'
   | 'createdAt'
   | 'startedAt'
@@ -170,10 +154,10 @@ export interface AgentTaskNotification {
   readonly rootThreadId: string;
   readonly status: Extract<
     AgentTaskStatus,
-    'completed' | 'failed' | 'killed' | 'recovered'
+    'completed' | 'failed' | 'blocked' | 'stopped'
   >;
   readonly summary: string;
-  readonly result?: string;
+  readonly result: AgentTaskResult;
   readonly usage?: AgentUsage;
   readonly createdAt: string;
   readonly deliveredAt?: string;
@@ -193,12 +177,15 @@ export function isTerminalAgentTaskStatus(
   status: AgentTaskStatus,
 ): status is Extract<
   AgentTaskStatus,
-  'completed' | 'failed' | 'killed' | 'recovered'
+  'completed' | 'failed' | 'blocked' | 'stopped'
 > {
   return (
     status === 'completed' ||
     status === 'failed' ||
-    status === 'killed' ||
-    status === 'recovered'
+    status === 'blocked' ||
+    status === 'stopped'
   );
 }
+
+export { AgentTaskPacketSchema, AgentTaskResultSchema };
+export type { AgentTaskPacket, AgentTaskResult };

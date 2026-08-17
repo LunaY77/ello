@@ -98,7 +98,7 @@ export function itemToHistoryEntry(item: ThreadItem): HistoryEntry | undefined {
   if (isToolItem(item)) {
     if (
       item.type === 'toolCall' &&
-      item.toolName === 'delegate_to_subagent' &&
+      item.toolName === 'spawn_agent' &&
       item.status === 'completed'
     ) {
       return undefined;
@@ -300,7 +300,6 @@ export function itemToSubagentView(
     runId: item.id,
     agentName: item.agentName,
     description: item.description,
-    background: item.background,
     status:
       item.status === 'inProgress'
         ? 'running'

@@ -11,7 +11,10 @@ import { cycleSessionMode } from '../api/protocol-types.js';
 import { ThreadClient } from '../client/thread-client.js';
 
 import { AgentSwitcher } from './component/AgentSwitcher.js';
-import { AgentTranscript } from './component/AgentTranscript.js';
+import {
+  AgentTranscript,
+  AgentTranscriptHistoryOutput,
+} from './component/AgentTranscript.js';
 import { AppShell } from './component/AppShell.js';
 import {
   Composer,
@@ -336,16 +339,26 @@ function ReadyThreadScreen({
     hasSteerTarget: agentTasks.activeTask !== undefined,
     suggestionCount: composerSuggestions?.length ?? 0,
   });
+  const activeHistoryResetKey =
+    state.historyResetKey + themeEpoch + agentTasks.viewEpoch * 1_000_000;
+  const activeAgentTask = agentTasks.activeTask;
   return (
     <ThemeProvider theme={resolveTheme(themeName)}>
       <TerminalHistoryOutput
         entries={agentTasks.activeView.kind === 'main' ? state.history : []}
-        resetKey={
-          state.historyResetKey + themeEpoch + agentTasks.viewEpoch * 1_000_000
-        }
+        resetKey={activeHistoryResetKey}
         cwd={thread.cwd}
         settings={state.settings}
       />
+      {activeAgentTask === undefined ? null : (
+        <AgentTranscriptHistoryOutput
+          task={activeAgentTask}
+          {...(agentTasks.activeDetail === undefined
+            ? {}
+            : { detail: agentTasks.activeDetail })}
+          resetKey={activeHistoryResetKey}
+        />
+      )}
       <AppShell
         cwd={thread.cwd}
         model={`primary: ${globalModelSelections.primaryModel} · auxiliary: ${globalModelSelections.auxiliaryModel}`}
@@ -440,16 +453,26 @@ function ReadyThreadScreen({
             onCancelAgentStop={() => setOverlay({ type: 'none' })}
           />
         }
-        agentTranscript={
-          agentTasks.activeTask === undefined ? undefined : (
-            <AgentTranscript
-              task={agentTasks.activeTask}
-              {...(agentTasks.activeDetail === undefined
-                ? {}
-                : { detail: agentTasks.activeDetail })}
-            />
-          )
-        }
+        {...(activeAgentTask === undefined
+          ? {}
+          : {
+              agentTranscript: ({
+                maxRows,
+                textWidth,
+              }: {
+                readonly maxRows: number;
+                readonly textWidth: number;
+              }) => (
+                <AgentTranscript
+                  task={activeAgentTask}
+                  {...(agentTasks.activeDetail === undefined
+                    ? {}
+                    : { detail: agentTasks.activeDetail })}
+                  maxRows={maxRows}
+                  textWidth={textWidth}
+                />
+              ),
+            })}
         agentSwitcher={
           <AgentSwitcher
             tasks={visibleAgentTasks}
@@ -494,7 +517,7 @@ function ReadyThreadScreen({
               } else {
                 onError(
                   new Error(
-                    `Agent task ${agentTasks.activeTask.taskId} is ${agentTasks.activeTask.status}; resume it explicitly.`,
+                    `Agent task ${agentTasks.activeTask.taskId} is ${agentTasks.activeTask.status}; return to main to start a new Agent.`,
                   ),
                 );
               }

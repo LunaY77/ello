@@ -58,6 +58,9 @@ describe('TypeScript report renderer', () => {
     const markdown = renderMarkdown(report, '/runs/example', 'fixture');
     expect(markdown).toContain('| ello | 3 | 2 | 66.7% |');
     expect(markdown).toContain('subagent input');
+    expect(markdown).toContain('combined input');
+    expect(markdown).toContain('subagent output');
+    expect(markdown).toContain('subagent tools');
     expect(markdown).toContain('non-cache input');
     expect(markdown).toContain('cache hit rate');
     expect(markdown).toContain('8.3%');

@@ -126,7 +126,7 @@ export const BenchmarkSuiteMetadataSchema = z
     taskSetHash: z.string().regex(/^[0-9a-f]{64}$/u),
     selectedTaskCount: z.number().int().positive(),
     upstreamTaskCount: z.number().int().positive(),
-    selectionKind: z.enum(['curated', 'calibration']),
+    selectionKind: z.enum(['curated', 'calibration', 'full']),
     scoreMetric: z.literal('binary-reward'),
   })
   .strict();

@@ -6,19 +6,26 @@
 
 ## Current published result
 
-The current DeepSWE v1.1 run fixes DeepSeek V4 Flash 0731, High reasoning, the same 20 tasks, and the same Docker/verifier contract.
+The current DeepSWE v1.1 run fixes DeepSeek V4 Flash 0731, High reasoning, the full 113-task suite, and the same Docker/verifier contract. Of 565 planned jobs, 520 are scored and 45 are infrastructure-invalid.
 
-| Agent         | Passed | Pass rate | Delta vs Claude Code |
-| ------------- | -----: | --------: | -------------------: |
-| Ello Rapid    |     13 | **65.0%** |         **+20.0 pp** |
-| Ello Thorough |     13 | **65.0%** |         **+20.0 pp** |
-| Claude Code   |      9 |     45.0% |             baseline |
+| Agent                    | Valid | Passed | Pass rate | Invalid |
+| ------------------------ | ----: | -----: | --------: | ------: |
+| Ello Rapid               |   104 |     46 |     44.2% |       9 |
+| Ello Rapid + Subagent    |   103 |     43 |     41.7% |      10 |
+| Ello Thorough            |   103 |     44 |     42.7% |      10 |
+| Ello Thorough + Subagent |   103 |     41 |     39.8% |      10 |
+| Claude Code              |   107 |     48 |     44.9% |       6 |
 
-Both Ello configurations are 6 wins, 12 ties, and 2 losses against Claude Code. On paired tasks with evidence on both sides, Rapid uses 69.0% less elapsed time, 68.3% fewer model rounds, 70.7% fewer normalized Command/Tool calls, and 74.5% fewer input tokens at the median.
+Ello Rapid is 18 wins, 66 ties, and 20 losses against Claude Code across valid pairs, a near-tie in accuracy. Paired resource results are:
 
-See the [evidence record](../../docs/benchmark/current-task-set-record.md), [generated report](../../docs/benchmark/results/report.md), [task patches](../../docs/benchmark/results/tasks/deep-swe/), and [methodology](../../docs/benchmark/benchmark-methodology.md).
+| vs Claude Code           |       Elapsed |  Model rounds | Command / Tool calls |  Input / output tokens |
+| ------------------------ | ------------: | ------------: | -------------------: | ---------------------: |
+| Ello Rapid               | ↓12.1% (n=94) | ↓22.8% (n=94) |        ↓29.2% (n=94) | ↓35.4% / ↓13.4% (n=85) |
+| Ello Rapid + Subagent    | ↓14.1% (n=93) | ↓20.6% (n=93) |        ↓32.5% (n=93) | ↓36.3% / ↓13.0% (n=79) |
+| Ello Thorough            |  ↓1.4% (n=93) |  ↓4.4% (n=93) |        ↓13.1% (n=93) |   ↓9.4% / ↓8.7% (n=81) |
+| Ello Thorough + Subagent |  ↑1.2% (n=93) |  ↓6.3% (n=93) |        ↓13.3% (n=93) |   ↓9.4% / ↓1.6% (n=75) |
 
-Strict `publishable` remains false because historical usage/tool-audit coverage is incomplete; all 60 verifier jobs are scored, but resource claims retain their measured sample counts.
+See the [evidence record](../../docs/benchmark/current-task-set-record.md), [generated report](../../docs/benchmark/results/report.md), [structured suite result](../../docs/benchmark/results/suite-report.json), and [methodology](../../docs/benchmark/benchmark-methodology.md).
 
 ## Pipeline
 
@@ -58,17 +65,15 @@ Full evidence remains under ignored `packages/ello-bench/raw/`. The Git-facing s
 
 ```text
 docs/benchmark/results/
-├── manifest.json
+├── README.md
 ├── report.md
 ├── suite-report.json
-├── charts/
-└── tasks/deep-swe/<task>/<agent>/
-    ├── manifest.json
-    ├── model.patch
-    └── harness.json
+├── agents/
+├── comparisons/
+└── charts/
 ```
 
-Task instruction and resolved metadata are shared one level above each Agent. Verifier logs, full evidence, tool audits, and phase timings stay in raw storage.
+Per-task instructions, patches, harnesses, and attempt manifests are not copied into Git. Verifier logs, full evidence, tool audits, and phase timings also stay in raw storage; aggregate and per-task outcomes remain in `suite-report.json`.
 
 ## Commands
 
@@ -95,8 +100,7 @@ Dependencies point inward from CLI and infrastructure through application ports 
 ```bash
 pnpm --filter @ello/bench test
 pnpm --filter @ello/bench typecheck
-pnpm exec eslint packages/ello-bench/src packages/ello-bench/tests \
-  packages/ello-bench/scripts/archive-doc-results.mjs
+pnpm exec eslint packages/ello-bench/src packages/ello-bench/tests
 pnpm --filter @ello/bench build
 ```
 

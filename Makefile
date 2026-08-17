@@ -9,6 +9,7 @@
 #   make doctor                   # 环境自检（Docker / 可执行文件 / 凭据）
 #   make run                      # 跑 benchmark（run root 已存在则自动只跑未完成的）
 #   make status                   # 盘点某个 run root 还剩多少没跑完
+#   make repair                   # dry-run 检查可挽救/需收尾的 attempt
 #
 # ## 心智模型：两个坐标
 #
@@ -67,6 +68,7 @@
 #   TASKS          （空）          只跑这些任务，空格分隔；空则 --all 全部任务
 #   AGENTS         由 SUITE 推导   只跑这些 agent，空格分隔；空则 --all-agents
 #   WITH_REPORT    0              1 表示 run 结束后顺带生成报告
+#   APPLY          0              repair 是否写回；只有 APPLY=1 才应用
 #   MAX_RETRIES    从 CONFIG 读取  status 盘点用的重试上限口径
 #   NODE           node           node 可执行文件。设成 echo 可干跑（见「干跑与调试」）
 #
@@ -91,6 +93,10 @@
 #
 #   # 只重跑上次被中断的那个 run root 里没跑完的任务
 #   make resume SUITE=deepswe RUN_ID=deep-swe-0809-03
+
+#   # runner 已停止后，先 dry-run，再显式收尾非终态 attempt
+#   make repair RUN_ID=deep-swe-0809-03
+#   make repair RUN_ID=deep-swe-0809-03 APPLY=1
 #
 #   # 开一个全新的 run（自动命名 deep-swe-0810-01，已存在则 -02）
 #   make fresh SUITE=deepswe
@@ -231,6 +237,8 @@ SELECT := $(if $(TASKS),$(foreach task,$(TASKS),--task $(task)),--all) \
 	$(if $(AGENTS),$(foreach agent,$(AGENTS),--agent $(agent)),--all-agents)
 WITH_REPORT ?= 0
 REPORT_FLAG := $(if $(filter-out 0,$(WITH_REPORT)),--report,)
+APPLY ?= 0
+REPAIR_FLAG := $(if $(filter 1,$(APPLY)),--apply,)
 
 .DEFAULT_GOAL := help
 # 前置校验目标必须严格先于执行目标跑完（-j 下并行会让校验失去意义），
@@ -238,7 +246,7 @@ REPORT_FLAG := $(if $(filter-out 0,$(WITH_REPORT)),--report,)
 .NOTPARALLEL:
 .PHONY: help vars bench build test typecheck lint verify \
 	list agents plan doctor config-print \
-	run resume fresh status runs report validate \
+	run resume fresh status runs repair report validate \
 	docker-clean docker-ps \
 	_require-suite _require-existing-root _require-matching-agents
 
@@ -254,7 +262,7 @@ help: ## 列出所有命令（默认目标）
 		| sed -e 's/:[^#]*##/\t/' \
 		| awk -F'\t' '{ printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2 }'
 	@echo ''
-	@echo '常用变量：SUITE RUN_ID RUN_ROOT RUNS_DIR CONFIG CORPUS TASKS AGENTS WITH_REPORT'
+	@echo '常用变量：SUITE RUN_ID RUN_ROOT RUNS_DIR CONFIG CORPUS TASKS AGENTS WITH_REPORT APPLY'
 	@echo '简写：make <suite>-<目标>，例如 make pro-status 等价于 make status SUITE=pro'
 	@echo '详细说明见本文件顶部注释：less $(firstword $(MAKEFILE_LIST))'
 
@@ -270,6 +278,7 @@ vars: ## 打印当前解析出的变量值（排查路径问题先看这个）
 	@echo 'MAX_RETRIES  $(MAX_RETRIES)'
 	@echo 'SELECT       $(SELECT)'
 	@echo 'WITH_REPORT  $(WITH_REPORT)'
+	@echo 'APPLY        $(APPLY)'
 	@echo 'CLI          $(CLI)'
 
 bench: ## 命名空间占位：make bench run 等价于 make run
@@ -357,6 +366,9 @@ runs: _require-suite ## 一行一个，列出 RUNS_DIR 下所有 run root 的进
 
 validate: ## 校验 run root 的证据完整性（configHash / job 矩阵 / 产物）
 	@$(CLI) validate --run-root $(RUN_ROOT)
+
+repair: _require-existing-root build ## 检查/收尾中断 attempt；默认 dry-run，APPLY=1 写回
+	$(CLI) repair --run-root $(RUN_ROOT) $(REPAIR_FLAG)
 
 report: ## 生成 run root 的报告
 	$(CLI) report --run-root $(RUN_ROOT)

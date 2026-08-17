@@ -478,6 +478,7 @@ function resolveDefinition(
         declared?.destructive ?? definition.risk !== 'readonly';
       return {
         logicalName: definition.name,
+        usesEnvironment: declared?.usesEnvironment !== false,
         concurrencySafe:
           declared?.concurrencySafe === true && readOnly && !destructive,
         readOnly,
@@ -548,6 +549,7 @@ function commandSearchDefinition(
       options: ['query', 'limit', 'offset'],
     }),
     effects: {
+      usesEnvironment: false,
       concurrencySafe: true,
       readOnly: true,
       destructive: false,

@@ -418,6 +418,8 @@ function mcpCapabilities(
     : tool.annotations?.destructiveHint !== false;
   return {
     logicalName: exposedToolName(connection.serverName, tool.name),
+    // MCP Server 可能是本地 stdio 进程并直接改写 workspace；安全性未知，保持受 gate 约束。
+    usesEnvironment: true,
     concurrencySafe: readOnly && !destructive,
     readOnly,
     destructive,
@@ -436,6 +438,7 @@ function resourceCapabilities(
       connection.serverName,
       telemetryTag === 'resources.list' ? 'list_resources' : 'read_resource',
     ),
+    usesEnvironment: true,
     concurrencySafe: true,
     readOnly: true,
     destructive: false,

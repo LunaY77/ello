@@ -208,7 +208,7 @@ describe('Task Command 命名空间', () => {
           toolContext(root, noNativeProcesses()),
         ),
       ).rejects.toThrow(
-        'This is a subagent task ID; use task_output to read it or task_stop to stop it.',
+        'This is a Subagent job ID; use get_agent to read it or stop_agent to stop it.',
       );
     } finally {
       stores.close();

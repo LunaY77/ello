@@ -21,9 +21,7 @@ type AgentTaskMethod =
   | 'agent/task/list'
   | 'agent/task/read'
   | 'agent/task/steer'
-  | 'agent/task/stop'
-  | 'agent/task/resume'
-  | 'agent/task/background';
+  | 'agent/task/stop';
 
 /** 子代理公开任务投影，拥有 connection subscription 的释放职责。 */
 export class AgentTaskRpcFeature {
@@ -66,22 +64,6 @@ export class AgentTaskRpcFeature {
       'agent/task/stop': route('write', async (_peer, params) => ({
         task: agentTaskSummary(
           await this.service.stop(params.taskId, params.threadId),
-        ),
-      })),
-      'agent/task/resume': route('write', (_peer, params) => ({
-        task: agentTaskSummary(
-          this.service.resume(params.taskId, params.threadId, params.prompt, {
-            ...(params.name === undefined ? {} : { name: params.name }),
-            ...(params.description === undefined
-              ? {}
-              : { description: params.description }),
-            executionMode: params.executionMode,
-          }).task,
-        ),
-      })),
-      'agent/task/background': route('write', (_peer, params) => ({
-        task: agentTaskSummary(
-          this.service.background(params.taskId, params.threadId),
         ),
       })),
     };

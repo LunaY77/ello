@@ -20,11 +20,12 @@ import {
 } from '../../../infra/database/schema.js';
 import type { AgentMessage, AgentUsage } from '../engine/index.js';
 
+import { taskResultSummary } from './task-result.js';
 import {
-  AgentTaskContextModeSchema,
   AgentTaskCurrentToolSchema,
-  AgentTaskExecutionModeSchema,
   AgentTaskIsolationSchema,
+  AgentTaskPacketSchema,
+  AgentTaskResultSchema,
   AgentTaskStatusSchema,
   AgentTaskToolSummarySchema,
   AgentUsageSchema,
@@ -33,8 +34,8 @@ import {
   type AgentTaskChange,
   type AgentTaskCurrentTool,
   type AgentTaskEvent,
-  type AgentTaskExecutionMode,
   type AgentTaskNotification,
+  type AgentTaskResult,
   type AgentTaskStatus,
   type AgentTaskSnapshot,
   type AgentTaskToolSummary,
@@ -43,19 +44,19 @@ import {
 } from './task-types.js';
 
 export {
-  AgentTaskContextModeSchema,
-  AgentTaskExecutionModeSchema,
   AgentTaskIsolationSchema,
+  AgentTaskPacketSchema,
+  AgentTaskResultSchema,
   AgentTaskStatusSchema,
   AgentUsageSchema,
   type AgentTask,
   type AgentTaskChange,
-  type AgentTaskContextMode,
   type AgentTaskCurrentTool,
   type AgentTaskEvent,
-  type AgentTaskExecutionMode,
   type AgentTaskIsolation,
   type AgentTaskNotification,
+  type AgentTaskPacket,
+  type AgentTaskResult,
   type AgentTaskSnapshot,
   type AgentTaskStatus,
   type AgentTaskToolSummary,
@@ -69,8 +70,8 @@ type AgentTaskNotificationRow = InferSelectModel<typeof agentTaskNotifications>;
 const TerminalStatusSchema = z.enum([
   'completed',
   'failed',
-  'killed',
-  'recovered',
+  'blocked',
+  'stopped',
 ]);
 
 /** 子代理任务和 transcript 的 Drizzle 持久化入口。 */
@@ -116,8 +117,8 @@ export class AgentTaskStore {
       tx.insert(agentTasks).values(toTaskRow(task)).run();
       return appendEvent(tx, task, 'created', {
         description: task.description,
-        contextMode: task.contextMode,
-        executionMode: task.executionMode,
+        objective: task.taskPacket.objective,
+        scope: task.taskPacket.scope,
       });
     });
   }
@@ -239,28 +240,6 @@ export class AgentTaskStore {
     });
   }
 
-  /** 将前台任务切到后台；不创建新 task，也不重启当前 AgentRun。 */
-  background(taskId: string): AgentTaskChange {
-    return immediateTransaction(this.database, (tx) => {
-      const current = requireTask(tx, taskId);
-      if (current.executionMode === 'background') {
-        return { task: current, event: latestEvent(tx, taskId) };
-      }
-      if (isTerminalAgentTaskStatus(current.status))
-        return {
-          task: current,
-          event: latestEvent(tx, taskId),
-        };
-      return appendEvent(
-        tx,
-        current,
-        'execution.backgrounded',
-        { executionMode: 'background' },
-        { executionMode: 'background' },
-      );
-    });
-  }
-
   /** 记录 steer，并在当前进程有 run 时由 Service 继续把文本送入运行句柄。 */
   recordSteer(taskId: string, steerId: string, text: string): AgentTaskChange {
     return immediateTransaction(this.database, (tx) => {
@@ -334,10 +313,7 @@ export class AgentTaskStore {
   settle(
     taskId: string,
     result: {
-      readonly status: Extract<
-        AgentTaskStatus,
-        'completed' | 'failed' | 'killed'
-      >;
+      readonly result: AgentTaskResult;
       readonly output?: string;
       readonly errorMessage?: string;
       readonly usage?: AgentUsage;
@@ -351,10 +327,7 @@ export class AgentTaskStore {
   settleChange(
     taskId: string,
     result: {
-      readonly status: Extract<
-        AgentTaskStatus,
-        'completed' | 'failed' | 'killed'
-      >;
+      readonly result: AgentTaskResult;
       readonly output?: string;
       readonly errorMessage?: string;
       readonly usage?: AgentUsage;
@@ -367,12 +340,15 @@ export class AgentTaskStore {
         return { task: current, event: latestEvent(tx, taskId) };
       }
       const sidechain = result.sidechain ?? current.sidechain;
+      const status = result.result.status;
+      const summary = taskResultSummary(result.result);
       const change = appendEvent(
         tx,
         current,
-        `status.${result.status}`,
+        `status.${status}`,
         {
-          status: result.status,
+          status,
+          result: result.result,
           ...(result.errorMessage === undefined
             ? {}
             : { errorMessage: result.errorMessage }),
@@ -380,19 +356,17 @@ export class AgentTaskStore {
         {
           output: result.output ?? null,
           errorMessage: result.errorMessage ?? null,
-          resultPreview:
-            result.status === 'completed'
-              ? boundedPreview(result.output)
-              : null,
+          result: result.result,
+          resultPreview: boundedPreview(summary),
           errorPreview:
-            result.status === 'failed'
-              ? boundedPreview(result.errorMessage)
+            status === 'failed' || status === 'stopped'
+              ? boundedPreview(summary)
               : null,
           ...(result.usage === undefined ? {} : { usage: result.usage }),
           sidechain,
           completedAt: new Date().toISOString(),
           currentTool: null,
-          status: result.status,
+          status,
         },
       );
       const notification = notificationFor(change.task);
@@ -404,9 +378,7 @@ export class AgentTaskStore {
           status: notification.status,
           payloadJson: JSON.stringify({
             summary: notification.summary,
-            ...(notification.result === undefined
-              ? {}
-              : { result: notification.result }),
+            result: notification.result,
             ...(notification.usage === undefined
               ? {}
               : { usage: notification.usage }),
@@ -420,28 +392,36 @@ export class AgentTaskStore {
     });
   }
 
-  /** Server 重启时把遗留 running 任务收口为 recovered，并留下审计事件。 */
+  /** Server 重启时把遗留 queued/running 任务收口为 failed，并留下审计事件。 */
   recoverRunning(): number {
     return immediateTransaction(this.database, (tx) => {
-      const running = tx
+      const interrupted = tx
         .select()
         .from(agentTasks)
-        .where(eq(agentTasks.status, 'running'))
+        .where(sql`${agentTasks.status} in ('queued', 'running')`)
         .orderBy(asc(agentTasks.createdAt), asc(agentTasks.id))
         .all()
         .map(parseTaskRow);
-      for (const task of running) {
+      for (const task of interrupted) {
+        const result: AgentTaskResult = {
+          status: 'failed',
+          summary: 'Subagent execution was interrupted by a Server restart.',
+          error:
+            'Server restarted before the Agent Task reached a terminal result.',
+          evidence: [],
+          retryable: true,
+        };
         const change = appendEvent(
           tx,
           task,
-          'status.recovered',
-          { status: 'recovered' },
+          'status.failed',
+          { status: 'failed', result },
           {
-            status: 'recovered',
+            status: 'failed',
             errorMessage: 'Server restarted while the task was running.',
-            errorPreview: boundedPreview(
-              'Server restarted while the task was running.',
-            ),
+            result,
+            resultPreview: boundedPreview(taskResultSummary(result)),
+            errorPreview: boundedPreview(taskResultSummary(result)),
             completedAt: new Date().toISOString(),
             currentTool: null,
           },
@@ -453,14 +433,17 @@ export class AgentTaskStore {
             taskId: notification.taskId,
             rootThreadId: notification.rootThreadId,
             status: notification.status,
-            payloadJson: JSON.stringify({ summary: notification.summary }),
+            payloadJson: JSON.stringify({
+              summary: notification.summary,
+              result: notification.result,
+            }),
             createdAt: notification.createdAt,
             deliveredAt: null,
           })
           .onConflictDoNothing({ target: agentTaskNotifications.taskId })
           .run();
       }
-      return running.length;
+      return interrupted.length;
     });
   }
 
@@ -526,11 +509,11 @@ function appendEvent(
   payload: unknown,
   projection: {
     readonly status?: AgentTaskStatus;
-    readonly executionMode?: AgentTaskExecutionMode;
     readonly startedAt?: string;
     readonly completedAt?: string;
     readonly output?: string | null;
     readonly errorMessage?: string | null;
+    readonly result?: AgentTaskResult;
     readonly currentTool?: AgentTaskCurrentTool | null;
     readonly toolCount?: number;
     readonly recentTools?: readonly AgentTaskToolSummary[];
@@ -549,9 +532,6 @@ function appendEvent(
     eventSequence: sequence,
     updatedAt: now,
     ...(projection.status === undefined ? {} : { status: projection.status }),
-    ...(projection.executionMode === undefined
-      ? {}
-      : { executionMode: projection.executionMode }),
     ...(projection.startedAt === undefined
       ? {}
       : { startedAt: projection.startedAt }),
@@ -562,6 +542,9 @@ function appendEvent(
     ...(projection.errorMessage === undefined
       ? {}
       : { errorMessage: projection.errorMessage }),
+    ...(projection.result === undefined
+      ? {}
+      : { resultJson: JSON.stringify(projection.result) }),
     ...(projection.currentTool === undefined
       ? {}
       : {
@@ -649,20 +632,15 @@ function toTaskRow(task: AgentTask) {
     id: task.id,
     agentId: task.agentId,
     rootThreadId: task.rootThreadId,
-    parentTaskId: task.parentTaskId ?? null,
-    resumeFromTaskId: task.resumeFromTaskId ?? null,
     name: task.name ?? null,
     description: task.description,
     definitionName: task.definitionName,
     modelSelector: task.modelSelector ?? null,
-    contextMode: task.contextMode,
-    executionMode: task.executionMode,
     status: task.status,
-    prompt: task.prompt,
+    taskPacketJson: JSON.stringify(task.taskPacket),
     cwd: task.cwd,
     isolation: task.isolation,
     maxTurns: task.maxTurns,
-    depth: task.depth,
     revision: task.revision,
     eventSequence: task.eventSequence,
     currentToolJson: null,
@@ -672,9 +650,9 @@ function toTaskRow(task: AgentTask) {
     errorPreview: task.errorPreview ?? null,
     output: null,
     errorMessage: null,
+    resultJson: null,
     usageJson: null,
     sidechainJson: JSON.stringify(task.sidechain),
-    toolsJson: JSON.stringify(task.commandNames),
     permissionRulesJson: JSON.stringify(task.permissionRules),
     externalPathsJson: JSON.stringify(task.externalPaths),
     createdAt: task.createdAt,
@@ -738,7 +716,15 @@ function parseTaskRow(row: AgentTaskRow): AgentTask {
     'sidechain',
     row.id,
   ) as readonly AgentMessage[];
-  const commandNames = parseStringArray(row.toolsJson, 'commands', row.id);
+  const taskPacket = AgentTaskPacketSchema.parse(
+    parseJsonUnknown(row.taskPacketJson, 'task_packet', row.id),
+  );
+  const result = parseJson(
+    row.resultJson,
+    AgentTaskResultSchema,
+    'result',
+    row.id,
+  );
   const permissionRules = PermissionRuleListSchema.parse(
     parseJsonUnknown(row.permissionRulesJson, 'permission_rules', row.id),
   );
@@ -751,10 +737,6 @@ function parseTaskRow(row: AgentTaskRow): AgentTask {
     id: row.id,
     agentId: row.agentId,
     rootThreadId: row.rootThreadId,
-    ...(row.parentTaskId === null ? {} : { parentTaskId: row.parentTaskId }),
-    ...(row.resumeFromTaskId === null
-      ? {}
-      : { resumeFromTaskId: row.resumeFromTaskId }),
     ...(row.name === null ? {} : { name: row.name }),
     description: row.description,
     definitionName: row.definitionName,
@@ -765,14 +747,11 @@ function parseTaskRow(row: AgentTaskRow): AgentTask {
             | 'primary_model'
             | 'auxiliary_model',
         }),
-    contextMode: AgentTaskContextModeSchema.parse(row.contextMode),
-    executionMode: AgentTaskExecutionModeSchema.parse(row.executionMode),
     status: AgentTaskStatusSchema.parse(row.status),
-    prompt: row.prompt,
+    taskPacket,
     cwd: row.cwd,
     isolation: AgentTaskIsolationSchema.parse(row.isolation),
     maxTurns: row.maxTurns,
-    depth: row.depth,
     revision: row.revision,
     eventSequence: row.eventSequence,
     ...(currentTool === undefined ? {} : { currentTool }),
@@ -782,9 +761,9 @@ function parseTaskRow(row: AgentTaskRow): AgentTask {
     ...(row.errorPreview === null ? {} : { errorPreview: row.errorPreview }),
     ...(row.output === null ? {} : { output: row.output }),
     ...(row.errorMessage === null ? {} : { errorMessage: row.errorMessage }),
+    ...(result === undefined ? {} : { result }),
     ...(usage === undefined ? {} : { usage }),
     sidechain,
-    commandNames,
     permissionRules,
     externalPaths,
     createdAt: row.createdAt,
@@ -824,7 +803,7 @@ function parseNotificationRow(
   const payload = z
     .object({
       summary: z.string(),
-      result: z.string().optional(),
+      result: AgentTaskResultSchema,
       usage: AgentUsageSchema.optional(),
     })
     .strict()
@@ -837,7 +816,7 @@ function parseNotificationRow(
     rootThreadId: row.rootThreadId,
     status: TerminalStatusSchema.parse(row.status),
     summary: payload.summary,
-    ...(payload.result === undefined ? {} : { result: payload.result }),
+    result: payload.result,
     ...(payload.usage === undefined ? {} : { usage: payload.usage }),
     createdAt: row.createdAt,
     ...(row.deliveredAt === null ? {} : { deliveredAt: row.deliveredAt }),
@@ -848,13 +827,16 @@ function notificationFor(task: AgentTask): AgentTaskNotification {
   if (!isTerminalAgentTaskStatus(task.status)) {
     throw new Error(`Agent task ${task.id} has no terminal notification.`);
   }
+  if (task.result === undefined) {
+    throw new Error(`Agent task ${task.id} has no structured terminal result.`);
+  }
   return {
     id: createEntityId('notification'),
     taskId: task.id,
     rootThreadId: task.rootThreadId,
     status: task.status,
-    summary: `${task.definitionName}: ${task.status}`,
-    ...(task.output === undefined ? {} : { result: task.output }),
+    summary: `${task.definitionName}: ${taskResultSummary(task.result)}`,
+    result: task.result,
     ...(task.usage === undefined ? {} : { usage: task.usage }),
     createdAt: task.updatedAt,
   };

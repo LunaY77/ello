@@ -3,7 +3,7 @@
  *
  * 测试运行真实 engine loop，只替换模型 adapter 与无副作用工具，避免用手工事件掩盖生命周期错误。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
   AgentRunEvent,
@@ -300,7 +300,14 @@ describe('Agent run event ordering', () => {
   });
 
   it('continues the same run when a background task finishes after a natural answer', async () => {
-    const notification = deferred<string | undefined>();
+    const notification = deferred<
+      | {
+          readonly notificationIds: readonly string[];
+          readonly text: string;
+        }
+      | undefined
+    >();
+    const acknowledgeTaskNotifications = vi.fn();
     const requests: AgentModelRequest[] = [];
     const inspect = defineTestCommand({
       name: 'inspect',
@@ -341,6 +348,7 @@ describe('Agent run event ordering', () => {
         notificationWaits++ === 0
           ? notification.promise
           : Promise.resolve(undefined),
+      acknowledgeTaskNotifications,
       modelCompactor: () => undefined,
       setMode: () => undefined,
       close: () => engine.close(),
@@ -371,7 +379,10 @@ describe('Agent run event ordering', () => {
     await Promise.resolve();
     expect(settled).toBe(false);
 
-    notification.resolve('<task-notification>done</task-notification>');
+    notification.resolve({
+      notificationIds: ['notification-background'],
+      text: '<task-notification>done</task-notification>',
+    });
     await collectEvents;
     await expect(run.result).resolves.toMatchObject({ status: 'completed' });
 
@@ -380,6 +391,9 @@ describe('Agent run event ordering', () => {
       role: 'user',
       content: '<task-notification>done</task-notification>',
     });
+    expect(acknowledgeTaskNotifications).toHaveBeenCalledWith([
+      'notification-background',
+    ]);
     expect(
       events
         .filter((event) => event.type === 'messageCompleted')
@@ -388,7 +402,13 @@ describe('Agent run event ordering', () => {
   });
 
   it('accepts user steering while waiting for a background task notification', async () => {
-    const waitingNotification = deferred<string | undefined>();
+    const waitingNotification = deferred<
+      | {
+          readonly notificationIds: readonly string[];
+          readonly text: string;
+        }
+      | undefined
+    >();
     const requests: AgentModelRequest[] = [];
     const inspect = defineTestCommand({
       name: 'inspect',

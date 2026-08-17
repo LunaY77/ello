@@ -23,17 +23,9 @@ export function agentTaskSummary(task: AgentTask): AgentTaskSummary {
     taskId: task.id,
     agentId: task.agentId,
     rootThreadId: task.rootThreadId,
-    ...(task.parentTaskId === undefined
-      ? {}
-      : { parentTaskId: task.parentTaskId }),
-    ...(task.resumeFromTaskId === undefined
-      ? {}
-      : { resumeFromTaskId: task.resumeFromTaskId }),
     ...(task.name === undefined ? {} : { name: task.name }),
     definitionName: task.definitionName,
     description: task.description,
-    contextMode: task.contextMode,
-    executionMode: task.executionMode,
     status: task.status,
     cwd: task.cwd,
     isolation: task.isolation,
@@ -91,9 +83,10 @@ export function agentTaskDetail(
 ): AgentTaskDetail {
   return {
     task: agentTaskSummary(task),
-    prompt: task.prompt,
+    taskPacket: task.taskPacket,
     ...(task.output === undefined ? {} : { output: task.output }),
     ...(task.errorMessage === undefined ? {} : { error: task.errorMessage }),
+    ...(task.result === undefined ? {} : { result: task.result }),
     events: events.map(agentTaskEvent),
   };
 }

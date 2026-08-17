@@ -29,7 +29,7 @@ import {
   terminalStopReason,
 } from '../agent/evidence.js';
 import { validateEventEvidence } from '../event-evidence.js';
-import { normalizeEventCaptureSource } from '../rounds.js';
+import { normalizeEventCaptures, readEventCaptures } from '../rounds.js';
 
 import { readReferencedJson, validateFileEvidence } from './artifact.js';
 
@@ -219,8 +219,8 @@ async function recomputeElloEvidence(options: {
         validateFileEvidence(run.attemptRoot, declared.rawSource),
         validateFileEvidence(run.attemptRoot, declared.rounds),
       ]);
-      const normalized = normalizeEventCaptureSource(
-        await readFile(thread.eventLogPath, 'utf8'),
+      const normalized = normalizeEventCaptures(
+        await readEventCaptures(thread.eventLogPath),
         client.timedOut,
       );
       const declaredRounds = parseRounds(
