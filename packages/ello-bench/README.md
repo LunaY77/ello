@@ -6,22 +6,29 @@
 
 ## 当前发布结果
 
-DeepSWE v1.1 当前记录固定同一个 DeepSeek V4 Flash 0731 模型、High reasoning、20 个任务和同一 Docker/verifier 契约：
+DeepSWE v1.1 当前记录固定同一个 DeepSeek V4 Flash 0731 模型、High reasoning、完整 113-task suite 和同一 Docker/verifier 契约。565 个计划 job 中有 520 个 scored、45 个 infrastructure-invalid：
 
-| Agent         | 通过 |    通过率 | 相对 Claude Code |
-| ------------- | ---: | --------: | ---------------- |
-| Ello Rapid    |   13 | **65.0%** | **+20.0 pp**     |
-| Ello Thorough |   13 | **65.0%** | **+20.0 pp**     |
-| Claude Code   |    9 |     45.0% | baseline         |
+| Agent                    | 有效 | 通过 | 通过率 | invalid |
+| ------------------------ | ---: | ---: | -----: | ------: |
+| Ello Rapid               |  104 |   46 |  44.2% |       9 |
+| Ello Rapid + Subagent    |  103 |   43 |  41.7% |      10 |
+| Ello Thorough            |  103 |   44 |  42.7% |      10 |
+| Ello Thorough + Subagent |  103 |   41 |  39.8% |      10 |
+| Claude Code              |  107 |   48 |  44.9% |       6 |
 
-两个 Ello 配置对 Claude Code 均为 6 胜、12 平、2 负。在 evidence 同时可用的配对任务上，Rapid 的 elapsed、模型轮次、Command/Tool 调用和 input token 中位数分别降低 69.0%、68.3%、70.7% 和 74.5%。
+Ello Rapid 对 Claude Code 的有效配对结果为 18 胜、66 平、20 负，准确率近似持平。配对资源结果如下：
+
+| 相对 Claude Code         |       elapsed |      模型轮次 | Command / Tool 调用 |   input / output token |
+| ------------------------ | ------------: | ------------: | ------------------: | ---------------------: |
+| Ello Rapid               | ↓12.1% (n=94) | ↓22.8% (n=94) |       ↓29.2% (n=94) | ↓35.4% / ↓13.4% (n=85) |
+| Ello Rapid + Subagent    | ↓14.1% (n=93) | ↓20.6% (n=93) |       ↓32.5% (n=93) | ↓36.3% / ↓13.0% (n=79) |
+| Ello Thorough            |  ↓1.4% (n=93) |  ↓4.4% (n=93) |       ↓13.1% (n=93) |   ↓9.4% / ↓8.7% (n=81) |
+| Ello Thorough + Subagent |  ↑1.2% (n=93) |  ↓6.3% (n=93) |       ↓13.3% (n=93) |   ↓9.4% / ↓1.6% (n=75) |
 
 - [当前证据记录](../../docs/benchmark/current-task-set-record.md)
 - [生成报告](../../docs/benchmark/results/report.md)
-- [逐 Task patch](../../docs/benchmark/results/tasks/deep-swe/)
+- [结构化 suite 结果](../../docs/benchmark/results/suite-report.json)
 - [方法论](../../docs/benchmark/benchmark-methodology.md)
-
-资源 coverage 不完整，因此严格 `publishable` 为 `false`；这不改变 60/60 job 已取得 verifier score，但资源数字必须保留样本数。
 
 ## 执行流水线
 
@@ -54,7 +61,7 @@ flowchart LR
 
 | Suite                       | 任务数 | 用途                        |
 | --------------------------- | -----: | --------------------------- |
-| `deep-swe-v1.1`             |     20 | 长程功能实现与 Agent 对比   |
+| `deep-swe-v1.1`             |    113 | 长程功能实现与 Agent 对比   |
 | `swe-bench-pro-calibration` |     30 | issue 修复与跨 harness 校准 |
 
 TOML 是唯一运行配置格式。默认入口是 [`config/benchmark.toml`](config/benchmark.toml)，Agent 定义位于 [`config/agents.toml`](config/agents.toml)。
@@ -129,27 +136,15 @@ Raw run 保存三层事实：
 
 ```text
 results/
-├── manifest.json
+├── README.md
 ├── report.md
 ├── suite-report.json
-├── charts/
-└── tasks/deep-swe/<task>/
-    ├── instruction.md
-    ├── task.json
-    └── <agent>/
-        ├── manifest.json
-        ├── model.patch
-        └── harness.json
+├── agents/
+├── comparisons/
+└── charts/
 ```
 
-逐 Task 目录只保留复核结果所需的最小集合。stdout/stderr、完整 evidence、tool audit 和 phase timing 留在 raw run，不复制到 Git；聚合统计与 coverage 已进入 `suite-report.json`。
-
-生成发布集：
-
-```bash
-pnpm --filter @ello/bench bench:archive-docs -- \
-  --run-root packages/ello-bench/raw/deep-swe-0809-03
-```
+Git 发布集不复制逐 Task instruction、patch、harness 或 attempt manifest。stdout/stderr、完整 evidence、tool audit 和 phase timing 也留在 raw run；聚合统计、逐 task outcome 与 coverage 已进入 `suite-report.json`。
 
 ## CLI
 
@@ -203,8 +198,7 @@ ESLint 阻止内层反向 import Node I/O 或外层实现。Agent adapter、Dock
 ```bash
 pnpm --filter @ello/bench test
 pnpm --filter @ello/bench typecheck
-pnpm exec eslint packages/ello-bench/src packages/ello-bench/tests \
-  packages/ello-bench/scripts/archive-doc-results.mjs
+pnpm exec eslint packages/ello-bench/src packages/ello-bench/tests
 pnpm --filter @ello/bench build
 ```
 

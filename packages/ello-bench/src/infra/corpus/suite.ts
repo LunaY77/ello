@@ -89,7 +89,7 @@ const DEEP_SWE: BenchmarkSuiteAdapter = {
   metadata: {
     id: 'deep-swe-v1.1',
     benchmarkId: 'ello.benchmark.deepswe.v1.1',
-    displayName: 'DeepSWE v1.1 curated',
+    displayName: 'DeepSWE v1.1',
     source: {
       repository: DEEP_SWE_SOURCE_REPOSITORY,
       revision: DEEP_SWE_SOURCE_REVISION,
@@ -97,7 +97,7 @@ const DEEP_SWE: BenchmarkSuiteAdapter = {
     taskSetHash: DEEP_SWE_TASK_SET_HASH,
     selectedTaskCount: DEEP_SWE_TASKS.length,
     upstreamTaskCount: 113,
-    selectionKind: 'curated',
+    selectionKind: 'full',
     scoreMetric: 'binary-reward',
   },
   taskBenchmark: 'deep-swe',

@@ -89,7 +89,7 @@ describe('event capture', () => {
     await expect(capture.close()).rejects.toThrow('already closed');
   });
 
-  it('captures recursive model tool schemas without overflowing the stack', async () => {
+  it('把 model 请求投影成摘要，并在保留字段里防住递归与超深结构', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'ello-bench-events-'));
     directories.push(directory);
     const capture = createEventCaptureRecorder(
@@ -126,14 +126,17 @@ describe('event capture', () => {
         request: {
           runId: 'run_1',
           model: 'model',
-          messages: [],
+          messages: [
+            { role: 'user', content: 'first' },
+            { role: 'assistant', content: 'second' },
+          ],
           tools: {
             command_run: {
               description: 'Run commands.',
               inputSchema: inputSchema as never,
             },
           },
-          modelSettings: {},
+          modelSettings: { recursion: inputSchema as never },
           signal: new AbortController().signal,
         },
         diagnostics: {
@@ -151,37 +154,118 @@ describe('event capture', () => {
       await readFile(capture.eventLogPath, 'utf8'),
     ) as {
       readonly payload: {
-        readonly request: {
-          readonly tools: {
-            readonly command_run: {
-              readonly inputSchema: {
-                readonly self: unknown;
-                readonly child: Record<string, unknown>;
-              };
+        readonly request?: unknown;
+        readonly requestSummary: {
+          readonly messageCount: number;
+          readonly toolCount: number;
+          readonly modelSettings: {
+            readonly recursion: {
+              readonly self: unknown;
+              readonly child: Record<string, unknown>;
             };
           };
         };
         readonly diagnostics: { readonly toolsetFingerprint: string };
       };
     };
-    expect(recorded.payload.request.tools.command_run.inputSchema.self).toBe(
-      '[Circular]',
-    );
-    expect(
-      recorded.payload.request.tools.command_run.inputSchema,
-    ).toMatchObject({
+    // 完整 model input 是二次增长的来源，不再逐轮归档；计数保留，避免看成本来就没有。
+    expect(recorded.payload.request).toBeUndefined();
+    expect(recorded.payload.requestSummary).toMatchObject({
+      messageCount: 2,
+      toolCount: 1,
+    });
+    const retained = recorded.payload.requestSummary.modelSettings.recursion;
+    expect(retained.self).toBe('[Circular]');
+    expect(retained).toMatchObject({
       left: { type: 'string' },
       right: { type: 'string' },
     });
-    let truncated: unknown =
-      recorded.payload.request.tools.command_run.inputSchema.child;
-    for (let depth = 0; depth < 59; depth += 1) {
+    let truncated: unknown = retained.child;
+    for (let depth = 0; depth < 60; depth += 1) {
       truncated = (truncated as Record<string, unknown>).child;
     }
     expect(truncated).toBe('[Truncated]');
     expect(recorded.payload.diagnostics.toolsetFingerprint).toBe(
       'b'.repeat(64),
     );
+  });
+
+  it('model.completed 只归档判决所需字段，不留完整响应文本', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'ello-bench-events-'));
+    directories.push(directory);
+    const capture = createEventCaptureRecorder(
+      path.join(directory, 'events.jsonl'),
+    );
+    const identity = {
+      runId: 'run_1',
+      turnIndex: 0,
+      modelCallId: 'call_1',
+      agentName: 'build',
+      modelSelector: 'primary_model',
+      configuredModel: 'benchmark-pro',
+      protocol: 'openai',
+      apiModel: 'model',
+    } as const;
+
+    await capture.recorder.record(
+      {
+        type: 'model.completed',
+        runId: 'run_1',
+        sequence: 1,
+        occurredAt: '2026-07-23T00:00:02.000Z',
+        startedAt: '2026-07-23T00:00:00.000Z',
+        identity,
+        response: {
+          text: 'x'.repeat(4096),
+          messages: [{ role: 'assistant', content: 'x'.repeat(4096) }],
+          newMessages: [{ role: 'assistant', content: 'x'.repeat(4096) }],
+          toolCalls: [
+            {
+              id: 'call_tool_1',
+              name: 'command_run',
+              input: { huge: 'y'.repeat(4096) },
+            },
+          ],
+          finishReason: 'tool-calls',
+          usage: {
+            inputTokens: 10,
+            outputTokens: 4,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            toolCalls: 1,
+          },
+        },
+        diagnostics: {
+          systemFingerprint: 'a'.repeat(64),
+          toolsetFingerprint: 'b'.repeat(64),
+          messagePrefixFingerprint: 'c'.repeat(64),
+          compactionBoundary: false,
+        },
+      } as never,
+      {},
+    );
+    await capture.close();
+
+    const line = await readFile(capture.eventLogPath, 'utf8');
+    const recorded = JSON.parse(line) as {
+      readonly payload: { readonly response: Record<string, unknown> };
+    };
+
+    expect(recorded.payload.response).toEqual({
+      finishReason: 'tool-calls',
+      usage: {
+        inputTokens: 10,
+        outputTokens: 4,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        toolCalls: 1,
+      },
+      toolCalls: [{ id: 'call_tool_1', name: 'command_run' }],
+      textLength: 4096,
+      messageCount: 1,
+      newMessageCount: 1,
+    });
+    expect(line).not.toContain('y'.repeat(64));
   });
 
   it('rejects non-increasing engine event sequences', async () => {

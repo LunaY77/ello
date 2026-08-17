@@ -42,17 +42,6 @@ export function useAgentNavigation({
     }
     if (overlay.type !== 'none') return;
 
-    if (key.ctrl && input === 'b') {
-      const task = agentTasks.activeTask;
-      if (
-        task !== undefined &&
-        task.status === 'running' &&
-        task.executionMode === 'foreground'
-      ) {
-        void agentTasks.client?.background(task.taskId).catch(onError);
-      }
-      return;
-    }
     if (agentTasks.focus !== 'agent-switcher') return;
 
     const visibleTaskIds = ['main', ...visibleTasks.map((task) => task.taskId)];

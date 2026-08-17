@@ -1,0 +1,8005 @@
+{
+  "agentId": "claude-code",
+  "agentConfigHash": "d7873a9af8e582ff91c8a328cc94d157a3591d24f04c932ee5ffd52cc56e1fa3",
+  "validRuns": 107,
+  "passedRuns": 48,
+  "passRate": 0.4485981308411215,
+  "invalidRuns": 6,
+  "taskMacroAverage": null,
+  "tasks": [
+    {
+      "taskId": "actionlint-action-pinning-lint",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "wazero-multi-module-snapshots",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2064722.823715,
+          "median": 2064722.823715,
+          "p95": 2064722.823715
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 102,
+          "median": 102,
+          "p95": 102
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 114,
+          "median": 114,
+          "p95": 114
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 6528771,
+          "median": 6528771,
+          "p95": 6528771
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 109059,
+          "median": 109059,
+          "p95": 109059
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 209736,
+          "median": 209736,
+          "p95": 209736
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 6419712,
+          "median": 6419712,
+          "p95": 6419712
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9832956309847596,
+          "median": 0.9832956309847596,
+          "p95": 0.9832956309847596
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "goreleaser-retry-publish-auditing",
+      "agentId": "claude-code",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "helm-unified-manifest-stream",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 5400024.385013,
+          "median": 5400024.385013,
+          "p95": 5400024.385013
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 642,
+          "median": 642,
+          "p95": 642
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 654,
+          "median": 654,
+          "p95": 654
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "ytt-jsonpath-query-api",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2370145.997854,
+          "median": 2370145.997854,
+          "p95": 2370145.997854
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 155,
+          "median": 155,
+          "p95": 155
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 178,
+          "median": 178,
+          "p95": 178
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 10462421,
+          "median": 10462421,
+          "p95": 10462421
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 117845,
+          "median": 117845,
+          "p95": 117845
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 303649,
+          "median": 303649,
+          "p95": 303649
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 10344576,
+          "median": 10344576,
+          "p95": 10344576
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9887363546162021,
+          "median": 0.9887363546162021,
+          "p95": 0.9887363546162021
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "go-genai-streamed-function-args",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2944750.688069,
+          "median": 2944750.688069,
+          "p95": 2944750.688069
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 294,
+          "median": 294,
+          "p95": 294
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 304,
+          "median": 304,
+          "p95": 304
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 40496893,
+          "median": 40496893,
+          "p95": 40496893
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 267133,
+          "median": 267133,
+          "p95": 267133
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 306597,
+          "median": 306597,
+          "p95": 306597
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 40229760,
+          "median": 40229760,
+          "p95": 40229760
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9934036174083775,
+          "median": 0.9934036174083775,
+          "p95": 0.9934036174083775
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kcp-go-multiplexed-kcp-streams",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2905919.8606509995,
+          "median": 2905919.8606509995,
+          "p95": 2905919.8606509995
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 110,
+          "median": 110,
+          "p95": 110
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 119,
+          "median": 119,
+          "p95": 119
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 11942955,
+          "median": 11942955,
+          "p95": 11942955
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 152875,
+          "median": 152875,
+          "p95": 152875
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 293067,
+          "median": 293067,
+          "p95": 293067
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 11790080,
+          "median": 11790080,
+          "p95": 11790080
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9871995666064219,
+          "median": 0.9871995666064219,
+          "p95": 0.9871995666064219
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "task-task-graph-export",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 3146865.5999640003,
+          "median": 3146865.5999640003,
+          "p95": 3146865.5999640003
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 288,
+          "median": 288,
+          "p95": 288
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 327,
+          "median": 327,
+          "p95": 327
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 42531979,
+          "median": 42531979,
+          "p95": 42531979
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 227851,
+          "median": 227851,
+          "p95": 227851
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 312790,
+          "median": 312790,
+          "p95": 312790
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 42304128,
+          "median": 42304128,
+          "p95": 42304128
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9946428309860682,
+          "median": 0.9946428309860682,
+          "p95": 0.9946428309860682
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "abs-module-cache-flags",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2327897.634935,
+          "median": 2327897.634935,
+          "p95": 2327897.634935
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 203,
+          "median": 203,
+          "p95": 203
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 226,
+          "median": 226,
+          "p95": 226
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 18901701,
+          "median": 18901701,
+          "p95": 18901701
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 157253,
+          "median": 157253,
+          "p95": 157253
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 243115,
+          "median": 243115,
+          "p95": 243115
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 18744448,
+          "median": 18744448,
+          "p95": 18744448
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9916804842061568,
+          "median": 0.9916804842061568,
+          "p95": 0.9916804842061568
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "arcane-drift-detection-baselines",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2888103.213773001,
+          "median": 2888103.213773001,
+          "p95": 2888103.213773001
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 276,
+          "median": 276,
+          "p95": 276
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 322,
+          "median": 322,
+          "p95": 322
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 51742476,
+          "median": 51742476,
+          "p95": 51742476
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 304908,
+          "median": 304908,
+          "p95": 304908
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 281564,
+          "median": 281564,
+          "p95": 281564
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 51437568,
+          "median": 51437568,
+          "p95": 51437568
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9941072012093121,
+          "median": 0.9941072012093121,
+          "p95": 0.9941072012093121
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "geo-shapeindex-serialization",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 3131315.4417579994,
+          "median": 3131315.4417579994,
+          "p95": 3131315.4417579994
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 187,
+          "median": 187,
+          "p95": 187
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 211,
+          "median": 211,
+          "p95": 211
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 21358309,
+          "median": 21358309,
+          "p95": 21358309
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 179301,
+          "median": 179301,
+          "p95": 179301
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 349216,
+          "median": 349216,
+          "p95": 349216
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 21179008,
+          "median": 21179008,
+          "p95": 21179008
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9916050938302279,
+          "median": 0.9916050938302279,
+          "p95": 0.9916050938302279
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "abs-stepped-slices",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1804268.8596529998,
+          "median": 1804268.8596529998,
+          "p95": 1804268.8596529998
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 124,
+          "median": 124,
+          "p95": 124
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 139,
+          "median": 139,
+          "p95": 139
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 15974641,
+          "median": 15974641,
+          "p95": 15974641
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 184945,
+          "median": 184945,
+          "p95": 184945
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 218473,
+          "median": 218473,
+          "p95": 218473
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 15789696,
+          "median": 15789696,
+          "p95": 15789696
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9884225880256088,
+          "median": 0.9884225880256088,
+          "p95": 0.9884225880256088
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "anko-default-function-arguments",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 3184899.127645,
+          "median": 3184899.127645,
+          "p95": 3184899.127645
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 256,
+          "median": 256,
+          "p95": 256
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 269,
+          "median": 269,
+          "p95": 269
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 45338412,
+          "median": 45338412,
+          "p95": 45338412
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 263724,
+          "median": 263724,
+          "p95": 263724
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 304297,
+          "median": 304297,
+          "p95": 304297
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 45074688,
+          "median": 45074688,
+          "p95": 45074688
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9941832104750382,
+          "median": 0.9941832104750382,
+          "p95": 0.9941832104750382
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "go-git-worktree-merge-conflicts",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1958957.8918999992,
+          "median": 1958957.8918999992,
+          "p95": 1958957.8918999992
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 231,
+          "median": 231,
+          "p95": 231
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 252,
+          "median": 252,
+          "p95": 252
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 35458455,
+          "median": 35458455,
+          "p95": 35458455
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 257559,
+          "median": 257559,
+          "p95": 257559
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 157766,
+          "median": 157766,
+          "p95": 157766
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 35200896,
+          "median": 35200896,
+          "p95": 35200896
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9927363163454245,
+          "median": 0.9927363163454245,
+          "p95": 0.9927363163454245
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "yaegi-go-embed-directives",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 3579943.4261639994,
+          "median": 3579943.4261639994,
+          "p95": 3579943.4261639994
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 434,
+          "median": 434,
+          "p95": 434
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 434,
+          "median": 434,
+          "p95": 434
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 71980039,
+          "median": 71980039,
+          "p95": 71980039
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 297991,
+          "median": 297991,
+          "p95": 297991
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 185138,
+          "median": 185138,
+          "p95": 185138
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 71682048,
+          "median": 71682048,
+          "p95": 71682048
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9958600883781127,
+          "median": 0.9958600883781127,
+          "p95": 0.9958600883781127
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "etree-xml-diff-patch",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "opa-template-string-reconstruction",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 5400016.187682001,
+          "median": 5400016.187682001,
+          "p95": 5400016.187682001
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 1211,
+          "median": 1211,
+          "p95": 1211
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 1225,
+          "median": 1225,
+          "p95": 1225
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "tengo-callable-instance-isolation",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 5400014.54379,
+          "median": 5400014.54379,
+          "p95": 5400014.54379
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 239,
+          "median": 239,
+          "p95": 239
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 250,
+          "median": 250,
+          "p95": 250
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "scriggo-method-declarations",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 5400014.173362002,
+          "median": 5400014.173362002,
+          "p95": 5400014.173362002
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 1381,
+          "median": 1381,
+          "p95": 1381
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 1407,
+          "median": 1407,
+          "p95": 1407
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "tengo-destructuring-bindings",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 3946484.827450998,
+          "median": 3946484.827450998,
+          "p95": 3946484.827450998
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 286,
+          "median": 286,
+          "p95": 286
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 291,
+          "median": 291,
+          "p95": 291
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 78734306,
+          "median": 78734306,
+          "p95": 78734306
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 376418,
+          "median": 376418,
+          "p95": 376418
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 401132,
+          "median": 401132,
+          "p95": 401132
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 78357888,
+          "median": 78357888,
+          "p95": 78357888
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9952191361158375,
+          "median": 0.9952191361158375,
+          "p95": 0.9952191361158375
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "opa-rego-rule-profiling",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 3572127.8815100007,
+          "median": 3572127.8815100007,
+          "p95": 3572127.8815100007
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 211,
+          "median": 211,
+          "p95": 211
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 219,
+          "median": 219,
+          "p95": 219
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 32516162,
+          "median": 32516162,
+          "p95": 32516162
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 238914,
+          "median": 238914,
+          "p95": 238914
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 374731,
+          "median": 374731,
+          "p95": 374731
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 32277248,
+          "median": 32277248,
+          "p95": 32277248
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9926524538781668,
+          "median": 0.9926524538781668,
+          "p95": 0.9926524538781668
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "scc-bounded-memory-spilling",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1799142.411166001,
+          "median": 1799142.411166001,
+          "p95": 1799142.411166001
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 153,
+          "median": 153,
+          "p95": 153
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 172,
+          "median": 172,
+          "p95": 172
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 18201333,
+          "median": 18201333,
+          "p95": 18201333
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 180597,
+          "median": 180597,
+          "p95": 180597
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 172274,
+          "median": 172274,
+          "p95": 172274
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 18020736,
+          "median": 18020736,
+          "p95": 18020736
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.99007781463039,
+          "median": 0.99007781463039,
+          "p95": 0.99007781463039
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "pebble-durability-wait-apis",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2225647.657571003,
+          "median": 2225647.657571003,
+          "p95": 2225647.657571003
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 157,
+          "median": 157,
+          "p95": 157
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 162,
+          "median": 162,
+          "p95": 162
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 33977531,
+          "median": 33977531,
+          "p95": 33977531
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 193595,
+          "median": 193595,
+          "p95": 193595
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 149852,
+          "median": 149852,
+          "p95": 149852
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 33783936,
+          "median": 33783936,
+          "p95": 33783936
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9943022640462016,
+          "median": 0.9943022640462016,
+          "p95": 0.9943022640462016
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "prometheus-typed-label-sorting",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "dasel-html-document-format",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 616492.0044179969,
+          "median": 616492.0044179969,
+          "p95": 616492.0044179969
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 86,
+          "median": 86,
+          "p95": 86
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 96,
+          "median": 96,
+          "p95": 96
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 6839694,
+          "median": 6839694,
+          "p95": 6839694
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 69390,
+          "median": 69390,
+          "p95": 69390
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 67462,
+          "median": 67462,
+          "p95": 67462
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 6770304,
+          "median": 6770304,
+          "p95": 6770304
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9898548092941,
+          "median": 0.9898548092941,
+          "p95": 0.9898548092941
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "go-critic-doc-link-checker",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1585865.4406239986,
+          "median": 1585865.4406239986,
+          "p95": 1585865.4406239986
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 170,
+          "median": 170,
+          "p95": 170
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 183,
+          "median": 183,
+          "p95": 183
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 19664441,
+          "median": 19664441,
+          "p95": 19664441
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 90041,
+          "median": 90041,
+          "p95": 90041
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 127604,
+          "median": 127604,
+          "p95": 127604
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 19574400,
+          "median": 19574400,
+          "p95": 19574400
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9954211258789406,
+          "median": 0.9954211258789406,
+          "p95": 0.9954211258789406
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "anko-typed-variable-bindings",
+      "agentId": "claude-code",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kgateway-consistent-hash-policy",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1695185.1263730004,
+          "median": 1695185.1263730004,
+          "p95": 1695185.1263730004
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 203,
+          "median": 203,
+          "p95": 203
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 210,
+          "median": 210,
+          "p95": 210
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 31565709,
+          "median": 31565709,
+          "p95": 31565709
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 175117,
+          "median": 175117,
+          "p95": 175117
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 88933,
+          "median": 88933,
+          "p95": 88933
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 31390592,
+          "median": 31390592,
+          "p95": 31390592
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.994452302655391,
+          "median": 0.994452302655391,
+          "p95": 0.994452302655391
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "onedump-dump-encryption-pipeline",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 827558.4175530002,
+          "median": 827558.4175530002,
+          "p95": 827558.4175530002
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 97,
+          "median": 97,
+          "p95": 97
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 117,
+          "median": 117,
+          "p95": 117
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 8799354,
+          "median": 8799354,
+          "p95": 8799354
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 57466,
+          "median": 57466,
+          "p95": 57466
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 93983,
+          "median": 93983,
+          "p95": 93983
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 8741888,
+          "median": 8741888,
+          "p95": 8741888
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9934692933140319,
+          "median": 0.9934692933140319,
+          "p95": 0.9934692933140319
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "participle-grammar-conflict-analysis",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1131948.0917580016,
+          "median": 1131948.0917580016,
+          "p95": 1131948.0917580016
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 86,
+          "median": 86,
+          "p95": 86
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 97,
+          "median": 97,
+          "p95": 97
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 9966549,
+          "median": 9966549,
+          "p95": 9966549
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 70869,
+          "median": 70869,
+          "p95": 70869
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 115974,
+          "median": 115974,
+          "p95": 115974
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 9895680,
+          "median": 9895680,
+          "p95": 9895680
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9928893140444099,
+          "median": 0.9928893140444099,
+          "p95": 0.9928893140444099
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "expr-try-catch-errors",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1995048.2475420013,
+          "median": 1995048.2475420013,
+          "p95": 1995048.2475420013
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 247,
+          "median": 247,
+          "p95": 247
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 261,
+          "median": 261,
+          "p95": 261
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 51668405,
+          "median": 51668405,
+          "p95": 51668405
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 157237,
+          "median": 157237,
+          "p95": 157237
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 184647,
+          "median": 184647,
+          "p95": 184647
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 51511168,
+          "median": 51511168,
+          "p95": 51511168
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9969568056145723,
+          "median": 0.9969568056145723,
+          "p95": 0.9969568056145723
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "helm-array-merge-strategies",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1825417.2531470023,
+          "median": 1825417.2531470023,
+          "p95": 1825417.2531470023
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 177,
+          "median": 177,
+          "p95": 177
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 194,
+          "median": 194,
+          "p95": 194
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 29957319,
+          "median": 29957319,
+          "p95": 29957319
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 137927,
+          "median": 137927,
+          "p95": 137927
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 147829,
+          "median": 147829,
+          "p95": 147829
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 29819392,
+          "median": 29819392,
+          "p95": 29819392
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9953958830561573,
+          "median": 0.9953958830561573,
+          "p95": 0.9953958830561573
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "termenv-preserve-ansi-resets",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1173398.1442859992,
+          "median": 1173398.1442859992,
+          "p95": 1173398.1442859992
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 118,
+          "median": 118,
+          "p95": 118
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 131,
+          "median": 131,
+          "p95": 131
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 14105471,
+          "median": 14105471,
+          "p95": 14105471
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 74495,
+          "median": 74495,
+          "p95": 74495
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 140270,
+          "median": 140270,
+          "p95": 140270
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 14030976,
+          "median": 14030976,
+          "p95": 14030976
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9947187158798171,
+          "median": 0.9947187158798171,
+          "p95": 0.9947187158798171
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "updo-policy-alerting",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 924584.2537709996,
+          "median": 924584.2537709996,
+          "p95": 924584.2537709996
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 106,
+          "median": 106,
+          "p95": 106
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 122,
+          "median": 122,
+          "p95": 122
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12783628,
+          "median": 12783628,
+          "p95": 12783628
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 105996,
+          "median": 105996,
+          "p95": 105996
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 105965,
+          "median": 105965,
+          "p95": 105965
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12677632,
+          "median": 12677632,
+          "p95": 12677632
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9917084570984074,
+          "median": 0.9917084570984074,
+          "p95": 0.9917084570984074
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "narwhals-rolling-window-suite",
+      "agentId": "claude-code",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "returns-validated-error-accumulation",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2122264.766017996,
+          "median": 2122264.766017996,
+          "p95": 2122264.766017996
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 235,
+          "median": 235,
+          "p95": 235
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 272,
+          "median": 272,
+          "p95": 272
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 46919415,
+          "median": 46919415,
+          "p95": 46919415
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 162807,
+          "median": 162807,
+          "p95": 162807
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 170473,
+          "median": 170473,
+          "p95": 170473
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 46756608,
+          "median": 46756608,
+          "p95": 46756608
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9965300718263431,
+          "median": 0.9965300718263431,
+          "p95": 0.9965300718263431
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "psd-tools-blend-range-api",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 897407.7166109979,
+          "median": 897407.7166109979,
+          "p95": 897407.7166109979
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 98,
+          "median": 98,
+          "p95": 98
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 112,
+          "median": 112,
+          "p95": 112
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12916363,
+          "median": 12916363,
+          "p95": 12916363
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 112395,
+          "median": 112395,
+          "p95": 112395
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 87200,
+          "median": 87200,
+          "p95": 87200
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12803968,
+          "median": 12803968,
+          "p95": 12803968
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9912982470374981,
+          "median": 0.9912982470374981,
+          "p95": 0.9912982470374981
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "aiomonitor-task-snapshots-diff",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1369468.7517729998,
+          "median": 1369468.7517729998,
+          "p95": 1369468.7517729998
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 148,
+          "median": 148,
+          "p95": 148
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 165,
+          "median": 165,
+          "p95": 165
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 18564040,
+          "median": 18564040,
+          "p95": 18564040
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 74440,
+          "median": 74440,
+          "p95": 74440
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 132526,
+          "median": 132526,
+          "p95": 132526
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 18489600,
+          "median": 18489600,
+          "p95": 18489600
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9959900969831997,
+          "median": 0.9959900969831997,
+          "p95": 0.9959900969831997
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "koota-entity-snapshot-rollback",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 901451.9260319993,
+          "median": 901451.9260319993,
+          "p95": 901451.9260319993
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 89,
+          "median": 89,
+          "p95": 89
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 117,
+          "median": 117,
+          "p95": 117
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 11483474,
+          "median": 11483474,
+          "p95": 11483474
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 112594,
+          "median": 112594,
+          "p95": 112594
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 95727,
+          "median": 95727,
+          "p95": 95727
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 11370880,
+          "median": 11370880,
+          "p95": 11370880
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9901951273630262,
+          "median": 0.9901951273630262,
+          "p95": 0.9901951273630262
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "adaptix-name-mapping-aliases",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1579676.8368599936,
+          "median": 1579676.8368599936,
+          "p95": 1579676.8368599936
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 223,
+          "median": 223,
+          "p95": 223
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 227,
+          "median": 227,
+          "p95": 227
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 38343129,
+          "median": 38343129,
+          "p95": 38343129
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 126297,
+          "median": 126297,
+          "p95": 126297
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 151943,
+          "median": 151943,
+          "p95": 151943
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 38216832,
+          "median": 38216832,
+          "p95": 38216832
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.996706137362968,
+          "median": 0.996706137362968,
+          "p95": 0.996706137362968
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "numba-stencil-boundary-modes",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2192361.577414006,
+          "median": 2192361.577414006,
+          "p95": 2192361.577414006
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 157,
+          "median": 157,
+          "p95": 157
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 162,
+          "median": 162,
+          "p95": 162
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 24605197,
+          "median": 24605197,
+          "p95": 24605197
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 128653,
+          "median": 128653,
+          "p95": 128653
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 133638,
+          "median": 133638,
+          "p95": 133638
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 24476544,
+          "median": 24476544,
+          "p95": 24476544
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9947713078663829,
+          "median": 0.9947713078663829,
+          "p95": 0.9947713078663829
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "textual-richlog-follow-state",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1925718.5780200064,
+          "median": 1925718.5780200064,
+          "p95": 1925718.5780200064
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 222,
+          "median": 222,
+          "p95": 222
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 228,
+          "median": 228,
+          "p95": 228
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 36388179,
+          "median": 36388179,
+          "p95": 36388179
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 133587,
+          "median": 133587,
+          "p95": 133587
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 167129,
+          "median": 167129,
+          "p95": 167129
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 36254592,
+          "median": 36254592,
+          "p95": 36254592
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9963288352516898,
+          "median": 0.9963288352516898,
+          "p95": 0.9963288352516898
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "tomlkit-toml-table-converters",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "cattrs-partial-structuring-recovery",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1866332.594705999,
+          "median": 1866332.594705999,
+          "p95": 1866332.594705999
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 178,
+          "median": 178,
+          "p95": 178
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 179,
+          "median": 179,
+          "p95": 179
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 24232642,
+          "median": 24232642,
+          "p95": 24232642
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 102722,
+          "median": 102722,
+          "p95": 102722
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 135584,
+          "median": 135584,
+          "p95": 135584
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 24129920,
+          "median": 24129920,
+          "p95": 24129920
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.995761006992139,
+          "median": 0.995761006992139,
+          "p95": 0.995761006992139
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "mobly-grouped-test-barriers",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1230529.0844250023,
+          "median": 1230529.0844250023,
+          "p95": 1230529.0844250023
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 147,
+          "median": 147,
+          "p95": 147
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 150,
+          "median": 150,
+          "p95": 150
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 26848213,
+          "median": 26848213,
+          "p95": 26848213
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 126677,
+          "median": 126677,
+          "p95": 126677
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 145152,
+          "median": 145152,
+          "p95": 145152
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 26721536,
+          "median": 26721536,
+          "p95": 26721536
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9952817343932723,
+          "median": 0.9952817343932723,
+          "p95": 0.9952817343932723
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "httpx-multipart-response-parsing",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1053009.7071229964,
+          "median": 1053009.7071229964,
+          "p95": 1053009.7071229964
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 111,
+          "median": 111,
+          "p95": 111
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 119,
+          "median": 119,
+          "p95": 119
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12444048,
+          "median": 12444048,
+          "p95": 12444048
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 81296,
+          "median": 81296,
+          "p95": 81296
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 105640,
+          "median": 105640,
+          "p95": 105640
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12362752,
+          "median": 12362752,
+          "p95": 12362752
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9934670775940434,
+          "median": 0.9934670775940434,
+          "p95": 0.9934670775940434
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "ipython-session-bundle-replay",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1686140.7448209971,
+          "median": 1686140.7448209971,
+          "p95": 1686140.7448209971
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 204,
+          "median": 204,
+          "p95": 204
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 209,
+          "median": 209,
+          "p95": 209
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 23592165,
+          "median": 23592165,
+          "p95": 23592165
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 87909,
+          "median": 87909,
+          "p95": 87909
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 123117,
+          "median": 123117,
+          "p95": 123117
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 23504256,
+          "median": 23504256,
+          "p95": 23504256
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9962738053078215,
+          "median": 0.9962738053078215,
+          "p95": 0.9962738053078215
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "mnamer-daemon-watch-lifecycle",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1028345.8895710036,
+          "median": 1028345.8895710036,
+          "p95": 1028345.8895710036
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 98,
+          "median": 98,
+          "p95": 98
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 113,
+          "median": 113,
+          "p95": 113
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 10749036,
+          "median": 10749036,
+          "p95": 10749036
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 67052,
+          "median": 67052,
+          "p95": 67052
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 106875,
+          "median": 106875,
+          "p95": 106875
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 10681984,
+          "median": 10681984,
+          "p95": 10681984
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9937620452661987,
+          "median": 0.9937620452661987,
+          "p95": 0.9937620452661987
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kombu-single-active-consumer-priority",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1506519.343212001,
+          "median": 1506519.343212001,
+          "p95": 1506519.343212001
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 153,
+          "median": 153,
+          "p95": 153
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 158,
+          "median": 158,
+          "p95": 158
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 17588236,
+          "median": 17588236,
+          "p95": 17588236
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 97292,
+          "median": 97292,
+          "p95": 97292
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 113151,
+          "median": 113151,
+          "p95": 113151
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 17490944,
+          "median": 17490944,
+          "p95": 17490944
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.994468348048093,
+          "median": 0.994468348048093,
+          "p95": 0.994468348048093
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "skrub-duration-encoding",
+      "agentId": "claude-code",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "sqlite-utils-safe-import-checkpoints",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1333992.688443996,
+          "median": 1333992.688443996,
+          "p95": 1333992.688443996
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 154,
+          "median": 154,
+          "p95": 154
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 159,
+          "median": 159,
+          "p95": 159
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 19179782,
+          "median": 19179782,
+          "p95": 19179782
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 109574,
+          "median": 109574,
+          "p95": 109574
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 110146,
+          "median": 110146,
+          "p95": 110146
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 19070208,
+          "median": 19070208,
+          "p95": 19070208
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9942870049305044,
+          "median": 0.9942870049305044,
+          "p95": 0.9942870049305044
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "fastapi-implicit-head-options",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1371744.6716400012,
+          "median": 1371744.6716400012,
+          "p95": 1371744.6716400012
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 164,
+          "median": 164,
+          "p95": 164
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 178,
+          "median": 178,
+          "p95": 178
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 33107260,
+          "median": 33107260,
+          "p95": 33107260
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 168380,
+          "median": 168380,
+          "p95": 168380
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 121334,
+          "median": 121334,
+          "p95": 121334
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 32938880,
+          "median": 32938880,
+          "p95": 32938880
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9949141064527841,
+          "median": 0.9949141064527841,
+          "p95": 0.9949141064527841
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "mashumaro-flattened-dataclass-fields",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2261734.2792889997,
+          "median": 2261734.2792889997,
+          "p95": 2261734.2792889997
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 195,
+          "median": 195,
+          "p95": 195
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 194,
+          "median": 194,
+          "p95": 194
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 34408158,
+          "median": 34408158,
+          "p95": 34408158
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 128990,
+          "median": 128990,
+          "p95": 128990
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 165087,
+          "median": 165087,
+          "p95": 165087
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 34279168,
+          "median": 34279168,
+          "p95": 34279168
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9962511797347594,
+          "median": 0.9962511797347594,
+          "p95": 0.9962511797347594
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "bandit-interprocedural-taint-checks",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1146640.8946819976,
+          "median": 1146640.8946819976,
+          "p95": 1146640.8946819976
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 156,
+          "median": 156,
+          "p95": 156
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 176,
+          "median": 176,
+          "p95": 176
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 19977951,
+          "median": 19977951,
+          "p95": 19977951
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 106207,
+          "median": 106207,
+          "p95": 106207
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 112611,
+          "median": 112611,
+          "p95": 112611
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 19871744,
+          "median": 19871744,
+          "p95": 19871744
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9946837891433411,
+          "median": 0.9946837891433411,
+          "p95": 0.9946837891433411
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "igel-persist-feature-schema",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1118412.3367270008,
+          "median": 1118412.3367270008,
+          "p95": 1118412.3367270008
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 141,
+          "median": 141,
+          "p95": 141
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 151,
+          "median": 151,
+          "p95": 151
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12700131,
+          "median": 12700131,
+          "p95": 12700131
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 70115,
+          "median": 70115,
+          "p95": 70115
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 94061,
+          "median": 94061,
+          "p95": 94061
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12630016,
+          "median": 12630016,
+          "p95": 12630016
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9944791908051972,
+          "median": 0.9944791908051972,
+          "p95": 0.9944791908051972
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "bandit-incremental-cache-control",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1284903.496555999,
+          "median": 1284903.496555999,
+          "p95": 1284903.496555999
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 129,
+          "median": 129,
+          "p95": 129
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 131,
+          "median": 131,
+          "p95": 131
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 17498280,
+          "median": 17498280,
+          "p95": 17498280
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 95272,
+          "median": 95272,
+          "p95": 95272
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 124352,
+          "median": 124352,
+          "p95": 124352
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 17403008,
+          "median": 17403008,
+          "p95": 17403008
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9945553505830287,
+          "median": 0.9945553505830287,
+          "p95": 0.9945553505830287
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "fastapi-deprecation-response-headers",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1299584.6985459998,
+          "median": 1299584.6985459998,
+          "p95": 1299584.6985459998
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 180,
+          "median": 180,
+          "p95": 180
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 188,
+          "median": 188,
+          "p95": 188
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 20470223,
+          "median": 20470223,
+          "p95": 20470223
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 102735,
+          "median": 102735,
+          "p95": 102735
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 107712,
+          "median": 107712,
+          "p95": 107712
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 20367488,
+          "median": 20367488,
+          "p95": 20367488
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9949812466625303,
+          "median": 0.9949812466625303,
+          "p95": 0.9949812466625303
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "dateutil-rfc5545-timezone-interop",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1838723.401068002,
+          "median": 1838723.401068002,
+          "p95": 1838723.401068002
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 204,
+          "median": 204,
+          "p95": 204
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 209,
+          "median": 209,
+          "p95": 209
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 34740429,
+          "median": 34740429,
+          "p95": 34740429
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 122061,
+          "median": 122061,
+          "p95": 122061
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 196082,
+          "median": 196082,
+          "p95": 196082
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 34618368,
+          "median": 34618368,
+          "p95": 34618368
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9964864855295829,
+          "median": 0.9964864855295829,
+          "p95": 0.9964864855295829
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "httpx-streaming-json-iteration",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1077198.8011700064,
+          "median": 1077198.8011700064,
+          "p95": 1077198.8011700064
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 125,
+          "median": 125,
+          "p95": 125
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 128,
+          "median": 128,
+          "p95": 128
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12717180,
+          "median": 12717180,
+          "p95": 12717180
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 68348,
+          "median": 68348,
+          "p95": 68348
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 108530,
+          "median": 108530,
+          "p95": 108530
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12648832,
+          "median": 12648832,
+          "p95": 12648832
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.994625538051675,
+          "median": 0.994625538051675,
+          "p95": 0.994625538051675
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "textual-kitty-key-phases",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2209810.781241998,
+          "median": 2209810.781241998,
+          "p95": 2209810.781241998
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 241,
+          "median": 241,
+          "p95": 241
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 249,
+          "median": 249,
+          "p95": 249
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 32631839,
+          "median": 32631839,
+          "p95": 32631839
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 113055,
+          "median": 113055,
+          "p95": 113055
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 141519,
+          "median": 141519,
+          "p95": 141519
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 32518784,
+          "median": 32518784,
+          "p95": 32518784
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9965354389006393,
+          "median": 0.9965354389006393,
+          "p95": 0.9965354389006393
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "pwntools-tube-multiplexing",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "langchain-request-coalescing",
+      "agentId": "claude-code",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "python-statemachine-state-data-scoping",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1696249.290993996,
+          "median": 1696249.290993996,
+          "p95": 1696249.290993996
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 197,
+          "median": 197,
+          "p95": 197
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 219,
+          "median": 219,
+          "p95": 219
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 36677616,
+          "median": 36677616,
+          "p95": 36677616
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 174320,
+          "median": 174320,
+          "p95": 174320
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 127133,
+          "median": 127133,
+          "p95": 127133
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 36503296,
+          "median": 36503296,
+          "p95": 36503296
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9952472374431315,
+          "median": 0.9952472374431315,
+          "p95": 0.9952472374431315
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "vulture-persistent-analysis-cache",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1520805.025433004,
+          "median": 1520805.025433004,
+          "p95": 1520805.025433004
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 163,
+          "median": 163,
+          "p95": 163
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 162,
+          "median": 162,
+          "p95": 162
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 24251744,
+          "median": 24251744,
+          "p95": 24251744
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 92256,
+          "median": 92256,
+          "p95": 92256
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 181392,
+          "median": 181392,
+          "p95": 181392
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 24159488,
+          "median": 24159488,
+          "p95": 24159488
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9961959024472632,
+          "median": 0.9961959024472632,
+          "p95": 0.9961959024472632
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kombu-virtual-queue-dead-lettering",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "sqlfmt-create-table-ddl-formatting",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1808027.732183002,
+          "median": 1808027.732183002,
+          "p95": 1808027.732183002
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 160,
+          "median": 160,
+          "p95": 160
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 176,
+          "median": 176,
+          "p95": 176
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 27653025,
+          "median": 27653025,
+          "p95": 27653025
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 125089,
+          "median": 125089,
+          "p95": 125089
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 163404,
+          "median": 163404,
+          "p95": 163404
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 27527936,
+          "median": 27527936,
+          "p95": 27527936
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9954764804212197,
+          "median": 0.9954764804212197,
+          "p95": 0.9954764804212197
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "bandit-structured-nosec-directives",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "gql-incremental-graphql-delivery",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 942006.6193849966,
+          "median": 942006.6193849966,
+          "p95": 942006.6193849966
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 99,
+          "median": 99,
+          "p95": 99
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 112,
+          "median": 112,
+          "p95": 112
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 14078697,
+          "median": 14078697,
+          "p95": 14078697
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 125673,
+          "median": 125673,
+          "p95": 125673
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 86091,
+          "median": 86091,
+          "p95": 86091
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 13953024,
+          "median": 13953024,
+          "p95": 13953024
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9910735347170267,
+          "median": 0.9910735347170267,
+          "p95": 0.9910735347170267
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "true-myth-iterable-collection-combinators",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 925431.8296239972,
+          "median": 925431.8296239972,
+          "p95": 925431.8296239972
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 93,
+          "median": 93,
+          "p95": 93
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 111,
+          "median": 111,
+          "p95": 111
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 15067651,
+          "median": 15067651,
+          "p95": 15067651
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 151427,
+          "median": 151427,
+          "p95": 151427
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 109688,
+          "median": 109688,
+          "p95": 109688
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 14916224,
+          "median": 14916224,
+          "p95": 14916224
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9899501919708653,
+          "median": 0.9899501919708653,
+          "p95": 0.9899501919708653
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "happy-dom-abort-pending-body-reads",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1865896.0845580027,
+          "median": 1865896.0845580027,
+          "p95": 1865896.0845580027
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 217,
+          "median": 217,
+          "p95": 217
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 221,
+          "median": 221,
+          "p95": 221
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 32775797,
+          "median": 32775797,
+          "p95": 32775797
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 204661,
+          "median": 204661,
+          "p95": 204661
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 106047,
+          "median": 106047,
+          "p95": 106047
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 32571136,
+          "median": 32571136,
+          "p95": 32571136
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.993755727740198,
+          "median": 0.993755727740198,
+          "p95": 0.993755727740198
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "drizzle-orm-window-function-builders",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1285778.528738007,
+          "median": 1285778.528738007,
+          "p95": 1285778.528738007
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 191,
+          "median": 191,
+          "p95": 191
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 216,
+          "median": 216,
+          "p95": 216
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 25207373,
+          "median": 25207373,
+          "p95": 25207373
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 139725,
+          "median": 139725,
+          "p95": 139725
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 100226,
+          "median": 100226,
+          "p95": 100226
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 25067648,
+          "median": 25067648,
+          "p95": 25067648
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9944569789164464,
+          "median": 0.9944569789164464,
+          "p95": 0.9944569789164464
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "ofetch-per-origin-circuit-breaker",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 974468.9492539987,
+          "median": 974468.9492539987,
+          "p95": 974468.9492539987
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 84,
+          "median": 84,
+          "p95": 84
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 91,
+          "median": 91,
+          "p95": 91
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 8974325,
+          "median": 8974325,
+          "p95": 8974325
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 69877,
+          "median": 69877,
+          "p95": 69877
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 115297,
+          "median": 115297,
+          "p95": 115297
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 8904448,
+          "median": 8904448,
+          "p95": 8904448
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9922136762374886,
+          "median": 0.9922136762374886,
+          "p95": 0.9922136762374886
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "httpx-deterministic-cookie-store",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1215637.6731930003,
+          "median": 1215637.6731930003,
+          "p95": 1215637.6731930003
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 150,
+          "median": 150,
+          "p95": 150
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 159,
+          "median": 159,
+          "p95": 159
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 16275485,
+          "median": 16275485,
+          "p95": 16275485
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 58525,
+          "median": 58525,
+          "p95": 58525
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 138960,
+          "median": 138960,
+          "p95": 138960
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 16216960,
+          "median": 16216960,
+          "p95": 16216960
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9964041010145013,
+          "median": 0.9964041010145013,
+          "p95": 0.9964041010145013
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "sql-formatter-bigquery-pipe-formatting",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 974104.8319990039,
+          "median": 974104.8319990039,
+          "p95": 974104.8319990039
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 102,
+          "median": 102,
+          "p95": 102
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 123,
+          "median": 123,
+          "p95": 123
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 11243233,
+          "median": 11243233,
+          "p95": 11243233
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 80609,
+          "median": 80609,
+          "p95": 80609
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 93374,
+          "median": 93374,
+          "p95": 93374
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 11162624,
+          "median": 11162624,
+          "p95": 11162624
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9928304429873507,
+          "median": 0.9928304429873507,
+          "p95": 0.9928304429873507
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "dynamodb-toolbox-conditional-attribute-requirements",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2301173.406847,
+          "median": 2301173.406847,
+          "p95": 2301173.406847
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 261,
+          "median": 261,
+          "p95": 261
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 317,
+          "median": 317,
+          "p95": 317
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 41974357,
+          "median": 41974357,
+          "p95": 41974357
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 165589,
+          "median": 165589,
+          "p95": 165589
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 141653,
+          "median": 141653,
+          "p95": 141653
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 41808768,
+          "median": 41808768,
+          "p95": 41808768
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9960549961491966,
+          "median": 0.9960549961491966,
+          "p95": 0.9960549961491966
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "vitest-duration-sharding",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1267722.5014949962,
+          "median": 1267722.5014949962,
+          "p95": 1267722.5014949962
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 164,
+          "median": 164,
+          "p95": 164
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 187,
+          "median": 187,
+          "p95": 187
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 27412162,
+          "median": 27412162,
+          "p95": 27412162
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 149954,
+          "median": 149954,
+          "p95": 149954
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 121626,
+          "median": 121626,
+          "p95": 121626
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 27262208,
+          "median": 27262208,
+          "p95": 27262208
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9945296543920906,
+          "median": 0.9945296543920906,
+          "p95": 0.9945296543920906
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "query-persist-restored-query-state",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1982554.841241002,
+          "median": 1982554.841241002,
+          "p95": 1982554.841241002
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 212,
+          "median": 212,
+          "p95": 212
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 223,
+          "median": 223,
+          "p95": 223
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 32340753,
+          "median": 32340753,
+          "p95": 32340753
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 130065,
+          "median": 130065,
+          "p95": 130065
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 143983,
+          "median": 143983,
+          "p95": 143983
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 32210688,
+          "median": 32210688,
+          "p95": 32210688
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9959782940118926,
+          "median": 0.9959782940118926,
+          "p95": 0.9959782940118926
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "dynamodb-toolbox-lazy-recursive-schemas",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 4144405.432377994,
+          "median": 4144405.432377994,
+          "p95": 4144405.432377994
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 377,
+          "median": 377,
+          "p95": 377
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 459,
+          "median": 459,
+          "p95": 459
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 85233660,
+          "median": 85233660,
+          "p95": 85233660
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 192252,
+          "median": 192252,
+          "p95": 192252
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 224888,
+          "median": 224888,
+          "p95": 224888
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 85041408,
+          "median": 85041408,
+          "p95": 85041408
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9977444122427689,
+          "median": 0.9977444122427689,
+          "p95": 0.9977444122427689
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "ts-pattern-match-each",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 849687.3493860066,
+          "median": 849687.3493860066,
+          "p95": 849687.3493860066
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 83,
+          "median": 83,
+          "p95": 83
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 93,
+          "median": 93,
+          "p95": 93
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 8571990,
+          "median": 8571990,
+          "p95": 8571990
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 96214,
+          "median": 96214,
+          "p95": 96214
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 83808,
+          "median": 83808,
+          "p95": 83808
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 8475776,
+          "median": 8475776,
+          "p95": 8475776
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9887757685204952,
+          "median": 0.9887757685204952,
+          "p95": 0.9887757685204952
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "obsidian-linter-scoped-ignore-markers",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1638794.8877490014,
+          "median": 1638794.8877490014,
+          "p95": 1638794.8877490014
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 146,
+          "median": 146,
+          "p95": 146
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 151,
+          "median": 151,
+          "p95": 151
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 23643346,
+          "median": 23643346,
+          "p95": 23643346
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 125266,
+          "median": 125266,
+          "p95": 125266
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 164944,
+          "median": 164944,
+          "p95": 164944
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 23518080,
+          "median": 23518080,
+          "p95": 23518080
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9947018497297294,
+          "median": 0.9947018497297294,
+          "p95": 0.9947018497297294
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "valibot-recursive-schema-composition",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2730778.681155011,
+          "median": 2730778.681155011,
+          "p95": 2730778.681155011
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 268,
+          "median": 268,
+          "p95": 268
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 292,
+          "median": 292,
+          "p95": 292
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 66819819,
+          "median": 66819819,
+          "p95": 66819819
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 187115,
+          "median": 187115,
+          "p95": 187115
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 214018,
+          "median": 214018,
+          "p95": 214018
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 66632704,
+          "median": 66632704,
+          "p95": 66632704
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9971997080686495,
+          "median": 0.9971997080686495,
+          "p95": 0.9971997080686495
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kysely-window-grouping-helpers",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1161127.7104700059,
+          "median": 1161127.7104700059,
+          "p95": 1161127.7104700059
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 181,
+          "median": 181,
+          "p95": 181
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 193,
+          "median": 193,
+          "p95": 193
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 31756495,
+          "median": 31756495,
+          "p95": 31756495
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 175183,
+          "median": 175183,
+          "p95": 175183
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 101782,
+          "median": 101782,
+          "p95": 101782
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 31581312,
+          "median": 31581312,
+          "p95": 31581312
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9944835536793339,
+          "median": 0.9944835536793339,
+          "p95": 0.9944835536793339
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "claude-code-by-agents-recursive-delegation",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 843784.0969829857,
+          "median": 843784.0969829857,
+          "p95": 843784.0969829857
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 91,
+          "median": 91,
+          "p95": 91
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 106,
+          "median": 106,
+          "p95": 106
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 10164225,
+          "median": 10164225,
+          "p95": 10164225
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 115713,
+          "median": 115713,
+          "p95": 115713
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 96992,
+          "median": 96992,
+          "p95": 96992
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 10048512,
+          "median": 10048512,
+          "p95": 10048512
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9886156593345778,
+          "median": 0.9886156593345778,
+          "p95": 0.9886156593345778
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "cliffy-config-file-parsing",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1411179.54578799,
+          "median": 1411179.54578799,
+          "p95": 1411179.54578799
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 209,
+          "median": 209,
+          "p95": 209
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 228,
+          "median": 228,
+          "p95": 228
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 33163742,
+          "median": 33163742,
+          "p95": 33163742
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 147294,
+          "median": 147294,
+          "p95": 147294
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 120529,
+          "median": 120529,
+          "p95": 120529
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 33016448,
+          "median": 33016448,
+          "p95": 33016448
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9955585832262234,
+          "median": 0.9955585832262234,
+          "p95": 0.9955585832262234
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "arktype-json-schema-refs-dependencies",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2130256.419670999,
+          "median": 2130256.419670999,
+          "p95": 2130256.419670999
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 270,
+          "median": 270,
+          "p95": 270
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 289,
+          "median": 289,
+          "p95": 289
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 42122031,
+          "median": 42122031,
+          "p95": 42122031
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 139183,
+          "median": 139183,
+          "p95": 139183
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 173372,
+          "median": 173372,
+          "p95": 173372
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 41982848,
+          "median": 41982848,
+          "p95": 41982848
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9966957196342218,
+          "median": 0.9966957196342218,
+          "p95": 0.9966957196342218
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "optique-conditional-option-dependencies",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2090188.234965995,
+          "median": 2090188.234965995,
+          "p95": 2090188.234965995
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 256,
+          "median": 256,
+          "p95": 256
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 260,
+          "median": 260,
+          "p95": 260
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 58199382,
+          "median": 58199382,
+          "p95": 58199382
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 222678,
+          "median": 222678,
+          "p95": 222678
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 191054,
+          "median": 191054,
+          "p95": 191054
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 57976704,
+          "median": 57976704,
+          "p95": 57976704
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9961738768978681,
+          "median": 0.9961738768978681,
+          "p95": 0.9961738768978681
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "clack-async-autocomplete-options",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1169656.1539700031,
+          "median": 1169656.1539700031,
+          "p95": 1169656.1539700031
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 102,
+          "median": 102,
+          "p95": 102
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 101,
+          "median": 101,
+          "p95": 101
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 10382899,
+          "median": 10382899,
+          "p95": 10382899
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 73907,
+          "median": 73907,
+          "p95": 73907
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 121843,
+          "median": 121843,
+          "p95": 121843
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 10308992,
+          "median": 10308992,
+          "p95": 10308992
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9928818531317698,
+          "median": 0.9928818531317698,
+          "p95": 0.9928818531317698
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "eicrud-keyset-pagination-cursor",
+      "agentId": "claude-code",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "koota-composite-trait-aspects",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1416400.3264289945,
+          "median": 1416400.3264289945,
+          "p95": 1416400.3264289945
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 170,
+          "median": 170,
+          "p95": 170
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 203,
+          "median": 203,
+          "p95": 203
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 30298919,
+          "median": 30298919,
+          "p95": 30298919
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 111271,
+          "median": 111271,
+          "p95": 111271
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 163577,
+          "median": 163577,
+          "p95": 163577
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 30187648,
+          "median": 30187648,
+          "p95": 30187648
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9963275587488781,
+          "median": 0.9963275587488781,
+          "p95": 0.9963275587488781
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kea-atomic-signal-selectors",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2248396.8114089966,
+          "median": 2248396.8114089966,
+          "p95": 2248396.8114089966
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 156,
+          "median": 156,
+          "p95": 156
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 165,
+          "median": 165,
+          "p95": 165
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 30329031,
+          "median": 30329031,
+          "p95": 30329031
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 92615,
+          "median": 92615,
+          "p95": 92615
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 201086,
+          "median": 201086,
+          "p95": 201086
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 30236416,
+          "median": 30236416,
+          "p95": 30236416
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9969463251232787,
+          "median": 0.9969463251232787,
+          "p95": 0.9969463251232787
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "awilix-async-container-initialization",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1414019.7249449939,
+          "median": 1414019.7249449939,
+          "p95": 1414019.7249449939
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 137,
+          "median": 137,
+          "p95": 137
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 140,
+          "median": 140,
+          "p95": 140
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 18033100,
+          "median": 18033100,
+          "p95": 18033100
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 82124,
+          "median": 82124,
+          "p95": 82124
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 151355,
+          "median": 151355,
+          "p95": 151355
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 17950976,
+          "median": 17950976,
+          "p95": 17950976
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9954459299843066,
+          "median": 0.9954459299843066,
+          "p95": 0.9954459299843066
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "superjson-error-stack-serialization",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 963370.643482998,
+          "median": 963370.643482998,
+          "p95": 963370.643482998
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 95,
+          "median": 95,
+          "p95": 95
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 106,
+          "median": 106,
+          "p95": 106
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 10879009,
+          "median": 10879009,
+          "p95": 10879009
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 68129,
+          "median": 68129,
+          "p95": 68129
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 116819,
+          "median": 116819,
+          "p95": 116819
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 10810880,
+          "median": 10810880,
+          "p95": 10810880
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.99373757297195,
+          "median": 0.99373757297195,
+          "p95": 0.99373757297195
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "happy-dom-deterministic-intersectionobserver",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1355844.9215119928,
+          "median": 1355844.9215119928,
+          "p95": 1355844.9215119928
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 138,
+          "median": 138,
+          "p95": 138
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 142,
+          "median": 142,
+          "p95": 142
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 11911300,
+          "median": 11911300,
+          "p95": 11911300
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 93572,
+          "median": 93572,
+          "p95": 93572
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 109357,
+          "median": 109357,
+          "p95": 109357
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 11817728,
+          "median": 11817728,
+          "p95": 11817728
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9921442663689102,
+          "median": 0.9921442663689102,
+          "p95": 0.9921442663689102
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "ink-grid-box-layout",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "koota-deferred-mutation-buffer",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1584960.1127999872,
+          "median": 1584960.1127999872,
+          "p95": 1584960.1127999872
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 172,
+          "median": 172,
+          "p95": 172
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 171,
+          "median": 171,
+          "p95": 171
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 26898626,
+          "median": 26898626,
+          "p95": 26898626
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 139586,
+          "median": 139586,
+          "p95": 139586
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 161473,
+          "median": 161473,
+          "p95": 161473
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 26759040,
+          "median": 26759040,
+          "p95": 26759040
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.994810664306794,
+          "median": 0.994810664306794,
+          "p95": 0.994810664306794
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "quill-shared-toolbar-focus",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1523469.1807899922,
+          "median": 1523469.1807899922,
+          "p95": 1523469.1807899922
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 163,
+          "median": 163,
+          "p95": 163
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 162,
+          "median": 162,
+          "p95": 162
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 21122161,
+          "median": 21122161,
+          "p95": 21122161
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 105457,
+          "median": 105457,
+          "p95": 105457
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 156964,
+          "median": 156964,
+          "p95": 156964
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 21016704,
+          "median": 21016704,
+          "p95": 21016704
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9950072816886492,
+          "median": 0.9950072816886492,
+          "p95": 0.9950072816886492
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "obsidian-linter-link-format-conversion",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1079294.599642992,
+          "median": 1079294.599642992,
+          "p95": 1079294.599642992
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 102,
+          "median": 102,
+          "p95": 102
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 122,
+          "median": 122,
+          "p95": 122
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 14668402,
+          "median": 14668402,
+          "p95": 14668402
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 107122,
+          "median": 107122,
+          "p95": 107122
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 115042,
+          "median": 115042,
+          "p95": 115042
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 14561280,
+          "median": 14561280,
+          "p95": 14561280
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9926970913396019,
+          "median": 0.9926970913396019,
+          "p95": 0.9926970913396019
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "koota-query-predicates",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2027782.1558350027,
+          "median": 2027782.1558350027,
+          "p95": 2027782.1558350027
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 238,
+          "median": 238,
+          "p95": 238
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 237,
+          "median": 237,
+          "p95": 237
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 47005710,
+          "median": 47005710,
+          "p95": 47005710
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 156686,
+          "median": 156686,
+          "p95": 156686
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 198875,
+          "median": 198875,
+          "p95": 198875
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 46849024,
+          "median": 46849024,
+          "p95": 46849024
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9966666602844633,
+          "median": 0.9966666602844633,
+          "p95": 0.9966666602844633
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "prometheus-transactional-reload-status",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1941757.3454070091,
+          "median": 1941757.3454070091,
+          "p95": 1941757.3454070091
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 216,
+          "median": 216,
+          "p95": 216
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 220,
+          "median": 220,
+          "p95": 220
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 23543023,
+          "median": 23543023,
+          "p95": 23543023
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 122607,
+          "median": 122607,
+          "p95": 122607
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 85643,
+          "median": 85643,
+          "p95": 85643
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 23420416,
+          "median": 23420416,
+          "p95": 23420416
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9947922150863974,
+          "median": 0.9947922150863974,
+          "p95": 0.9947922150863974
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "koota-pair-relation-tracking",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "meriyah-explicit-resource-declarations",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1671509.255043,
+          "median": 1671509.255043,
+          "p95": 1671509.255043
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 195,
+          "median": 195,
+          "p95": 195
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 198,
+          "median": 198,
+          "p95": 198
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 29194778,
+          "median": 29194778,
+          "p95": 29194778
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 144794,
+          "median": 144794,
+          "p95": 144794
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 127360,
+          "median": 127360,
+          "p95": 127360
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 29049984,
+          "median": 29049984,
+          "p95": 29049984
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9950404144193185,
+          "median": 0.9950404144193185,
+          "p95": 0.9950404144193185
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "effect-sse-httpapi-streaming",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2399150.045526013,
+          "median": 2399150.045526013,
+          "p95": 2399150.045526013
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 277,
+          "median": 277,
+          "p95": 277
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 289,
+          "median": 289,
+          "p95": 289
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 52881592,
+          "median": 52881592,
+          "p95": 52881592
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 182456,
+          "median": 182456,
+          "p95": 182456
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 156866,
+          "median": 156866,
+          "p95": 156866
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 52699136,
+          "median": 52699136,
+          "p95": 52699136
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9965497256587887,
+          "median": 0.9965497256587887,
+          "p95": 0.9965497256587887
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "obsidian-linter-auto-table-of-contents",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 878044.0627339929,
+          "median": 878044.0627339929,
+          "p95": 878044.0627339929
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 84,
+          "median": 84,
+          "p95": 84
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 104,
+          "median": 104,
+          "p95": 104
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 9675992,
+          "median": 9675992,
+          "p95": 9675992
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 95576,
+          "median": 95576,
+          "p95": 95576
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 93252,
+          "median": 93252,
+          "p95": 93252
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 9580416,
+          "median": 9580416,
+          "p95": 9580416
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9901223564467602,
+          "median": 0.9901223564467602,
+          "p95": 0.9901223564467602
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "wasmi-trap-coredumps",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1977321.0811640024,
+          "median": 1977321.0811640024,
+          "p95": 1977321.0811640024
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 272,
+          "median": 272,
+          "p95": 272
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 292,
+          "median": 292,
+          "p95": 292
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 62164567,
+          "median": 62164567,
+          "p95": 62164567
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 222423,
+          "median": 222423,
+          "p95": 222423
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 146280,
+          "median": 146280,
+          "p95": 146280
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 61942144,
+          "median": 61942144,
+          "p95": 61942144
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.996422029288807,
+          "median": 0.996422029288807,
+          "p95": 0.996422029288807
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "fd-deterministic-multi-key-sorting",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1128492.688804999,
+          "median": 1128492.688804999,
+          "p95": 1128492.688804999
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 157,
+          "median": 157,
+          "p95": 157
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 161,
+          "median": 161,
+          "p95": 161
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 19388430,
+          "median": 19388430,
+          "p95": 19388430
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 97294,
+          "median": 97294,
+          "p95": 97294
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 110480,
+          "median": 110480,
+          "p95": 110480
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 19291136,
+          "median": 19291136,
+          "p95": 19291136
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9949818525790897,
+          "median": 0.9949818525790897,
+          "p95": 0.9949818525790897
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "boa-hierarchical-evaluation-cancellation",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 3534085.028774008,
+          "median": 3534085.028774008,
+          "p95": 3534085.028774008
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 249,
+          "median": 249,
+          "p95": 249
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 274,
+          "median": 274,
+          "p95": 274
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 58295006,
+          "median": 58295006,
+          "p95": 58295006
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 200030,
+          "median": 200030,
+          "p95": 200030
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 176394,
+          "median": 176394,
+          "p95": 176394
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 58094976,
+          "median": 58094976,
+          "p95": 58094976
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9965686597579216,
+          "median": 0.9965686597579216,
+          "p95": 0.9965686597579216
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "pest-character-class-coalescing",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1156873.1531410068,
+          "median": 1156873.1531410068,
+          "p95": 1156873.1531410068
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 123,
+          "median": 123,
+          "p95": 123
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 139,
+          "median": 139,
+          "p95": 139
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 16388693,
+          "median": 16388693,
+          "p95": 16388693
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 107221,
+          "median": 107221,
+          "p95": 107221
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 93811,
+          "median": 93811,
+          "p95": 93811
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 16281472,
+          "median": 16281472,
+          "p95": 16281472
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9934576234968829,
+          "median": 0.9934576234968829,
+          "p95": 0.9934576234968829
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "oxvg-structural-selector-preservation",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2491164.225933999,
+          "median": 2491164.225933999,
+          "p95": 2491164.225933999
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 165,
+          "median": 165,
+          "p95": 165
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 172,
+          "median": 172,
+          "p95": 172
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 26038499,
+          "median": 26038499,
+          "p95": 26038499
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 144611,
+          "median": 144611,
+          "p95": 144611
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 122656,
+          "median": 122656,
+          "p95": 122656
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 25893888,
+          "median": 25893888,
+          "p95": 25893888
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.994446262052202,
+          "median": 0.994446262052202,
+          "p95": 0.994446262052202
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "yjs-map-conflict-detection",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1511035.7901579887,
+          "median": 1511035.7901579887,
+          "p95": 1511035.7901579887
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 163,
+          "median": 163,
+          "p95": 163
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 173,
+          "median": 173,
+          "p95": 173
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 31850766,
+          "median": 31850766,
+          "p95": 31850766
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 151950,
+          "median": 151950,
+          "p95": 151950
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 157520,
+          "median": 157520,
+          "p95": 157520
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 31698816,
+          "median": 31698816,
+          "p95": 31698816
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9952293141081756,
+          "median": 0.9952293141081756,
+          "p95": 0.9952293141081756
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "testem-per-launcher-reports",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1320557.622394994,
+          "median": 1320557.622394994,
+          "p95": 1320557.622394994
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 79,
+          "median": 79,
+          "p95": 79
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 105,
+          "median": 105,
+          "p95": 105
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 9203446,
+          "median": 9203446,
+          "p95": 9203446
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 92150,
+          "median": 92150,
+          "p95": 92150
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 100324,
+          "median": 100324,
+          "p95": 100324
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 9111296,
+          "median": 9111296,
+          "p95": 9111296
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9899874460066371,
+          "median": 0.9899874460066371,
+          "p95": 0.9899874460066371
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "katex-multicolumn-array-spans",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2101080.7871470004,
+          "median": 2101080.7871470004,
+          "p95": 2101080.7871470004
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 269,
+          "median": 269,
+          "p95": 269
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 275,
+          "median": 275,
+          "p95": 275
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 49498359,
+          "median": 49498359,
+          "p95": 49498359
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 141559,
+          "median": 141559,
+          "p95": 141559
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 216696,
+          "median": 216696,
+          "p95": 216696
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 49356800,
+          "median": 49356800,
+          "p95": 49356800
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9971401274131129,
+          "median": 0.9971401274131129,
+          "p95": 0.9971401274131129
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "csstree-shorthand-expansion-compression",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "testem-bail-on-test-failure",
+      "agentId": "claude-code",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2118120.0865039974,
+          "median": 2118120.0865039974,
+          "p95": 2118120.0865039974
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 186,
+          "median": 186,
+          "p95": 186
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 200,
+          "median": 200,
+          "p95": 200
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 30742760,
+          "median": 30742760,
+          "p95": 30742760
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 127976,
+          "median": 127976,
+          "p95": 127976
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 151777,
+          "median": 151777,
+          "p95": 151777
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 30614784,
+          "median": 30614784,
+          "p95": 30614784
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9958371987420778,
+          "median": 0.9958371987420778,
+          "p95": 0.9958371987420778
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    }
+  ],
+  "resources": {
+    "elapsedMs": {
+      "count": 97,
+      "mean": 1920630.707794701,
+      "median": 1686140.7448209971,
+      "p95": 3986068.9484363953
+    },
+    "rounds": {
+      "count": 97,
+      "mean": 204.7835051546392,
+      "median": 165,
+      "p95": 310.59999999999906
+    },
+    "toolCalls": {
+      "count": 97,
+      "mean": 218.5463917525773,
+      "median": 178,
+      "p95": 348.3999999999988
+    },
+    "inputTokens": {
+      "count": 93,
+      "mean": 27716175.268817205,
+      "median": 24251744,
+      "p95": 59842830.39999997
+    },
+    "nonCachedInputTokens": {
+      "count": 93,
+      "mean": 138459.6559139785,
+      "median": 126297,
+      "p95": 260024.99999999994
+    },
+    "outputTokens": {
+      "count": 93,
+      "mean": 156143.69892473117,
+      "median": 140270,
+      "p95": 305217
+    },
+    "cacheReadTokens": {
+      "count": 93,
+      "mean": 27577715.612903226,
+      "median": 24159488,
+      "p95": 59633843.199999966
+    },
+    "cacheWriteTokens": {
+      "count": 93,
+      "mean": 0,
+      "median": 0,
+      "p95": 0
+    },
+    "cacheHitRate": {
+      "count": 93,
+      "mean": 0.9940535624672276,
+      "median": 0.9946837891433411,
+      "p95": 0.9968022124670923
+    },
+    "reasoningTokens": {
+      "count": 0,
+      "mean": null,
+      "median": null,
+      "p95": null
+    },
+    "phaseElapsedMs": {
+      "agent-running": {
+        "count": 97,
+        "mean": 1920835.7464879388,
+        "median": 1686249.0523609966,
+        "p95": 3986514.7518192
+      },
+      "audit-workspace-storage": {
+        "count": 97,
+        "mean": 101895.08734569121,
+        "median": 88264.09739099815,
+        "p95": 231996.99904859718
+      },
+      "capture-patch": {
+        "count": 97,
+        "mean": 51.098716515745274,
+        "median": 44.18876299262047,
+        "p95": 94.94777619987708
+      },
+      "cleanup-agent-container": {
+        "count": 97,
+        "mean": 5212.188232340015,
+        "median": 5220.413925997913,
+        "p95": 5464.436747595666
+      },
+      "cleanup-attempt-workspaces": {
+        "count": 97,
+        "mean": 1036.582611236846,
+        "median": 256.0395520031452,
+        "p95": 3548.3969144016414
+      },
+      "close-agent": {
+        "count": 97,
+        "mean": 0.010314907518589926,
+        "median": 0.005110010504722595,
+        "p95": 0.04325040057301499
+      },
+      "normalize-agent-evidence": {
+        "count": 97,
+        "mean": 184.31727256741587,
+        "median": 151.27956599742174,
+        "p95": 397.2418967984613
+      },
+      "prepare-agent": {
+        "count": 97,
+        "mean": 688.5294746493965,
+        "median": 442.77362800017,
+        "p95": 1339.4270780026911
+      },
+      "prepare-attempt": {
+        "count": 97,
+        "mean": 1.3478741650121544,
+        "median": 0.906530998647213,
+        "p95": 2.836695604445412
+      },
+      "prepare-workspace": {
+        "count": 97,
+        "mean": 43145.47102580444,
+        "median": 38872.22952499986,
+        "p95": 74771.578526804
+      },
+      "verifier-baseline-preflight": {
+        "count": 97,
+        "mean": 160715.31549843305,
+        "median": 137368.46454499662,
+        "p95": 364174.4729681998
+      },
+      "verifier-running": {
+        "count": 97,
+        "mean": 180201.81206088714,
+        "median": 154438.89659200003,
+        "p95": 420005.22951920016
+      }
+    },
+    "threadUsage": {
+      "mainInputTokens": {
+        "count": 93,
+        "mean": 27716175.268817205,
+        "median": 24251744,
+        "p95": 59842830.39999997
+      },
+      "subagentInputTokens": {
+        "count": 97,
+        "mean": 0,
+        "median": 0,
+        "p95": 0
+      },
+      "combinedInputTokens": {
+        "count": 93,
+        "mean": 27716175.268817205,
+        "median": 24251744,
+        "p95": 59842830.39999997
+      },
+      "mainOutputTokens": {
+        "count": 93,
+        "mean": 156143.69892473117,
+        "median": 140270,
+        "p95": 305217
+      },
+      "subagentOutputTokens": {
+        "count": 97,
+        "mean": 0,
+        "median": 0,
+        "p95": 0
+      },
+      "combinedOutputTokens": {
+        "count": 93,
+        "mean": 156143.69892473117,
+        "median": 140270,
+        "p95": 305217
+      },
+      "mainToolCalls": {
+        "count": 93,
+        "mean": 189.9247311827957,
+        "median": 176,
+        "p95": 309.1999999999999
+      },
+      "subagentToolCalls": {
+        "count": 97,
+        "mean": 0,
+        "median": 0,
+        "p95": 0
+      },
+      "combinedToolCalls": {
+        "count": 93,
+        "mean": 189.9247311827957,
+        "median": 176,
+        "p95": 309.1999999999999
+      }
+    }
+  },
+  "evidenceCoverage": {
+    "usageCompleteRuns": 93,
+    "usageUnavailableRuns": 4,
+    "toolAuditPassedRuns": 77
+  }
+}

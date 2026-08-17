@@ -117,6 +117,26 @@ export async function buildAgent(
     ...(commands.waitForTaskNotification === undefined
       ? {}
       : { waitForTaskNotification: commands.waitForTaskNotification }),
+    ...(commands.acknowledgeTaskNotifications === undefined
+      ? {}
+      : {
+          acknowledgeTaskNotifications: commands.acknowledgeTaskNotifications,
+        }),
+    ...(commands.releaseTaskNotifications === undefined
+      ? {}
+      : { releaseTaskNotifications: commands.releaseTaskNotifications }),
+    ...(commands.acknowledgeSystemTaskNotifications === undefined
+      ? {}
+      : {
+          acknowledgeSystemTaskNotifications:
+            commands.acknowledgeSystemTaskNotifications,
+        }),
+    ...(commands.releaseSystemTaskNotifications === undefined
+      ? {}
+      : {
+          releaseSystemTaskNotifications:
+            commands.releaseSystemTaskNotifications,
+        }),
     modelCompactor: () => engine.modelCompactor(),
     setMode: commands.setMode,
     close: () => closeBuiltAgent(engine, tracing.close),

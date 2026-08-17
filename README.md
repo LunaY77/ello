@@ -4,7 +4,7 @@
 
 **Ello 是面向长程软件工程任务的 Coding Agent。** 它不把模型限制在“调用一个小工具、等待一次结果”的循环里，而是用一个可编译、可调度、可恢复的 `command_run` 承载环境执行与 Agent 能力，让模型把更多预算用于定位根因、实现改动和验证结果。
 
-> DeepSWE v1.1：Ello Rapid 与 Thorough 均为 **13/20（65%）**，Claude Code 为 **9/20（45%）**。在可比的配对任务上，Rapid 的模型轮次中位数减少 **68.3%**，Tool 调用减少 **70.7%**，input token 减少 **74.5%**。
+> DeepSWE v1.1 完整 113-task 运行：Ello Rapid 为 **46/104（44.2%）**，Claude Code 为 **48/107（44.9%）**，能力结果近似持平；在双方 evidence 可用的配对任务上，Rapid 的 elapsed 中位数减少 **12.1%**、模型轮次减少 **22.8%**、Command/Tool 调用减少 **29.2%**、input token 减少 **35.4%**。
 
 ## 运行演示
 
@@ -63,26 +63,28 @@ flowchart LR
 
 ### 当前结果
 
-最新一轮固定使用同一个 DeepSeek V4 Flash 0731 模型、High reasoning effort、同一组 20 个 DeepSWE v1.1 任务，以及相同的 Docker image、资源限制和 verifier。比较对象是 Ello Rapid、Ello Thorough 与 Claude Code 三个完整 Agent 配置。
+最新一轮固定使用同一个 DeepSeek V4 Flash 0731 模型、High reasoning effort、完整 113 个 DeepSWE v1.1 task，以及相同的 Docker image、资源限制和 verifier。比较对象包含 Ello Rapid/Thorough、各自的 Subagent 配置和 Claude Code，共 565 个计划 job；520 个取得有效 verifier score，45 个为 infrastructure invalid。
 
-| 配置          | 有效任务 | 通过 |    通过率 | 相对 Claude Code |
-| ------------- | -------: | ---: | --------: | ---------------- |
-| Ello Rapid    |       20 |   13 | **65.0%** | **+20.0 pp**     |
-| Ello Thorough |       20 |   13 | **65.0%** | **+20.0 pp**     |
-| Claude Code   |       20 |    9 |     45.0% | baseline         |
+| 配置                     | 有效 job | 通过 | 通过率 | invalid |
+| ------------------------ | -------: | ---: | -----: | ------: |
+| Ello Rapid               |      104 |   46 |  44.2% |       9 |
+| Ello Rapid + Subagent    |      103 |   43 |  41.7% |      10 |
+| Ello Thorough            |      103 |   44 |  42.7% |      10 |
+| Ello Thorough + Subagent |      103 |   41 |  39.8% |      10 |
+| Claude Code              |      107 |   48 |  44.9% |       6 |
 
-两个 Ello 配置对 Claude Code 的配对结果均为 **6 胜、12 平、2 负**。60 个 job 均已完成并取得 verifier score。
+Ello Rapid 与 Claude Code 在 104 个有效配对任务上为 **18 胜、66 平、20 负**，配对通过率差为 **-1.9 个百分点**。两者的 verifier 结果接近，Rapid 使用的运行时资源更少。
 
 ### 资源效率
 
 下面的下降比例先在双方 evidence 都可用的同一 Task 上计算 `Ello / Claude Code`，再取中位数。括号内是可比任务数；缺失 usage 不以 0 填补。
 
-| 相对 Claude Code |       elapsed |      模型轮次 | Command / Tool 调用 |  input / output token |
-| ---------------- | ------------: | ------------: | ------------------: | --------------------: |
-| Ello Rapid       | ↓69.0% (n=17) | ↓68.3% (n=17) |       ↓70.7% (n=17) | ↓74.5% / ↓73.2% (n=7) |
-| Ello Thorough    | ↓58.9% (n=17) | ↓65.3% (n=17) |       ↓66.8% (n=17) | ↓60.1% / ↓62.2% (n=6) |
-
-Round 和工具事件由不同 Agent adapter 归一化，原子语义并不完全相同，因此这里只把它们作为与 elapsed、token 同时观察的描述性指标。严格 `publishable` gate 仍为 `false`：verifier 矩阵完整，但历史 usage 和 tool-audit coverage 未达到 60/60。
+| 相对 Claude Code         |       elapsed |      模型轮次 | Command / Tool 调用 |   input / output token |
+| ------------------------ | ------------: | ------------: | ------------------: | ---------------------: |
+| Ello Rapid               | ↓12.1% (n=94) | ↓22.8% (n=94) |       ↓29.2% (n=94) | ↓35.4% / ↓13.4% (n=85) |
+| Ello Rapid + Subagent    | ↓14.1% (n=93) | ↓20.6% (n=93) |       ↓32.5% (n=93) | ↓36.3% / ↓13.0% (n=79) |
+| Ello Thorough            |  ↓1.4% (n=93) |  ↓4.4% (n=93) |       ↓13.1% (n=93) |   ↓9.4% / ↓8.7% (n=81) |
+| Ello Thorough + Subagent |  ↑1.2% (n=93) |  ↓6.3% (n=93) |       ↓13.3% (n=93) |   ↓9.4% / ↓1.6% (n=75) |
 
 ### 隔离执行与可审计证据
 
@@ -94,14 +96,12 @@ Benchmark 使用与产品相同的 Client-Server 路径，而不是为 Ello 创�
 4. runner 捕获 `model.patch`，再在新的同镜像容器中应用 patch 并运行 verifier。
 5. EngineEvent、模型 usage、Command、patch、verifier assertion 和 retry lineage 进入可校验报告。
 
-完整 raw run 已通过 136 个 attempt 的 lineage、artifact checksum 与报告一致性校验。Git 只发布聚合报告和每题的最小审计集，重型 stdout、evidence 与 phase timing 留在 ignored raw run。
+完整 raw run 已通过 validator：855 个 attempts（520 completed、335 invalid attempts），报告一致性检查通过。Git 只发布聚合 report、suite/agent/comparison JSON 与 charts；逐 task patch、stdout、evidence 和 phase timing 留在 ignored raw run。
 
 - [当前 Benchmark 证据记录](docs/benchmark/current-task-set-record.md)
 - [完整生成报告](docs/benchmark/results/report.md)
-- [逐 Task patch 与 verifier 摘要](docs/benchmark/results/tasks/deep-swe/)
+- [结构化 suite 结果](docs/benchmark/results/suite-report.json)
 - [Benchmark 方法](docs/benchmark/benchmark-methodology.md)
-
-这仍是 Agent 系统级对比：prompt、Command 协议、上下文策略和运行时同时变化。当前结果不能证明 Command Run、Backward Reasoning 或其他单项机制各自贡献了多少差异。
 
 ## 为什么用 Command 替代工具
 

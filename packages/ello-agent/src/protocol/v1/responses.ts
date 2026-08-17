@@ -335,8 +335,6 @@ export const CLIENT_RESPONSE_SCHEMAS = {
   'agent/task/read': AgentTaskDetailSchema,
   'agent/task/steer': z.object({ task: AgentTaskSummarySchema }).strict(),
   'agent/task/stop': z.object({ task: AgentTaskSummarySchema }).strict(),
-  'agent/task/resume': z.object({ task: AgentTaskSummarySchema }).strict(),
-  'agent/task/background': z.object({ task: AgentTaskSummarySchema }).strict(),
   'tool/list': CatalogResultSchema,
   'skills/list': CatalogResultSchema,
   'skills/get': z.object({ skill: CatalogEntrySchema }).strict(),

@@ -51,11 +51,13 @@ describe('prompt composition', () => {
   it('subagent 基线只包含与只读角色相容的共享规则', () => {
     const prompt = renderPromptTemplate('subagent', { model: 'test-model' });
 
-    expect(prompt).toContain('# Subagent Worker Role');
+    expect(prompt).toContain('# Subagent Role');
     expect(prompt).toContain('# Command Run');
     expect(prompt).toContain('# Investigation');
     expect(prompt).not.toContain('# Delegation');
     expect(prompt).not.toContain('# Primary Agent Role');
+    expect(prompt).toContain('You have no Agent control capabilities');
+    expect(prompt).toContain('<agent-result>');
     expect(prompt).toContain('apply_patch');
     expect(prompt).not.toContain('# Code Quality');
     expect(prompt).not.toContain('{%');

@@ -4,18 +4,27 @@
  * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
  * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
  */
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import BetterSqlite3 from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
+import { createAgentCommands } from '../../src/app.js';
 import type {
   AgentRun,
   AgentRunEvent,
   AgentRunResult,
   AgentRunRequest,
-  ResolvedAgentDefinition,
 } from '../../src/features/agent/index.js';
 import {
   AgentTaskService,
@@ -25,21 +34,30 @@ import {
   createAgentTaskEventPreparer,
   createSubagentCommands,
   deriveSubagentPermission,
+  parseAgentTaskResult,
+  type AgentTaskResult,
   type CreateAgentTask,
   type CodingAgentDefinition,
 } from '../../src/features/agent/subagents/index.js';
 import { ArtifactStore } from '../../src/features/artifact/index.js';
 import {
   AgentConfigSchema,
+  CodingAgentConfigSchema,
   SubagentsConfigSchema,
   type CodingAgentConfig,
 } from '../../src/features/config/index.js';
+import { createTaskBoardStore } from '../../src/features/task/index.js';
 import type { PermissionRule } from '../../src/features/tool/permissions/types.js';
+import {
+  configureCodingDatabase,
+  createCodingDatabase,
+} from '../../src/infra/database/database.js';
 import {
   openDatabase,
   type DatabaseHandle,
 } from '../../src/infra/database/index.js';
 import type { ServerNotification } from '../../src/protocol/v1/index.js';
+import { defineTestCommand } from '../support/command.js';
 import { createTestEnvironmentHandle } from '../support/environment.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 
@@ -231,7 +249,6 @@ unknown-field: true
           definition: registry.get('build'),
           agentRegistry: registry,
         },
-        parentCommandNames: [],
         service: {} as AgentTaskService,
         approval: () => () => ({ action: 'auto' }),
       }),
@@ -268,11 +285,17 @@ unknown-field: true
     expect(rules).toContainEqual(parentRules[2]);
   });
 
-  it('默认禁止递归委派和任务写入，显式白名单可分别放开', () => {
+  it('始终禁止递归委派与用户提问，任务工具默认关闭', () => {
     const defaults = deriveSubagentPermission([], subagentDefinition);
     expect(defaults).toContainEqual(
       expect.objectContaining({
-        pattern: 'delegate_to_subagent',
+        pattern: 'spawn_agent',
+        action: 'deny',
+      }),
+    );
+    expect(defaults).toContainEqual(
+      expect.objectContaining({
+        pattern: 'request_user_input',
         action: 'deny',
       }),
     );
@@ -282,11 +305,14 @@ unknown-field: true
 
     const delegated = deriveSubagentPermission([], {
       ...subagentDefinition,
-      commands: ['delegate_to_subagent'],
+      commands: ['spawn_agent', 'request_user_input'],
     });
     expect(
-      delegated.some((rule) => rule.pattern === 'delegate_to_subagent'),
-    ).toBe(false);
+      delegated.filter((rule) => rule.pattern === 'spawn_agent'),
+    ).toHaveLength(1);
+    expect(
+      delegated.filter((rule) => rule.pattern === 'request_user_input'),
+    ).toHaveLength(1);
 
     const tasked = deriveSubagentPermission([], {
       ...subagentDefinition,
@@ -322,118 +348,177 @@ describe('Subagent 后台任务契约', () => {
         definition: registry.get('build'),
         agentRegistry: registry,
       },
-      parentCommandNames: [],
       service: {} as AgentTaskService,
       approval: () => () => ({ action: 'auto' }),
     });
-    const delegate = testCommand(tools, 'delegate_to_subagent');
-    const taskOutput = testCommand(tools, 'task_output');
-    const taskStop = testCommand(tools, 'task_stop');
+    expect(tools.map((tool) => tool.name)).toEqual([
+      'spawn_agent',
+      'list_agents',
+      'get_agent',
+      'wait_agent',
+      'stop_agent',
+    ]);
+    const spawn = testCommand(tools, 'spawn_agent');
 
-    expect(delegate.description).toContain('Available subagents:');
-    expect(delegate.description).toContain('- explore:');
-    expect(delegate.description).toContain('- worker:');
+    expect(spawn.description).toContain('Available Subagents:');
+    expect(spawn.description).toContain('- explore:');
+    expect(spawn.description).toContain('- worker:');
+    const wait = testCommand(tools, 'wait_agent');
     expect(
-      delegate.input.safeParse({
-        subagent_type: '不存在',
-        prompt: '检查代码',
-        description: '检查代码',
+      wait.input.safeParse({ agent_id: 'job_reader', timeout_ms: 999 }).success,
+    ).toBe(false);
+    expect(
+      wait.input.safeParse({ agent_id: 'job_reader', timeout_ms: 180_000 })
+        .success,
+    ).toBe(true);
+    expect(
+      spawn.input.safeParse({
+        agent: '不存在',
+        objective: '检查代码',
+        scope: 'src',
+        expected_outcome: '返回报告',
+        acceptance_evidence: ['结果可验证'],
       }).success,
     ).toBe(false);
     expect(
-      delegate.input.safeParse({
-        subagent_type: 'explore',
-        prompt: '检查代码',
-        description: '检查代码',
+      spawn.input.safeParse({
+        agent: 'explore',
+        objective: '检查代码',
+        scope: 'src',
+        known_facts: ['已有事实'],
+        constraints: ['只读'],
+        expected_outcome: '返回报告',
+        acceptance_evidence: ['结果可验证'],
       }).success,
     ).toBe(true);
-    expect(
-      taskOutput.input.safeParse({
-        task_id: 'job_test',
-        block: true,
-        timeout_ms: 180_000,
-      }).success,
-    ).toBe(true);
-    expect(
-      taskOutput.input.safeParse({
-        task_id: 'job_test',
-        block: true,
-        timeout_ms: 180_001,
-      }).success,
-    ).toBe(false);
-    await expect(
-      taskStop.execute(
-        { task_id: '830f1bc6-82b0-4dcd-90b0-6a993b2e29a6' },
-        agentToolContext,
-      ),
-    ).rejects.toThrow('is a persisted task-board ID; use task_get to read it');
   });
 
-  it('fork 保留父级委派工具 schema，但默认深度明确拒绝递归', async () => {
+  it('Subagent 运行不装配任何 Agent 控制 Command', async () => {
     const registry = await createRegistry();
     const request: AgentRunRequest = {
-      threadId: 'job_parent',
-      turnId: 'turn-parent',
-      executionLocation: {
-        environmentRef: 'test',
-        workingDirectory: '/workspace',
-      },
+      ...parentRequest('/workspace'),
+      threadId: 'job_child',
+      turnId: 'job_child',
       selection: { mode: 'accept-edits', agent: 'explore' },
-      history: [],
-      input: '继续探索',
-      goal: null,
-      permission: { rules: () => [], externalPaths: () => [] },
       delegation: {
-        taskId: 'job_parent',
-        agentId: 'agent_parent',
+        taskId: 'job_child',
+        agentId: 'agent_child',
         rootThreadId: 'parent-a',
-        depth: 1,
-        contextMode: 'fork',
-        executionMode: 'background',
         maxTurns: 4,
-        exactCommandNames: [
-          'read',
-          'delegate_to_subagent',
-          'task_output',
-          'task_stop',
-        ],
       },
     };
-    const definition: ResolvedAgentDefinition = {
-      config: {
-        cwd: '/workspace',
-        subagents: enabledSubagents,
-      } as CodingAgentConfig,
-      definition: registry.get('explore'),
-      agentRegistry: registry,
-    };
-    const tools = createSubagentCommands({
-      request,
-      definition,
-      parentCommandNames: request.delegation!.exactCommandNames!,
-      service: {} as AgentTaskService,
-      approval: () => () => ({ action: 'auto' }),
-    });
-    const delegate = testCommand(tools, 'delegate_to_subagent');
 
-    expect(tools.map((tool) => tool.name)).toEqual([
-      'delegate_to_subagent',
-      'task_output',
-      'task_stop',
-    ]);
-    await expect(
-      delegate.execute(
-        {
-          subagent_type: 'explore',
-          prompt: '继续递归',
-          description: '递归探索',
-          context_mode: 'fresh',
-          execution_mode: 'background',
-          isolation: 'shared',
+    expect(
+      createSubagentCommands({
+        request,
+        definition: {
+          config: {
+            cwd: '/workspace',
+            subagents: enabledSubagents,
+          } as CodingAgentConfig,
+          definition: registry.get('explore'),
+          agentRegistry: registry,
         },
-        agentToolContext,
-      ),
-    ).rejects.toThrow('delegation depth is limited to one');
+        service: {} as AgentTaskService,
+        approval: () => () => ({ action: 'auto' }),
+      }),
+    ).toEqual([]);
+  });
+
+  it('真实 Command 装配只向 Primary 暴露 Agent 控制与用户提问', async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), 'ello-command-assembly-'));
+    temporaryDirectories.push(cwd);
+    const config = CodingAgentConfigSchema.parse({
+      cwd,
+      initial_mode: 'accept-edits',
+      models: {
+        test: {
+          protocol: 'openai',
+          endpoint: 'responses',
+          api_model: 'test-model',
+          base_url: 'https://api.example.test/v1',
+          api_key_env: 'TEST_API_KEY',
+          context_window: 128_000,
+          max_output_tokens: 16_000,
+        },
+      },
+      primary_model: 'test',
+      auxiliary_model: 'test',
+    });
+    const registry = await createAgentRegistry(config);
+    const databasePath = await temporaryDatabasePath();
+    const handle = openTestDatabase(databasePath);
+    const store = new AgentTaskStore(handle.db);
+    const service = createTaskService(store, new Map());
+    const createCommands = createAgentCommands(
+      createTaskBoardStore(handle.db),
+      service,
+    );
+    const activationCommand = defineTestCommand({
+      name: 'activate_skill',
+      summary: 'Activate a test skill.',
+      schema: z.object({ name: z.string() }).strict(),
+      run: ({ name }) => ({ name }),
+    });
+    const context = {
+      skills: [],
+      activationCommand,
+      readRoots: () => [cwd],
+      createSystemSections: () => [],
+    };
+    const primaryRequest = parentRequest(cwd);
+    const primary = await createCommands({
+      request: primaryRequest,
+      definition: {
+        config,
+        definition: registry.get('build'),
+        agentRegistry: registry,
+      },
+      context,
+    });
+    const subagentRequest: AgentRunRequest = {
+      ...parentRequest(cwd),
+      threadId: 'job_child',
+      turnId: 'job_child',
+      selection: { mode: 'accept-edits', agent: 'explore' },
+      history: [
+        { role: 'user', content: 'Primary history must not grant tools.' },
+      ],
+      delegation: {
+        taskId: 'job_child',
+        agentId: 'agent_child',
+        rootThreadId: 'parent-a',
+        maxTurns: 4,
+      },
+    };
+    const subagent = await createCommands({
+      request: subagentRequest,
+      definition: {
+        config,
+        definition: registry.get('explore'),
+        agentRegistry: registry,
+      },
+      context,
+    });
+
+    for (const name of [
+      'spawn_agent',
+      'list_agents',
+      'get_agent',
+      'wait_agent',
+      'stop_agent',
+    ]) {
+      expect(primary.commandRun.modelTool.description).toContain(`- ${name}:`);
+      expect(subagent.commandRun.modelTool.description).not.toContain(
+        `- ${name}:`,
+      );
+    }
+    await expect(
+      commandIsDiscoverable(primary.commandRun, 'request_user_input'),
+    ).resolves.toBe(true);
+    await expect(
+      commandIsDiscoverable(subagent.commandRun, 'request_user_input'),
+    ).resolves.toBe(false);
   });
 
   it('父运行已中断时，排队中的第二次委派不会创建任务', async () => {
@@ -451,18 +536,21 @@ describe('Subagent 后台任务契约', () => {
         definition: registry.get('build'),
         agentRegistry: registry,
       },
-      parentCommandNames: [],
       service: { start } as unknown as AgentTaskService,
       approval: () => () => ({ action: 'auto' }),
     });
     const delegate = requireDelegateTool(tools);
 
-    await expect(
+    let interrupted: unknown;
+    try {
       delegate.execute(delegateInput(), {
         ...agentToolContext,
         signal: controller.signal,
-      }),
-    ).rejects.toBe('client interrupt');
+      });
+    } catch (error) {
+      interrupted = error;
+    }
+    expect(interrupted).toBe('client interrupt');
     expect(start).not.toHaveBeenCalled();
   });
 
@@ -487,15 +575,14 @@ describe('Subagent 后台任务契约', () => {
           definition: registry.get('build'),
           agentRegistry: registry,
         },
-        parentCommandNames: [],
         service,
         approval: () => () => ({ action: 'auto' }),
       }),
     );
 
-    await expect(
+    expect(
       delegate.execute(delegateInput({ cwd: childCwd }), agentToolContext),
-    ).resolves.toMatchObject({ cwd: childCwd });
+    ).toMatchObject({ cwd: childCwd });
     expect(store.list('parent-a')).toEqual([
       expect.objectContaining({
         cwd: childCwd,
@@ -524,15 +611,14 @@ describe('Subagent 后台任务契约', () => {
           definition: registry.get('build'),
           agentRegistry: registry,
         },
-        parentCommandNames: [],
         service: { start } as unknown as AgentTaskService,
         approval: () => () => ({ action: 'auto' }),
       }),
     );
 
-    await expect(
+    expect(() =>
       delegate.execute(delegateInput({ cwd: childCwd }), agentToolContext),
-    ).rejects.toThrow('outside the parent workspace');
+    ).toThrow('outside the parent workspace');
     expect(start).not.toHaveBeenCalled();
   });
 
@@ -561,20 +647,19 @@ describe('Subagent 后台任务契约', () => {
           definition: registry.get('build'),
           agentRegistry: registry,
         },
-        parentCommandNames: [],
         service: { start } as unknown as AgentTaskService,
         approval: () => () => ({ action: 'auto' }),
       }),
     );
 
-    await expect(
+    expect(() =>
       delegate.execute(delegateInput({ cwd: outside }), agentToolContext),
-    ).rejects.toThrow(
+    ).toThrow(
       `outside the allowed paths: ${outside}. Authorized cwd roots: ${parentCwd}, ${root}`,
     );
-    await expect(
+    expect(() =>
       delegate.execute(delegateInput({ cwd: linkedOutside }), agentToolContext),
-    ).rejects.toThrow('outside the allowed paths');
+    ).toThrow('outside the allowed paths');
     expect(start).not.toHaveBeenCalled();
   });
 
@@ -601,15 +686,166 @@ describe('Subagent 后台任务契约', () => {
     expect(secondStore.list('parent-a')).toHaveLength(1);
   });
 
-  it('进程遗留的 running 任务恢复为 recovered 终态', async () => {
-    const store = await createTaskStore();
-    const task = store.create(taskInput());
-    expect(store.markRunning(task.id)?.status).toBe('running');
+  it('0004 legacy task 数据可升级为 Task Packet、结构化 Result 与新通知 payload', async () => {
+    const databasePath = await temporaryDatabasePath();
+    const client = new BetterSqlite3(databasePath);
+    configureCodingDatabase(client);
+    for (let index = 0; index <= 4; index += 1) {
+      const names = [
+        '0000_tiny_swordsman',
+        '0001_remove_change_checkpoints',
+        '0002_moaning_inertia',
+        '0003_brief_titania',
+        '0004_agent_task_runtime_projection',
+      ];
+      const sql = await readFile(
+        path.join(
+          process.cwd(),
+          'src/infra/database/migrations',
+          `${names[index]}.sql`,
+        ),
+        'utf8',
+      );
+      for (const statement of sql.split('--> statement-breakpoint')) {
+        if (statement.trim() !== '') client.exec(statement);
+      }
+    }
+    client
+      .prepare(
+        'insert into agent_task_roots (root_thread_id, sequence, updated_at) values (?, ?, ?)',
+      )
+      .run('legacy-root', 0, '2026-08-15T00:00:00.000Z');
+    const insertTask = client.prepare(`
+      insert into agent_tasks (
+        id, agent_id, root_thread_id, name, description, definition_name, model_selector,
+        context_mode, execution_mode, status, prompt, cwd, isolation,
+        max_turns, depth, revision, event_sequence, current_tool_json, tool_count,
+        recent_tools_json, result_preview, error_preview, output, error_message, usage_json, sidechain_json, tools_json,
+        permission_rules_json, external_paths_json, created_at, started_at, completed_at, updated_at
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const legacyTask = (
+      id: string,
+      status: string,
+      output: string | null,
+      error: string | null,
+    ) =>
+      insertTask.run(
+        id,
+        `agent-${id}`,
+        'legacy-root',
+        id,
+        'legacy description',
+        'explore',
+        null,
+        'fresh',
+        'background',
+        status,
+        'legacy prompt',
+        '/workspace',
+        'worktree',
+        4,
+        1,
+        1,
+        0,
+        null,
+        0,
+        '[]',
+        null,
+        null,
+        output,
+        error,
+        null,
+        '[]',
+        '[]',
+        '[]',
+        '[]',
+        '2026-08-15T00:00:00.000Z',
+        status === 'running' ? '2026-08-15T00:00:01.000Z' : null,
+        status === 'running' ? null : '2026-08-15T00:00:02.000Z',
+        '2026-08-15T00:00:02.000Z',
+      );
+    legacyTask(
+      'job_legacy_completed',
+      'completed',
+      'legacy completed output',
+      null,
+    );
+    legacyTask('job_legacy_recovered', 'recovered', null, null);
+    legacyTask(
+      'job_legacy_killed',
+      'killed',
+      'partial legacy output',
+      'user stopped',
+    );
+    legacyTask('job_legacy_running', 'running', null, null);
+    client
+      .prepare(
+        'insert into agent_task_notifications (id, task_id, root_thread_id, status, payload_json, created_at, delivered_at) values (?, ?, ?, ?, ?, ?, null)',
+      )
+      .run(
+        'legacy-notification',
+        'job_legacy_completed',
+        'legacy-root',
+        'completed',
+        JSON.stringify({ summary: 'legacy summary' }),
+        '2026-08-15T00:00:03.000Z',
+      );
+    const migration = await readFile(
+      path.join(
+        process.cwd(),
+        'src/infra/database/migrations/0005_centralized_subagents.sql',
+      ),
+      'utf8',
+    );
+    for (const statement of migration.split('--> statement-breakpoint')) {
+      if (statement.trim() !== '') client.exec(statement);
+    }
 
+    const store = new AgentTaskStore(createCodingDatabase(client));
+    expect(store.require('job_legacy_completed')).toMatchObject({
+      isolation: 'shared',
+      status: 'completed',
+      taskPacket: { objective: 'legacy prompt' },
+      result: { status: 'completed', summary: 'legacy completed output' },
+    });
+    expect(store.require('job_legacy_recovered')).toMatchObject({
+      status: 'failed',
+      result: { status: 'failed', retryable: true },
+    });
+    expect(store.require('job_legacy_killed')).toMatchObject({
+      status: 'stopped',
+      result: { status: 'stopped', reason: 'user stopped' },
+    });
+    expect(store.pendingNotifications('legacy-root')).toMatchObject([
+      {
+        taskId: 'job_legacy_completed',
+        result: { status: 'completed', summary: 'legacy completed output' },
+      },
+    ]);
     expect(store.recoverRunning()).toBe(1);
-    expect(store.get(task.id)).toMatchObject({
-      status: 'recovered',
+    expect(store.require('job_legacy_running')).toMatchObject({
+      status: 'failed',
+      result: { status: 'failed' },
+    });
+    client.close();
+  });
+
+  it('进程遗留的 queued/running 任务恢复为结构化 failed 终态', async () => {
+    const store = await createTaskStore();
+    const queued = store.create(taskInput({ name: 'queued' }));
+    const running = store.create(taskInput({ name: 'running' }));
+    expect(store.markRunning(running.id)?.status).toBe('running');
+
+    expect(store.recoverRunning()).toBe(2);
+    expect(store.get(queued.id)).toMatchObject({
+      status: 'failed',
+      result: { status: 'failed', retryable: true },
+    });
+    expect(store.get(running.id)).toMatchObject({
+      status: 'failed',
       errorMessage: 'Server restarted while the task was running.',
+      result: { status: 'failed', retryable: true },
     });
     expect(store.recoverRunning()).toBe(0);
   });
@@ -619,19 +855,23 @@ describe('Subagent 后台任务契约', () => {
     const task = store.create(taskInput());
     store.markRunning(task.id);
 
+    const result = completedResult('分析完成');
     expect(
-      store.settle(task.id, { status: 'completed', output: '分析完成' }),
-    ).toMatchObject({ status: 'completed', output: '分析完成' });
+      store.settle(task.id, { result, output: agentResultText(result) }),
+    ).toMatchObject({ status: 'completed', result });
     expect(
-      store.settle(task.id, { status: 'failed', errorMessage: '重复结算' }),
-    ).toMatchObject({ status: 'completed', output: '分析完成' });
+      store.settle(task.id, {
+        result: failedResult('重复结算'),
+        errorMessage: '重复结算',
+      }),
+    ).toMatchObject({ status: 'completed', result });
 
     const notifications = store.pendingNotifications('parent-a');
     expect(notifications).toHaveLength(1);
     expect(notifications[0]).toMatchObject({
       taskId: task.id,
       status: 'completed',
-      result: '分析完成',
+      result,
     });
     store.markNotificationsDelivered([notifications[0]!.id]);
     store.markNotificationsDelivered([notifications[0]!.id]);
@@ -721,51 +961,40 @@ describe('Subagent 后台任务契约', () => {
     expect((await artifacts.read(artifactId)).toString('utf8')).toBe(output);
   });
 
-  it('同步结果只返回一次，异步结果通过持久通知和名称查询读取', async () => {
+  it('委派始终异步，并可通过通知及名称读取结构化结果', async () => {
     const store = await createTaskStore();
     const runs = new Map<string, FakeTaskRun>();
     const service = createTaskService(store, runs);
 
-    const sync = service.start(taskInput({ executionMode: 'foreground' }));
-    const syncRun = await waitForRun(runs, sync.task.id);
-    syncRun.message('同步分析完成');
-    syncRun.complete();
-    await expect(sync.completion).resolves.toMatchObject({
-      status: 'completed',
-      output: '同步分析完成',
-    });
-    service.acknowledge(sync.task.id);
-    expect(service.takeNotifications('parent-a')).toBe('');
-
-    const asyncTask = service.start(
-      taskInput({ executionMode: 'background', name: 'background-reader' }),
-    );
+    const asyncTask = service.start(taskInput({ name: 'background-reader' }));
     const asyncRun = await waitForRun(runs, asyncTask.task.id);
     asyncRun.message('异步分析完成');
     asyncRun.complete();
-    await asyncTask.completion;
-    await expect(
-      service.output('background-reader', 'parent-a', 0),
-    ).resolves.toMatchObject({
+    await expect(asyncTask.completion).resolves.toMatchObject({
       status: 'completed',
-      output: '异步分析完成',
+      result: { status: 'completed', summary: '异步分析完成' },
     });
-    await expect(
-      service.output(asyncTask.task.id, 'parent-b', 0),
-    ).rejects.toThrow(`Unknown agent task: ${asyncTask.task.id}`);
-    expect(service.takeNotifications('parent-a')).toContain(
-      `<task-id>${asyncTask.task.id}</task-id>`,
+    expect(service.read('background-reader', 'parent-a').task).toMatchObject({
+      id: asyncTask.task.id,
+      result: { status: 'completed', summary: '异步分析完成' },
+    });
+    expect(() => service.read(asyncTask.task.id, 'parent-b')).toThrow(
+      `Unknown agent task: ${asyncTask.task.id}`,
     );
-    expect(service.takeNotifications('parent-a')).toBe('');
+    const delivery = service.takeNotifications('parent-a');
+    expect(delivery?.text).toContain(`<task-id>${asyncTask.task.id}</task-id>`);
+    expect(service.takeNotifications('parent-a')).toBeUndefined();
+    service.releaseNotifications(delivery?.notificationIds ?? []);
+    expect(service.takeNotifications('parent-a')?.notificationIds).toEqual(
+      delivery?.notificationIds,
+    );
   });
 
   it('后台任务完成会唤醒通知等待者并只消费一次持久通知', async () => {
     const store = await createTaskStore();
     const runs = new Map<string, FakeTaskRun>();
     const service = createTaskService(store, runs);
-    const started = service.start(
-      taskInput({ executionMode: 'background', name: 'background-waiter' }),
-    );
+    const started = service.start(taskInput({ name: 'background-waiter' }));
     const run = await waitForRun(runs, started.task.id);
     const controller = new AbortController();
     const notification = service.waitForNotification(
@@ -776,8 +1005,11 @@ describe('Subagent 后台任务契约', () => {
     run.message('等待后的分析结果');
     run.complete();
 
-    await expect(notification).resolves.toContain('等待后的分析结果');
-    expect(service.takeNotifications('parent-a')).toBe('');
+    const delivery = await notification;
+    expect(delivery?.text).toContain('等待后的分析结果');
+    expect(service.takeNotifications('parent-a')).toBeUndefined();
+    service.acknowledgeNotifications(delivery?.notificationIds ?? []);
+    expect(store.pendingNotifications('parent-a')).toEqual([]);
     await started.completion;
   });
 
@@ -785,7 +1017,7 @@ describe('Subagent 后台任务契约', () => {
     const store = await createTaskStore();
     const runs = new Map<string, FakeTaskRun>();
     const service = createTaskService(store, runs);
-    const started = service.start(taskInput({ executionMode: 'foreground' }));
+    const started = service.start(taskInput());
     const run = await waitForRun(runs, started.task.id);
 
     run.complete();
@@ -797,110 +1029,245 @@ describe('Subagent 后台任务契约', () => {
     expect(store.require(started.task.id).output).toBeUndefined();
   });
 
-  it('停止运行中任务会触发 interrupt，并稳定保留 killed 终态', async () => {
+  it('缺少用户决策时持久化 blocked 结果并通知 Primary', async () => {
     const store = await createTaskStore();
     const runs = new Map<string, FakeTaskRun>();
     const service = createTaskService(store, runs);
-    const started = service.start(
-      taskInput({ executionMode: 'background', name: 'reader' }),
+    const started = service.start(taskInput({ name: 'blocked-reader' }));
+    const run = await waitForRun(runs, started.task.id);
+    const result: AgentTaskResult = {
+      status: 'blocked',
+      summary: '已完成可独立验证的分析。',
+      blockingReason: '需要用户选择兼容性策略。',
+      questionForUser: '是否删除旧协议字段？',
+      completedWork: ['已定位所有旧字段引用。'],
+      evidence: ['rg 找到 4 个调用点。'],
+    };
+
+    run.emit({
+      type: 'messageCompleted',
+      messageId: 'message-blocked',
+      text: agentResultText(result),
+    });
+    run.complete();
+
+    await expect(started.completion).resolves.toMatchObject({
+      status: 'blocked',
+      result,
+    });
+    expect(service.takeNotifications('parent-a')?.text).toContain(
+      '是否删除旧协议字段？',
     );
+  });
+
+  it('缺少 remainingRisks 的合法结果按空列表通过校验', () => {
+    const parsed = parseAgentTaskResult(
+      '<agent-result>{"status":"completed","summary":"tsconfig 有 3 个 compilerOptions 条目。","evidence":["tsconfig.json:3-7"]}</agent-result>',
+    );
+
+    expect(parsed).toEqual({
+      status: 'completed',
+      summary: 'tsconfig 有 3 个 compilerOptions 条目。',
+      evidence: ['tsconfig.json:3-7'],
+      remainingRisks: [],
+    });
+  });
+
+  it('校验失败时仍保留已经成立的 summary 与 evidence', async () => {
+    const store = await createTaskStore();
+    const runs = new Map<string, FakeTaskRun>();
+    const service = createTaskService(store, runs);
+    const started = service.start(taskInput({ name: 'salvaged-result' }));
+    const run = await waitForRun(runs, started.task.id);
+
+    run.emit({
+      type: 'messageCompleted',
+      messageId: 'message-salvage',
+      text: '<agent-result>{"status":"completed","summary":"读到了 name 字段。","evidence":["package.json:2 name 为 @ello/tui"],"unexpectedField":1}</agent-result>',
+    });
+    run.complete();
+
+    await expect(started.completion).resolves.toMatchObject({
+      status: 'failed',
+      result: {
+        status: 'failed',
+        summary: '读到了 name 字段。',
+        evidence: ['package.json:2 name 为 @ello/tui'],
+        retryable: true,
+      },
+    });
+  });
+
+  it('修复 fenced JSON、字符串控制字符和 trailing comma 后仍按严格 Result schema 校验', () => {
+    const parsed = parseAgentTaskResult(`<agent-result>
+\`\`\`json
+{"status":"completed","summary":"line one
+line two","evidence":["package.json:2",],"remainingRisks":[],}
+\`\`\`
+</agent-result>`);
+
+    expect(parsed).toEqual({
+      status: 'completed',
+      summary: 'line one\nline two',
+      evidence: ['package.json:2'],
+      remainingRisks: [],
+    });
+  });
+
+  it('非法结构化结果保留有界原始输出供 Primary 诊断', async () => {
+    const store = await createTaskStore();
+    const runs = new Map<string, FakeTaskRun>();
+    const service = createTaskService(store, runs);
+    const started = service.start(taskInput({ name: 'invalid-result' }));
+    const run = await waitForRun(runs, started.task.id);
+    const raw =
+      '<agent-result>{"status":"completed","summary":"unterminated}</agent-result>';
+
+    run.emit({
+      type: 'messageCompleted',
+      messageId: 'message-invalid',
+      text: raw,
+    });
+    run.complete();
+
+    await expect(started.completion).resolves.toMatchObject({
+      status: 'failed',
+      output: raw,
+      result: {
+        status: 'failed',
+        retryable: true,
+        error: expect.stringContaining(`Raw Subagent output:\n${raw}`),
+      },
+    });
+  });
+
+  it('取消 wait_agent 只释放依赖屏障，不停止仍在运行的 Agent', async () => {
+    const store = await createTaskStore();
+    const runs = new Map<string, FakeTaskRun>();
+    const service = createTaskService(store, runs);
+    const started = service.start(taskInput({ name: 'waited-reader' }));
+    const run = await waitForRun(runs, started.task.id);
+    const controller = new AbortController();
+    const waiting = service.wait(
+      'waited-reader',
+      'parent-a',
+      controller.signal,
+      10_000,
+    );
+
+    controller.abort(new Error('dependency no longer needed'));
+
+    await expect(waiting).rejects.toThrow('dependency no longer needed');
+    expect(store.require(started.task.id).status).toBe('running');
+    run.message('继续独立完成');
+    run.complete();
+    await expect(started.completion).resolves.toMatchObject({
+      status: 'completed',
+    });
+  });
+
+  it('wait_agent 超时返回 timed_out 且不停止仍在运行的 Agent', async () => {
+    const store = await createTaskStore();
+    const runs = new Map<string, FakeTaskRun>();
+    const service = createTaskService(store, runs);
+    const started = service.start(taskInput({ name: 'slow-reader' }));
+    const run = await waitForRun(runs, started.task.id);
+
+    await expect(
+      service.wait('slow-reader', 'parent-a', new AbortController().signal, 5),
+    ).resolves.toMatchObject({
+      waitStatus: 'timed_out',
+      task: { id: started.task.id, status: 'running' },
+    });
+    expect(store.require(started.task.id).status).toBe('running');
+
+    run.message('稍后完成');
+    run.complete();
+    await expect(started.completion).resolves.toMatchObject({
+      status: 'completed',
+    });
+  });
+
+  it('停止运行中任务会触发 interrupt，并稳定保留 stopped 终态', async () => {
+    const store = await createTaskStore();
+    const runs = new Map<string, FakeTaskRun>();
+    const service = createTaskService(store, runs);
+    const started = service.start(taskInput({ name: 'reader' }));
     const run = await waitForRun(runs, started.task.id);
 
     await expect(service.stop('reader', 'parent-a')).resolves.toMatchObject({
-      status: 'killed',
-      errorMessage: 'Parent stopped the task.',
+      status: 'stopped',
+      result: { status: 'stopped' },
     });
     expect(run.interruptions).toEqual([
-      `agent task tree ${started.task.id} stopped`,
+      `agent task ${started.task.id} stopped`,
     ]);
     await expect(started.completion).resolves.toMatchObject({
-      status: 'killed',
+      status: 'stopped',
     });
     await expect(
       service.stop(started.task.id, 'parent-a'),
-    ).resolves.toMatchObject({ status: 'killed' });
+    ).resolves.toMatchObject({ status: 'stopped' });
   });
 
-  it('父任务停止时递归收口后代，不扩大到无关任务', async () => {
+  it('终态后的晚到运行事件不会改写 transcript 或结果', async () => {
     const store = await createTaskStore();
-    const runs = new Map<string, FakeTaskRun>();
-    const service = createTaskService(store, runs);
-    const parent = service.start(
-      taskInput({ executionMode: 'background', name: 'parent' }),
+    const run = new FakeTaskRun(false);
+    const service = new AgentTaskService(store, () => Promise.resolve(run));
+    taskServices.push(service);
+    const started = service.start(taskInput({ name: 'late-event-reader' }));
+    await vi.waitFor(() =>
+      expect(store.require(started.task.id).status).toBe('running'),
     );
-    const child = service.start(
-      taskInput({
-        executionMode: 'background',
-        name: 'child',
-        parentTaskId: parent.task.id,
-      }),
-    );
-    const unrelated = service.start(
-      taskInput({ executionMode: 'background', name: 'unrelated' }),
-    );
-    const parentRun = await waitForRun(runs, parent.task.id);
-    const childRun = await waitForRun(runs, child.task.id);
-    const unrelatedRun = await waitForRun(runs, unrelated.task.id);
 
-    await expect(
-      service.stop(parent.task.id, 'parent-a'),
-    ).resolves.toMatchObject({
-      status: 'killed',
+    await service.stop(started.task.id, 'parent-a');
+    const terminal = store.require(started.task.id);
+    const eventCount = store.events(started.task.id).length;
+    run.emit({
+      type: 'messageCompleted',
+      messageId: 'message-late',
+      text: agentResultText(completedResult('不应覆盖终态')),
     });
-    expect(store.require(child.task.id)).toMatchObject({
-      status: 'killed',
-      errorMessage: `Ancestor task ${parent.task.id} was stopped.`,
-    });
-    expect(store.require(unrelated.task.id).status).toBe('running');
-    expect(parentRun.interruptions).toEqual([
-      `agent task tree ${parent.task.id} stopped`,
-    ]);
-    expect(childRun.interruptions).toEqual([
-      `agent task tree ${parent.task.id} stopped`,
-    ]);
-
-    unrelatedRun.complete();
-    await unrelated.completion;
-  });
-
-  it('foreground 原地转为 background 后只释放交付门，原 run 继续完成', async () => {
-    const store = await createTaskStore();
-    const runs = new Map<string, FakeTaskRun>();
-    const service = createTaskService(store, runs);
-    const started = service.start(
-      taskInput({ executionMode: 'foreground', name: 'foreground-reader' }),
-    );
-    const run = await waitForRun(runs, started.task.id);
-
-    expect(service.background('foreground-reader', 'parent-a')).toMatchObject({
-      id: started.task.id,
-      status: 'running',
-      executionMode: 'background',
-    });
-    await expect(started.delivery).resolves.toMatchObject({
-      id: started.task.id,
-      status: 'running',
-      executionMode: 'background',
-    });
-    expect(run.interruptions).toEqual([]);
-
-    run.message('后台完成');
     run.complete();
-    await expect(started.completion).resolves.toMatchObject({
-      id: started.task.id,
-      status: 'completed',
-      output: '后台完成',
+
+    await started.completion;
+    expect(store.require(started.task.id)).toMatchObject({
+      status: 'stopped',
+      revision: terminal.revision,
+      result: terminal.result,
     });
-    expect(service.takeNotifications('parent-a')).toContain(
-      `<task-id>${started.task.id}</task-id>`,
+    expect(store.events(started.task.id)).toHaveLength(eventCount);
+  });
+
+  it('launcher 卡住时 close 有界返回且不留下 running 任务', async () => {
+    const store = await createTaskStore();
+    const service = new AgentTaskService(
+      store,
+      () => new Promise<AgentRun>(() => undefined),
+      undefined,
+      20,
     );
+    taskServices.push(service);
+    const started = service.start(taskInput({ name: 'stuck-launcher' }));
+    await vi.waitFor(() =>
+      expect(store.require(started.task.id).status).toBe('running'),
+    );
+
+    const before = Date.now();
+    await service.close();
+
+    expect(Date.now() - before).toBeLessThan(250);
+    expect(store.require(started.task.id)).toMatchObject({
+      status: 'stopped',
+      result: { status: 'stopped' },
+    });
   });
 
   it('重复 steer 只进入一次持久事件和 live run', async () => {
     const store = await createTaskStore();
     const runs = new Map<string, FakeTaskRun>();
     const service = createTaskService(store, runs);
-    const started = service.start(taskInput({ executionMode: 'background' }));
+    const started = service.start(taskInput());
     const run = await waitForRun(runs, started.task.id);
 
     service.steer(started.task.id, 'parent-a', 'steer-one', '继续检查');
@@ -914,40 +1281,6 @@ describe('Subagent 后台任务契约', () => {
     ).toHaveLength(1);
     run.complete();
     await started.completion;
-  });
-
-  it('resume 单独记录恢复血缘，并复用已持久化 sidechain', async () => {
-    const store = await createTaskStore();
-    const runs = new Map<string, FakeTaskRun>();
-    const service = createTaskService(store, runs);
-    const started = service.start(
-      taskInput({
-        executionMode: 'background',
-        parentTaskId: 'job_parent',
-      }),
-    );
-    const firstRun = await waitForRun(runs, started.task.id);
-    firstRun.appendMessage('已确认事实');
-    firstRun.complete();
-    const completed = await started.completion;
-
-    const resumed = service.resume(
-      completed.id,
-      'parent-a',
-      '继续验证剩余问题',
-    );
-    expect(resumed.task).toMatchObject({
-      resumeFromTaskId: completed.id,
-      parentTaskId: 'job_parent',
-      prompt: '继续验证剩余问题',
-      sidechain: [{ role: 'assistant', content: '已确认事实' }],
-    });
-    const resumedRun = await waitForRun(runs, resumed.task.id);
-    resumedRun.message('恢复分析完成');
-    resumedRun.complete();
-    await expect(resumed.completion).resolves.toMatchObject({
-      status: 'completed',
-    });
   });
 
   it('公开 RPC 完整投影任务树，并按连接管理控制操作与通知', async () => {
@@ -970,9 +1303,7 @@ describe('Subagent 后台任务契约', () => {
       }),
     ).resolves.toEqual({ rootThreadId: 'parent-a', seq: 0, tasks: [] });
 
-    const started = service.start(
-      taskInput({ executionMode: 'foreground', name: 'rpc-reader' }),
-    );
+    const started = service.start(taskInput({ name: 'rpc-reader' }));
     const run = await waitForRun(runs, started.task.id);
     await vi.waitFor(() => expect(notifications).toHaveLength(2));
     expect(notifications.map((notification) => notification.method)).toEqual([
@@ -1006,25 +1337,13 @@ describe('Subagent 后台任务契约', () => {
       }),
     ).resolves.toMatchObject({
       task: { taskId: started.task.id, status: 'running' },
-      prompt: '分析目标代码',
+      taskPacket: { objective: '分析目标代码' },
       events: [
         { sequence: 1, eventType: 'created' },
         { sequence: 2, eventType: 'status' },
       ],
     });
 
-    await expect(
-      invokeServiceRoute(feature, peer, 'agent/task/background', {
-        threadId: 'parent-a',
-        taskId: started.task.id,
-      }),
-    ).resolves.toMatchObject({
-      task: {
-        taskId: started.task.id,
-        status: 'running',
-        executionMode: 'background',
-      },
-    });
     await expect(
       invokeServiceRoute(feature, peer, 'agent/task/steer', {
         threadId: 'parent-a',
@@ -1045,49 +1364,29 @@ describe('Subagent 后台任务契约', () => {
         taskId: started.task.id,
       }),
     ).resolves.toMatchObject({
-      task: { taskId: started.task.id, status: 'killed' },
+      task: { taskId: started.task.id, status: 'stopped' },
     });
     await expect(started.completion).resolves.toMatchObject({
-      status: 'killed',
+      status: 'stopped',
     });
-
-    const resumed = await invokeServiceRoute(
-      feature,
-      peer,
-      'agent/task/resume',
-      {
-        threadId: 'parent-a',
-        taskId: started.task.id,
-        prompt: '从持久上下文继续',
-        executionMode: 'background',
-      },
-    );
-    expect(resumed.task).toMatchObject({
-      resumeFromTaskId: started.task.id,
-      status: 'queued',
-      executionMode: 'background',
-    });
-    const resumedRun = await waitForRun(runs, resumed.task.taskId);
 
     await invokeServiceRoute(feature, peer, 'agent/task/unsubscribe', {
       threadId: 'parent-a',
     });
-    await vi.waitFor(() =>
-      expect(
-        taskNotificationSequence(notifications.at(-1)),
-      ).toBeGreaterThanOrEqual(7),
-    );
     const countAfterUnsubscribe = notifications.length;
-    await invokeServiceRoute(feature, peer, 'agent/task/steer', {
-      threadId: 'parent-a',
-      taskId: resumed.task.taskId,
-      steerId: 'steer_rpc_2',
-      input: '订阅释放后继续',
-    });
+    const afterUnsubscribe = service.start(
+      taskInput({ name: 'after-unsubscribe' }),
+    );
+    const afterUnsubscribeRun = await waitForRun(
+      runs,
+      afterUnsubscribe.task.id,
+    );
     await Promise.resolve();
     expect(notifications).toHaveLength(countAfterUnsubscribe);
 
-    resumedRun.complete();
+    afterUnsubscribeRun.message('订阅释放后完成');
+    afterUnsubscribeRun.complete();
+    await afterUnsubscribe.completion;
     feature.releaseConnection(peer.connectionId);
     feature.close();
   });
@@ -1110,7 +1409,7 @@ function parentRequest(cwd: string): AgentRunRequest {
 }
 
 function requireDelegateTool(tools: ReturnType<typeof createSubagentCommands>) {
-  return testCommand(tools, 'delegate_to_subagent');
+  return testCommand(tools, 'spawn_agent');
 }
 
 function testCommand(
@@ -1138,14 +1437,38 @@ function testCommand(
 
 function delegateInput(overrides: { readonly cwd?: string } = {}) {
   return {
-    subagent_type: 'explore',
-    prompt: '检查目标代码',
-    description: '检查目标代码',
-    context_mode: 'fresh' as const,
-    execution_mode: 'background' as const,
-    isolation: 'shared' as const,
+    agent: 'explore',
+    objective: '检查目标代码',
+    scope: '目标 package',
+    known_facts: [],
+    constraints: ['不要修改范围外文件'],
+    expected_outcome: '返回结构化分析报告',
+    acceptance_evidence: ['列出检查过的文件'],
     ...overrides,
   };
+}
+
+function completedResult(summary: string) {
+  return {
+    status: 'completed' as const,
+    summary,
+    evidence: [],
+    remainingRisks: [],
+  };
+}
+
+function failedResult(error: string) {
+  return {
+    status: 'failed' as const,
+    summary: 'Subagent execution failed.',
+    error,
+    evidence: [],
+    retryable: false,
+  };
+}
+
+function agentResultText(result: AgentTaskResult): string {
+  return `<agent-result>${JSON.stringify(result)}</agent-result>`;
 }
 
 async function temporaryMonorepo(): Promise<string> {
@@ -1163,15 +1486,18 @@ function taskInput(overrides: Partial<CreateAgentTask> = {}): CreateAgentTask {
     rootThreadId: 'parent-a',
     description: '分析目标代码',
     definitionName: 'explore',
-    contextMode: 'fresh',
-    executionMode: 'background',
-    prompt: '分析目标代码',
+    taskPacket: {
+      objective: '分析目标代码',
+      scope: '/workspace',
+      knownFacts: [],
+      constraints: [],
+      expectedOutcome: '返回结构化分析结果',
+      acceptanceEvidence: ['报告包含证据'],
+    },
     cwd: '/workspace',
     isolation: 'shared',
     maxTurns: 4,
-    depth: 1,
     sidechain: [],
-    commandNames: ['read', 'search'],
     permissionRules: [],
     externalPaths: [],
     ...overrides,
@@ -1188,6 +1514,35 @@ function taskNotificationSequence(
     return undefined;
   }
   return notification.params.seq;
+}
+
+async function commandIsDiscoverable(
+  runtime: import('../../src/features/command/index.js').CommandRunRuntime,
+  name: string,
+): Promise<boolean> {
+  const execution = runtime.start({
+    providerToolCallId: `search-${name}`,
+    input: {
+      commands: [
+        {
+          step: 1,
+          command: 'command_search',
+          args: ['--query', name],
+        },
+      ],
+    },
+    context: {
+      runId: 'run-command-assembly',
+      turnIndex: 0,
+      environment: createTestEnvironmentHandle(),
+      metadata: {},
+      signal: new AbortController().signal,
+    },
+  });
+  for await (const _event of execution) {
+    // Drain the execution before reading its terminal transition.
+  }
+  return JSON.stringify(await execution.result).includes(`"name":"${name}"`);
 }
 
 async function temporaryDatabasePath(): Promise<string> {
@@ -1257,7 +1612,7 @@ class FakeTaskRun implements AgentRun {
   private readonly resolveResult: (result: AgentRunResult) => void;
   private settled = false;
 
-  constructor() {
+  constructor(private readonly finishOnInterrupt = true) {
     this.events = this.queue;
     let resolveResult: ((result: AgentRunResult) => void) | undefined;
     this.result = new Promise((resolve) => {
@@ -1271,7 +1626,7 @@ class FakeTaskRun implements AgentRun {
     this.queue.push({
       type: 'messageCompleted',
       messageId: 'message-1',
-      text,
+      text: agentResultText(completedResult(text)),
     });
   }
 
@@ -1300,7 +1655,9 @@ class FakeTaskRun implements AgentRun {
 
   interrupt(reason: string): void {
     this.interruptions.push(reason);
-    this.finish({ status: 'interrupted', usage: EMPTY_USAGE, reason });
+    if (this.finishOnInterrupt) {
+      this.finish({ status: 'interrupted', usage: EMPTY_USAGE, reason });
+    }
   }
 
   resume(): void {}

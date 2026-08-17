@@ -130,6 +130,14 @@ export type EngineEvent =
       readonly startedAt: string;
     })
   | (AgentEventMetadata & {
+      readonly type: 'model.interrupted';
+      readonly identity: ModelCallIdentity;
+      readonly diagnostics: ModelCallDiagnostics;
+      readonly startedAt: string;
+      readonly reason: 'reasoning-budget';
+      readonly reasoningChars: number;
+    })
+  | (AgentEventMetadata & {
       readonly type: 'tool.started';
       readonly turnIndex: number;
       readonly toolCallId: string;
@@ -615,6 +623,7 @@ function toTraceEvent(
     case 'model.first_token':
     case 'model.completed':
     case 'model.failed':
+    case 'model.interrupted':
     case 'queue.drained':
     case 'messages.appended':
     case 'message.started':
@@ -683,6 +692,7 @@ async function emitSingleObserverEvent(
     case 'model.first_token':
     case 'model.completed':
     case 'model.failed':
+    case 'model.interrupted':
     case 'tool.approval_requested':
     case 'tool.deferred':
     case 'tool.failed':

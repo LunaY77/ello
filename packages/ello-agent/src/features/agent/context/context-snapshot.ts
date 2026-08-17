@@ -21,6 +21,7 @@ import {
 } from './source-registry.js';
 
 export interface ContextSnapshotDeps {
+  readonly subagent?: boolean;
   /**
    * 处理 产品 Agent `context-snapshot` 模块 的 `onContextEvent` 事件，并保持生产顺序与失败传播语义。
    *
@@ -96,7 +97,7 @@ export class ContextSnapshot {
   private loadStableBundle(): Promise<ContextBundle> {
     if (this.stableBundle === undefined) {
       const loaders = [
-        () => loadEnvironmentSource(this.config),
+        () => loadEnvironmentSource(this.config, this.deps.subagent === true),
         () => loadInstructionSources(this.config),
       ];
       if (this.includeMemory) {
@@ -114,15 +115,17 @@ export class ContextSnapshot {
 
 async function loadEnvironmentSource(
   config: CodingAgentConfig,
+  subagent: boolean,
 ): Promise<ContextSourceLoadResult> {
   const authorized = [config.cwd, ...config.allowed_paths].sort().join('\n');
-  const delegation = config.subagents.enabled
-    ? [
-        '<delegation>',
-        `  <cwd-policy>${config.subagents.cwd_policy}</cwd-policy>`,
-        '</delegation>',
-      ]
-    : [];
+  const delegation =
+    config.subagents.enabled && !subagent
+      ? [
+          '<delegation>',
+          `  <cwd-policy>${config.subagents.cwd_policy}</cwd-policy>`,
+          '</delegation>',
+        ]
+      : [];
   const content = [
     '<coding-scope>',
     `  <working-directory>${config.cwd}</working-directory>`,
@@ -132,7 +135,7 @@ async function loadEnvironmentSource(
     '<approval>',
     // runtime 构建时 config.initial_mode 已被替换为当前 session mode，而非启动快照。
     `  <mode>${config.initial_mode}</mode>`,
-    `  <guidance>${modeGuidance(config.initial_mode)}</guidance>`,
+    `  <guidance>${modeGuidance(config.initial_mode, subagent)}</guidance>`,
     '</approval>',
     'Treat authorized paths as the current coding scope. Access outside that scope requires Tool Policy approval; it is not an Environment isolation claim.',
   ].join('\n');
@@ -157,7 +160,10 @@ function compareSource(left: ContextSource, right: ContextSource): number {
     : left.priority - right.priority;
 }
 
-function modeGuidance(mode: CodingAgentConfig['initial_mode']): string {
+function modeGuidance(
+  mode: CodingAgentConfig['initial_mode'],
+  subagent: boolean,
+): string {
   // 提示词只解释行为边界；真正的安全约束仍由 permission policy 强制执行。
   const guidance: Record<CodingAgentConfig['initial_mode'], string> = {
     'ask-before-changes':
@@ -168,7 +174,8 @@ function modeGuidance(mode: CodingAgentConfig['initial_mode']): string {
     bypass:
       'All approvals are bypassed; act carefully because changes apply without a prompt. Inspect available context first; use request_user_input only for user-owned ambiguity that materially changes the implementation.',
   };
-  return guidance[mode];
+  if (!subagent) return guidance[mode];
+  return 'Stay within the Task Packet and allowed capability set. Runtime security approvals may route through the Primary session. Do not ask the user directly; return missing user-owned product decisions as a blocked result.';
 }
 
 function indent(value: string): string {

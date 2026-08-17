@@ -29,6 +29,14 @@ export interface CommandRunInput {
 
 export interface CommandCapabilities {
   readonly logicalName: string;
+  /**
+   * Command 是否需要 Environment 执行 gate。
+   *
+   * 只读写 Ello 自身持久状态、不触碰 Environment 文件系统或进程的协调类 Command 声明
+   * `false`，其执行不占用 gate，因此不会与同一 Environment 内其他 Agent 的工作互相阻塞。
+   * 可能长时间阻塞的屏障类 Command 必须声明 `false`，否则会饿死并行 Subagent。
+   */
+  readonly usesEnvironment: boolean;
   readonly concurrencySafe: boolean;
   readonly readOnly: boolean;
   readonly destructive: boolean;

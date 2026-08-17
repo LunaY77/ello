@@ -21,6 +21,7 @@ import {
   createCodingSystemPromptSection,
   createRequestUserInputCommand,
   createSubagentCommands,
+  renderTaskPacket,
   AgentTaskService,
   AgentTaskStore,
   AgentTaskRpcFeature,
@@ -475,6 +476,7 @@ export function createAgentCommands(
 ): CreateAgentCommands {
   const fileStates = new SessionFileStateRegistry();
   return async ({ request, definition, context }) => {
+    const isSubagent = request.delegation !== undefined;
     let modeState: SessionModeState = {
       mode: request.selection.mode,
       previousMode: null,
@@ -505,83 +507,84 @@ export function createAgentCommands(
       productionCommands.module,
       ...(memory.enabled ? [memory.module] : []),
     ];
-    const goalRuntime = createThreadGoalRuntime(request.goal);
+    const goalRuntime = createThreadGoalRuntime(
+      isSubagent ? null : request.goal,
+    );
     const baseModules: CommandModule[] = [
       defineCommandModule({
         id: 'skill',
         commands: [context.activationCommand],
       }),
-      defineCommandModule({
-        id: 'user-input',
-        commands: [createRequestUserInputCommand()],
-      }),
-      goalRuntime.module,
+      ...(isSubagent
+        ? []
+        : [
+            defineCommandModule({
+              id: 'user-input',
+              commands: [createRequestUserInputCommand()],
+            }),
+            goalRuntime.module,
+          ]),
     ];
-    if (request.selection.mode === 'plan') {
+    if (!isSubagent && request.selection.mode === 'plan') {
       baseModules.push(createPlanCommandModule(request));
     }
     const definitionWhitelist = definition.definition.commands;
-    const initiallySelected = selectCommandModules(
+    const selected = selectCommandModules(
       availableModules,
-      request.delegation?.contextMode === 'fork'
-        ? undefined
-        : definitionWhitelist,
+      definitionWhitelist,
     );
-    const parentCommandNames = [
-      ...commandDefinitions(initiallySelected).map((command) => command.name),
-      ...commandDefinitions(baseModules).map((command) => command.name),
-      'delegate_to_subagent',
-      'task_output',
-      'task_stop',
-    ];
     const subagentModule = defineCommandModule({
       id: 'subagent',
       commands: createSubagentCommands({
         request,
         definition,
-        parentCommandNames,
         service: agentTasks,
         approval: productionCommands.approval,
       }),
     });
-    const exactCommandNames = request.delegation?.exactCommandNames;
-    const selected =
-      exactCommandNames === undefined
-        ? initiallySelected
-        : filterExactCommandModules(availableModules, exactCommandNames);
-    const directCommands =
-      exactCommandNames === undefined
-        ? [...baseModules, subagentModule]
-        : filterExactCommandModules(
-            [...baseModules, subagentModule],
-            exactCommandNames,
-          );
-    if (exactCommandNames !== undefined) {
-      assertExactCommands(
-        commandDefinitions([...selected, ...directCommands]),
-        exactCommandNames,
-        request.delegation?.taskId ?? request.threadId,
-      );
-    }
     const commandRun = createCommandRunRuntime(
       createCommandRegistrySnapshot({
-        modules: [...selected, ...directCommands],
+        modules: [...selected, ...baseModules, subagentModule],
         search: {
           resultLimit: definition.config.commands.search.result_limit,
           maxResultBytes: definition.config.commands.search.max_result_bytes,
         },
       }),
     );
+    let systemNotification:
+      | import('./features/agent/subagents/index.js').AgentTaskNotificationDelivery
+      | undefined;
+    const takeSystemNotification = () => {
+      systemNotification ??= agentTasks.takeNotifications(request.threadId);
+      return systemNotification?.text ?? '';
+    };
+    const acknowledgeSystemNotification = () => {
+      if (systemNotification === undefined) return;
+      agentTasks.acknowledgeNotifications(systemNotification.notificationIds);
+      systemNotification = undefined;
+    };
+    const releaseSystemNotification = () => {
+      if (systemNotification === undefined) return;
+      agentTasks.releaseNotifications(systemNotification.notificationIds);
+      systemNotification = undefined;
+    };
     return {
       commandRun,
       ...(memory.enabled ? { memoryIndexLoader: memory.indexLoader } : {}),
       goalSystemSection: goalRuntime.systemSection,
-      taskNotificationSection: () =>
-        agentTasks.takeNotifications(request.threadId),
-      ...(request.delegation === undefined
+      ...(isSubagent
+        ? {}
+        : { taskNotificationSection: takeSystemNotification }),
+      ...(!isSubagent
         ? {
             waitForTaskNotification: (signal: AbortSignal) =>
               agentTasks.waitForNotification(request.threadId, signal),
+            acknowledgeTaskNotifications: (ids: readonly string[]) =>
+              agentTasks.acknowledgeNotifications(ids),
+            releaseTaskNotifications: (ids: readonly string[]) =>
+              agentTasks.releaseNotifications(ids),
+            acknowledgeSystemTaskNotifications: acknowledgeSystemNotification,
+            releaseSystemTaskNotifications: releaseSystemNotification,
           }
         : {}),
       mode: currentMode,
@@ -612,20 +615,6 @@ function filterExactCommandModules(
       }),
     )
     .filter((module) => module.commands.length > 0);
-}
-
-function assertExactCommands(
-  commands: readonly CommandDefinition[],
-  exactCommandNames: readonly string[],
-  taskId: string,
-): void {
-  const available = new Set(commands.map((command) => command.name));
-  const missing = exactCommandNames.filter((name) => !available.has(name));
-  if (missing.length > 0) {
-    throw new Error(
-      `Fork task ${taskId} cannot restore exact Commands: ${missing.join(', ')}`,
-    );
-  }
 }
 
 function createPlanCommandModule(
@@ -716,8 +705,8 @@ function agentTaskRunRequest(
       agent: task.definitionName,
     },
     modeSource,
-    history: task.sidechain,
-    input: task.prompt,
+    history: [],
+    input: renderTaskPacket(task.taskPacket),
     goal: null,
     permission: {
       rules: () => task.permissionRules,
@@ -727,19 +716,10 @@ function agentTaskRunRequest(
       taskId: task.id,
       agentId: task.agentId,
       rootThreadId: task.rootThreadId,
-      ...(task.parentTaskId === undefined
-        ? {}
-        : { parentTaskId: task.parentTaskId }),
-      depth: task.depth,
-      contextMode: task.contextMode,
-      executionMode: task.executionMode,
       maxTurns: task.maxTurns,
       ...(task.modelSelector === undefined
         ? {}
         : { modelSelector: task.modelSelector }),
-      ...(task.contextMode === 'fork'
-        ? { exactCommandNames: task.commandNames }
-        : {}),
     },
   };
 }

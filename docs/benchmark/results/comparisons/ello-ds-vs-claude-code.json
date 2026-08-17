@@ -1,0 +1,41 @@
+{
+  "leftAgentId": "ello-ds",
+  "rightAgentId": "claude-code",
+  "matchedRuns": 103,
+  "excludedPairs": 10,
+  "wins": 19,
+  "ties": 62,
+  "losses": 22,
+  "pairedPassRateDelta": -0.029126213592233052,
+  "taskMacroDelta": -0.02912621359223301,
+  "durationRatio": {
+    "count": 93,
+    "mean": 0.9934475223920795,
+    "median": 0.9859118088246986,
+    "p95": 1.5538501378237912
+  },
+  "inputTokenRatio": {
+    "count": 81,
+    "mean": 1.0335414537878176,
+    "median": 0.9059584188896028,
+    "p95": 1.935230599714169
+  },
+  "outputTokenRatio": {
+    "count": 81,
+    "mean": 0.9643282355410817,
+    "median": 0.913315730469672,
+    "p95": 1.5010838837265317
+  },
+  "toolCallRatio": {
+    "count": 93,
+    "mean": 0.8669422814740249,
+    "median": 0.869198312236287,
+    "p95": 1.351282051282051
+  },
+  "resourceCoverage": {
+    "durationPairs": 93,
+    "inputTokenPairs": 81,
+    "outputTokenPairs": 81,
+    "toolCallPairs": 93
+  }
+}

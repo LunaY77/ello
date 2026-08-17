@@ -553,7 +553,6 @@ describe('AppShell', () => {
             runId: 'task-1',
             agentName: 'explore',
             description: 'inspect loader',
-            background: false,
             status: 'running',
             startedAt: '2026-07-01T00:00:00.000Z',
             tools: [
@@ -602,7 +601,6 @@ describe('AppShell', () => {
             runId: 'task-1',
             agentName: 'explore',
             description: 'inspect loader',
-            background: false,
             status: 'running',
             startedAt: '2026-07-01T00:00:00.000Z',
             tools,

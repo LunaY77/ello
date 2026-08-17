@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import {
   normalizeEventCapture,
   normalizeEventCaptureSource,
+  normalizeEventCaptures,
+  readEventCaptures,
 } from '../src/infra/rounds.js';
 
 describe('round normalization', () => {
@@ -221,6 +223,45 @@ describe('round normalization', () => {
     });
     expect(normalized.tools).toHaveLength(1);
     expect(normalized.usage.status).toBe('unavailable');
+  });
+
+  it('records a reasoning-budget interruption as an incomplete round', () => {
+    const identity = {
+      runId: 'run-1',
+      turnIndex: 0,
+      modelCallId: 'call-budget',
+      agentName: 'build',
+      modelSelector: 'primary_model',
+      configuredModel: 'benchmark-pro',
+      protocol: 'openai',
+      apiModel: 'model',
+    };
+    const normalized = normalizeEventCaptures(
+      [
+        capture(1, 'model.started', modelEvent('model.started', 1, identity)),
+        capture(2, 'model.interrupted', {
+          ...modelEvent('model.interrupted', 2, identity),
+          diagnostics: modelDiagnostics(),
+          startedAt: '2026-07-23T00:00:01.000Z',
+          reason: 'reasoning-budget',
+          reasoningChars: 262144,
+        }),
+        capture(3, 'run.completed', {
+          type: 'run.completed',
+          sequence: 3,
+          runId: 'run-1',
+          occurredAt: '2026-07-23T00:00:03.000Z',
+        }),
+      ],
+      false,
+    );
+
+    expect(normalized.providerFailure).toBe(false);
+    expect(normalized.rounds[0]).toMatchObject({
+      status: 'incomplete',
+      error: 'Ello model call interrupted: reasoning-budget.',
+      usage: { status: 'unavailable' },
+    });
   });
 
   it('keeps tool ownership separate when recovered runs reuse turn indexes', async () => {
@@ -442,6 +483,64 @@ describe('round normalization', () => {
       status: 'complete',
       toolCalls: 3,
     });
+  });
+
+  it('逐行读取 event log，不把整个文件读成一个字符串', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-bench-stream-'));
+    const eventLogPath = path.join(root, 'events.jsonl');
+    const identity = {
+      runId: 'run-1',
+      turnIndex: 0,
+      modelCallId: 'call-1',
+      agentName: 'build',
+      modelSelector: 'primary_model',
+      configuredModel: 'benchmark-pro',
+      protocol: 'openai',
+      apiModel: 'model',
+    };
+    await writeFile(
+      eventLogPath,
+      `${[
+        capture(1, 'model.started', modelEvent('model.started', 1, identity)),
+        capture(2, 'model.completed', {
+          ...modelEvent('model.completed', 2, identity),
+          response: {
+            finishReason: 'stop',
+            usage: {
+              inputTokens: 10,
+              outputTokens: 4,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+          },
+        }),
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n')}\n`,
+      'utf8',
+    );
+
+    const captures = await readEventCaptures(eventLogPath);
+
+    expect(captures.map((entry) => entry.event)).toEqual([
+      'model.started',
+      'model.completed',
+    ]);
+    expect(normalizeEventCaptures(captures, false).usage).toMatchObject({
+      status: 'complete',
+      requests: 1,
+    });
+  });
+
+  it('流式读取在坏行上报告真实行号', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'ello-bench-stream-bad-'));
+    const eventLogPath = path.join(root, 'events.jsonl');
+    await writeFile(eventLogPath, '\n{"nope":true}\n', 'utf8');
+
+    await expect(readEventCaptures(eventLogPath)).rejects.toThrow(
+      'Invalid event capture line 2.',
+    );
   });
 });
 

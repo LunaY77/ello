@@ -135,38 +135,6 @@ export class AgentTaskClient {
     return result.task;
   }
 
-  async resume(
-    taskId: string,
-    prompt: string,
-    options: {
-      readonly name?: string;
-      readonly description?: string;
-      readonly executionMode?: 'foreground' | 'background';
-    } = {},
-  ) {
-    const result = await this.server.request('agent/task/resume', {
-      threadId: this.rootThreadId,
-      taskId,
-      prompt,
-      ...(options.name === undefined ? {} : { name: options.name }),
-      ...(options.description === undefined
-        ? {}
-        : { description: options.description }),
-      executionMode: options.executionMode ?? 'background',
-    });
-    this.upsertTask(result.task);
-    return result.task;
-  }
-
-  async background(taskId: string) {
-    const result = await this.server.request('agent/task/background', {
-      threadId: this.rootThreadId,
-      taskId,
-    });
-    this.upsertTask(result.task);
-    return result.task;
-  }
-
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
@@ -233,9 +201,29 @@ export class AgentTaskClient {
     if (this.recoveryTask !== undefined) return this.recoveryTask;
     this.recoveryTask = this.server
       .request('agent/task/subscribe', { threadId: this.rootThreadId })
-      .then((snapshot) => {
+      .then(async (snapshot) => {
+        const tasks = new Map(
+          snapshot.tasks.map((task) => [task.taskId, task]),
+        );
+        const staleDetails: string[] = [];
+        for (const [taskId, detail] of this.details) {
+          const task = tasks.get(taskId);
+          if (task === undefined) {
+            this.details.delete(taskId);
+          } else if (task.eventSequence !== detail.task.eventSequence) {
+            this.details.delete(taskId);
+            staleDetails.push(taskId);
+          }
+        }
         this.tree = snapshot;
         this.emit({ type: 'snapshot', snapshot });
+        await Promise.all(
+          staleDetails.map((taskId) =>
+            this.read(taskId).catch((error: unknown) =>
+              this.emit({ type: 'error', error: toError(error) }),
+            ),
+          ),
+        );
       })
       .catch((error: unknown) => {
         this.emit({ type: 'error', error: toError(error) });

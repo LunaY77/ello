@@ -117,16 +117,6 @@
       "threadId": "thr_fixture",
       "taskId": "job_fixture"
     },
-    "agent/task/resume": {
-      "threadId": "thr_fixture",
-      "taskId": "job_fixture",
-      "prompt": "继续完成任务",
-      "executionMode": "background"
-    },
-    "agent/task/background": {
-      "threadId": "thr_fixture",
-      "taskId": "job_fixture"
-    },
     "tool/list": { "cwd": "/workspace" },
     "skills/list": { "cwd": "/workspace", "query": "fixture" },
     "skills/get": { "cwd": "/workspace", "name": "fixture" },

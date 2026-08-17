@@ -28,7 +28,6 @@ describe('tui-event-store', () => {
         revision: 7,
         agentName: 'explore',
         description: '调研 skill 能力',
-        background: true,
         status: 'completed' as const,
         startedAt: fixtureTimestamp,
         completedAt: fixtureTimestamp,
@@ -68,7 +67,6 @@ describe('tui-event-store', () => {
         revision: 7,
         agentName: 'explore',
         description: '调研 skill 能力',
-        background: true,
         status: 'completed' as const,
         startedAt: fixtureTimestamp,
         completedAt: fixtureTimestamp,
@@ -109,8 +107,7 @@ describe('tui-event-store', () => {
         revision: 171,
         agentName: 'explore',
         description: '调研 agent 架构',
-        background: false,
-        status: 'killed' as const,
+        status: 'stopped' as const,
         startedAt: fixtureTimestamp,
         completedAt: fixtureTimestamp,
         toolCount: 13,
@@ -873,16 +870,16 @@ describe('tui-event-store', () => {
     });
   });
 
-  it('hides successful delegate tool rows but preserves failed delegates', () => {
-    const delegate = (
+  it('hides successful spawn tool rows but preserves failed spawns', () => {
+    const spawn = (
       id: string,
       status: 'completed' | 'failed',
     ): Extract<ThreadItem, { type: 'toolCall' }> => ({
       id,
       turnId: 'turn-1',
       type: 'toolCall',
-      toolName: 'delegate_to_subagent',
-      headline: 'Delegate',
+      toolName: 'spawn_agent',
+      headline: 'Spawn Agent',
       status,
       ...(status === 'failed' ? { error: 'cwd policy rejected' } : {}),
       createdAt: fixtureTimestamp,
@@ -892,8 +889,8 @@ describe('tui-event-store', () => {
         turns: [
           turnFixture({
             items: [
-              delegate('delegate-completed', 'completed'),
-              delegate('delegate-failed', 'failed'),
+              spawn('spawn-completed', 'completed'),
+              spawn('spawn-failed', 'failed'),
             ],
             completedAt: fixtureTimestamp,
           }),
@@ -903,7 +900,7 @@ describe('tui-event-store', () => {
 
     expect(state.history.filter((entry) => entry.kind === 'tool')).toEqual([
       expect.objectContaining({
-        id: 'delegate-failed',
+        id: 'spawn-failed',
         tool: expect.objectContaining({ status: 'fail' }),
       }),
     ]);

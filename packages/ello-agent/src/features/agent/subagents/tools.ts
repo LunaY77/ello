@@ -1,7 +1,8 @@
 /**
- * 本文件定义主 Agent 可见的子代理启动与控制工具。
+ * Primary-only Agent Commands.
  *
- * 工具只负责参数、权限和上下文派生；任务生命周期与前后台竞态统一交给 AgentTaskService。
+ * `spawn_agent` is always asynchronous. Subagent runs receive none of these Commands, so recursive
+ * delegation is impossible even when a Subagent definition names one explicitly.
  */
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -21,138 +22,140 @@ import type { AgentRunRequest, ResolvedAgentDefinition } from '../contracts.js';
 import type { CodingAgentDefinition } from './schema.js';
 import { deriveSubagentPermission } from './subagent-permissions.js';
 import type { AgentTaskService } from './task-service.js';
-import {
-  AgentTaskContextModeSchema,
-  AgentTaskExecutionModeSchema,
-  type AgentTask,
-} from './task-store.js';
+import type { AgentTask, AgentTaskPacket } from './task-types.js';
 
-/** 创建当前父 run 专属的委派、输出和停止工具。 */
-export function createSubagentCommands(input: {
+const DEFAULT_AGENT_WAIT_TIMEOUT_MS = 120_000;
+const MAX_AGENT_WAIT_TIMEOUT_MS = 180_000;
+
+/**
+ * Agent 控制 Commands 只读写 Ello 自身的任务存储，从不触碰 Environment。
+ *
+ * 声明 `usesEnvironment: false` 让它们绕过 Environment 执行 gate：`wait_agent` 会在屏障上
+ * 阻塞到分钟级，若占用 gate 就会阻塞同一 Environment 内所有 Subagent 的工具执行。
+ */
+const AGENT_CONTROL_EFFECTS = { usesEnvironment: false } as const;
+
+export { AGENT_CONTROL_COMMAND_NAMES } from './agent-controls.js';
+
+interface SubagentCommandInput {
   readonly request: AgentRunRequest;
   readonly definition: ResolvedAgentDefinition;
-  readonly parentCommandNames: readonly string[];
   readonly service: AgentTaskService;
   readonly approval: ApprovalFor;
-}): readonly CommandDefinition[] {
+}
+
+/** 创建当前 Primary run 专属的异步 Agent 控制 Commands。 */
+export function createSubagentCommands(
+  input: SubagentCommandInput,
+): readonly CommandDefinition[] {
   if (!input.definition.config.subagents.enabled) return [];
-  const controls: CommandDefinition[] = [
-    createTaskOutputCommand(input),
-    createTaskStopCommand(input),
+  if (input.request.delegation !== undefined) return [];
+  const controls = [
+    createListAgentsCommand(input),
+    createGetAgentCommand(input),
+    createWaitAgentCommand(input),
+    createStopAgentCommand(input),
   ];
-  const depth = input.request.delegation?.depth ?? 0;
-  const explicitlyDelegatable =
-    input.definition.definition.commands?.includes('delegate_to_subagent') ===
-    true;
-  const forkRequiresExactDelegate =
-    input.request.delegation?.contextMode === 'fork' &&
-    input.request.delegation.exactCommandNames?.includes(
-      'delegate_to_subagent',
-    ) === true;
-  if (depth >= 1 && !explicitlyDelegatable && !forkRequiresExactDelegate) {
-    return controls;
-  }
   const candidates = input.definition.agentRegistry.delegatable();
   return candidates.length === 0
     ? controls
-    : [createDelegateCommand(input, candidates), ...controls];
+    : [createSpawnAgentCommand(input, candidates), ...controls];
 }
 
-function createDelegateCommand(
-  input: {
-    readonly request: AgentRunRequest;
-    readonly definition: ResolvedAgentDefinition;
-    readonly parentCommandNames: readonly string[];
-    readonly service: AgentTaskService;
-    readonly approval: ApprovalFor;
-  },
+function createSpawnAgentCommand(
+  input: SubagentCommandInput,
   candidates: readonly CodingAgentDefinition[],
 ): CommandDefinition {
   const candidateNames = candidates.map((candidate) => candidate.name);
-  const commandInputSchema = z
+  const schema = z
     .object({
-      subagent_type: z
+      agent: z
         .enum(candidateNames)
-        .describe('Configured subagent type to run'),
-      prompt: z
+        .describe('Configured Subagent type to run.'),
+      scope: z
         .string()
+        .trim()
         .min(1)
-        .describe('Complete task prompt for the subagent'),
-      description: z
+        .describe('Owned files, modules, or responsibility boundary.'),
+      known_facts: z
+        .array(z.string().trim().min(1))
+        .max(64)
+        .default([])
+        .describe('Established facts; repeat this option for multiple facts.'),
+      constraints: z
+        .array(z.string().trim().min(1))
+        .max(64)
+        .default([])
+        .describe('Constraints to preserve; repeat for multiple constraints.'),
+      expected_outcome: z
         .string()
+        .trim()
         .min(1)
-        .describe('Short task description shown in task status'),
+        .describe('Concrete deliverable expected from the Subagent.'),
+      acceptance_evidence: z
+        .array(z.string().trim().min(1))
+        .min(1)
+        .max(64)
+        .describe('Required evidence; repeat for multiple acceptance checks.'),
       model: z
         .enum(['primary_model', 'auxiliary_model'])
         .optional()
-        .describe('Optional model selector override'),
-      context_mode: AgentTaskContextModeSchema.default('fresh').describe(
-        'Use fresh context or fork the parent context',
-      ),
-      execution_mode: AgentTaskExecutionModeSchema.default(
-        'foreground',
-      ).describe('Wait for completion or return a background task handle'),
-      cwd: z.string().min(1).optional().describe('Child working directory'),
-      isolation: z
-        .enum(['shared'])
-        .default('shared')
-        .describe('Workspace isolation mode'),
+        .describe('Optional model selector override.'),
+      cwd: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe('Subagent working directory.'),
       name: z
         .string()
         .regex(/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/u)
         .optional()
-        .describe('Optional root-thread-local task name'),
+        .describe('Optional root-thread-local Agent name.'),
+      objective: z
+        .string()
+        .trim()
+        .min(1)
+        .describe('Complete, self-contained objective for the Subagent.'),
     })
     .strict();
   return defineCommand({
-    name: 'delegate_to_subagent',
-    summary: 'Run one configured subagent by type.',
-    details: delegateDescription(
+    name: 'spawn_agent',
+    summary:
+      'Start one independent Subagent and immediately return its durable handle.',
+    details: spawnDescription(
       candidates,
       cwdPolicy(input.definition.config),
       authorizedChildRoots(input),
     ),
-    aliases: ['agent', 'delegate', 'subagent'],
+    aliases: [],
     risk: 'workspace-write',
-    invocation: cliInput(commandInput(commandInputSchema), {
-      positionals: [{ field: 'subagent_type', metavar: 'type' }],
+    invocation: cliInput(commandInput(schema), {
+      positionals: [{ field: 'agent', metavar: 'agent' }],
       options: [
-        'description',
+        'scope',
+        'known_facts',
+        'constraints',
+        'expected_outcome',
+        'acceptance_evidence',
         'model',
-        'context_mode',
-        'execution_mode',
         'cwd',
-        'isolation',
         'name',
       ],
-      body: 'prompt',
+      body: 'objective',
     }),
-    approval: input.approval('delegate_to_subagent'),
+    approval: input.approval('spawn_agent'),
     effects: () => ({
-      concurrencySafe: false,
+      ...AGENT_CONTROL_EFFECTS,
+      concurrencySafe: true,
       readOnly: false,
       destructive: false,
       interruptible: true,
-      telemetryTag: 'agent.delegate',
+      telemetryTag: 'agent.spawn',
     }),
     execution: {
       kind: 'immediate',
-      run: async (commandInput, context) => {
-        const depth = input.request.delegation?.depth ?? 0;
-        const explicitlyDelegatable =
-          input.definition.definition.commands?.includes(
-            'delegate_to_subagent',
-          ) === true;
-        if (depth >= 1 && !explicitlyDelegatable) {
-          throw new Error(
-            'Subagent delegation depth is limited to one unless its definition explicitly allows delegate_to_subagent.',
-          );
-        }
-        if (commandInput.isolation !== 'shared') {
-          throw new Error(
-            `${commandInput.isolation} isolation belongs to the P3 workspace coordinator; P2 delegation supports shared isolation only.`,
-          );
-        }
+      run: (commandInput, context) => {
         context.signal.throwIfAborted();
         const authorizedRoots = authorizedChildRoots(input);
         const cwd = resolveChildCwd(
@@ -161,34 +164,213 @@ function createDelegateCommand(
           cwdPolicy(input.definition.config),
           authorizedRoots,
         );
-        const started = startNewTask(input, commandInput, cwd, authorizedRoots);
-        if (commandInput.execution_mode === 'background') {
-          return taskView(started.task);
+        const definition = input.definition.agentRegistry.get(
+          commandInput.agent,
+        );
+        if (
+          !candidates.some((candidate) => candidate.name === definition.name)
+        ) {
+          throw new Error(`Agent is not delegatable: ${definition.name}`);
         }
-        const stopOnParentAbort = () => {
-          void input.service.stop(started.task.id, input.request.threadId);
+        const taskPacket: AgentTaskPacket = {
+          objective: commandInput.objective,
+          scope: commandInput.scope,
+          knownFacts: commandInput.known_facts,
+          constraints: commandInput.constraints,
+          expectedOutcome: commandInput.expected_outcome,
+          acceptanceEvidence: commandInput.acceptance_evidence,
         };
-        if (context.signal.aborted) stopOnParentAbort();
-        else {
-          context.signal.addEventListener('abort', stopOnParentAbort, {
-            once: true,
-          });
-        }
-        try {
-          const delivered = await started.delivery;
-          if (delivered.executionMode === 'foreground') {
-            input.service.acknowledge(delivered.id);
-          }
-          return taskView(delivered);
-        } finally {
-          context.signal.removeEventListener('abort', stopOnParentAbort);
-        }
+        const started = input.service.start({
+          rootThreadId: input.request.threadId,
+          ...(commandInput.name === undefined
+            ? {}
+            : { name: commandInput.name }),
+          description: oneLine(commandInput.objective),
+          definitionName: definition.name,
+          ...(commandInput.model === undefined
+            ? {}
+            : { modelSelector: commandInput.model }),
+          taskPacket,
+          cwd,
+          isolation: 'shared',
+          maxTurns: definition.maxTurns ?? 20,
+          sidechain: [],
+          permissionRules: deriveSubagentPermission(
+            input.request.permission.rules(),
+            definition,
+          ),
+          externalPaths: authorizedRoots,
+        });
+        return agentView(started.task);
       },
     },
   });
 }
 
-function delegateDescription(
+function createListAgentsCommand(
+  input: SubagentCommandInput,
+): CommandDefinition {
+  const schema = z.object({}).strict();
+  return defineCommand({
+    name: 'list_agents',
+    summary: 'List Subagent instances spawned by this Primary session.',
+    aliases: [],
+    risk: 'readonly',
+    invocation: cliInput(commandInput(schema)),
+    effects: readonlyEffects('agent.list'),
+    execution: {
+      kind: 'immediate',
+      run: () => input.service.list(input.request.threadId).map(agentView),
+    },
+  });
+}
+
+function createGetAgentCommand(input: SubagentCommandInput): CommandDefinition {
+  const schema = agentSelectorSchema();
+  return defineCommand({
+    name: 'get_agent',
+    summary:
+      'Read the current state and structured result of one Subagent instance.',
+    aliases: [],
+    risk: 'readonly',
+    invocation: cliInput(commandInput(schema), {
+      positionals: [{ field: 'agent_id', metavar: 'agent' }],
+    }),
+    effects: readonlyEffects('agent.get'),
+    execution: {
+      kind: 'immediate',
+      run: ({ agent_id }) => {
+        assertAgentSelector(agent_id);
+        return agentView(
+          input.service.read(agent_id, input.request.threadId).task,
+        );
+      },
+    },
+  });
+}
+
+function createWaitAgentCommand(
+  input: SubagentCommandInput,
+): CommandDefinition {
+  const schema = z
+    .object({
+      agent_id: agentSelectorField(),
+      timeout_ms: z
+        .number()
+        .int()
+        .min(1_000)
+        .max(MAX_AGENT_WAIT_TIMEOUT_MS)
+        .optional()
+        .describe(
+          'Maximum barrier wait in milliseconds; timeout does not stop the Agent.',
+        ),
+    })
+    .strict();
+  return defineCommand({
+    name: 'wait_agent',
+    summary:
+      'Wait at an explicit dependency barrier until one Subagent is terminal.',
+    details:
+      'Use only when the next Primary step depends on this result. To wait for independent Agents together, issue multiple wait_agent Commands in the same Command Run step. A timeout returns timed_out and leaves the Agent running.',
+    aliases: [],
+    risk: 'readonly',
+    invocation: cliInput(commandInput(schema), {
+      positionals: [{ field: 'agent_id', metavar: 'agent' }],
+      options: ['timeout_ms'],
+    }),
+    effects: () => ({
+      ...AGENT_CONTROL_EFFECTS,
+      concurrencySafe: true,
+      readOnly: true,
+      destructive: false,
+      interruptible: true,
+      telemetryTag: 'agent.wait',
+    }),
+    execution: {
+      kind: 'immediate',
+      run: async ({ agent_id, timeout_ms }, context) => {
+        assertAgentSelector(agent_id);
+        const timeoutMs = timeout_ms ?? DEFAULT_AGENT_WAIT_TIMEOUT_MS;
+        const waited = await input.service.wait(
+          agent_id,
+          input.request.threadId,
+          context.signal,
+          timeoutMs,
+        );
+        return waited.waitStatus === 'timed_out'
+          ? {
+              waitStatus: waited.waitStatus,
+              timeoutMs,
+              agent: agentView(waited.task),
+            }
+          : agentView(waited.task);
+      },
+    },
+  });
+}
+
+function createStopAgentCommand(
+  input: SubagentCommandInput,
+): CommandDefinition {
+  const schema = agentSelectorSchema();
+  return defineCommand({
+    name: 'stop_agent',
+    summary:
+      'Stop one queued or running Subagent; terminal Agents are unchanged.',
+    aliases: [],
+    risk: 'workspace-write',
+    invocation: cliInput(commandInput(schema), {
+      positionals: [{ field: 'agent_id', metavar: 'agent' }],
+    }),
+    approval: input.approval('stop_agent'),
+    effects: () => ({
+      ...AGENT_CONTROL_EFFECTS,
+      concurrencySafe: false,
+      readOnly: false,
+      destructive: false,
+      interruptible: false,
+      telemetryTag: 'agent.stop',
+    }),
+    execution: {
+      kind: 'immediate',
+      run: async ({ agent_id }) => {
+        assertAgentSelector(agent_id);
+        return agentView(
+          await input.service.stop(agent_id, input.request.threadId),
+        );
+      },
+    },
+  });
+}
+
+function agentSelectorSchema() {
+  return z
+    .object({
+      agent_id: agentSelectorField(),
+    })
+    .strict();
+}
+
+function agentSelectorField() {
+  return z
+    .string()
+    .trim()
+    .min(1)
+    .describe('Subagent job_ id, agent_ id, or root-thread-local name.');
+}
+
+function readonlyEffects(telemetryTag: string) {
+  return () => ({
+    ...AGENT_CONTROL_EFFECTS,
+    concurrencySafe: true,
+    readOnly: true,
+    destructive: false,
+    interruptible: true,
+    telemetryTag,
+  });
+}
+
+function spawnDescription(
   candidates: readonly CodingAgentDefinition[],
   policy: 'workspace' | 'allowed_paths',
   authorizedRoots: readonly string[],
@@ -197,180 +379,15 @@ function delegateDescription(
     .map((candidate) => `- ${candidate.name}: ${candidate.description}`)
     .join('\n');
   return [
-    'context_mode selects a fresh context or a fork of the parent context. execution_mode selects whether this Command waits for the result or returns a durable task handle that task_output and task_stop then address.',
-    `cwd policy: ${policy}. Omit cwd to inherit the current working directory.`,
+    'Delegation is always asynchronous and every Subagent receives an independent context built only from this Task Packet and stable project context.',
+    `cwd policy: ${policy}. Omit cwd to use the Primary working directory.`,
     `Authorized cwd roots: ${authorizedRoots.join(', ')}`,
-    'Available subagents:',
+    'Available Subagents:',
     catalog,
   ].join('\n');
 }
 
-function startNewTask(
-  input: {
-    readonly request: AgentRunRequest;
-    readonly definition: ResolvedAgentDefinition;
-    readonly parentCommandNames: readonly string[];
-    readonly service: AgentTaskService;
-  },
-  toolInput: {
-    readonly subagent_type: string;
-    readonly prompt: string;
-    readonly description: string;
-    readonly model?: 'primary_model' | 'auxiliary_model' | undefined;
-    readonly context_mode: 'fresh' | 'fork';
-    readonly execution_mode: 'foreground' | 'background';
-    readonly isolation: 'shared' | 'worktree' | 'container';
-    readonly name?: string | undefined;
-  },
-  cwd: string,
-  authorizedRoots: readonly string[],
-) {
-  const childDefinition = input.definition.agentRegistry.get(
-    toolInput.subagent_type,
-  );
-  if (
-    !input.definition.agentRegistry
-      .delegatable()
-      .some((candidate) => candidate.name === childDefinition.name)
-  ) {
-    throw new Error(`Agent is not delegatable: ${childDefinition.name}`);
-  }
-  const parentDepth = input.request.delegation?.depth ?? 0;
-  const fork = toolInput.context_mode === 'fork';
-  const permissionRules = fork
-    ? input.request.permission.rules()
-    : deriveSubagentPermission(
-        input.request.permission.rules(),
-        childDefinition,
-      );
-  return input.service.start({
-    rootThreadId:
-      input.request.delegation?.rootThreadId ?? input.request.threadId,
-    ...(input.request.delegation === undefined
-      ? {}
-      : { parentTaskId: input.request.delegation.taskId }),
-    ...(toolInput.name === undefined ? {} : { name: toolInput.name }),
-    description: toolInput.description,
-    definitionName: childDefinition.name,
-    ...(toolInput.model === undefined
-      ? {}
-      : { modelSelector: toolInput.model }),
-    contextMode: toolInput.context_mode,
-    executionMode: toolInput.execution_mode,
-    prompt: toolInput.prompt,
-    cwd,
-    isolation: toolInput.isolation,
-    maxTurns: childDefinition.maxTurns ?? 20,
-    depth: parentDepth + 1,
-    sidechain: fork ? [...input.request.history] : [],
-    commandNames: fork ? [...input.parentCommandNames] : [],
-    permissionRules,
-    externalPaths: authorizedRoots,
-  });
-}
-
-function createTaskOutputCommand(input: {
-  readonly request: AgentRunRequest;
-  readonly service: AgentTaskService;
-}): CommandDefinition {
-  const commandInputSchema = z
-    .object({
-      task_id: z
-        .string()
-        .min(1)
-        .describe('Subagent task job_ id or root-thread-local name'),
-      block: z
-        .boolean()
-        .default(false)
-        .describe('Whether to wait briefly for a live task'),
-      timeout_ms: z
-        .number()
-        .int()
-        .min(100)
-        .max(180_000)
-        .default(30_000)
-        .describe('Maximum wait time in milliseconds'),
-    })
-    .strict();
-  return defineCommand({
-    name: 'task_output',
-    summary:
-      'Read one durable subagent task. Persisted task-board ids belong to task_get.',
-    aliases: ['agent output'],
-    risk: 'readonly',
-    invocation: cliInput(commandInput(commandInputSchema), {
-      positionals: [{ field: 'task_id', metavar: 'task' }],
-      options: ['block', 'timeout_ms'],
-    }),
-    effects: () => ({
-      concurrencySafe: true,
-      readOnly: true,
-      destructive: false,
-      interruptible: true,
-      telemetryTag: 'agent.task_output',
-    }),
-    execution: {
-      kind: 'immediate',
-      run: async ({ task_id, block, timeout_ms }) => {
-        assertSubagentTaskSelector(task_id);
-        return taskView(
-          await input.service.output(
-            task_id,
-            input.request.delegation?.rootThreadId ?? input.request.threadId,
-            block ? timeout_ms : 0,
-          ),
-        );
-      },
-    },
-  });
-}
-
-function createTaskStopCommand(input: {
-  readonly request: AgentRunRequest;
-  readonly service: AgentTaskService;
-  readonly approval: ApprovalFor;
-}): CommandDefinition {
-  const commandInputSchema = z
-    .object({
-      task_id: z
-        .string()
-        .min(1)
-        .describe('Subagent task job_ id or root-thread-local name'),
-    })
-    .strict();
-  return defineCommand({
-    name: 'task_stop',
-    summary:
-      'Stop one queued or running subagent task; a task already in a terminal state is returned unchanged.',
-    aliases: ['stop agent'],
-    risk: 'workspace-write',
-    invocation: cliInput(commandInput(commandInputSchema), {
-      positionals: [{ field: 'task_id', metavar: 'task' }],
-    }),
-    approval: input.approval('task_stop'),
-    effects: () => ({
-      concurrencySafe: false,
-      readOnly: false,
-      destructive: false,
-      interruptible: false,
-      telemetryTag: 'agent.task_stop',
-    }),
-    execution: {
-      kind: 'immediate',
-      run: async ({ task_id }) => {
-        assertSubagentTaskSelector(task_id);
-        return taskView(
-          await input.service.stop(
-            task_id,
-            input.request.delegation?.rootThreadId ?? input.request.threadId,
-          ),
-        );
-      },
-    },
-  });
-}
-
-function assertSubagentTaskSelector(selector: string): void {
+function assertAgentSelector(selector: string): void {
   if (
     !/^\d+$/u.test(selector) &&
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
@@ -380,7 +397,7 @@ function assertSubagentTaskSelector(selector: string): void {
     return;
   }
   throw new Error(
-    `Task '${selector}' is a persisted task-board ID; use task_get to read it, task_update to change it, or task_delete to remove it. task_output and task_stop only accept subagent job_ IDs or local names.`,
+    `Task '${selector}' is a Task Board id; Agent Commands accept only job_ ids, agent_ ids, or local Agent names.`,
   );
 }
 
@@ -440,20 +457,22 @@ function pathInside(root: string, target: string): boolean {
   );
 }
 
-function taskView(task: AgentTask) {
+function oneLine(value: string): string {
+  const normalized = value.replace(/\s+/gu, ' ').trim();
+  return normalized.length <= 160 ? normalized : `${normalized.slice(0, 159)}…`;
+}
+
+function agentView(task: AgentTask) {
   return {
     taskId: task.id,
     agentId: task.agentId,
     ...(task.name === undefined ? {} : { name: task.name }),
     agent: task.definitionName,
     description: task.description,
-    contextMode: task.contextMode,
-    executionMode: task.executionMode,
     status: task.status,
     cwd: task.cwd,
-    depth: task.depth,
     revision: task.revision,
-    ...(task.output === undefined ? {} : { output: task.output }),
+    ...(task.result === undefined ? {} : { result: task.result }),
     ...(task.errorMessage === undefined ? {} : { error: task.errorMessage }),
     ...(task.usage === undefined ? {} : { usage: task.usage }),
   };

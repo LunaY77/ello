@@ -21,8 +21,8 @@ import {
 } from '../../domain/scoring/report.js';
 import { claudeCodeBaseUrlIssue } from '../agent/claude-code/base-url.js';
 import { diagnoseClaudeCodeProviderFailure } from '../agent/claude-code/parser.js';
-import { readJsonFile, writeJsonAtomic } from '../io.js';
-import { normalizeEventCaptureSource } from '../rounds.js';
+import { readJsonFile, sha256File, writeJsonAtomic } from '../io.js';
+import { normalizeEventCaptures, readEventCaptures } from '../rounds.js';
 
 export async function generateSuiteReport(
   runRootInput: string,
@@ -113,14 +113,14 @@ async function loadInvalidPartialEvidence(
   const evidence = NormalizedAgentEvidenceSchema.parse(
     JSON.parse(evidenceContent.toString('utf8')) as unknown,
   );
-  const rawContent = await readFile(evidence.rawSource.path);
-  if (sha256(rawContent) !== evidence.rawSource.sha256) {
+  const rawSha256 = await sha256File(evidence.rawSource.path);
+  if (rawSha256 !== evidence.rawSource.sha256) {
     throw new Error(
       `Agent raw evidence checksum mismatch: ${attempt.attemptId}`,
     );
   }
-  const normalized = normalizeEventCaptureSource(
-    rawContent.toString('utf8'),
+  const normalized = normalizeEventCaptures(
+    await readEventCaptures(evidence.rawSource.path),
     true,
   );
   const completeRounds = normalized.rounds.filter(

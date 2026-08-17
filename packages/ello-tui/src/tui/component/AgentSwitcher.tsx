@@ -48,7 +48,7 @@ export function AgentSwitcher({
         label="main"
         density={density}
       />
-      {visible.map(({ task, depth }) => (
+      {visible.map((task) => (
         <AgentRow
           key={task.taskId}
           active={activeTaskId === task.taskId}
@@ -57,7 +57,6 @@ export function AgentSwitcher({
           }
           label={task.name ?? task.definitionName}
           task={task}
-          depth={depth}
           now={now || Date.parse(task.updatedAt)}
           density={density}
         />
@@ -81,7 +80,6 @@ function AgentRow({
   highlighted,
   label,
   task,
-  depth = 0,
   now,
   density,
 }: {
@@ -89,12 +87,11 @@ function AgentRow({
   readonly highlighted: boolean;
   readonly label: string;
   readonly task?: AgentTaskSummary;
-  readonly depth?: number;
   readonly now?: number;
   readonly density: AgentRowDensity;
 }) {
   const theme = useTheme();
-  const left = `${highlighted ? '❯' : ' '} ${active ? '●' : '○'} ${'  '.repeat(depth)}${label}`;
+  const left = `${highlighted ? '❯' : ' '} ${active ? '●' : '○'} ${label}`;
   const metrics = taskMetrics(task, density, now);
   return (
     <Box width="100%">
@@ -146,13 +143,13 @@ function taskMetrics(
   now: number | undefined,
 ): string {
   if (task === undefined) return '';
-  if (task.status !== 'running' || density === 'compact') return task.status;
+  if (task.status === 'queued' || density === 'compact') return task.status;
   const duration = elapsed(task, now ?? Date.parse(task.updatedAt));
-  if (density === 'narrow') return `running · ${duration}`;
+  if (density === 'narrow') return `${task.status} · ${duration}`;
   const tokens = totalTokens(task);
   return tokens === undefined
-    ? `running · ${duration}`
-    : `running · ${duration} · ${formatTokens(tokens)}`;
+    ? `${task.status} · ${duration}`
+    : `${task.status} · ${duration} · ${formatTokens(tokens)}`;
 }
 
 function navigationHint(
@@ -170,13 +167,11 @@ function navigationHint(
 
 /** 以高亮项为中心的固定窗口，保证行数上界与 `agentSwitcherRows()` 一致。 */
 function visibleTaskWindow(
-  ordered: readonly { task: AgentTaskSummary; depth: number }[],
+  ordered: readonly AgentTaskSummary[],
   highlightedTaskId: 'main' | string,
-): readonly { task: AgentTaskSummary; depth: number }[] {
+): readonly AgentTaskSummary[] {
   if (ordered.length <= AGENT_SWITCHER_MAX_TASK_ROWS) return ordered;
-  const active = ordered.findIndex(
-    (entry) => entry.task.taskId === highlightedTaskId,
-  );
+  const active = ordered.findIndex((task) => task.taskId === highlightedTaskId);
   const start = Math.min(
     Math.max(0, active - AGENT_SWITCHER_MAX_TASK_ROWS + 1),
     ordered.length - AGENT_SWITCHER_MAX_TASK_ROWS,
@@ -185,21 +180,7 @@ function visibleTaskWindow(
 }
 
 function orderTasks(tasks: readonly AgentTaskSummary[]) {
-  const result: Array<{ task: AgentTaskSummary; depth: number }> = [];
-  const seen = new Set<string>();
-  const append = (parentTaskId: string | undefined, depth: number) => {
-    for (const task of tasks) {
-      if (task.parentTaskId !== parentTaskId || seen.has(task.taskId)) continue;
-      seen.add(task.taskId);
-      result.push({ task, depth });
-      append(task.taskId, depth + 1);
-    }
-  };
-  append(undefined, 0);
-  for (const task of tasks) {
-    if (!seen.has(task.taskId)) result.push({ task, depth: 0 });
-  }
-  return result;
+  return tasks;
 }
 
 function elapsed(task: AgentTaskSummary, now: number): string {
@@ -226,9 +207,10 @@ function statusColor(
   task: AgentTaskSummary,
   theme: ReturnType<typeof useTheme>,
 ): string {
-  if (task.status === 'failed' || task.status === 'killed') return theme.error;
+  if (task.status === 'failed') return theme.error;
   if (task.status === 'completed') return theme.success;
-  if (task.status === 'recovered') return theme.warning;
+  if (task.status === 'stopped' || task.status === 'blocked')
+    return theme.warning;
   if (task.status === 'running') return theme.warning;
   return theme.info;
 }

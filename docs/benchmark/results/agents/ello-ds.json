@@ -1,0 +1,8005 @@
+{
+  "agentId": "ello-ds",
+  "agentConfigHash": "f36fc84624f62f72308eb30c66ac53a01c4d518601ed267beaa7d9100dbaac06",
+  "validRuns": 103,
+  "passedRuns": 44,
+  "passRate": 0.42718446601941745,
+  "invalidRuns": 10,
+  "taskMacroAverage": null,
+  "tasks": [
+    {
+      "taskId": "actionlint-action-pinning-lint",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1586315.222351,
+          "median": 1586315.222351,
+          "p95": 1586315.222351
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 228,
+          "median": 228,
+          "p95": 228
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 174,
+          "median": 174,
+          "p95": 174
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 38348903,
+          "median": 38348903,
+          "p95": 38348903
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 195943,
+          "median": 195943,
+          "p95": 195943
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 155418,
+          "median": 155418,
+          "p95": 155418
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 38152960,
+          "median": 38152960,
+          "p95": 38152960
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9948905187718147,
+          "median": 0.9948905187718147,
+          "p95": 0.9948905187718147
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "wazero-multi-module-snapshots",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 942652.227432,
+          "median": 942652.227432,
+          "p95": 942652.227432
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 76,
+          "median": 76,
+          "p95": 76
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 84,
+          "median": 84,
+          "p95": 84
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 6209572,
+          "median": 6209572,
+          "p95": 6209572
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 81700,
+          "median": 81700,
+          "p95": 81700
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 79533,
+          "median": 79533,
+          "p95": 79533
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 6127872,
+          "median": 6127872,
+          "p95": 6127872
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9868428935198754,
+          "median": 0.9868428935198754,
+          "p95": 0.9868428935198754
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "goreleaser-retry-publish-auditing",
+      "agentId": "ello-ds",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "helm-unified-manifest-stream",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1408790.782314,
+          "median": 1408790.782314,
+          "p95": 1408790.782314
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 147,
+          "median": 147,
+          "p95": 147
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 176,
+          "median": 176,
+          "p95": 176
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 18540509,
+          "median": 18540509,
+          "p95": 18540509
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 163805,
+          "median": 163805,
+          "p95": 163805
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 94213,
+          "median": 94213,
+          "p95": 94213
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 18376704,
+          "median": 18376704,
+          "p95": 18376704
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9911650214133819,
+          "median": 0.9911650214133819,
+          "p95": 0.9911650214133819
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "ytt-jsonpath-query-api",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1016352.228498,
+          "median": 1016352.228498,
+          "p95": 1016352.228498
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 96,
+          "median": 96,
+          "p95": 96
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 97,
+          "median": 97,
+          "p95": 97
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 10377120,
+          "median": 10377120,
+          "p95": 10377120
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 87584,
+          "median": 87584,
+          "p95": 87584
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 128812,
+          "median": 128812,
+          "p95": 128812
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 10289536,
+          "median": 10289536,
+          "p95": 10289536
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9915598933037297,
+          "median": 0.9915598933037297,
+          "p95": 0.9915598933037297
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "go-genai-streamed-function-args",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1117905.79409,
+          "median": 1117905.79409,
+          "p95": 1117905.79409
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 168,
+          "median": 168,
+          "p95": 168
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 148,
+          "median": 148,
+          "p95": 148
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kcp-go-multiplexed-kcp-streams",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1894229.550136,
+          "median": 1894229.550136,
+          "p95": 1894229.550136
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 77,
+          "median": 77,
+          "p95": 77
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 73,
+          "median": 73,
+          "p95": 73
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 8887925,
+          "median": 8887925,
+          "p95": 8887925
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 97653,
+          "median": 97653,
+          "p95": 97653
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 127328,
+          "median": 127328,
+          "p95": 127328
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 8790272,
+          "median": 8790272,
+          "p95": 8790272
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9890128460804969,
+          "median": 0.9890128460804969,
+          "p95": 0.9890128460804969
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "task-task-graph-export",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1285098.15277,
+          "median": 1285098.15277,
+          "p95": 1285098.15277
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 141,
+          "median": 141,
+          "p95": 141
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 134,
+          "median": 134,
+          "p95": 134
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 19042340,
+          "median": 19042340,
+          "p95": 19042340
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 158628,
+          "median": 158628,
+          "p95": 158628
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 114286,
+          "median": 114286,
+          "p95": 114286
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 18883712,
+          "median": 18883712,
+          "p95": 18883712
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9916697212632481,
+          "median": 0.9916697212632481,
+          "p95": 0.9916697212632481
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "abs-module-cache-flags",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 643634.356013,
+          "median": 643634.356013,
+          "p95": 643634.356013
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 89,
+          "median": 89,
+          "p95": 89
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 92,
+          "median": 92,
+          "p95": 92
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 7489388,
+          "median": 7489388,
+          "p95": 7489388
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 81772,
+          "median": 81772,
+          "p95": 81772
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 71426,
+          "median": 71426,
+          "p95": 71426
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 7407616,
+          "median": 7407616,
+          "p95": 7407616
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9890816178838645,
+          "median": 0.9890816178838645,
+          "p95": 0.9890816178838645
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "arcane-drift-detection-baselines",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1143268.3789189998,
+          "median": 1143268.3789189998,
+          "p95": 1143268.3789189998
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 124,
+          "median": 124,
+          "p95": 124
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 131,
+          "median": 131,
+          "p95": 131
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 13688353,
+          "median": 13688353,
+          "p95": 13688353
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 119329,
+          "median": 119329,
+          "p95": 119329
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 96557,
+          "median": 96557,
+          "p95": 96557
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 13569024,
+          "median": 13569024,
+          "p95": 13569024
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9912824428183581,
+          "median": 0.9912824428183581,
+          "p95": 0.9912824428183581
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "geo-shapeindex-serialization",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1988237.180954,
+          "median": 1988237.180954,
+          "p95": 1988237.180954
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 262,
+          "median": 262,
+          "p95": 262
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 199,
+          "median": 199,
+          "p95": 199
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "abs-stepped-slices",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 747306.7079229988,
+          "median": 747306.7079229988,
+          "p95": 747306.7079229988
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 109,
+          "median": 109,
+          "p95": 109
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 97,
+          "median": 97,
+          "p95": 97
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 8883431,
+          "median": 8883431,
+          "p95": 8883431
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 99943,
+          "median": 99943,
+          "p95": 99943
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 73977,
+          "median": 73977,
+          "p95": 73977
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 8783488,
+          "median": 8783488,
+          "p95": 8783488
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9887495045551656,
+          "median": 0.9887495045551656,
+          "p95": 0.9887495045551656
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "anko-default-function-arguments",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1794838.6742860004,
+          "median": 1794838.6742860004,
+          "p95": 1794838.6742860004
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 206,
+          "median": 206,
+          "p95": 206
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 194,
+          "median": 194,
+          "p95": 194
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "go-git-worktree-merge-conflicts",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2161659.3618899994,
+          "median": 2161659.3618899994,
+          "p95": 2161659.3618899994
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 168,
+          "median": 168,
+          "p95": 168
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 175,
+          "median": 175,
+          "p95": 175
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 24618274,
+          "median": 24618274,
+          "p95": 24618274
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 123682,
+          "median": 123682,
+          "p95": 123682
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 236820,
+          "median": 236820,
+          "p95": 236820
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 24494592,
+          "median": 24494592,
+          "p95": 24494592
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9949760084724055,
+          "median": 0.9949760084724055,
+          "p95": 0.9949760084724055
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "yaegi-go-embed-directives",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1944494.6566729993,
+          "median": 1944494.6566729993,
+          "p95": 1944494.6566729993
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 211,
+          "median": 211,
+          "p95": 211
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 233,
+          "median": 233,
+          "p95": 233
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "etree-xml-diff-patch",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1624431.311315,
+          "median": 1624431.311315,
+          "p95": 1624431.311315
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 68,
+          "median": 68,
+          "p95": 68
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 81,
+          "median": 81,
+          "p95": 81
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 7175176,
+          "median": 7175176,
+          "p95": 7175176
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 130440,
+          "median": 130440,
+          "p95": 130440
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 195449,
+          "median": 195449,
+          "p95": 195449
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 7044736,
+          "median": 7044736,
+          "p95": 7044736
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9818206549915988,
+          "median": 0.9818206549915988,
+          "p95": 0.9818206549915988
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "opa-template-string-reconstruction",
+      "agentId": "ello-ds",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "tengo-callable-instance-isolation",
+      "agentId": "ello-ds",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "scriggo-method-declarations",
+      "agentId": "ello-ds",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "tengo-destructuring-bindings",
+      "agentId": "ello-ds",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "opa-rego-rule-profiling",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1429781.1439500041,
+          "median": 1429781.1439500041,
+          "p95": 1429781.1439500041
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 122,
+          "median": 122,
+          "p95": 122
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 118,
+          "median": 118,
+          "p95": 118
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "scc-bounded-memory-spilling",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1141278.0518090017,
+          "median": 1141278.0518090017,
+          "p95": 1141278.0518090017
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 127,
+          "median": 127,
+          "p95": 127
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 113,
+          "median": 113,
+          "p95": 113
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 15716816,
+          "median": 15716816,
+          "p95": 15716816
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 130512,
+          "median": 130512,
+          "p95": 130512
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 110351,
+          "median": 110351,
+          "p95": 110351
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 15586304,
+          "median": 15586304,
+          "p95": 15586304
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9916960279995642,
+          "median": 0.9916960279995642,
+          "p95": 0.9916960279995642
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "pebble-durability-wait-apis",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2707799.7253139988,
+          "median": 2707799.7253139988,
+          "p95": 2707799.7253139988
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 206,
+          "median": 206,
+          "p95": 206
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 206,
+          "median": 206,
+          "p95": 206
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 37577672,
+          "median": 37577672,
+          "p95": 37577672
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 200776,
+          "median": 200776,
+          "p95": 200776
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 177086,
+          "median": 177086,
+          "p95": 177086
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 37376896,
+          "median": 37376896,
+          "p95": 37376896
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.994657039957132,
+          "median": 0.994657039957132,
+          "p95": 0.994657039957132
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "prometheus-typed-label-sorting",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1406775.95981,
+          "median": 1406775.95981,
+          "p95": 1406775.95981
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 110,
+          "median": 110,
+          "p95": 110
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 124,
+          "median": 124,
+          "p95": 124
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 11151551,
+          "median": 11151551,
+          "p95": 11151551
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 98751,
+          "median": 98751,
+          "p95": 98751
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 136305,
+          "median": 136305,
+          "p95": 136305
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 11052800,
+          "median": 11052800,
+          "p95": 11052800
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9911446398801387,
+          "median": 0.9911446398801387,
+          "p95": 0.9911446398801387
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "dasel-html-document-format",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 926192.2376489975,
+          "median": 926192.2376489975,
+          "p95": 926192.2376489975
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 58,
+          "median": 58,
+          "p95": 58
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 60,
+          "median": 60,
+          "p95": 60
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "go-critic-doc-link-checker",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1055373.9656339996,
+          "median": 1055373.9656339996,
+          "p95": 1055373.9656339996
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 91,
+          "median": 91,
+          "p95": 91
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 75,
+          "median": 75,
+          "p95": 75
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "anko-typed-variable-bindings",
+      "agentId": "ello-ds",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kgateway-consistent-hash-policy",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1313458.1072710007,
+          "median": 1313458.1072710007,
+          "p95": 1313458.1072710007
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 115,
+          "median": 115,
+          "p95": 115
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 125,
+          "median": 125,
+          "p95": 125
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 13255481,
+          "median": 13255481,
+          "p95": 13255481
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 399545,
+          "median": 399545,
+          "p95": 399545
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 77774,
+          "median": 77774,
+          "p95": 77774
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12855936,
+          "median": 12855936,
+          "p95": 12855936
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9698581288751423,
+          "median": 0.9698581288751423,
+          "p95": 0.9698581288751423
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "onedump-dump-encryption-pipeline",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1076399.0006869994,
+          "median": 1076399.0006869994,
+          "p95": 1076399.0006869994
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 89,
+          "median": 89,
+          "p95": 89
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 70,
+          "median": 70,
+          "p95": 70
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 6335297,
+          "median": 6335297,
+          "p95": 6335297
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 69953,
+          "median": 69953,
+          "p95": 69953
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 69468,
+          "median": 69468,
+          "p95": 69468
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 6265344,
+          "median": 6265344,
+          "p95": 6265344
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9889582130087982,
+          "median": 0.9889582130087982,
+          "p95": 0.9889582130087982
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "participle-grammar-conflict-analysis",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1134168.9527100027,
+          "median": 1134168.9527100027,
+          "p95": 1134168.9527100027
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 104,
+          "median": 104,
+          "p95": 104
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 93,
+          "median": 93,
+          "p95": 93
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12767529,
+          "median": 12767529,
+          "p95": 12767529
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 97321,
+          "median": 97321,
+          "p95": 97321
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 109637,
+          "median": 109637,
+          "p95": 109637
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12670208,
+          "median": 12670208,
+          "p95": 12670208
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9923774600394485,
+          "median": 0.9923774600394485,
+          "p95": 0.9923774600394485
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "expr-try-catch-errors",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1900471.0592739955,
+          "median": 1900471.0592739955,
+          "p95": 1900471.0592739955
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 247,
+          "median": 247,
+          "p95": 247
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 198,
+          "median": 198,
+          "p95": 198
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "helm-array-merge-strategies",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2243222.1164030023,
+          "median": 2243222.1164030023,
+          "p95": 2243222.1164030023
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 189,
+          "median": 189,
+          "p95": 189
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 174,
+          "median": 174,
+          "p95": 174
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 31535558,
+          "median": 31535558,
+          "p95": 31535558
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 143686,
+          "median": 143686,
+          "p95": 143686
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 188377,
+          "median": 188377,
+          "p95": 188377
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 31391872,
+          "median": 31391872,
+          "p95": 31391872
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9954436829689204,
+          "median": 0.9954436829689204,
+          "p95": 0.9954436829689204
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "termenv-preserve-ansi-resets",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1269680.7449159995,
+          "median": 1269680.7449159995,
+          "p95": 1269680.7449159995
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 109,
+          "median": 109,
+          "p95": 109
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 113,
+          "median": 113,
+          "p95": 113
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 11746731,
+          "median": 11746731,
+          "p95": 11746731
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 99243,
+          "median": 99243,
+          "p95": 99243
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 139091,
+          "median": 139091,
+          "p95": 139091
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 11647488,
+          "median": 11647488,
+          "p95": 11647488
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9915514367358885,
+          "median": 0.9915514367358885,
+          "p95": 0.9915514367358885
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "updo-policy-alerting",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1027358.188043002,
+          "median": 1027358.188043002,
+          "p95": 1027358.188043002
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 127,
+          "median": 127,
+          "p95": 127
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 124,
+          "median": 124,
+          "p95": 124
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 14095568,
+          "median": 14095568,
+          "p95": 14095568
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 99920,
+          "median": 99920,
+          "p95": 99920
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 91558,
+          "median": 91558,
+          "p95": 91558
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 13995648,
+          "median": 13995648,
+          "p95": 13995648
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9929112469962189,
+          "median": 0.9929112469962189,
+          "p95": 0.9929112469962189
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "narwhals-rolling-window-suite",
+      "agentId": "ello-ds",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "returns-validated-error-accumulation",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2514092.9621009976,
+          "median": 2514092.9621009976,
+          "p95": 2514092.9621009976
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 229,
+          "median": 229,
+          "p95": 229
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 296,
+          "median": 296,
+          "p95": 296
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 44539239,
+          "median": 44539239,
+          "p95": 44539239
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 188647,
+          "median": 188647,
+          "p95": 188647
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 174771,
+          "median": 174771,
+          "p95": 174771
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 44350592,
+          "median": 44350592,
+          "p95": 44350592
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9957644763530872,
+          "median": 0.9957644763530872,
+          "p95": 0.9957644763530872
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "psd-tools-blend-range-api",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1340602.5972229987,
+          "median": 1340602.5972229987,
+          "p95": 1340602.5972229987
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 148,
+          "median": 148,
+          "p95": 148
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 144,
+          "median": 144,
+          "p95": 144
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 19320368,
+          "median": 19320368,
+          "p95": 19320368
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 126512,
+          "median": 126512,
+          "p95": 126512
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 139140,
+          "median": 139140,
+          "p95": 139140
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 19193856,
+          "median": 19193856,
+          "p95": 19193856
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9934518845603769,
+          "median": 0.9934518845603769,
+          "p95": 0.9934518845603769
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "aiomonitor-task-snapshots-diff",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 905263.8340220004,
+          "median": 905263.8340220004,
+          "p95": 905263.8340220004
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 146,
+          "median": 146,
+          "p95": 146
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 102,
+          "median": 102,
+          "p95": 102
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 15190588,
+          "median": 15190588,
+          "p95": 15190588
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 99900,
+          "median": 99900,
+          "p95": 99900
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 97154,
+          "median": 97154,
+          "p95": 97154
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 15090688,
+          "median": 15090688,
+          "p95": 15090688
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9934235593776883,
+          "median": 0.9934235593776883,
+          "p95": 0.9934235593776883
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "koota-entity-snapshot-rollback",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 789925.7835600004,
+          "median": 789925.7835600004,
+          "p95": 789925.7835600004
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 86,
+          "median": 86,
+          "p95": 86
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 157,
+          "median": 157,
+          "p95": 157
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 10133684,
+          "median": 10133684,
+          "p95": 10133684
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 124084,
+          "median": 124084,
+          "p95": 124084
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 87000,
+          "median": 87000,
+          "p95": 87000
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 10009600,
+          "median": 10009600,
+          "p95": 10009600
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.98775529215239,
+          "median": 0.98775529215239,
+          "p95": 0.98775529215239
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "adaptix-name-mapping-aliases",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1717336.799199,
+          "median": 1717336.799199,
+          "p95": 1717336.799199
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 217,
+          "median": 217,
+          "p95": 217
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 211,
+          "median": 211,
+          "p95": 211
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 36276929,
+          "median": 36276929,
+          "p95": 36276929
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 152897,
+          "median": 152897,
+          "p95": 152897
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 164998,
+          "median": 164998,
+          "p95": 164998
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 36124032,
+          "median": 36124032,
+          "p95": 36124032
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9957852827068134,
+          "median": 0.9957852827068134,
+          "p95": 0.9957852827068134
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "numba-stencil-boundary-modes",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1893734.492647998,
+          "median": 1893734.492647998,
+          "p95": 1893734.492647998
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 169,
+          "median": 169,
+          "p95": 169
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 144,
+          "median": 144,
+          "p95": 144
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 21070913,
+          "median": 21070913,
+          "p95": 21070913
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 104641,
+          "median": 104641,
+          "p95": 104641
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 121934,
+          "median": 121934,
+          "p95": 121934
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 20966272,
+          "median": 20966272,
+          "p95": 20966272
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9950338649302951,
+          "median": 0.9950338649302951,
+          "p95": 0.9950338649302951
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "textual-richlog-follow-state",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1749873.0996159986,
+          "median": 1749873.0996159986,
+          "p95": 1749873.0996159986
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 209,
+          "median": 209,
+          "p95": 209
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 196,
+          "median": 196,
+          "p95": 196
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 25484386,
+          "median": 25484386,
+          "p95": 25484386
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 124130,
+          "median": 124130,
+          "p95": 124130
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 143255,
+          "median": 143255,
+          "p95": 143255
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 25360256,
+          "median": 25360256,
+          "p95": 25360256
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9951291743893692,
+          "median": 0.9951291743893692,
+          "p95": 0.9951291743893692
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "tomlkit-toml-table-converters",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2240629.085689001,
+          "median": 2240629.085689001,
+          "p95": 2240629.085689001
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 200,
+          "median": 200,
+          "p95": 200
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 177,
+          "median": 177,
+          "p95": 177
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 37852473,
+          "median": 37852473,
+          "p95": 37852473
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 134329,
+          "median": 134329,
+          "p95": 134329
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 239767,
+          "median": 239767,
+          "p95": 239767
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 37718144,
+          "median": 37718144,
+          "p95": 37718144
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9964512490372822,
+          "median": 0.9964512490372822,
+          "p95": 0.9964512490372822
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "cattrs-partial-structuring-recovery",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1332053.6889340058,
+          "median": 1332053.6889340058,
+          "p95": 1332053.6889340058
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 132,
+          "median": 132,
+          "p95": 132
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 121,
+          "median": 121,
+          "p95": 121
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 15731640,
+          "median": 15731640,
+          "p95": 15731640
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 95544,
+          "median": 95544,
+          "p95": 95544
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 123831,
+          "median": 123831,
+          "p95": 123831
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 15636096,
+          "median": 15636096,
+          "p95": 15636096
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9939266344767614,
+          "median": 0.9939266344767614,
+          "p95": 0.9939266344767614
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "mobly-grouped-test-barriers",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1078479.4122629985,
+          "median": 1078479.4122629985,
+          "p95": 1078479.4122629985
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 115,
+          "median": 115,
+          "p95": 115
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 125,
+          "median": 125,
+          "p95": 125
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 13671089,
+          "median": 13671089,
+          "p95": 13671089
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 103857,
+          "median": 103857,
+          "p95": 103857
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 122286,
+          "median": 122286,
+          "p95": 122286
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 13567232,
+          "median": 13567232,
+          "p95": 13567232
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9924031655415307,
+          "median": 0.9924031655415307,
+          "p95": 0.9924031655415307
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "httpx-multipart-response-parsing",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 909496.3882689998,
+          "median": 909496.3882689998,
+          "p95": 909496.3882689998
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 87,
+          "median": 87,
+          "p95": 87
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 93,
+          "median": 93,
+          "p95": 93
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 8311167,
+          "median": 8311167,
+          "p95": 8311167
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 94719,
+          "median": 94719,
+          "p95": 94719
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 100363,
+          "median": 100363,
+          "p95": 100363
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 8216448,
+          "median": 8216448,
+          "p95": 8216448
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9886034055145324,
+          "median": 0.9886034055145324,
+          "p95": 0.9886034055145324
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "ipython-session-bundle-replay",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1098316.195900999,
+          "median": 1098316.195900999,
+          "p95": 1098316.195900999
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 95,
+          "median": 95,
+          "p95": 95
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 85,
+          "median": 85,
+          "p95": 85
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 8752739,
+          "median": 8752739,
+          "p95": 8752739
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 79971,
+          "median": 79971,
+          "p95": 79971
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 109177,
+          "median": 109177,
+          "p95": 109177
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 8672768,
+          "median": 8672768,
+          "p95": 8672768
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9908633171856261,
+          "median": 0.9908633171856261,
+          "p95": 0.9908633171856261
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "mnamer-daemon-watch-lifecycle",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 917088.5289900005,
+          "median": 917088.5289900005,
+          "p95": 917088.5289900005
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 87,
+          "median": 87,
+          "p95": 87
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 70,
+          "median": 70,
+          "p95": 70
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kombu-single-active-consumer-priority",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 563091.7914780006,
+          "median": 563091.7914780006,
+          "p95": 563091.7914780006
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 95,
+          "median": 95,
+          "p95": 95
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 90,
+          "median": 90,
+          "p95": 90
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 7074619,
+          "median": 7074619,
+          "p95": 7074619
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 106427,
+          "median": 106427,
+          "p95": 106427
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 42838,
+          "median": 42838,
+          "p95": 42838
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 6968192,
+          "median": 6968192,
+          "p95": 6968192
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9849565043714722,
+          "median": 0.9849565043714722,
+          "p95": 0.9849565043714722
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "skrub-duration-encoding",
+      "agentId": "ello-ds",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "sqlite-utils-safe-import-checkpoints",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1708898.7438799962,
+          "median": 1708898.7438799962,
+          "p95": 1708898.7438799962
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 199,
+          "median": 199,
+          "p95": 199
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 165,
+          "median": 165,
+          "p95": 165
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 29054687,
+          "median": 29054687,
+          "p95": 29054687
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 129887,
+          "median": 129887,
+          "p95": 129887
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 149815,
+          "median": 149815,
+          "p95": 149815
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 28924800,
+          "median": 28924800,
+          "p95": 28924800
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9955295680865535,
+          "median": 0.9955295680865535,
+          "p95": 0.9955295680865535
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "fastapi-implicit-head-options",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 4092154.9204859957,
+          "median": 4092154.9204859957,
+          "p95": 4092154.9204859957
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 222,
+          "median": 222,
+          "p95": 222
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 224,
+          "median": 224,
+          "p95": 224
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 33492542,
+          "median": 33492542,
+          "p95": 33492542
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 132542,
+          "median": 132542,
+          "p95": 132542
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 163150,
+          "median": 163150,
+          "p95": 163150
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 33360000,
+          "median": 33360000,
+          "p95": 33360000
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9960426413737123,
+          "median": 0.9960426413737123,
+          "p95": 0.9960426413737123
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "mashumaro-flattened-dataclass-fields",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1919162.3911949992,
+          "median": 1919162.3911949992,
+          "p95": 1919162.3911949992
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 189,
+          "median": 189,
+          "p95": 189
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 174,
+          "median": 174,
+          "p95": 174
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 25039491,
+          "median": 25039491,
+          "p95": 25039491
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 115075,
+          "median": 115075,
+          "p95": 115075
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 136248,
+          "median": 136248,
+          "p95": 136248
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 24924416,
+          "median": 24924416,
+          "p95": 24924416
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9954042596153412,
+          "median": 0.9954042596153412,
+          "p95": 0.9954042596153412
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "bandit-interprocedural-taint-checks",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1893255.1369610056,
+          "median": 1893255.1369610056,
+          "p95": 1893255.1369610056
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 191,
+          "median": 191,
+          "p95": 191
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 160,
+          "median": 160,
+          "p95": 160
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 29557789,
+          "median": 29557789,
+          "p95": 29557789
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 130717,
+          "median": 130717,
+          "p95": 130717
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 157722,
+          "median": 157722,
+          "p95": 157722
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 29427072,
+          "median": 29427072,
+          "p95": 29427072
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9955775785529831,
+          "median": 0.9955775785529831,
+          "p95": 0.9955775785529831
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "igel-persist-feature-schema",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 753486.2732139975,
+          "median": 753486.2732139975,
+          "p95": 753486.2732139975
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 99,
+          "median": 99,
+          "p95": 99
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 102,
+          "median": 102,
+          "p95": 102
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 8029903,
+          "median": 8029903,
+          "p95": 8029903
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 77391,
+          "median": 77391,
+          "p95": 77391
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 79826,
+          "median": 79826,
+          "p95": 79826
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 7952512,
+          "median": 7952512,
+          "p95": 7952512
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9903621500782762,
+          "median": 0.9903621500782762,
+          "p95": 0.9903621500782762
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "bandit-incremental-cache-control",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1091516.9752380028,
+          "median": 1091516.9752380028,
+          "p95": 1091516.9752380028
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 112,
+          "median": 112,
+          "p95": 112
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 102,
+          "median": 102,
+          "p95": 102
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12414373,
+          "median": 12414373,
+          "p95": 12414373
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 103973,
+          "median": 103973,
+          "p95": 103973
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 103458,
+          "median": 103458,
+          "p95": 103458
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12310400,
+          "median": 12310400,
+          "p95": 12310400
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9916247884609235,
+          "median": 0.9916247884609235,
+          "p95": 0.9916247884609235
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "fastapi-deprecation-response-headers",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 851495.9042169973,
+          "median": 851495.9042169973,
+          "p95": 851495.9042169973
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 115,
+          "median": 115,
+          "p95": 115
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 98,
+          "median": 98,
+          "p95": 98
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 9414258,
+          "median": 9414258,
+          "p95": 9414258
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 81394,
+          "median": 81394,
+          "p95": 81394
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 75131,
+          "median": 75131,
+          "p95": 75131
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 9332864,
+          "median": 9332864,
+          "p95": 9332864
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9913541778863507,
+          "median": 0.9913541778863507,
+          "p95": 0.9913541778863507
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "dateutil-rfc5545-timezone-interop",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2116137.1122429967,
+          "median": 2116137.1122429967,
+          "p95": 2116137.1122429967
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 303,
+          "median": 303,
+          "p95": 303
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 208,
+          "median": 208,
+          "p95": 208
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 50719853,
+          "median": 50719853,
+          "p95": 50719853
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 192365,
+          "median": 192365,
+          "p95": 192365
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 170559,
+          "median": 170559,
+          "p95": 170559
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 50527488,
+          "median": 50527488,
+          "p95": 50527488
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9962073036765308,
+          "median": 0.9962073036765308,
+          "p95": 0.9962073036765308
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "httpx-streaming-json-iteration",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 664460.0659620017,
+          "median": 664460.0659620017,
+          "p95": 664460.0659620017
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 86,
+          "median": 86,
+          "p95": 86
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 93,
+          "median": 93,
+          "p95": 93
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 6977170,
+          "median": 6977170,
+          "p95": 6977170
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 82322,
+          "median": 82322,
+          "p95": 82322
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 55753,
+          "median": 55753,
+          "p95": 55753
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 6894848,
+          "median": 6894848,
+          "p95": 6894848
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.988201233451385,
+          "median": 0.988201233451385,
+          "p95": 0.988201233451385
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "textual-kitty-key-phases",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1309983.5363100022,
+          "median": 1309983.5363100022,
+          "p95": 1309983.5363100022
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 109,
+          "median": 109,
+          "p95": 109
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 127,
+          "median": 127,
+          "p95": 127
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12553570,
+          "median": 12553570,
+          "p95": 12553570
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 109154,
+          "median": 109154,
+          "p95": 109154
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 111135,
+          "median": 111135,
+          "p95": 111135
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12444416,
+          "median": 12444416,
+          "p95": 12444416
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9913049435339907,
+          "median": 0.9913049435339907,
+          "p95": 0.9913049435339907
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "pwntools-tube-multiplexing",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 4052489.085853003,
+          "median": 4052489.085853003,
+          "p95": 4052489.085853003
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 162,
+          "median": 162,
+          "p95": 162
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 159,
+          "median": 159,
+          "p95": 159
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 29613119,
+          "median": 29613119,
+          "p95": 29613119
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 116415,
+          "median": 116415,
+          "p95": 116415
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 243104,
+          "median": 243104,
+          "p95": 243104
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 29496704,
+          "median": 29496704,
+          "p95": 29496704
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9960688031544398,
+          "median": 0.9960688031544398,
+          "p95": 0.9960688031544398
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "langchain-request-coalescing",
+      "agentId": "ello-ds",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "python-statemachine-state-data-scoping",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1731813.3757129982,
+          "median": 1731813.3757129982,
+          "p95": 1731813.3757129982
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 200,
+          "median": 200,
+          "p95": 200
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 206,
+          "median": 206,
+          "p95": 206
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 33228395,
+          "median": 33228395,
+          "p95": 33228395
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 171755,
+          "median": 171755,
+          "p95": 171755
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 115546,
+          "median": 115546,
+          "p95": 115546
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 33056640,
+          "median": 33056640,
+          "p95": 33056640
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9948310774564947,
+          "median": 0.9948310774564947,
+          "p95": 0.9948310774564947
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "vulture-persistent-analysis-cache",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 788674.7798580006,
+          "median": 788674.7798580006,
+          "p95": 788674.7798580006
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 52,
+          "median": 52,
+          "p95": 52
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 57,
+          "median": 57,
+          "p95": 57
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 5183823,
+          "median": 5183823,
+          "p95": 5183823
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 63055,
+          "median": 63055,
+          "p95": 63055
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 98316,
+          "median": 98316,
+          "p95": 98316
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 5120768,
+          "median": 5120768,
+          "p95": 5120768
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9878361973392996,
+          "median": 0.9878361973392996,
+          "p95": 0.9878361973392996
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kombu-virtual-queue-dead-lettering",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1751458.663247995,
+          "median": 1751458.663247995,
+          "p95": 1751458.663247995
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 217,
+          "median": 217,
+          "p95": 217
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 199,
+          "median": 199,
+          "p95": 199
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 35534834,
+          "median": 35534834,
+          "p95": 35534834
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 189042,
+          "median": 189042,
+          "p95": 189042
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 140774,
+          "median": 140774,
+          "p95": 140774
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 35345792,
+          "median": 35345792,
+          "p95": 35345792
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.994680093341649,
+          "median": 0.994680093341649,
+          "p95": 0.994680093341649
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "sqlfmt-create-table-ddl-formatting",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1735067.6695209965,
+          "median": 1735067.6695209965,
+          "p95": 1735067.6695209965
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 166,
+          "median": 166,
+          "p95": 166
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 147,
+          "median": 147,
+          "p95": 147
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 25897296,
+          "median": 25897296,
+          "p95": 25897296
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 146640,
+          "median": 146640,
+          "p95": 146640
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 163611,
+          "median": 163611,
+          "p95": 163611
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 25750656,
+          "median": 25750656,
+          "p95": 25750656
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.994337632778341,
+          "median": 0.994337632778341,
+          "p95": 0.994337632778341
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "bandit-structured-nosec-directives",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1143244.8547400013,
+          "median": 1143244.8547400013,
+          "p95": 1143244.8547400013
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 118,
+          "median": 118,
+          "p95": 118
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 140,
+          "median": 140,
+          "p95": 140
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12398477,
+          "median": 12398477,
+          "p95": 12398477
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 80013,
+          "median": 80013,
+          "p95": 80013
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 112482,
+          "median": 112482,
+          "p95": 112482
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12318464,
+          "median": 12318464,
+          "p95": 12318464
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9935465460798129,
+          "median": 0.9935465460798129,
+          "p95": 0.9935465460798129
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "gql-incremental-graphql-delivery",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1951144.5645589978,
+          "median": 1951144.5645589978,
+          "p95": 1951144.5645589978
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 265,
+          "median": 265,
+          "p95": 265
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 245,
+          "median": 245,
+          "p95": 245
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 56282987,
+          "median": 56282987,
+          "p95": 56282987
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 204907,
+          "median": 204907,
+          "p95": 204907
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 158751,
+          "median": 158751,
+          "p95": 158751
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 56078080,
+          "median": 56078080,
+          "p95": 56078080
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.996359343899072,
+          "median": 0.996359343899072,
+          "p95": 0.996359343899072
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "true-myth-iterable-collection-combinators",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1386374.1658350006,
+          "median": 1386374.1658350006,
+          "p95": 1386374.1658350006
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 122,
+          "median": 122,
+          "p95": 122
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 133,
+          "median": 133,
+          "p95": 133
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 21616393,
+          "median": 21616393,
+          "p95": 21616393
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 175113,
+          "median": 175113,
+          "p95": 175113
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 166579,
+          "median": 166579,
+          "p95": 166579
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 21441280,
+          "median": 21441280,
+          "p95": 21441280
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9918990647514597,
+          "median": 0.9918990647514597,
+          "p95": 0.9918990647514597
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "happy-dom-abort-pending-body-reads",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1925780.0497549996,
+          "median": 1925780.0497549996,
+          "p95": 1925780.0497549996
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 214,
+          "median": 214,
+          "p95": 214
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 197,
+          "median": 197,
+          "p95": 197
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 39064592,
+          "median": 39064592,
+          "p95": 39064592
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 209552,
+          "median": 209552,
+          "p95": 209552
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 120633,
+          "median": 120633,
+          "p95": 120633
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 38855040,
+          "median": 38855040,
+          "p95": 38855040
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9946357560831558,
+          "median": 0.9946357560831558,
+          "p95": 0.9946357560831558
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "drizzle-orm-window-function-builders",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1352392.7357919961,
+          "median": 1352392.7357919961,
+          "p95": 1352392.7357919961
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 183,
+          "median": 183,
+          "p95": 183
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 207,
+          "median": 207,
+          "p95": 207
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 22469525,
+          "median": 22469525,
+          "p95": 22469525
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 131861,
+          "median": 131861,
+          "p95": 131861
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 99785,
+          "median": 99785,
+          "p95": 99785
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 22337664,
+          "median": 22337664,
+          "p95": 22337664
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9941315626387296,
+          "median": 0.9941315626387296,
+          "p95": 0.9941315626387296
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "ofetch-per-origin-circuit-breaker",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 698641.8250999972,
+          "median": 698641.8250999972,
+          "p95": 698641.8250999972
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 51,
+          "median": 51,
+          "p95": 51
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 60,
+          "median": 60,
+          "p95": 60
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 4263415,
+          "median": 4263415,
+          "p95": 4263415
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 74999,
+          "median": 74999,
+          "p95": 74999
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 87929,
+          "median": 87929,
+          "p95": 87929
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 4188416,
+          "median": 4188416,
+          "p95": 4188416
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9824087028825483,
+          "median": 0.9824087028825483,
+          "p95": 0.9824087028825483
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "httpx-deterministic-cookie-store",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1512352.8745139986,
+          "median": 1512352.8745139986,
+          "p95": 1512352.8745139986
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 132,
+          "median": 132,
+          "p95": 132
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 123,
+          "median": 123,
+          "p95": 123
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "sql-formatter-bigquery-pipe-formatting",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1395334.9964160025,
+          "median": 1395334.9964160025,
+          "p95": 1395334.9964160025
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 159,
+          "median": 159,
+          "p95": 159
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 155,
+          "median": 155,
+          "p95": 155
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 22630981,
+          "median": 22630981,
+          "p95": 22630981
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 125893,
+          "median": 125893,
+          "p95": 125893
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 121445,
+          "median": 121445,
+          "p95": 121445
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 22505088,
+          "median": 22505088,
+          "p95": 22505088
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9944371390705511,
+          "median": 0.9944371390705511,
+          "p95": 0.9944371390705511
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "dynamodb-toolbox-conditional-attribute-requirements",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 3082830.1497709975,
+          "median": 3082830.1497709975,
+          "p95": 3082830.1497709975
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 372,
+          "median": 372,
+          "p95": 372
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 338,
+          "median": 338,
+          "p95": 338
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 74618265,
+          "median": 74618265,
+          "p95": 74618265
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 195097,
+          "median": 195097,
+          "p95": 195097
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 188371,
+          "median": 188371,
+          "p95": 188371
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 74423168,
+          "median": 74423168,
+          "p95": 74423168
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9973853988698343,
+          "median": 0.9973853988698343,
+          "p95": 0.9973853988698343
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "vitest-duration-sharding",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1894682.692448996,
+          "median": 1894682.692448996,
+          "p95": 1894682.692448996
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 267,
+          "median": 267,
+          "p95": 267
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 209,
+          "median": 209,
+          "p95": 209
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 43777197,
+          "median": 43777197,
+          "p95": 43777197
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 169133,
+          "median": 169133,
+          "p95": 169133
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 126208,
+          "median": 126208,
+          "p95": 126208
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 43608064,
+          "median": 43608064,
+          "p95": 43608064
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9961365045825114,
+          "median": 0.9961365045825114,
+          "p95": 0.9961365045825114
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "query-persist-restored-query-state",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2042468.568370007,
+          "median": 2042468.568370007,
+          "p95": 2042468.568370007
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 401,
+          "median": 401,
+          "p95": 401
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 195,
+          "median": 195,
+          "p95": 195
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 59673772,
+          "median": 59673772,
+          "p95": 59673772
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 169260,
+          "median": 169260,
+          "p95": 169260
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 131179,
+          "median": 131179,
+          "p95": 131179
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 59504512,
+          "median": 59504512,
+          "p95": 59504512
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9971635779953713,
+          "median": 0.9971635779953713,
+          "p95": 0.9971635779953713
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "dynamodb-toolbox-lazy-recursive-schemas",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 4805412.262046009,
+          "median": 4805412.262046009,
+          "p95": 4805412.262046009
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 459,
+          "median": 459,
+          "p95": 459
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 503,
+          "median": 503,
+          "p95": 503
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 124240054,
+          "median": 124240054,
+          "p95": 124240054
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 272566,
+          "median": 272566,
+          "p95": 272566
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 247099,
+          "median": 247099,
+          "p95": 247099
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 123967488,
+          "median": 123967488,
+          "p95": 123967488
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9978061342439533,
+          "median": 0.9978061342439533,
+          "p95": 0.9978061342439533
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "ts-pattern-match-each",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 622488.4020420015,
+          "median": 622488.4020420015,
+          "p95": 622488.4020420015
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 53,
+          "median": 53,
+          "p95": 53
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 53,
+          "median": 53,
+          "p95": 53
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 3362400,
+          "median": 3362400,
+          "p95": 3362400
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 67168,
+          "median": 67168,
+          "p95": 67168
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 70898,
+          "median": 70898,
+          "p95": 70898
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 3295232,
+          "median": 3295232,
+          "p95": 3295232
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9800237925291458,
+          "median": 0.9800237925291458,
+          "p95": 0.9800237925291458
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "obsidian-linter-scoped-ignore-markers",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2217068.6631959975,
+          "median": 2217068.6631959975,
+          "p95": 2217068.6631959975
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 203,
+          "median": 203,
+          "p95": 203
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 171,
+          "median": 171,
+          "p95": 171
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 43390285,
+          "median": 43390285,
+          "p95": 43390285
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 197069,
+          "median": 197069,
+          "p95": 197069
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 208090,
+          "median": 208090,
+          "p95": 208090
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 43193216,
+          "median": 43193216,
+          "p95": 43193216
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9954582229639654,
+          "median": 0.9954582229639654,
+          "p95": 0.9954582229639654
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "valibot-recursive-schema-composition",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 3328390.0834250003,
+          "median": 3328390.0834250003,
+          "p95": 3328390.0834250003
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 226,
+          "median": 226,
+          "p95": 226
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 194,
+          "median": 194,
+          "p95": 194
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 54294243,
+          "median": 54294243,
+          "p95": 54294243
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 167395,
+          "median": 167395,
+          "p95": 167395
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 279007,
+          "median": 279007,
+          "p95": 279007
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 54126848,
+          "median": 54126848,
+          "p95": 54126848
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9969168922753007,
+          "median": 0.9969168922753007,
+          "p95": 0.9969168922753007
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kysely-window-grouping-helpers",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1190609.9942139983,
+          "median": 1190609.9942139983,
+          "p95": 1190609.9942139983
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 205,
+          "median": 205,
+          "p95": 205
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 241,
+          "median": 241,
+          "p95": 241
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 26424098,
+          "median": 26424098,
+          "p95": 26424098
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 144674,
+          "median": 144674,
+          "p95": 144674
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 110921,
+          "median": 110921,
+          "p95": 110921
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 26279424,
+          "median": 26279424,
+          "p95": 26279424
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9945249219102956,
+          "median": 0.9945249219102956,
+          "p95": 0.9945249219102956
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "claude-code-by-agents-recursive-delegation",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 831896.7053140104,
+          "median": 831896.7053140104,
+          "p95": 831896.7053140104
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 87,
+          "median": 87,
+          "p95": 87
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 99,
+          "median": 99,
+          "p95": 99
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 8962514,
+          "median": 8962514,
+          "p95": 8962514
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 97234,
+          "median": 97234,
+          "p95": 97234
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 86394,
+          "median": 86394,
+          "p95": 86394
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 8865280,
+          "median": 8865280,
+          "p95": 8865280
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.989151035077881,
+          "median": 0.989151035077881,
+          "p95": 0.989151035077881
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "cliffy-config-file-parsing",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1106436.2270309925,
+          "median": 1106436.2270309925,
+          "p95": 1106436.2270309925
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 115,
+          "median": 115,
+          "p95": 115
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 121,
+          "median": 121,
+          "p95": 121
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 10781998,
+          "median": 10781998,
+          "p95": 10781998
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 95662,
+          "median": 95662,
+          "p95": 95662
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 96709,
+          "median": 96709,
+          "p95": 96709
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 10686336,
+          "median": 10686336,
+          "p95": 10686336
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9911276184618102,
+          "median": 0.9911276184618102,
+          "p95": 0.9911276184618102
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "arktype-json-schema-refs-dependencies",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2954947.7939549983,
+          "median": 2954947.7939549983,
+          "p95": 2954947.7939549983
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 264,
+          "median": 264,
+          "p95": 264
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 258,
+          "median": 258,
+          "p95": 258
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 52988242,
+          "median": 52988242,
+          "p95": 52988242
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 217170,
+          "median": 217170,
+          "p95": 217170
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 203997,
+          "median": 203997,
+          "p95": 203997
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 52771072,
+          "median": 52771072,
+          "p95": 52771072
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.995901543591501,
+          "median": 0.995901543591501,
+          "p95": 0.995901543591501
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "optique-conditional-option-dependencies",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2006770.3418570012,
+          "median": 2006770.3418570012,
+          "p95": 2006770.3418570012
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 303,
+          "median": 303,
+          "p95": 303
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 234,
+          "median": 234,
+          "p95": 234
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 60359101,
+          "median": 60359101,
+          "p95": 60359101
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 228157,
+          "median": 228157,
+          "p95": 228157
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 166132,
+          "median": 166132,
+          "p95": 166132
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 60130944,
+          "median": 60130944,
+          "p95": 60130944
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9962200066564941,
+          "median": 0.9962200066564941,
+          "p95": 0.9962200066564941
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "clack-async-autocomplete-options",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1365454.7062370032,
+          "median": 1365454.7062370032,
+          "p95": 1365454.7062370032
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 120,
+          "median": 120,
+          "p95": 120
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 106,
+          "median": 106,
+          "p95": 106
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 15185979,
+          "median": 15185979,
+          "p95": 15185979
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 122427,
+          "median": 122427,
+          "p95": 122427
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 142341,
+          "median": 142341,
+          "p95": 142341
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 15063552,
+          "median": 15063552,
+          "p95": 15063552
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9919381555841741,
+          "median": 0.9919381555841741,
+          "p95": 0.9919381555841741
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "eicrud-keyset-pagination-cursor",
+      "agentId": "ello-ds",
+      "validRuns": 0,
+      "passedRuns": 0,
+      "passRate": null,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "koota-composite-trait-aspects",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1680306.173691988,
+          "median": 1680306.173691988,
+          "p95": 1680306.173691988
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 169,
+          "median": 169,
+          "p95": 169
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 178,
+          "median": 178,
+          "p95": 178
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 31253763,
+          "median": 31253763,
+          "p95": 31253763
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 168835,
+          "median": 168835,
+          "p95": 168835
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 178669,
+          "median": 178669,
+          "p95": 178669
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 31084928,
+          "median": 31084928,
+          "p95": 31084928
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9945979304956014,
+          "median": 0.9945979304956014,
+          "p95": 0.9945979304956014
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "kea-atomic-signal-selectors",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1589302.9314150065,
+          "median": 1589302.9314150065,
+          "p95": 1589302.9314150065
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 104,
+          "median": 104,
+          "p95": 104
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 162,
+          "median": 162,
+          "p95": 162
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 17317949,
+          "median": 17317949,
+          "p95": 17317949
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 173629,
+          "median": 173629,
+          "p95": 173629
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 152697,
+          "median": 152697,
+          "p95": 152697
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 17144320,
+          "median": 17144320,
+          "p95": 17144320
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9899740436930493,
+          "median": 0.9899740436930493,
+          "p95": 0.9899740436930493
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "awilix-async-container-initialization",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1125083.0648769885,
+          "median": 1125083.0648769885,
+          "p95": 1125083.0648769885
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 115,
+          "median": 115,
+          "p95": 115
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 106,
+          "median": 106,
+          "p95": 106
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12468649,
+          "median": 12468649,
+          "p95": 12468649
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 96809,
+          "median": 96809,
+          "p95": 96809
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 104927,
+          "median": 104927,
+          "p95": 104927
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12371840,
+          "median": 12371840,
+          "p95": 12371840
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9922358067822745,
+          "median": 0.9922358067822745,
+          "p95": 0.9922358067822745
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "superjson-error-stack-serialization",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 978391.878015995,
+          "median": 978391.878015995,
+          "p95": 978391.878015995
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 178,
+          "median": 178,
+          "p95": 178
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 164,
+          "median": 164,
+          "p95": 164
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 25809692,
+          "median": 25809692,
+          "p95": 25809692
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 230812,
+          "median": 230812,
+          "p95": 230812
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 70302,
+          "median": 70302,
+          "p95": 70302
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 25578880,
+          "median": 25578880,
+          "p95": 25578880
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9910571579079673,
+          "median": 0.9910571579079673,
+          "p95": 0.9910571579079673
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "happy-dom-deterministic-intersectionobserver",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1622626.4403380007,
+          "median": 1622626.4403380007,
+          "p95": 1622626.4403380007
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 117,
+          "median": 117,
+          "p95": 117
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 107,
+          "median": 107,
+          "p95": 107
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 13540680,
+          "median": 13540680,
+          "p95": 13540680
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 104136,
+          "median": 104136,
+          "p95": 104136
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 139476,
+          "median": 139476,
+          "p95": 139476
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 13436544,
+          "median": 13436544,
+          "p95": 13436544
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9923093965738796,
+          "median": 0.9923093965738796,
+          "p95": 0.9923093965738796
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "ink-grid-box-layout",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "rounds": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "koota-deferred-mutation-buffer",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1556688.4214099944,
+          "median": 1556688.4214099944,
+          "p95": 1556688.4214099944
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 150,
+          "median": 150,
+          "p95": 150
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 148,
+          "median": 148,
+          "p95": 148
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 22846156,
+          "median": 22846156,
+          "p95": 22846156
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 133196,
+          "median": 133196,
+          "p95": 133196
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 158704,
+          "median": 158704,
+          "p95": 158704
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 22712960,
+          "median": 22712960,
+          "p95": 22712960
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9941698726035137,
+          "median": 0.9941698726035137,
+          "p95": 0.9941698726035137
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "quill-shared-toolbar-focus",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2018196.892594993,
+          "median": 2018196.892594993,
+          "p95": 2018196.892594993
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 186,
+          "median": 186,
+          "p95": 186
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 150,
+          "median": 150,
+          "p95": 150
+        },
+        "inputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "nonCachedInputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "outputTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheReadTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheWriteTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "cacheHitRate": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "obsidian-linter-link-format-conversion",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1222600.5417319983,
+          "median": 1222600.5417319983,
+          "p95": 1222600.5417319983
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 136,
+          "median": 136,
+          "p95": 136
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 126,
+          "median": 126,
+          "p95": 126
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 16330724,
+          "median": 16330724,
+          "p95": 16330724
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 109284,
+          "median": 109284,
+          "p95": 109284
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 116599,
+          "median": 116599,
+          "p95": 116599
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 16221440,
+          "median": 16221440,
+          "p95": 16221440
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.993308073787788,
+          "median": 0.993308073787788,
+          "p95": 0.993308073787788
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "koota-query-predicates",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1599694.7002360076,
+          "median": 1599694.7002360076,
+          "p95": 1599694.7002360076
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 176,
+          "median": 176,
+          "p95": 176
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 206,
+          "median": 206,
+          "p95": 206
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 29605895,
+          "median": 29605895,
+          "p95": 29605895
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 161543,
+          "median": 161543,
+          "p95": 161543
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 152171,
+          "median": 152171,
+          "p95": 152171
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 29444352,
+          "median": 29444352,
+          "p95": 29444352
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.994543552897151,
+          "median": 0.994543552897151,
+          "p95": 0.994543552897151
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "prometheus-transactional-reload-status",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1974871.336044997,
+          "median": 1974871.336044997,
+          "p95": 1974871.336044997
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 187,
+          "median": 187,
+          "p95": 187
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 196,
+          "median": 196,
+          "p95": 196
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 25072870,
+          "median": 25072870,
+          "p95": 25072870
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 150374,
+          "median": 150374,
+          "p95": 150374
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 99725,
+          "median": 99725,
+          "p95": 99725
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 24922496,
+          "median": 24922496,
+          "p95": 24922496
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9940025214504762,
+          "median": 0.9940025214504762,
+          "p95": 0.9940025214504762
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "koota-pair-relation-tracking",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2163397.4065939933,
+          "median": 2163397.4065939933,
+          "p95": 2163397.4065939933
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 276,
+          "median": 276,
+          "p95": 276
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 206,
+          "median": 206,
+          "p95": 206
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 51097184,
+          "median": 51097184,
+          "p95": 51097184
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 195936,
+          "median": 195936,
+          "p95": 195936
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 188460,
+          "median": 188460,
+          "p95": 188460
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 50901248,
+          "median": 50901248,
+          "p95": 50901248
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9961654246934626,
+          "median": 0.9961654246934626,
+          "p95": 0.9961654246934626
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "meriyah-explicit-resource-declarations",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2321338.849980995,
+          "median": 2321338.849980995,
+          "p95": 2321338.849980995
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 231,
+          "median": 231,
+          "p95": 231
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 187,
+          "median": 187,
+          "p95": 187
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 31775075,
+          "median": 31775075,
+          "p95": 31775075
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 135395,
+          "median": 135395,
+          "p95": 135395
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 146563,
+          "median": 146563,
+          "p95": 146563
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 31639680,
+          "median": 31639680,
+          "p95": 31639680
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9957389557695773,
+          "median": 0.9957389557695773,
+          "p95": 0.9957389557695773
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "effect-sse-httpapi-streaming",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 3913222.5071119964,
+          "median": 3913222.5071119964,
+          "p95": 3913222.5071119964
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 432,
+          "median": 432,
+          "p95": 432
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 416,
+          "median": 416,
+          "p95": 416
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 102338075,
+          "median": 102338075,
+          "p95": 102338075
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 238747,
+          "median": 238747,
+          "p95": 238747
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 235062,
+          "median": 235062,
+          "p95": 235062
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 102099328,
+          "median": 102099328,
+          "p95": 102099328
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9976670755239435,
+          "median": 0.9976670755239435,
+          "p95": 0.9976670755239435
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "obsidian-linter-auto-table-of-contents",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1254082.5431820005,
+          "median": 1254082.5431820005,
+          "p95": 1254082.5431820005
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 134,
+          "median": 134,
+          "p95": 134
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 142,
+          "median": 142,
+          "p95": 142
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 18447248,
+          "median": 18447248,
+          "p95": 18447248
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 144144,
+          "median": 144144,
+          "p95": 144144
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 125260,
+          "median": 125260,
+          "p95": 125260
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 18303104,
+          "median": 18303104,
+          "p95": 18303104
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9921861515603845,
+          "median": 0.9921861515603845,
+          "p95": 0.9921861515603845
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "wasmi-trap-coredumps",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2649670.796973005,
+          "median": 2649670.796973005,
+          "p95": 2649670.796973005
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 342,
+          "median": 342,
+          "p95": 342
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 295,
+          "median": 295,
+          "p95": 295
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 64038583,
+          "median": 64038583,
+          "p95": 64038583
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 198199,
+          "median": 198199,
+          "p95": 198199
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 190762,
+          "median": 190762,
+          "p95": 190762
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 63840384,
+          "median": 63840384,
+          "p95": 63840384
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9969050064708646,
+          "median": 0.9969050064708646,
+          "p95": 0.9969050064708646
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "fd-deterministic-multi-key-sorting",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1100198.284254998,
+          "median": 1100198.284254998,
+          "p95": 1100198.284254998
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 110,
+          "median": 110,
+          "p95": 110
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 109,
+          "median": 109,
+          "p95": 109
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 14492754,
+          "median": 14492754,
+          "p95": 14492754
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 114770,
+          "median": 114770,
+          "p95": 114770
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 111650,
+          "median": 111650,
+          "p95": 111650
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 14377984,
+          "median": 14377984,
+          "p95": 14377984
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9920808702058974,
+          "median": 0.9920808702058974,
+          "p95": 0.9920808702058974
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "boa-hierarchical-evaluation-cancellation",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2895755.7392230034,
+          "median": 2895755.7392230034,
+          "p95": 2895755.7392230034
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 208,
+          "median": 208,
+          "p95": 208
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 208,
+          "median": 208,
+          "p95": 208
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 32045723,
+          "median": 32045723,
+          "p95": 32045723
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 144283,
+          "median": 144283,
+          "p95": 144283
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 122301,
+          "median": 122301,
+          "p95": 122301
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 31901440,
+          "median": 31901440,
+          "p95": 31901440
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9954975894911156,
+          "median": 0.9954975894911156,
+          "p95": 0.9954975894911156
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "pest-character-class-coalescing",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1570281.2632210106,
+          "median": 1570281.2632210106,
+          "p95": 1570281.2632210106
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 152,
+          "median": 152,
+          "p95": 152
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 148,
+          "median": 148,
+          "p95": 148
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 21073501,
+          "median": 21073501,
+          "p95": 21073501
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 119133,
+          "median": 119133,
+          "p95": 119133
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 136540,
+          "median": 136540,
+          "p95": 136540
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 20954368,
+          "median": 20954368,
+          "p95": 20954368
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9943467865163933,
+          "median": 0.9943467865163933,
+          "p95": 0.9943467865163933
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "oxvg-structural-selector-preservation",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 4457217.442313001,
+          "median": 4457217.442313001,
+          "p95": 4457217.442313001
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 362,
+          "median": 362,
+          "p95": 362
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 305,
+          "median": 305,
+          "p95": 305
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 79931763,
+          "median": 79931763,
+          "p95": 79931763
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 204403,
+          "median": 204403,
+          "p95": 204403
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 196860,
+          "median": 196860,
+          "p95": 196860
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 79727360,
+          "median": 79727360,
+          "p95": 79727360
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9974427812883346,
+          "median": 0.9974427812883346,
+          "p95": 0.9974427812883346
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "yjs-map-conflict-detection",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2152030.0308559984,
+          "median": 2152030.0308559984,
+          "p95": 2152030.0308559984
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 206,
+          "median": 206,
+          "p95": 206
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 176,
+          "median": 176,
+          "p95": 176
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 43221400,
+          "median": 43221400,
+          "p95": 43221400
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 151832,
+          "median": 151832,
+          "p95": 151832
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 208292,
+          "median": 208292,
+          "p95": 208292
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 43069568,
+          "median": 43069568,
+          "p95": 43069568
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9964871105517175,
+          "median": 0.9964871105517175,
+          "p95": 0.9964871105517175
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "testem-per-launcher-reports",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1353243.1619240046,
+          "median": 1353243.1619240046,
+          "p95": 1353243.1619240046
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 122,
+          "median": 122,
+          "p95": 122
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 121,
+          "median": 121,
+          "p95": 121
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12656439,
+          "median": 12656439,
+          "p95": 12656439
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 94007,
+          "median": 94007,
+          "p95": 94007
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 81212,
+          "median": 81212,
+          "p95": 81212
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12562432,
+          "median": 12562432,
+          "p95": 12562432
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9925723973386195,
+          "median": 0.9925723973386195,
+          "p95": 0.9925723973386195
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "katex-multicolumn-array-spans",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 1,
+      "passRate": 1,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1478904.0465189964,
+          "median": 1478904.0465189964,
+          "p95": 1478904.0465189964
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 164,
+          "median": 164,
+          "p95": 164
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 192,
+          "median": 192,
+          "p95": 192
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 23410882,
+          "median": 23410882,
+          "p95": 23410882
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 148418,
+          "median": 148418,
+          "p95": 148418
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 136845,
+          "median": 136845,
+          "p95": 136845
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 23262464,
+          "median": 23262464,
+          "p95": 23262464
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9936602986594012,
+          "median": 0.9936602986594012,
+          "p95": 0.9936602986594012
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "csstree-shorthand-expansion-compression",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 1292669.6450180113,
+          "median": 1292669.6450180113,
+          "p95": 1292669.6450180113
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 95,
+          "median": 95,
+          "p95": 95
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 91,
+          "median": 91,
+          "p95": 91
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 12417701,
+          "median": 12417701,
+          "p95": 12417701
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 83237,
+          "median": 83237,
+          "p95": 83237
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 158723,
+          "median": 158723,
+          "p95": 158723
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 12334464,
+          "median": 12334464,
+          "p95": 12334464
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9932969073744005,
+          "median": 0.9932969073744005,
+          "p95": 0.9932969073744005
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    },
+    {
+      "taskId": "testem-bail-on-test-failure",
+      "agentId": "ello-ds",
+      "validRuns": 1,
+      "passedRuns": 0,
+      "passRate": 0,
+      "resources": {
+        "elapsedMs": {
+          "count": 1,
+          "mean": 2202229.288396001,
+          "median": 2202229.288396001,
+          "p95": 2202229.288396001
+        },
+        "rounds": {
+          "count": 1,
+          "mean": 220,
+          "median": 220,
+          "p95": 220
+        },
+        "toolCalls": {
+          "count": 1,
+          "mean": 245,
+          "median": 245,
+          "p95": 245
+        },
+        "inputTokens": {
+          "count": 1,
+          "mean": 38819479,
+          "median": 38819479,
+          "p95": 38819479
+        },
+        "nonCachedInputTokens": {
+          "count": 1,
+          "mean": 162071,
+          "median": 162071,
+          "p95": 162071
+        },
+        "outputTokens": {
+          "count": 1,
+          "mean": 149209,
+          "median": 149209,
+          "p95": 149209
+        },
+        "cacheReadTokens": {
+          "count": 1,
+          "mean": 38657408,
+          "median": 38657408,
+          "p95": 38657408
+        },
+        "cacheWriteTokens": {
+          "count": 1,
+          "mean": 0,
+          "median": 0,
+          "p95": 0
+        },
+        "cacheHitRate": {
+          "count": 1,
+          "mean": 0.9958250083675775,
+          "median": 0.9958250083675775,
+          "p95": 0.9958250083675775
+        },
+        "reasoningTokens": {
+          "count": 0,
+          "mean": null,
+          "median": null,
+          "p95": null
+        }
+      }
+    }
+  ],
+  "resources": {
+    "elapsedMs": {
+      "count": 102,
+      "mean": 1670862.1487781082,
+      "median": 1495628.4605164975,
+      "p95": 3316112.0867422973
+    },
+    "rounds": {
+      "count": 102,
+      "mean": 168.54901960784315,
+      "median": 151,
+      "p95": 340.04999999999956
+    },
+    "toolCalls": {
+      "count": 102,
+      "mean": 159.59803921568627,
+      "median": 148,
+      "p95": 293.1499999999996
+    },
+    "inputTokens": {
+      "count": 91,
+      "mean": 26641327.846153848,
+      "median": 21073501,
+      "p95": 62198842
+    },
+    "nonCachedInputTokens": {
+      "count": 91,
+      "mean": 139188.06593406593,
+      "median": 130440,
+      "p95": 222663.5
+    },
+    "outputTokens": {
+      "count": 91,
+      "mean": 136154.8021978022,
+      "median": 128812,
+      "p95": 235941
+    },
+    "cacheReadTokens": {
+      "count": 91,
+      "mean": 26502139.78021978,
+      "median": 20966272,
+      "p95": 61985664
+    },
+    "cacheWriteTokens": {
+      "count": 91,
+      "mean": 0,
+      "median": 0,
+      "p95": 0
+    },
+    "cacheHitRate": {
+      "count": 91,
+      "mean": 0.992701119769996,
+      "median": 0.9936602986594012,
+      "p95": 0.997040235135336
+    },
+    "reasoningTokens": {
+      "count": 0,
+      "mean": null,
+      "median": null,
+      "p95": null
+    },
+    "phaseElapsedMs": {
+      "agent-running": {
+        "count": 102,
+        "mean": 1671139.2672592455,
+        "median": 1495924.3203134984,
+        "p95": 3316525.5999841965
+      },
+      "audit-workspace-storage": {
+        "count": 102,
+        "mean": 93744.98683792155,
+        "median": 85455.71015500091,
+        "p95": 162891.83606790134
+      },
+      "capture-patch": {
+        "count": 102,
+        "mean": 54.13828700944078,
+        "median": 45.370541006326675,
+        "p95": 91.39698745422062
+      },
+      "cleanup-agent-container": {
+        "count": 102,
+        "mean": 5222.396521529475,
+        "median": 5218.859104000032,
+        "p95": 5536.609380299481
+      },
+      "cleanup-attempt-workspaces": {
+        "count": 102,
+        "mean": 1061.8013284899084,
+        "median": 163.7651649992913,
+        "p95": 4402.6435781955515
+      },
+      "close-agent": {
+        "count": 102,
+        "mean": 195.17489134328778,
+        "median": 186.8267999999225,
+        "p95": 242.4002091001719
+      },
+      "normalize-agent-evidence": {
+        "count": 102,
+        "mean": 864.0148516957667,
+        "median": 839.275802500546,
+        "p95": 1382.0667135976255
+      },
+      "prepare-agent": {
+        "count": 102,
+        "mean": 784.5520942938753,
+        "median": 706.7712679952383,
+        "p95": 1216.7639744019134
+      },
+      "prepare-attempt": {
+        "count": 102,
+        "mean": 1.8378602357044944,
+        "median": 0.921569497557357,
+        "p95": 5.080672349408262
+      },
+      "prepare-workspace": {
+        "count": 102,
+        "mean": 45918.008162706115,
+        "median": 40050.16077050194,
+        "p95": 81190.8961663
+      },
+      "verifier-baseline-preflight": {
+        "count": 102,
+        "mean": 160709.51760449956,
+        "median": 136147.19966000319,
+        "p95": 373453.83760904777
+      },
+      "verifier-running": {
+        "count": 102,
+        "mean": 175648.58769076466,
+        "median": 152252.198655501,
+        "p95": 442831.99424479017
+      }
+    },
+    "threadUsage": {
+      "mainInputTokens": {
+        "count": 91,
+        "mean": 26641327.846153848,
+        "median": 21073501,
+        "p95": 62198842
+      },
+      "subagentInputTokens": {
+        "count": 102,
+        "mean": 0,
+        "median": 0,
+        "p95": 0
+      },
+      "combinedInputTokens": {
+        "count": 91,
+        "mean": 26641327.846153848,
+        "median": 21073501,
+        "p95": 62198842
+      },
+      "mainOutputTokens": {
+        "count": 91,
+        "mean": 136154.8021978022,
+        "median": 128812,
+        "p95": 235941
+      },
+      "subagentOutputTokens": {
+        "count": 102,
+        "mean": 0,
+        "median": 0,
+        "p95": 0
+      },
+      "combinedOutputTokens": {
+        "count": 91,
+        "mean": 136154.8021978022,
+        "median": 128812,
+        "p95": 235941
+      },
+      "mainToolCalls": {
+        "count": 91,
+        "mean": 161.65934065934067,
+        "median": 148,
+        "p95": 295.5
+      },
+      "subagentToolCalls": {
+        "count": 102,
+        "mean": 0,
+        "median": 0,
+        "p95": 0
+      },
+      "combinedToolCalls": {
+        "count": 91,
+        "mean": 161.65934065934067,
+        "median": 148,
+        "p95": 295.5
+      }
+    }
+  },
+  "evidenceCoverage": {
+    "usageCompleteRuns": 91,
+    "usageUnavailableRuns": 11,
+    "toolAuditPassedRuns": 102
+  }
+}

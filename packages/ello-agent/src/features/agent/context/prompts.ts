@@ -144,6 +144,7 @@ function createCodingSystemPromptRenderer(
     .digest('hex');
   const memory = runtime.memory;
   const contextDeps: ContextSnapshotDeps = {
+    subagent: profile === 'subagent',
     ...(runtime.onContextEvent !== undefined
       ? { onContextEvent: runtime.onContextEvent }
       : {}),

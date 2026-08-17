@@ -34,27 +34,35 @@ describe('subagent report contract', () => {
   ])('为 %s 报告追加对应消费指令', async (definitionName, marker) => {
     const { service, store } = await fixture();
     const task = store.create(taskInput(definitionName));
-    store.settle(task.id, { status: 'completed', output: 'report body' });
+    store.settle(task.id, {
+      result: completedResult('report body'),
+      output: agentResultText('report body'),
+    });
 
     const notification = service.takeNotifications(task.rootThreadId);
 
-    expect(notification).toContain('<how-to-consume>');
-    expect(notification).toContain(marker);
-    expect(notification.indexOf('<how-to-consume>')).toBeGreaterThan(
-      notification.indexOf('<result>'),
+    expect(notification?.text).toContain('<how-to-consume>');
+    expect(notification?.text).toContain(marker);
+    expect(notification?.text.indexOf('<how-to-consume>')).toBeGreaterThan(
+      notification?.text.indexOf('<result>') ?? -1,
     );
   });
 
   it('未知 definition 只追加通用消费契约', async () => {
     const { service, store } = await fixture();
     const task = store.create(taskInput('custom-agent'));
-    store.settle(task.id, { status: 'completed', output: 'custom report' });
+    store.settle(task.id, {
+      result: completedResult('custom report'),
+      output: agentResultText('custom report'),
+    });
 
     const notification = service.takeNotifications(task.rootThreadId);
 
-    expect(notification).toContain('A subagent report is evidence');
-    expect(notification).not.toContain('read-only exploration agent');
-    expect(notification).not.toContain('implementation agent');
+    expect(notification?.text).toContain(
+      'This is a structured Subagent result',
+    );
+    expect(notification?.text).not.toContain('read-only exploration agent');
+    expect(notification?.text).not.toContain('implementation agent');
   });
 });
 
@@ -82,16 +90,32 @@ function taskInput(definitionName: string): CreateAgentTask {
     rootThreadId: `root-${definitionName}`,
     description: 'test report contract',
     definitionName,
-    contextMode: 'fresh',
-    executionMode: 'background',
-    prompt: 'inspect',
+    taskPacket: {
+      objective: 'inspect',
+      scope: 'test fixture',
+      knownFacts: [],
+      constraints: [],
+      expectedOutcome: 'return a report',
+      acceptanceEvidence: ['the report is structured'],
+    },
     cwd: '/workspace',
     isolation: 'shared',
     maxTurns: 1,
-    depth: 1,
     sidechain: [],
-    commandNames: [],
     permissionRules: [],
     externalPaths: [],
   };
+}
+
+function completedResult(summary: string) {
+  return {
+    status: 'completed' as const,
+    summary,
+    evidence: [],
+    remainingRisks: [],
+  };
+}
+
+function agentResultText(summary: string): string {
+  return `<agent-result>${JSON.stringify(completedResult(summary))}</agent-result>`;
 }

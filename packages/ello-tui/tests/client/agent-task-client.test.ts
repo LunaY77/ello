@@ -55,6 +55,39 @@ describe('AgentTaskClient', () => {
     await client.close();
   });
 
+  it('root seq 恢复会清理已删除详情并刷新 event sequence 变化的缓存', async () => {
+    const server = new TaskServer(snapshot(1, [summary(1)]));
+    const client = await AgentTaskClient.connect(
+      server as unknown as AppServerClient,
+      'thr_root',
+    );
+    server.detail = detail(summary(1), [taskEvent(1, 1)]);
+    await client.read('job_child');
+
+    server.detail = detail(summary(5), [
+      taskEvent(1, 1),
+      taskEvent(2, 2),
+      taskEvent(3, 3),
+      taskEvent(4, 4),
+      taskEvent(5, 5),
+    ]);
+    server.subscribeResult = snapshot(5, [summary(5)]);
+    server.emit(updated(4, summary(4)));
+
+    await vi.waitFor(() =>
+      expect(client.detail('job_child')?.task.eventSequence).toBe(5),
+    );
+    expect(
+      server.requests.filter(([method]) => method === 'agent/task/read'),
+    ).toHaveLength(2);
+
+    server.subscribeResult = snapshot(9, []);
+    server.emit(updated(8, summary(8)));
+    await vi.waitFor(() => expect(client.snapshot.seq).toBe(9));
+    expect(client.detail('job_child')).toBeUndefined();
+    await client.close();
+  });
+
   it('控制操作始终携带 root thread 边界', async () => {
     const server = new TaskServer(snapshot(0, [summary(1)]));
     const client = await AgentTaskClient.connect(
@@ -62,26 +95,21 @@ describe('AgentTaskClient', () => {
       'thr_root',
     );
 
-    await client.background('job_child');
+    await client.steer('继续', 'job_child', 'steer_fixture');
     await client.stop('job_child');
-    await client.resume('job_child', '继续', { executionMode: 'background' });
 
     expect(server.requests).toContainEqual([
-      'agent/task/background',
-      { threadId: 'thr_root', taskId: 'job_child' },
+      'agent/task/steer',
+      {
+        threadId: 'thr_root',
+        taskId: 'job_child',
+        steerId: 'steer_fixture',
+        input: '继续',
+      },
     ]);
     expect(server.requests).toContainEqual([
       'agent/task/stop',
       { threadId: 'thr_root', taskId: 'job_child' },
-    ]);
-    expect(server.requests).toContainEqual([
-      'agent/task/resume',
-      {
-        threadId: 'thr_root',
-        taskId: 'job_child',
-        prompt: '继续',
-        executionMode: 'background',
-      },
     ]);
     await client.close();
   });
@@ -110,12 +138,7 @@ class TaskServer {
     if (method === 'agent/task/read') return Promise.resolve(this.detail);
     if (method === 'agent/task/unsubscribe')
       return Promise.resolve({ ok: true });
-    if (
-      method === 'agent/task/background' ||
-      method === 'agent/task/stop' ||
-      method === 'agent/task/resume' ||
-      method === 'agent/task/steer'
-    ) {
+    if (method === 'agent/task/stop' || method === 'agent/task/steer') {
       return Promise.resolve({ task: summary(2) });
     }
     throw new Error(`Unexpected task request ${method}.`);
@@ -133,8 +156,6 @@ function summary(revision: number): AgentTaskSummary {
     rootThreadId: 'thr_root',
     definitionName: 'explore',
     description: '检查实现',
-    contextMode: 'fresh',
-    executionMode: revision > 1 ? 'background' : 'foreground',
     status: 'running',
     cwd: '/workspace',
     isolation: 'shared',
@@ -171,7 +192,18 @@ function detail(
   task: AgentTaskSummary,
   events: readonly AgentTaskEvent[],
 ): AgentTaskDetail {
-  return { task, prompt: '检查实现', events };
+  return {
+    task,
+    taskPacket: {
+      objective: '检查实现',
+      scope: '/workspace',
+      knownFacts: [],
+      constraints: [],
+      expectedOutcome: '返回分析结果',
+      acceptanceEvidence: ['包含证据'],
+    },
+    events,
+  };
 }
 
 function updated(seq: number, task: AgentTaskSummary): ServerNotification {

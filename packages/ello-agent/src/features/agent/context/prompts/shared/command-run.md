@@ -5,12 +5,16 @@
 ### 1. Batch and order
 
 1. Emit at most one `command_run` per model response.
-2. Include all currently known actions whose inputs are available.
-3. Commands in the same `step` must be independent; dependent Commands use a later `step`.
-4. Never construct a Command from output you have not yet seen.
-5. Batch independent work to minimize model round trips. Do not chain independent reads or searches inside one `bash` line to save a frame.
+2. A single `command_run` is your only parallelism unit: Include all currently known actions whose inputs are available in this batch.
+3. Commands in the same `step` must be independent; dependent Commands use a later `step`. Two dependency kinds decide placement:
+   - Step dependency: a later Command only needs the earlier one to have _run_; its inputs are already fully known (e.g. create a script, then run it). Put it in a later `step` of the same batch.
+   - Output dependency: a later Command consumes the _content_ of an earlier result, invisible inside a batch. Send it in the next model turn.
+4. Never construct a Command from output you have not yet seen; do not treat step dependencies as output dependencies.
+5. Batch independent work to minimize model round trips, including speculative read-only probes that may fail cheaply. Do not chain independent reads or searches inside one `bash` line to save a frame.
 6. Do not emit empty batches.
 7. When a result is reduced to a bounded preview, narrow the next Command instead of rerunning the same one.
+
+Example batch: independent probes in step 1; creating a script in step 2; running it in step 3 — every input known in advance, so it is one batch.
 
 ### 2. Command Frames
 
@@ -29,9 +33,10 @@
 
 ### 4. Failure
 
-1. Use `onFailure: "continue"` only when failure should not block otherwise valid later work.
-2. Use `onFailure: "diagnose"` only for permitted read-only diagnosis of an earlier failure.
-3. Do not assume rollback. After uncertain or partial mutation, establish durable state before retrying.
+1. Commands in the same `step` must be independent; dependent Commands use a later `step`. They are attempted independently of each other; `onFailure` only governs the later `step`s.
+2. For batched independent read-only probes, explicitly set `onFailure: "continue"`. The runtime default is `stop` when the field is omitted, so keep it only when a later step depends on this Command succeeding or its failure would corrupt later mutations.
+3. Use `onFailure: "diagnose"` only for permitted read-only diagnosis of an earlier failure.
+4. Do not assume rollback. After uncertain or partial mutation, establish durable state before retrying.
 
 ### 5. Local programs
 

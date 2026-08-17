@@ -13,6 +13,7 @@ import type {
   AgentRunRequest,
   AgentRunResult,
   BuiltAgent,
+  AgentTaskNotificationInput,
 } from './contracts.js';
 import type {
   AgentRunResult as EngineRunResult,
@@ -65,7 +66,15 @@ interface RunningAgentOptions {
    */
   readonly waitForTaskNotification?: (
     signal: AbortSignal,
-  ) => Promise<string | undefined>;
+  ) => Promise<AgentTaskNotificationInput | undefined>;
+  readonly acknowledgeTaskNotifications?: (
+    notificationIds: readonly string[],
+  ) => void;
+  readonly releaseTaskNotifications?: (
+    notificationIds: readonly string[],
+  ) => void;
+  readonly acknowledgeSystemTaskNotifications?: () => void;
+  readonly releaseSystemTaskNotifications?: () => void;
 }
 
 interface QueuedRunInput {
@@ -103,6 +112,23 @@ export function startAgentRun(
     ...(built.waitForTaskNotification === undefined
       ? {}
       : { waitForTaskNotification: built.waitForTaskNotification }),
+    ...(built.acknowledgeTaskNotifications === undefined
+      ? {}
+      : { acknowledgeTaskNotifications: built.acknowledgeTaskNotifications }),
+    ...(built.releaseTaskNotifications === undefined
+      ? {}
+      : { releaseTaskNotifications: built.releaseTaskNotifications }),
+    ...(built.acknowledgeSystemTaskNotifications === undefined
+      ? {}
+      : {
+          acknowledgeSystemTaskNotifications:
+            built.acknowledgeSystemTaskNotifications,
+        }),
+    ...(built.releaseSystemTaskNotifications === undefined
+      ? {}
+      : {
+          releaseSystemTaskNotifications: built.releaseSystemTaskNotifications,
+        }),
   });
 }
 
@@ -129,6 +155,7 @@ class RunningAgent implements AgentRun {
     'transitioning';
   private wakeWaitingInput: (() => void) | undefined;
   private interruptReason: string | undefined;
+  private initialNotificationIds: string[] = [];
 
   constructor(private readonly options: RunningAgentOptions) {
     this.interactions = createRunInteractions({
@@ -235,8 +262,9 @@ class RunningAgent implements AgentRun {
             };
           }
           if (notification !== undefined) {
+            this.initialNotificationIds = [...notification.notificationIds];
             stream = this.options.agent.stream(
-              { messages, prompt: notification },
+              { messages, prompt: notification.text },
               this.runOptions(),
             );
             this.forwardWaitingInputs(stream);
@@ -245,6 +273,9 @@ class RunningAgent implements AgentRun {
           const input = this.waitingInputs.shift();
           if (input !== undefined) {
             if (input.kind === 'steer') this.publishConsumedInput(input);
+            if (input.kind === 'notification') {
+              this.initialNotificationIds = [input.id];
+            }
             stream = this.options.agent.stream(
               { messages, prompt: input.text },
               this.runOptions(),
@@ -288,6 +319,7 @@ class RunningAgent implements AgentRun {
         },
       };
     } finally {
+      this.releaseUnconsumedNotifications();
       this.phase = 'closed';
       this.activeStream = undefined;
       this.wakeWaitingInput?.();
@@ -309,7 +341,9 @@ class RunningAgent implements AgentRun {
     this.wakeWaitingInput?.();
   }
 
-  private async waitForContinuation(): Promise<string | undefined> {
+  private async waitForContinuation(): Promise<
+    AgentTaskNotificationInput | undefined
+  > {
     const waitForTaskNotification = this.options.waitForTaskNotification;
     if (waitForTaskNotification === undefined) return undefined;
     this.phase = 'waiting';
@@ -471,6 +505,9 @@ class RunningAgent implements AgentRun {
         // 永久保留 in-progress item。
         this.completeOpenMessages();
         return;
+      case 'model.interrupted':
+        this.completeOpenMessages();
+        return;
       case 'queue.drained':
         if (event.queue === 'steering') {
           this.publishConsumedInputs(event.count, event.occurredAt);
@@ -482,11 +519,19 @@ class RunningAgent implements AgentRun {
           messages: event.messages,
         });
         return;
+      case 'model.started':
+        this.options.acknowledgeSystemTaskNotifications?.();
+        if (this.initialNotificationIds.length > 0) {
+          this.options.acknowledgeTaskNotifications?.(
+            this.initialNotificationIds,
+          );
+          this.initialNotificationIds = [];
+        }
+        return;
       case 'run.completed':
       case 'run.started':
       case 'turn.started':
       case 'turn.completed':
-      case 'model.started':
       case 'model.first_token':
       case 'tool.approval_requested':
       case 'run.interrupted':
@@ -576,7 +621,25 @@ class RunningAgent implements AgentRun {
           occurredAt,
         });
       }
+      if (input.kind === 'notification') {
+        this.options.acknowledgeTaskNotifications?.([input.id]);
+      }
     }
+  }
+
+  private releaseUnconsumedNotifications(): void {
+    const ids = [
+      ...this.initialNotificationIds,
+      ...this.pendingInputs
+        .filter((input) => input.kind === 'notification')
+        .map((input) => input.id),
+      ...this.waitingInputs
+        .filter((input) => input.kind === 'notification')
+        .map((input) => input.id),
+    ];
+    if (ids.length > 0) this.options.releaseTaskNotifications?.(ids);
+    this.initialNotificationIds = [];
+    this.options.releaseSystemTaskNotifications?.();
   }
 
   private requireMessageText(messageId: string): string {

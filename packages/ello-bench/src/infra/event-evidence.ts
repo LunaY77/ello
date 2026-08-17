@@ -3,10 +3,11 @@ import path from 'node:path';
 
 import {
   EventCaptureCompleteSchema,
-  EventCaptureSchema,
   type EventCaptureComplete,
 } from '../domain/contract/index.js';
-import { sha256 } from '../domain/hash.js';
+
+import { sha256File } from './io.js';
+import { forEachEventCapture } from './rounds.js';
 
 export interface AgentEventEvidence {
   readonly main: EventCaptureComplete & { readonly threadId: string };
@@ -68,53 +69,41 @@ async function validateCapture(
     );
   }
   const eventLogPath = path.join(path.resolve(rawRoot), expectedName);
-  const content = await readFile(eventLogPath);
-  if (sha256(content) !== complete.sha256) {
+  if ((await sha256File(eventLogPath)) !== complete.sha256) {
     throw new Error(`Event capture checksum mismatch: ${eventLogPath}`);
   }
-  const captures = content
-    .toString('utf8')
-    .split(/\r?\n/u)
-    .filter((line) => line !== '')
-    .map((line) => EventCaptureSchema.parse(JSON.parse(line) as unknown));
-  if (captures.length !== complete.eventCount) {
+  let eventCount = 0;
+  let previousSequence = 0;
+  let runCount = 0;
+  let turnCount = 0;
+  let modelCallCount = 0;
+  await forEachEventCapture(eventLogPath, (capture) => {
+    eventCount += 1;
+    if (capture.sequence !== previousSequence + 1) {
+      throw new Error(
+        previousSequence === capture.sequence
+          ? `Event sequence is duplicated: ${capture.sequence}.`
+          : `Event sequence has a gap: expected ${previousSequence + 1}, received ${capture.sequence}.`,
+      );
+    }
+    previousSequence = capture.sequence;
+    if (capture.event === 'run.started') runCount += 1;
+    if (capture.event === 'turn.started') turnCount += 1;
+    if (capture.event === 'model.started') modelCallCount += 1;
+  });
+  if (eventCount !== complete.eventCount) {
     throw new Error(`Event capture count mismatch: ${eventLogPath}`);
   }
-  const actualCounts = captures.reduce(
-    (counts, capture) => ({
-      runCount: counts.runCount + (capture.event === 'run.started' ? 1 : 0),
-      turnCount: counts.turnCount + (capture.event === 'turn.started' ? 1 : 0),
-      modelCallCount:
-        counts.modelCallCount + (capture.event === 'model.started' ? 1 : 0),
-    }),
-    { runCount: 0, turnCount: 0, modelCallCount: 0 },
-  );
   if (
-    actualCounts.runCount !== complete.runCount ||
-    actualCounts.turnCount !== complete.turnCount ||
-    actualCounts.modelCallCount !== complete.modelCallCount
+    runCount !== complete.runCount ||
+    turnCount !== complete.turnCount ||
+    modelCallCount !== complete.modelCallCount
   ) {
     throw new Error(`Event capture lifecycle count mismatch: ${eventLogPath}`);
   }
-  if (
-    actualCounts.runCount < 1 ||
-    actualCounts.turnCount < 1 ||
-    actualCounts.modelCallCount < 1
-  ) {
+  if (runCount < 1 || turnCount < 1 || modelCallCount < 1) {
     throw new Error(
-      `Event capture lifecycle is incomplete: runs=${actualCounts.runCount} turns=${actualCounts.turnCount} modelCalls=${actualCounts.modelCallCount}.`,
-    );
-  }
-  const sequences = captures
-    .map((capture) => capture.sequence)
-    .sort((a, b) => a - b);
-  for (const [index, sequence] of sequences.entries()) {
-    if (sequence === index + 1) continue;
-    const previous = sequences[index - 1];
-    throw new Error(
-      previous === sequence
-        ? `Event sequence is duplicated: ${sequence}.`
-        : `Event sequence has a gap: expected ${index + 1}, received ${sequence}.`,
+      `Event capture lifecycle is incomplete: runs=${runCount} turns=${turnCount} modelCalls=${modelCallCount}.`,
     );
   }
   return { ...complete, eventLogPath };

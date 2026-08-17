@@ -96,6 +96,12 @@ export interface DefineCommandOptions<
   readonly risk: CommandRisk;
   readonly exposure?: CommandExposure;
   readonly invocation: TInvocation;
+  /**
+   * 声明 Command 的效果元数据。
+   *
+   * 该声明决定运行时如何在 Environment 执行 gate 中调度本 Command，因此它本身必须是
+   * 纯函数：只读取输入和上下文元数据，不访问 Environment 文件系统、进程或网络。
+   */
   readonly effects?:
     | Partial<CommandCapabilities>
     | ((

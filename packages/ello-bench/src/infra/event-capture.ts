@@ -3,13 +3,19 @@
  *
  * recorder 写入失败会直接中止 Agent run，确保不产生缺少原始证据的可发布结果。
  */
-import { createHash } from 'node:crypto';
-import { appendFile, mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { appendFile, mkdir, open, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 
 import type { AgentEventRecorder } from '@ello/agent/runtime';
 
-import { EventCaptureSchema } from '../domain/contract/index.js';
+import {
+  EventCaptureSchema,
+  type EventCapture,
+} from '../domain/contract/index.js';
+
+import { sha256File } from './io.js';
 
 type RecordedEvent = Parameters<AgentEventRecorder['record']>[0];
 
@@ -57,8 +63,7 @@ class JsonlEventCaptureRecorder implements EventCaptureRecorder {
       throw new Error(`Event capture already closed: ${this.eventLogPath}`);
     }
     await this.flush();
-    const content = await readFile(this.eventLogPath);
-    const checksum = createHash('sha256').update(content).digest('hex');
+    const checksum = await sha256File(this.eventLogPath);
     await writeFile(
       this.completePath,
       `${JSON.stringify({
@@ -80,7 +85,7 @@ class JsonlEventCaptureRecorder implements EventCaptureRecorder {
     // tracing lifecycle. New events reopen the capture and the next close
     // atomically replaces its completion marker.
     this.finalized = false;
-    const payload = redact(event);
+    const payload = redact(project(event));
     if (!isRecord(payload)) {
       throw new TypeError('Engine event must serialize to an object payload.');
     }
@@ -132,30 +137,132 @@ class JsonlEventCaptureRecorder implements EventCaptureRecorder {
 
   private async initialize(): Promise<void> {
     await mkdir(path.dirname(this.eventLogPath), { recursive: true });
-    let source: string;
     try {
-      source = await readFile(this.eventLogPath, 'utf8');
+      await forEachExistingCapture(this.eventLogPath, (capture) => {
+        this.eventCount += 1;
+        if (capture.event === 'run.started') this.runCount += 1;
+        if (capture.event === 'turn.started') this.turnCount += 1;
+        if (capture.event === 'model.started') this.modelCallCount += 1;
+        const runId = capture.payload.runId;
+        const sequence = capture.payload.sequence;
+        if (typeof runId === 'string' && typeof sequence === 'number') {
+          this.lastSequenceByRun.set(runId, sequence);
+        }
+      });
     } catch (error) {
       if (!isMissingFile(error)) throw error;
       await writeFile(this.eventLogPath, '', 'utf8');
-      return;
-    }
-    const captures = source
-      .split(/\r?\n/u)
-      .filter((line) => line !== '')
-      .map((line) => EventCaptureSchema.parse(JSON.parse(line) as unknown));
-    this.eventCount = captures.length;
-    for (const capture of captures) {
-      if (capture.event === 'run.started') this.runCount += 1;
-      if (capture.event === 'turn.started') this.turnCount += 1;
-      if (capture.event === 'model.started') this.modelCallCount += 1;
-      const runId = capture.payload.runId;
-      const sequence = capture.payload.sequence;
-      if (typeof runId === 'string' && typeof sequence === 'number') {
-        this.lastSequenceByRun.set(runId, sequence);
-      }
     }
   }
+}
+
+async function forEachExistingCapture(
+  eventLogPath: string,
+  visit: (capture: EventCapture) => void,
+): Promise<void> {
+  const lines = createInterface({
+    input: createReadStream(eventLogPath, { encoding: 'utf8' }),
+    crlfDelay: Number.POSITIVE_INFINITY,
+  });
+  let lineNumber = 0;
+  try {
+    for await (const line of lines) {
+      lineNumber += 1;
+      if (line === '') continue;
+      try {
+        visit(EventCaptureSchema.parse(JSON.parse(line) as unknown));
+      } catch (error) {
+        throw new Error(`Invalid event capture line ${lineNumber}.`, {
+          cause: error,
+        });
+      }
+    }
+  } finally {
+    lines.close();
+  }
+}
+
+/**
+ * 把两个二次增长的 model 事件投影成定长摘要。
+ *
+ * `model.started.request` 携带本次请求的**全部**消息，`model.completed.response` 携带
+ * 全部消息加响应文本，于是第 k 轮写入的内容包含前 k-1 轮：一次 279 轮的 run 里这两类
+ * 事件就占了 588MB 中的 453MB，长会话必然撞上 V8 单字符串上限并让整份证据不可读。
+ *
+ * 归一化只读 identity、occurredAt、diagnostics.toolsetFingerprint、response.finishReason、
+ * response.usage 和 response.toolCalls 的 id/name，所以这里保留这些字段，并把被裁掉的
+ * 部分换成显式计数，避免看起来像「本来就没有」。
+ *
+ * Args:
+ * - `event`: 引擎原样交付的事件。
+ *
+ * Returns:
+ * - 需要裁剪的事件返回投影副本，其余事件原样返回。
+ */
+function project(event: RecordedEvent): unknown {
+  if (event.type === 'model.started') {
+    const { request, ...rest } = event as RecordedEvent & {
+      readonly request?: Record<string, unknown>;
+    };
+    return { ...rest, requestSummary: summarizeRequest(request) };
+  }
+  if (event.type === 'model.completed') {
+    const { response, ...rest } = event as RecordedEvent & {
+      readonly response?: Record<string, unknown>;
+    };
+    return { ...rest, response: summarizeResponse(response) };
+  }
+  return event;
+}
+
+function summarizeRequest(
+  request: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (request === undefined) return { messageCount: 0 };
+  const messages = request.messages;
+  const tools = request.tools;
+  return {
+    messageCount: Array.isArray(messages) ? messages.length : 0,
+    toolCount:
+      typeof tools === 'object' && tools !== null
+        ? Object.keys(tools).length
+        : 0,
+    ...(Array.isArray(request.activeTools)
+      ? { activeTools: request.activeTools }
+      : {}),
+    ...(isRecord(request.modelSettings)
+      ? { modelSettings: request.modelSettings }
+      : {}),
+  };
+}
+
+function summarizeResponse(
+  response: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (response === undefined) return {};
+  const toolCalls = Array.isArray(response.toolCalls) ? response.toolCalls : [];
+  const text = response.text;
+  return {
+    ...(response.finishReason === undefined
+      ? {}
+      : { finishReason: response.finishReason }),
+    ...(response.usage === undefined ? {} : { usage: response.usage }),
+    toolCalls: toolCalls.map((toolCall) =>
+      isRecord(toolCall)
+        ? {
+            ...(toolCall.id === undefined ? {} : { id: toolCall.id }),
+            ...(toolCall.name === undefined ? {} : { name: toolCall.name }),
+          }
+        : toolCall,
+    ),
+    textLength: typeof text === 'string' ? text.length : 0,
+    messageCount: Array.isArray(response.messages)
+      ? response.messages.length
+      : 0,
+    newMessageCount: Array.isArray(response.newMessages)
+      ? response.newMessages.length
+      : 0,
+  };
 }
 
 function redact(

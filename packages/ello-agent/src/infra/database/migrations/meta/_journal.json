@@ -36,6 +36,13 @@
       "when": 1785310775525,
       "tag": "0004_agent_task_runtime_projection",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786754149457,
+      "tag": "0005_centralized_subagents",
+      "breakpoints": true
     }
   ]
 }

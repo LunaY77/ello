@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { normalizeEventCaptureSource } from '../../rounds.js';
+import { normalizeEventCaptures, readEventCaptures } from '../../rounds.js';
 
 export interface ElloProviderRecoveryTarget {
   readonly threadId: string;
@@ -34,8 +34,8 @@ export async function findElloProviderRecoveryTarget(options: {
       `Ello recovery event log escaped its root: ${eventLogPath}`,
     );
   }
-  const normalized = normalizeEventCaptureSource(
-    await readFile(eventLogPath, 'utf8'),
+  const normalized = normalizeEventCaptures(
+    await readEventCaptures(eventLogPath),
     false,
   );
   return normalized.providerFailure ? { threadId, eventLogPath } : null;

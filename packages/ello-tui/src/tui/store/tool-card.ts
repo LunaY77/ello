@@ -240,9 +240,9 @@ function headline(
   if (kind === 'network') {
     return `Fetched ${text(metadata?.url) || inputString(call.input, 'url')}`;
   }
-  if (kind === 'task' || call.name === 'delegate_to_subagent') {
-    const agent = inputString(call.input, 'name') || text(metadata?.agentName);
-    return `Delegate${agent !== '' ? ` ${agent}` : ''}`;
+  if (kind === 'task' || call.name === 'spawn_agent') {
+    const agent = inputString(call.input, 'agent') || text(metadata?.agentName);
+    return `Spawn${agent !== '' ? ` ${agent}` : ''}`;
   }
   return `${formatName(call.name)}${path !== '' ? ` ${path}` : ''}`;
 }

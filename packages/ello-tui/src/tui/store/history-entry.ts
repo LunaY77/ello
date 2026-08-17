@@ -47,14 +47,13 @@ export interface SubagentRunView {
   readonly revision?: number;
   readonly agentName: string;
   readonly description: string;
-  readonly background: boolean;
   readonly status:
     | 'queued'
     | 'running'
     | 'completed'
     | 'failed'
-    | 'killed'
-    | 'recovered'
+    | 'blocked'
+    | 'stopped'
     | 'fail';
   readonly startedAt: string;
   readonly completedAt?: string;

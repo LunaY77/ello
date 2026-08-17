@@ -10,28 +10,35 @@ export { createAgentRegistry, type AgentRegistry } from './registry.js';
 export { createAgentTaskEventPreparer } from './event-artifacts.js';
 export {
   AgentTaskService,
+  type AgentTaskNotificationDelivery,
   type LaunchAgentTask,
   type PrepareAgentTaskEvent,
 } from './task-service.js';
 export {
   AgentTaskStore,
-  AgentTaskContextModeSchema,
-  AgentTaskExecutionModeSchema,
   AgentTaskIsolationSchema,
+  AgentTaskPacketSchema,
+  AgentTaskResultSchema,
   AgentTaskStatusSchema,
   type AgentTask,
   type AgentTaskChange,
-  type AgentTaskContextMode,
   type AgentTaskCurrentTool,
   type AgentTaskEvent,
-  type AgentTaskExecutionMode,
   type AgentTaskIsolation,
   type AgentTaskNotification,
+  type AgentTaskPacket,
+  type AgentTaskResult,
   type AgentTaskStatus,
   type AgentTaskSnapshot,
   type CreateAgentTask,
 } from './task-store.js';
 export { createSubagentCommands } from './tools.js';
+export {
+  AGENT_CONTROL_COMMAND_NAMES,
+  SUBAGENT_FORBIDDEN_COMMAND_NAMES,
+} from './agent-controls.js';
+export { renderTaskPacket } from './task-packet.js';
+export { parseAgentTaskResult, taskResultSummary } from './task-result.js';
 export { AgentTaskRpcFeature } from './task-routes.js';
 export {
   agentTaskDetail,

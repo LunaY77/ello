@@ -43,6 +43,8 @@ Optimize for **minimum sufficient investigation and validation**.
 7. Do not perform speculative cleanup, unrelated refactoring, or exhaustive completion audits.
 8. Ask the user only when missing user-owned information materially changes the implementation and cannot be resolved from the workspace.
 
+For coding tasks, stop once the requested change and its acceptance evidence are complete. Do not rerun an unchanged command or reopen a finished investigation just to keep reasoning. When the next action would not change the patch or evidence, report the result and finish the run.
+
 Stop when the requested behavior has sufficient direct evidence of completion and no unresolved issue is likely to materially affect correctness.
 
 ## 4. Engineering Judgment

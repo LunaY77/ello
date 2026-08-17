@@ -3,7 +3,10 @@
  *
  * 该模块只接受已有领域能力的结构化定义，不依赖 Agent engine 或旧调度器。
  */
-import { environmentExecutionGateFor } from '../environment/index.js';
+import {
+  environmentExecutionGateFor,
+  type EnvironmentExecutionGate,
+} from '../environment/index.js';
 
 import {
   compileDetails,
@@ -348,10 +351,10 @@ async function prepareCommand(
     logicalName = resolved.logicalName;
     const base = createCommandContext(state, frame, runContext);
     const gate = environmentExecutionGateFor(runContext.environment);
-    const capabilities = await gate.runExclusive(
-      () => resolved.capabilities(base),
-      runContext.signal,
-    );
+    // capabilities 只声明 Command 的效果元数据，不接触 Environment；在 gate 内解析会让每次
+    // 准备都变成一次全局写屏障，从而饿死同一 Environment 内其他 Agent 的执行。
+    runContext.signal.throwIfAborted();
+    const capabilities = await resolved.capabilities(base);
     const context = createCommandContext(
       state,
       frame,
@@ -365,9 +368,12 @@ async function prepareCommand(
         ? { action: 'auto' as const }
         : await resolved.approval(context);
     };
-    const approval = capabilities.concurrencySafe
-      ? await gate.runShared(prepare, runContext.signal)
-      : await gate.runExclusive(prepare, runContext.signal);
+    const approval = await runGated(
+      gate,
+      capabilities,
+      prepare,
+      runContext.signal,
+    );
     return {
       type: 'prepared',
       command: {
@@ -388,6 +394,34 @@ async function prepareCommand(
       interrupted: runContext.signal.aborted,
     };
   }
+}
+
+/**
+ * 按 Command 声明的 Environment 语义在执行 gate 内运行一个阶段。
+ *
+ * Args:
+ * - `gate`: 当前 Environment generation 共用的读写 gate。
+ * - `capabilities`: 已解析的 Command 效果声明。
+ * - `operation`: 需要按声明语义串行化的阶段。
+ * - `signal`: 当前 Command Run 的取消信号。
+ *
+ * Returns:
+ * - Promise 兑现为 `operation` 的结果；不触碰 Environment 的 Command 完全绕过 gate，
+ *   因此其阻塞不会传播给同一 Environment 内的其他 Agent。
+ */
+async function runGated<T>(
+  gate: EnvironmentExecutionGate,
+  capabilities: CommandCapabilities,
+  operation: () => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (!capabilities.usesEnvironment) {
+    signal.throwIfAborted();
+    return await operation();
+  }
+  return capabilities.concurrencySafe
+    ? await gate.runShared(operation, signal)
+    : await gate.runExclusive(operation, signal);
 }
 
 function createCommandContext(
@@ -430,9 +464,12 @@ async function executeCommand(
   try {
     const gate = environmentExecutionGateFor(command.context.environment);
     const execute = () => command.resolved.execute(command.context);
-    const output = command.capabilities.concurrencySafe
-      ? await gate.runShared(execute, command.context.signal)
-      : await gate.runExclusive(execute, command.context.signal);
+    const output = await runGated(
+      gate,
+      command.capabilities,
+      execute,
+      command.context.signal,
+    );
     const shellFailure = shellExitFailure(output);
     if (shellFailure !== undefined) {
       return recordFailure(

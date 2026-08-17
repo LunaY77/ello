@@ -274,7 +274,7 @@ export const agentTaskRoots = sqliteTable('agent_task_roots', {
   updatedAt: text('updated_at').notNull(),
 });
 
-/** 可恢复的子代理任务；输出、关系和列表投影随 Server 重启保留。 */
+/** 可恢复的 Subagent 实例；Task Packet、结果和列表投影随 Server 重启保留。 */
 export const agentTasks = sqliteTable(
   'agent_tasks',
   {
@@ -283,20 +283,15 @@ export const agentTasks = sqliteTable(
     rootThreadId: text('root_thread_id')
       .notNull()
       .references(() => agentTaskRoots.rootThreadId, { onDelete: 'cascade' }),
-    parentTaskId: text('parent_task_id'),
-    resumeFromTaskId: text('resume_from_task_id'),
     name: text('name'),
     description: text('description').notNull(),
     definitionName: text('definition_name').notNull(),
     modelSelector: text('model_selector'),
-    contextMode: text('context_mode').notNull(),
-    executionMode: text('execution_mode').notNull(),
     status: text('status').notNull(),
-    prompt: text('prompt').notNull(),
+    taskPacketJson: text('task_packet_json').notNull(),
     cwd: text('cwd').notNull(),
     isolation: text('isolation').notNull(),
     maxTurns: integer('max_turns').notNull(),
-    depth: integer('depth').notNull(),
     revision: integer('revision').notNull(),
     eventSequence: integer('event_sequence').notNull(),
     currentToolJson: text('current_tool_json'),
@@ -306,9 +301,9 @@ export const agentTasks = sqliteTable(
     errorPreview: text('error_preview'),
     output: text('output'),
     errorMessage: text('error_message'),
+    resultJson: text('result_json'),
     usageJson: text('usage_json'),
     sidechainJson: text('sidechain_json').notNull(),
-    toolsJson: text('tools_json').notNull(),
     permissionRulesJson: text('permission_rules_json').notNull(),
     externalPathsJson: text('external_paths_json').notNull(),
     createdAt: text('created_at').notNull(),
@@ -318,22 +313,10 @@ export const agentTasks = sqliteTable(
   },
   (table) => [
     check(
-      'agent_tasks_context_mode_check',
-      sql`${table.contextMode} in ('fresh', 'fork')`,
-    ),
-    check(
-      'agent_tasks_execution_mode_check',
-      sql`${table.executionMode} in ('foreground', 'background')`,
-    ),
-    check(
       'agent_tasks_status_check',
-      sql`${table.status} in ('queued', 'running', 'completed', 'failed', 'killed', 'recovered')`,
+      sql`${table.status} in ('queued', 'running', 'completed', 'failed', 'blocked', 'stopped')`,
     ),
-    check(
-      'agent_tasks_isolation_check',
-      sql`${table.isolation} in ('shared', 'worktree', 'container')`,
-    ),
-    check('agent_tasks_depth_check', sql`${table.depth} >= 1`),
+    check('agent_tasks_isolation_check', sql`${table.isolation} = 'shared'`),
     check('agent_tasks_revision_check', sql`${table.revision} >= 0`),
     check('agent_tasks_event_sequence_check', sql`${table.eventSequence} >= 0`),
     check('agent_tasks_tool_count_check', sql`${table.toolCount} >= 0`),
@@ -344,10 +327,6 @@ export const agentTasks = sqliteTable(
     index('agent_tasks_root_status_idx').on(
       table.rootThreadId,
       table.status,
-      table.createdAt,
-    ),
-    index('agent_tasks_parent_task_idx').on(
-      table.parentTaskId,
       table.createdAt,
     ),
   ],
