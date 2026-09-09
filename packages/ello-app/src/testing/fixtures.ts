@@ -81,8 +81,6 @@ export function makeSnapshot(
   return {
     settings: {
       mode: 'ask-before-changes',
-      profile: 'default',
-      model: 'claude-opus-4-8',
       agent: 'default',
     },
     turns: [],

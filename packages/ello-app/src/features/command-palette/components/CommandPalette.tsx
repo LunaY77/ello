@@ -71,7 +71,7 @@ function PaletteSurface(props: {
   const models = useAppStore((s) => s.entities.catalogs.models);
   const currentModel = useAppStore((s) => {
     const id = s.view.selectedThreadId;
-    return id === null ? null : (s.entities.snapshots[id]?.settings.model ?? null);
+    return id === null ? null : (s.entities.snapshots[id]?.settings.agent ?? null);
   });
 
   const commands = useMemo(() => buildCommands(navigate), [navigate]);

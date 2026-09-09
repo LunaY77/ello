@@ -182,6 +182,9 @@ function applyNotification(
     case 'server/ready':
     case 'fs/changed':
     case 'memory/job/updated':
+    case 'agent/task/updated':
+    case 'agent/task/event':
+    case 'agent/task/removed':
       // 这些事件不对应全局实体投影,由各 feature 在需要时直接消费。
       return state;
     case 'warning': {
@@ -211,6 +214,9 @@ type ThreadNotification = Exclude<
   | { readonly method: 'skills/changed' }
   | { readonly method: 'fs/changed' }
   | { readonly method: 'memory/job/updated' }
+  | { readonly method: 'agent/task/updated' }
+  | { readonly method: 'agent/task/event' }
+  | { readonly method: 'agent/task/removed' }
 >;
 
 interface SeqGate {
@@ -457,6 +463,43 @@ function applyThreadNotification(
               ? notification.params.item
               : item,
           ),
+      );
+
+    case 'item/updated':
+      return mutateItems(
+        base,
+        gate.snapshot,
+        threadId,
+        notification.params.turnId,
+        seq,
+        (items) =>
+          items.map((item) =>
+            item.id === notification.params.itemId
+              ? notification.params.item
+              : item,
+          ),
+      );
+
+    case 'item/reasoning/delta':
+      return mutateItems(
+        base,
+        gate.snapshot,
+        threadId,
+        notification.params.turnId,
+        seq,
+        (items) =>
+          items.map((item) => {
+            if (item.id !== notification.params.itemId) return item;
+            if (item.type !== 'reasoning') {
+              throw new ProtocolViolationError(
+                `reasoning delta targets non-reasoning item ${item.id}.`,
+              );
+            }
+            return {
+              ...item,
+              summary: item.summary + notification.params.delta,
+            };
+          }),
       );
 
     case 'item/agentMessage/delta':

@@ -224,7 +224,7 @@ export function Composer() {
               <ModelPicker
                 threadId={threadId}
                 cwd={thread.cwd}
-                model={settings.model}
+                model={settings.agent}
                 disabled={!connected}
               />
             )}

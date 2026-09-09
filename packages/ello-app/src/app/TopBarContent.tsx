@@ -54,7 +54,7 @@ export function TopBarCenter() {
   return (
     <div className="flex items-center gap-2 rounded-full border border-border-subtle bg-surface-2/70 py-1 pr-2 pl-3">
       <span className="max-w-40 truncate text-[12px] text-secondary">
-        {snapshot.settings.model}
+        {snapshot.settings.agent}
       </span>
       <span className="h-3 w-px bg-divider" />
       <ModeSwitcher threadId={thread.id} mode={snapshot.settings.mode} />

@@ -115,6 +115,7 @@ export async function steerTurn(
   await getAppClient().request('turn/steer', {
     threadId,
     expectedTurnId: activeTurn.id,
+    steerId: `steer_${crypto.randomUUID().replaceAll('-', '')}`,
     input,
   });
 }
@@ -181,7 +182,7 @@ export async function setThreadModel(
   threadId: string,
   model: string,
 ): Promise<void> {
-  await getAppClient().request('thread/settings/update', { threadId, model });
+  await getAppClient().request('thread/settings/update', { threadId, agent: model });
 }
 
 export function selectActiveTurn(snapshot: ThreadSnapshot): Turn | undefined {
