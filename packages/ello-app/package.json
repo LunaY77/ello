@@ -15,7 +15,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "tauri": "tauri",
     "icons": "node scripts/generate-icons.mjs",
-    "sidecar": "./scripts/prepare-sidecar.sh"
+    "sidecar": "bash scripts/prepare-sidecar.sh"
   },
   "dependencies": {
     "@ello/agent": "workspace:*",

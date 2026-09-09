@@ -10,14 +10,18 @@ if ! HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')" || [ -z "$HOST_TRIPLE" ]
 fi
 TRIPLE="${1:-$HOST_TRIPLE}"
 case "$TRIPLE" in
-  aarch64-apple-darwin|x86_64-apple-darwin) ;;
+  aarch64-apple-darwin|x86_64-apple-darwin|x86_64-pc-windows-msvc) ;;
   *)
     echo "!! ello-app sidecar does not support target triple: $TRIPLE" >&2
     exit 1
     ;;
 esac
+case "$TRIPLE" in
+  *-windows-*) EXE=".exe" ;;
+  *) EXE="" ;;
+esac
 OUT_DIR="$ROOT/src-tauri/binaries"
-OUT="$OUT_DIR/ello-agent-$TRIPLE"
+OUT="$OUT_DIR/ello-agent-$TRIPLE$EXE"
 
 mkdir -p "$OUT_DIR"
 
