@@ -144,6 +144,33 @@ function encodeIcns(entries) {
   return Buffer.concat([header, body]);
 }
 
+// ICO(Vista+ 标准):ICONDIR + ICONDIRENTRY 列表,图像数据直接嵌入 PNG。
+// 宽高 256 在 entry 中以字节 0 表示。
+function encodeIco(entries) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0); // reserved
+  header.writeUInt16LE(1, 2); // type: icon
+  header.writeUInt16LE(entries.length, 4);
+  const dirEntries = [];
+  const payloads = [];
+  let offset = 6 + 16 * entries.length;
+  for (const { size, png } of entries) {
+    const entry = Buffer.alloc(16);
+    entry[0] = size >= 256 ? 0 : size; // width
+    entry[1] = size >= 256 ? 0 : size; // height
+    entry[2] = 0; // colors in palette
+    entry[3] = 0; // reserved
+    entry.writeUInt16LE(1, 4); // planes
+    entry.writeUInt16LE(32, 6); // bit count
+    entry.writeUInt32LE(png.length, 8);
+    entry.writeUInt32LE(offset, 12);
+    dirEntries.push(entry);
+    payloads.push(png);
+    offset += png.length;
+  }
+  return Buffer.concat([header, ...dirEntries, ...payloads]);
+}
+
 // ---------- main ----------
 
 mkdirSync(ICONS_DIR, { recursive: true });
@@ -154,11 +181,22 @@ for (const size of sizes) {
   const png = encodePng(size, renderIcon(size));
   pngs.set(size, png);
 }
+// ICO 需要 16/48 两个额外尺寸,只嵌入 icon.ico,不落盘独立 PNG。
+const icoSizes = [256, 128, 48, 32, 16];
+for (const size of icoSizes) {
+  if (!pngs.has(size)) {
+    pngs.set(size, encodePng(size, renderIcon(size)));
+  }
+}
 
 writeFileSync(join(ICONS_DIR, '32x32.png'), pngs.get(32));
 writeFileSync(join(ICONS_DIR, '128x128.png'), pngs.get(128));
 writeFileSync(join(ICONS_DIR, '128x128@2x.png'), pngs.get(256));
 writeFileSync(join(ICONS_DIR, 'icon.png'), pngs.get(512));
+writeFileSync(
+  join(ICONS_DIR, 'icon.ico'),
+  encodeIco(icoSizes.map((size) => ({ size, png: pngs.get(size) }))),
+);
 writeFileSync(
   join(ICONS_DIR, 'icon.icns'),
   encodeIcns([

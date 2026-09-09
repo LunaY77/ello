@@ -72,15 +72,18 @@ storybook-static/
 # ==============================
 # Tauri / Rust
 # ==============================
-src-tauri/target/
-src-tauri/gen/
+**/src-tauri/target/
+**/src-tauri/gen/
 
 # Rust 临时备份文件
 **/*.rs.bk
 
 # Tauri 打包产物
-src-tauri/*.log
-src-tauri/target/release/bundle/
+**/src-tauri/*.log
+**/src-tauri/target/release/bundle/
+
+# Tauri sidecar 二进制(pnpm tauri build 时下载/编译)
+packages/ello-app/src-tauri/binaries/
 
 # ==============================
 # Testing / Coverage
