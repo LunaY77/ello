@@ -47,7 +47,13 @@ fn resolve_sidecar(app: &AppHandle) -> Result<Command, String> {
         .find(|path| {
             path.file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("ello-agent"))
+                .is_some_and(|name| {
+                    if cfg!(windows) {
+                        name.starts_with("ello-agent") && name.ends_with(".exe")
+                    } else {
+                        name.starts_with("ello-agent") && !name.contains('.')
+                    }
+                })
         })
         .ok_or_else(|| {
             format!(
@@ -56,6 +62,13 @@ fn resolve_sidecar(app: &AppHandle) -> Result<Command, String> {
             )
         })?;
     let mut command = Command::new(binary);
+    // Windows: 防止 sidecar 弹出控制台窗口 (CREATE_NO_WINDOW)。
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
     command.arg("--listen").arg("stdio://");
     Ok(command)
 }
