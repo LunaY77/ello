@@ -42,4 +42,23 @@ fi
 echo ">> compiling single-file sidecar with bun ($TRIPLE)"
 bun build "$ENTRY" --compile --outfile "$OUT"
 
+# bun --compile 的单文件 sidecar 无法从虚拟路径读取 dist 资源
+# (提示词、迁移、模板等),复制到 src-tauri/agent-dist 随 Tauri bundle
+# 分发,运行时由宿主通过 ELLO_AGENT_DIST_DIR 注入。
+# 资源清单需与 packages/ello-agent/scripts/build.mjs 的 assets 保持一致。
+echo ">> copying agent runtime assets for bundling"
+ASSETS_OUT="$ROOT/src-tauri/agent-dist"
+rm -rf "$ASSETS_OUT"
+for item in \
+  features/agent/context/prompts \
+  features/agent/subagents/bundled \
+  features/config/templates \
+  infra/database/migrations
+do
+  mkdir -p "$ASSETS_OUT/$(dirname "$item")"
+  cp -R "$REPO/ello-agent/dist/$item" "$ASSETS_OUT/$item"
+done
+# sidecar 启动时读取自身 package.json 获取版本号,一并分发。
+cp "$REPO/ello-agent/package.json" "$ASSETS_OUT/package.json"
+
 echo ">> sidecar ready: $OUT"

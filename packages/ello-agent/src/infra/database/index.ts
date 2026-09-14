@@ -7,23 +7,24 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 
-import { stateDatabasePath } from '../../infra/paths.js';
+import { bundledAssetDir, stateDatabasePath } from '../../infra/paths.js';
 
+import { openSqliteClient } from './client.js';
 import {
   configureCodingDatabase,
   createCodingDatabase,
   type CodingDatabase,
 } from './database.js';
 
-const migrationsFolder = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  'migrations',
-);
+const migrationsFolder = bundledAssetDir({
+  moduleUrl: import.meta.url,
+  dirName: 'migrations',
+  distRelative: path.join('infra', 'database', 'migrations'),
+});
 
 interface MigrationDescriptor {
   readonly hash: string;
@@ -69,7 +70,7 @@ export function openDatabase(
 ): DatabaseHandle {
   const databasePath = options.databasePath ?? stateDatabasePath();
   mkdirSync(path.dirname(databasePath), { recursive: true });
-  const client = new Database(databasePath);
+  const client = openSqliteClient(databasePath);
   try {
     configureCodingDatabase(client);
     const db = createCodingDatabase(client);

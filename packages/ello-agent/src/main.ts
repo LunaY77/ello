@@ -200,10 +200,16 @@ function writeFailure(error: unknown): void {
   );
 }
 
+// bun --compile 的独立可执行文件中,argv[1] 使用正斜杠的虚拟路径
+// (如 B:/~BUN/root/ello-agent.exe),与 fileURLToPath 的结果仅差路径分隔符,
+// 统一为正斜杠后再比较,保证 sidecar 场景下入口守卫仍然成立。
+const normalizeEntryPath = (value: string): string => value.replace(/\\/g, '/');
+
 const invokedPath = process.argv[1];
 if (
   invokedPath !== undefined &&
-  fileURLToPath(import.meta.url) === invokedPath
+  normalizeEntryPath(fileURLToPath(import.meta.url)) ===
+    normalizeEntryPath(invokedPath)
 ) {
   runAppServer().catch((error: unknown) => {
     writeFailure(error);

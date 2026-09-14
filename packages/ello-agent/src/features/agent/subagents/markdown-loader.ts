@@ -6,9 +6,9 @@
  */
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { errnoCode } from '../../../infra/filesystem.js';
+import { bundledAssetDir } from '../../../infra/paths.js';
 import {
   globalAgentsDir,
   parseYamlConfig,
@@ -51,7 +51,11 @@ export async function loadMarkdownAgents(
 }
 
 function bundledAgentsDir(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'bundled');
+  return bundledAssetDir({
+    moduleUrl: import.meta.url,
+    dirName: 'bundled',
+    distRelative: path.join('features', 'agent', 'subagents', 'bundled'),
+  });
 }
 
 async function loadFromDir(

@@ -3,5 +3,6 @@ dist/
 src-tauri/target/
 src-tauri/gen/
 src-tauri/binaries/
+src-tauri/agent-dist/
 node_modules/
 *.log

@@ -5,9 +5,37 @@
  * 适配边界只转换已声明的协议；资源错误保持原因并向调用方传播。
  */
 import { homedir } from 'node:os';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const STORAGE_ID_PATTERN = /^[A-Za-z0-9_@+-][A-Za-z0-9._:@+-]{0,199}$/u;
+
+/**
+ * 解析随构建产物分发的只读资源目录(提示词、迁移、模板等)。
+ *
+ * `bun build --compile` 打包的 sidecar 中模块路径是虚拟的(~BUN/root),
+ * 文件系统上没有真实资源文件;此时由宿主进程(桌面端)通过
+ * ELLO_AGENT_DIST_DIR 注入解包后的资源根目录。
+ *
+ * Args:
+ * - `options.moduleUrl`: 调用方模块的 import.meta.url,仅用于本地布局回退。
+ * - `options.dirName`: 本地布局中资源目录相对模块目录的名字。
+ * - `options.distRelative`: 资源目录相对 dist 根的路径,用于 ELLO_AGENT_DIST_DIR 布局。
+ *
+ * Returns:
+ * - 返回资源目录的绝对路径;目录是否存在由调用方读取时显式校验。
+ */
+export function bundledAssetDir(options: {
+  readonly moduleUrl: string;
+  readonly dirName: string;
+  readonly distRelative: string;
+}): string {
+  const root = process.env.ELLO_AGENT_DIST_DIR?.trim();
+  if (root !== undefined && root !== '') {
+    return join(root, options.distRelative);
+  }
+  return join(dirname(fileURLToPath(options.moduleUrl)), options.dirName);
+}
 
 /**
  * 执行 基础设施层的 `paths` 模块 定义的 `elloHomeDir` 领域操作，输入和副作用均受该边界约束。

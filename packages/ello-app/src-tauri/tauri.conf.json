@@ -36,7 +36,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["binaries/*"],
+    "resources": ["binaries/*", "agent-dist/**/*"],
     "externalBin": ["binaries/ello-agent"],
     "macOS": {
       "minimumSystemVersion": "12.0",

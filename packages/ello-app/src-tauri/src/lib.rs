@@ -62,6 +62,15 @@ fn resolve_sidecar(app: &AppHandle) -> Result<Command, String> {
             )
         })?;
     let mut command = Command::new(binary);
+    // bun --compile 打包的 sidecar 无法从自身读取 dist 资源(提示词、迁移、
+    // 模板),这些文件随 bundle 解包到 resource_dir/agent-dist,通过环境变量注入。
+    let agent_dist = resource.join("agent-dist");
+    if agent_dist.is_dir() {
+        // Windows 上 resource_dir 可能带 \\?\ 扩展前缀,该前缀会关闭路径规范化,
+        // 子进程内混用的正斜杠将失效,传递给 sidecar 前必须去除。
+        let agent_dist = agent_dist.to_string_lossy().replace(r"\\?\", "");
+        command.env("ELLO_AGENT_DIST_DIR", agent_dist);
+    }
     // Windows: 防止 sidecar 弹出控制台窗口 (CREATE_NO_WINDOW)。
     #[cfg(windows)]
     {

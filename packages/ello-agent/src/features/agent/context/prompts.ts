@@ -6,11 +6,11 @@
  */
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import nunjucks from 'nunjucks';
 
 import type { CodingAgentConfig } from '../../config/index.js';
+import { bundledAssetDir } from '../../../infra/paths.js';
 import type { AgentMemoryContextLoader } from '../contracts.js';
 import {
   wrapDynamicSystemContent,
@@ -222,7 +222,11 @@ function entryTemplate(profile: string): string {
 }
 
 function promptDir(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'prompts');
+  return bundledAssetDir({
+    moduleUrl: import.meta.url,
+    dirName: 'prompts',
+    distRelative: path.join('features', 'agent', 'context', 'prompts'),
+  });
 }
 
 function resolvePromptProfile(

@@ -5,7 +5,9 @@
  * 任一资源创建或释放失败都必须保留错误原因，不能通过空实现或默认容器继续运行。
  */
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Writable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 
 import { z } from 'zod';
 
@@ -791,8 +793,15 @@ async function closeAppResources(
 }
 
 async function packageVersion(): Promise<string> {
+  // bun --compile 打包的 sidecar 中模块 URL 是虚拟路径,宿主通过
+  // ELLO_AGENT_DIST_DIR 注入解包后的资源根,package.json 随资源分发。
+  const distRoot = process.env.ELLO_AGENT_DIST_DIR?.trim();
+  const packageJsonUrl =
+    distRoot !== undefined && distRoot !== ''
+      ? pathToFileURL(join(distRoot, 'package.json'))
+      : new URL('../package.json', import.meta.url);
   const packageJson: unknown = JSON.parse(
-    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    await readFile(packageJsonUrl, 'utf8'),
   );
   if (
     typeof packageJson !== 'object' ||
