@@ -9,8 +9,8 @@ import path from 'node:path';
 
 import nunjucks from 'nunjucks';
 
-import type { CodingAgentConfig } from '../../config/index.js';
 import { bundledAssetDir } from '../../../infra/paths.js';
+import type { CodingAgentConfig } from '../../config/index.js';
 import type { AgentMemoryContextLoader } from '../contracts.js';
 import {
   wrapDynamicSystemContent,
