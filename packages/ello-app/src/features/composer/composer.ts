@@ -144,6 +144,12 @@ export async function loadModelCatalog(cwd: string): Promise<void> {
   dispatchStoreEvent({ kind: 'catalog-loaded', catalog: 'models', entries: result.data });
 }
 
+/** 拉取 agent 目录(agent/list 需要 cwd);thread 设置只接受 agent 名。 */
+export async function loadAgentCatalog(cwd: string): Promise<void> {
+  const result = await getAppClient().request('agent/list', { cwd });
+  dispatchStoreEvent({ kind: 'catalog-loaded', catalog: 'agents', entries: result.data });
+}
+
 export function modelDisplayName(entry: CatalogEntry | undefined, rawName: string): string {
   if (entry === undefined) return rawName;
   return entry.title ?? entry.name;

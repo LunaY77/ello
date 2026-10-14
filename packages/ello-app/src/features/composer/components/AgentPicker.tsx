@@ -1,33 +1,37 @@
 import { Check, ChevronDown } from 'lucide-react';
 import { useEffect } from 'react';
 
-import { loadModelCatalog, modelDisplayName } from '../composer';
+import { loadAgentCatalog } from '../composer';
 
 import { Menu } from '@/components/ui/Menu';
-import { setThreadModel } from '@/features/thread';
+import { setThreadAgent } from '@/features/thread';
 import { cn } from '@/lib/cn';
 import { runOperation } from '@/lib/report';
 import { useAppStore } from '@/store/store';
 
 
-/** 模型选择器(ActionBar 右侧,文字按钮 + 下拉)。 */
-export function ModelPicker(props: {
+/** agent 选择器(ActionBar 右侧,文字按钮 + 下拉);仅列可作 primary 的 agent。 */
+export function AgentPicker(props: {
   readonly threadId: string;
   readonly cwd: string;
-  readonly model: string;
+  readonly agent: string;
   readonly disabled?: boolean;
 }) {
-  const { threadId, cwd, model, disabled = false } = props;
-  const models = useAppStore((s) => s.entities.catalogs.models);
+  const { threadId, cwd, agent, disabled = false } = props;
+  const agents = useAppStore((s) => s.entities.catalogs.agents);
   const ready = useAppStore((s) => s.connection.phase === 'ready');
 
-  useEffect(() => {
-    if (ready && models.length === 0) {
-      void runOperation(loadModelCatalog(cwd));
-    }
-  }, [ready, cwd, models.length]);
+  const primaries = agents.filter(
+    (entry) => entry.metadata.runtime === 'primary' && entry.enabled,
+  );
 
-  const current = models.find((entry) => entry.id === model || entry.name === model);
+  useEffect(() => {
+    if (ready && agents.length === 0) {
+      void runOperation(loadAgentCatalog(cwd));
+    }
+  }, [ready, cwd, agents.length]);
+
+  const current = primaries.find((entry) => entry.id === agent);
 
   return (
     <Menu
@@ -45,18 +49,18 @@ export function ModelPicker(props: {
             disabled && 'cursor-not-allowed opacity-50',
           )}
         >
-          <span className="truncate">{modelDisplayName(current, model)}</span>
+          <span className="truncate">{current?.title ?? current?.name ?? agent}</span>
           <ChevronDown size={11} className="shrink-0 text-tertiary" />
         </button>
       )}
-      items={models.map((entry) => ({
+      items={primaries.map((entry) => ({
         id: entry.id,
-        label: modelDisplayName(entry, entry.name),
-        hint: entry.id === model ? '当前' : undefined,
+        label: entry.title ?? entry.name,
+        hint: entry.id === agent ? '当前' : undefined,
         icon:
-          entry.id === model ? <Check size={13} /> : <span className="w-[13px]" />,
+          entry.id === agent ? <Check size={13} /> : <span className="w-[13px]" />,
       }))}
-      onSelect={(id) => void runOperation(setThreadModel(threadId, id))}
+      onSelect={(id) => void runOperation(setThreadAgent(threadId, id))}
     />
   );
 }

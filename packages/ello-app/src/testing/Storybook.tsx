@@ -11,7 +11,7 @@ import { useEffect, type ReactElement, type ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 
 import { toast } from '@/components/ui/Toasts';
-import { usePaletteStore } from '@/features/command-palette/commands';
+import { usePaletteStore } from '@/features/command-palette/palette-store';
 import {
   useComposerStore,
   type ComposerAttachment,

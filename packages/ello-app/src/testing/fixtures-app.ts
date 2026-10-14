@@ -285,6 +285,12 @@ export const MODEL_ENTRIES: readonly CatalogEntry[] = [
   { id: 'claude-haiku-4-5', name: 'claude-haiku-4-5', title: 'Claude Haiku 4.5', enabled: true, metadata: {} },
 ];
 
+export const AGENT_ENTRIES: readonly CatalogEntry[] = [
+  { id: 'build', name: 'build', description: 'Full-cycle coding agent.', enabled: true, metadata: { runtime: 'primary', mode: 'primary' } },
+  { id: 'explore', name: 'explore', description: 'Read-only exploration agent.', enabled: true, metadata: { runtime: 'primary', mode: 'all' } },
+  { id: 'worker', name: 'worker', description: 'Bounded implementation worker.', enabled: true, metadata: { runtime: 'subagent', mode: 'subagent' } },
+];
+
 export const REPOSITORIES: readonly Repository[] = [
   {
     id: 'repo-ello',

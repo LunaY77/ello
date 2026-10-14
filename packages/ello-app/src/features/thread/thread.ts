@@ -10,14 +10,15 @@ import type {
   UserInput,
 } from '@ello/agent/protocol';
 
+import { useNewThreadPickerStore } from './new-thread-picker-store';
+
 import { dispatchStoreEvent } from '@/client/session';
 import { getAppClient } from '@/client/session';
-import { pickDirectory } from '@/lib/tauri/bridge';
 import { appMutations, useAppStore } from '@/store/store';
 import type { AppState } from '@/store/types';
 
 const openingThreads = new Set<string>();
-const { clearSelectedThread, selectThread, setLastChatCwd } = appMutations;
+const { clearSelectedThread, selectThread } = appMutations;
 
 /** 打开 Thread:未加载则 resume + subscribe 取得完整快照;工作区展示上下文按 cwd 派生。 */
 export async function openThread(threadId: string): Promise<void> {
@@ -67,9 +68,9 @@ export async function startThread(
 
 /**
  * 在当前上下文新建会话:选中工作区时使用其执行目录;
- * 未选中时创建纯聊天,工作目录取上次选择,首次经系统目录选择器确定。
+ * 未选中时交给归属选择器(最近工作区 / 纯聊天),见 NewThreadPicker。
  */
-export async function newThreadInContext(): Promise<string | null> {
+export function newThreadInContext(): string | null {
   const state = useAppStore.getState();
   const workspaceId = state.view.selectedWorkspaceId;
   if (workspaceId !== null) {
@@ -77,15 +78,11 @@ export async function newThreadInContext(): Promise<string | null> {
     if (workspace === undefined) {
       throw new Error(`Selected workspace ${workspaceId} is not loaded.`);
     }
-    return startThread({ cwd: workspace.rootPath });
+    void startThread({ cwd: workspace.rootPath });
+    return null;
   }
-  let cwd = state.preferences.lastChatCwd;
-  if (cwd === null) {
-    cwd = await pickDirectory('选择纯聊天的工作目录');
-    if (cwd === null) return null;
-    setLastChatCwd(cwd);
-  }
-  return startThread({ cwd });
+  useNewThreadPickerStore.getState().setOpen(true);
+  return null;
 }
 
 /** 发送新回合;turn 实体经 turn/started 事件到达,这里只返回 turnId。 */
@@ -177,12 +174,12 @@ export async function setThreadMode(
   await getAppClient().request('thread/settings/update', { threadId, mode });
 }
 
-/** 切换模型。 */
-export async function setThreadModel(
+/** 切换会话 agent;具体模型由 agent 定义的 primary_model/auxiliary_model 槽位决定。 */
+export async function setThreadAgent(
   threadId: string,
-  model: string,
+  agent: string,
 ): Promise<void> {
-  await getAppClient().request('thread/settings/update', { threadId, agent: model });
+  await getAppClient().request('thread/settings/update', { threadId, agent });
 }
 
 export function selectActiveTurn(snapshot: ThreadSnapshot): Turn | undefined {

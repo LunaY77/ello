@@ -1,29 +1,29 @@
 import type { Meta, StoryObj } from '@storybook/react';
 
-import { ModelPicker } from './ModelPicker';
+import { AgentPicker } from './AgentPicker';
 
-import { MODEL_ENTRIES } from '@/testing/fixtures-app';
+import { AGENT_ENTRIES } from '@/testing/fixtures-app';
 import { Padded, type StoreSeed } from '@/testing/Storybook';
 
 
-const withModels: StoreSeed = (state) => ({
+const withAgents: StoreSeed = (state) => ({
   ...state,
   entities: {
     ...state.entities,
-    catalogs: { ...state.entities.catalogs, models: MODEL_ENTRIES },
+    catalogs: { ...state.entities.catalogs, agents: AGENT_ENTRIES },
   },
 });
 
 const meta = {
-  title: 'Composer/ModelPicker',
-  component: ModelPicker,
+  title: 'Composer/AgentPicker',
+  component: AgentPicker,
   args: {
     threadId: 'thread-story',
     cwd: '/data/workspace/search-page',
-    model: 'claude-opus-4-8',
+    agent: 'build',
   },
-  parameters: { store: withModels, layout: 'centered' },
-} satisfies Meta<typeof ModelPicker>;
+  parameters: { store: withAgents, layout: 'centered' },
+} satisfies Meta<typeof AgentPicker>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -31,7 +31,7 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   render: (args) => (
     <Padded>
-      <ModelPicker {...args} />
+      <AgentPicker {...args} />
     </Padded>
   ),
 };
@@ -40,7 +40,7 @@ export const Disabled: Story = {
   args: { disabled: true },
   render: (args) => (
     <Padded>
-      <ModelPicker {...args} />
+      <AgentPicker {...args} />
     </Padded>
   ),
 };

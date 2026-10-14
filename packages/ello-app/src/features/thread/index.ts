@@ -6,8 +6,8 @@ export {
   newThreadInContext,
   openThread,
   sendTurn,
+  setThreadAgent,
   setThreadMode,
-  setThreadModel,
   startThread,
   steerTurn,
   unarchiveThread,
@@ -15,3 +15,4 @@ export {
   selectCanSubmit,
   threadDisplayName,
 } from './thread';
+export { NewThreadPicker } from './NewThreadPicker';
