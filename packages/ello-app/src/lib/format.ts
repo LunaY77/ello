@@ -20,3 +20,11 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
+
+/** 路径短化:保留尾部两段(统一正斜杠),用于纯聊天会话的工作目录展示。 */
+export function formatPathTail(path: string): string {
+  const segments = path.replace(/\\/gu, '/').split('/').filter((s) => s !== '');
+  const tail = segments.slice(-2).join('/');
+  return tail === '' ? path : tail;
+}
+

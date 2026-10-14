@@ -19,6 +19,7 @@ import { StatusDot } from '@/components/ui/StatusDot';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { openThread, newThreadInContext, threadDisplayName } from '@/features/thread';
 import { cn } from '@/lib/cn';
+import { formatPathTail } from '@/lib/format';
 import { runOperation } from '@/lib/report';
 import { relativeTime } from '@/lib/time';
 import {
@@ -332,7 +333,7 @@ function ThreadRowView(props: { readonly row: ThreadRow }) {
             )}
           </span>
           <span className="mt-0.5 block truncate font-mono text-[11px] text-tertiary">
-            {row.workspaceLabel ?? '未关联工作区'}
+            {row.workspaceLabel ?? formatPathTail(row.thread.cwd)}
           </span>
           <span className="mt-0.5 block text-[11px] text-tertiary">
             {relativeTime(row.thread.updatedAt)}
@@ -351,7 +352,7 @@ function NewThreadButton() {
     <Tooltip content="新建会话" placement="bottom">
       <button
         type="button"
-        onClick={() => void runOperation(newThreadInContext())}
+        onClick={() => newThreadInContext()}
         className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-tertiary opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:bg-surface-3 hover:text-primary"
       >
         <MessageSquarePlus size={13} />
