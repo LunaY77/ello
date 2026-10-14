@@ -125,7 +125,12 @@ function parseMarkdown(
     throw new Error(`Agent markdown frontmatter is not closed: ${filePath}`);
   }
   return {
-    frontmatter: parseYamlConfig(raw.slice(openDelimiter.length, end)),
+    frontmatter: parseYamlConfig(
+      // CRLF 检出时切片会在 `\n` 处截断，末行残留孤立的 `\r`（无配对 `\n`），
+      // 被 YAML 当作标量值的一部分（如 max-turns: "-1\r"）破坏字段类型；
+      // frontmatter 值中 CR 无合法用途，统一剥离。
+      raw.slice(openDelimiter.length, end).replace(/\r/gu, ''),
+    ),
     body: raw.slice(end + 4).replace(/^\r?\n/u, ''),
   };
 }
