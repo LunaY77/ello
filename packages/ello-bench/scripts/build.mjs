@@ -16,7 +16,7 @@ await rm(distDir, { recursive: true, force: true });
 await execFileAsync(
   'pnpm',
   ['exec', 'tsc', '-p', 'tsconfig.json', '--outDir', distDir],
-  { cwd: packageDir },
+  { cwd: packageDir, shell: process.platform === 'win32' },
 );
 await mkdir(path.join(distDir, 'config'), { recursive: true });
 await cp(path.join(packageDir, 'config'), path.join(distDir, 'config'), {
