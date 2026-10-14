@@ -16,7 +16,7 @@ import {
   useComposerStore,
 } from '../composer';
 
-import { ModelPicker } from './ModelPicker';
+import { AgentPicker } from './AgentPicker';
 import { ModeSwitcher } from './ModeSwitcher';
 
 import { IconButton } from '@/components/ui/IconButton';
@@ -26,6 +26,7 @@ import {
   setThreadMode,
 } from '@/features/thread';
 import { cn } from '@/lib/cn';
+import { formatKeys, isMacPlatform } from '@/lib/platform';
 import { runOperation } from '@/lib/report';
 import { pickFiles } from '@/lib/tauri/bridge';
 import {
@@ -180,7 +181,11 @@ export function Composer() {
                 return;
               }
               if (event.key === 'Enter') {
-                const shouldSend = enterToSend ? !event.shiftKey : event.metaKey;
+                const shouldSend = enterToSend
+    ? !event.shiftKey
+    : isMacPlatform()
+      ? event.metaKey
+      : event.ctrlKey;
                 if (shouldSend && !event.nativeEvent.isComposing) {
                   event.preventDefault();
                   submit();
@@ -221,10 +226,10 @@ export function Composer() {
             />
             <div className="flex-1" />
             {settings !== undefined && (
-              <ModelPicker
+              <AgentPicker
                 threadId={threadId}
                 cwd={thread.cwd}
-                model={settings.agent}
+                agent={settings.agent}
                 disabled={!connected}
               />
             )}
@@ -240,7 +245,7 @@ export function Composer() {
                 </button>
               </Tooltip>
             ) : (
-              <Tooltip content="发送 (⌘Enter)">
+              <Tooltip content={formatKeys('发送 (⌘Enter)')}>
                 <button
                   type="button"
                   aria-label="发送"

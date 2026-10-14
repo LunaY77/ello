@@ -1,6 +1,7 @@
 import { cn } from '@/lib/cn';
+import { formatKeys } from '@/lib/platform';
 
-/** 快捷键标注(kbd 样式),f-sm/tertiary。 */
+/** 快捷键标记(kbd 样式),f-sm/tertiary;⌘ 按平台渲染(mac ⌘ / 其他 Ctrl+)。 */
 export function Kbd(props: { readonly keys: string; readonly className?: string }) {
   return (
     <kbd
@@ -9,7 +10,7 @@ export function Kbd(props: { readonly keys: string; readonly className?: string 
         props.className,
       )}
     >
-      {props.keys}
+      {formatKeys(props.keys)}
     </kbd>
   );
 }

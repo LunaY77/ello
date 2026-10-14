@@ -7,6 +7,8 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { formatKeys } from '@/lib/platform';
+
 type Placement = 'top' | 'bottom' | 'left' | 'right';
 
 const OFFSET = 6;
@@ -117,5 +119,5 @@ function TooltipBubble(props: {
 
 /** tooltip 内的快捷键标注。 */
 export function TooltipShortcut(props: { readonly keys: string }) {
-  return <span className="ml-2 font-mono text-tertiary">{props.keys}</span>;
+  return <span className="ml-2 font-mono text-tertiary">{formatKeys(props.keys)}</span>;
 }
