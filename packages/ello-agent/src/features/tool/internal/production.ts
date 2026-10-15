@@ -1,10 +1,13 @@
 /**
- * 本文件负责 tool feature 的“production”模块职责。
+ * 生产 Command runtime 的装配入口。
  *
- * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
- * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
+ * 本模块只组合原生 Command definitions 与权限策略，不再创建或适配 Tool。
  */
-import type { AnyAgentTool } from '../../agent/engine/index.js';
+import {
+  defineCommandModule,
+  type CommandDefinition,
+  type CommandModule,
+} from '../../command/index.js';
 import type { CodingAgentConfig } from '../../config/index.js';
 import type { TaskBoardStore, TaskBoardScope } from '../../task/index.js';
 import {
@@ -16,103 +19,70 @@ import {
 import type { SessionModeState } from '../permissions/session-mode.js';
 import type { PermissionRule } from '../permissions/types.js';
 
-import { createCodingTools } from './index.js';
+import type { SessionFileState } from './runtime/file-state.js';
 
-export interface ProductionToolRuntime {
-  readonly tools: readonly AnyAgentTool[];
+import { createCodingCommands } from './index.js';
+
+export interface ProductionCommandRuntime {
+  readonly module: CommandModule;
   readonly approval: ApprovalFor;
 }
 
-export interface CreateProductionToolRuntimeOptions {
+export interface CreateProductionCommandRuntimeOptions {
   readonly config: CodingAgentConfig;
   readonly taskBoards: TaskBoardStore;
   readonly taskBoardScope: TaskBoardScope;
-  /**
-   * 读取 工具 `production` 模块 的 `rules` 视图，不转移底层状态所有权。
-   *
-   * Args:
-   * - 无：操作使用实例或闭包已经持有的稳定状态。
-   *
-   * Returns:
-   * - 返回按领域顺序排列的快照集合；调用方不能借此修改内部状态。
-   */
+  /** 读取当前生效的权限规则。 */
   readonly rules?: () => readonly PermissionRule[];
-  /**
-   * 执行 工具 `production` 模块 定义的 `mode` 领域操作，输入和副作用均受该边界约束。
-   *
-   * Args:
-   * - 无：操作使用实例或闭包已经持有的稳定状态。
-   *
-   * Returns:
-   * - 返回 `mode` 计算出的声明结果；返回值不包含未声明的兜底状态。
-   */
+  /** 读取当前 Session 权限模式。 */
   readonly mode: () => SessionModeState;
-  /**
-   * 读取 工具 `production` 模块 的 `readRoots` 视图，不转移底层状态所有权。
-   *
-   * Args:
-   * - 无：操作使用实例或闭包已经持有的稳定状态。
-   *
-   * Returns:
-   * - 返回按领域顺序排列的快照集合；调用方不能借此修改内部状态。
-   *
-   * Throws:
-   * - 当 工具 `production` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
-   */
+  /** 读取当前 Command 可访问的额外根目录。 */
   readonly readRoots?: () => readonly string[];
+  readonly fileState?: SessionFileState;
+  readonly additionalCommands?: readonly CommandDefinition[];
 }
 
 /**
- * 组装生产 Turn 的文件、Shell、搜索与任务工具，并暴露同一权限判定产生的通用审批能力。
+ * 组装生产 Turn 的原生 Command 集合和通用审批能力。
  *
  * Args:
- * - `options`: 仅作用于 `createProductionToolRuntime` 的调用选项；函数只读取该对象，不保留可变引用。
+ * - `options`: 当前 run 的配置、权限、任务和扩展 Command 依赖。
  *
  * Returns:
- * - 返回 `createProductionToolRuntime` 计算出的声明结果；返回值不包含未声明的兜底状态。
- *
- * Throws:
- * - 当 工具 `production` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+ * - 返回 Registry 可直接消费的 Command definitions 与审批工厂。
  */
-export function createProductionToolRuntime(
-  options: CreateProductionToolRuntimeOptions,
-): ProductionToolRuntime {
+export function createProductionCommandRuntime(
+  options: CreateProductionCommandRuntimeOptions,
+): ProductionCommandRuntime {
   const decide = createDecisionPolicy(options);
-  const codingTools = createCodingTools({
-    config: options.config,
-    taskBoards: options.taskBoards,
-    taskBoardScope: options.taskBoardScope,
-    ...(options.rules === undefined ? {} : { rules: options.rules }),
-    mode: options.mode,
-    ...(options.readRoots === undefined
-      ? {}
-      : { readRoots: options.readRoots }),
-    decide,
-  }).map(markCoreTool);
+  const additionalCommands = (options.additionalCommands ?? []).map((command) =>
+    withAdditionalCommandApproval(command, decide),
+  );
   return {
-    tools: codingTools,
+    module: defineCommandModule({
+      id: 'coding',
+      commands: createCodingCommands({
+        config: options.config,
+        taskBoards: options.taskBoards,
+        taskBoardScope: options.taskBoardScope,
+        ...(options.rules === undefined ? {} : { rules: options.rules }),
+        mode: options.mode,
+        ...(options.readRoots === undefined
+          ? {}
+          : { readRoots: options.readRoots }),
+        ...(options.fileState === undefined
+          ? {}
+          : { fileState: options.fileState }),
+        ...(additionalCommands.length === 0 ? {} : { additionalCommands }),
+        decide,
+      }),
+    }),
     approval: genericApprovalFor(decide),
   };
 }
 
-/**
- * 按 工具 `production` 模块 的一致性约束执行 `markCoreTool` 状态变更。
- *
- * Args:
- * - `tool`: `markCoreTool` 所需的业务值；函数按声明读取，不补造缺失内容。
- *
- * Returns:
- * - 返回 `markCoreTool` 计算出的声明结果；返回值不包含未声明的兜底状态。
- */
-export function markCoreTool(tool: AnyAgentTool): AnyAgentTool {
-  return {
-    ...tool,
-    discovery: { ...tool.discovery, core: true },
-  };
-}
-
 function createDecisionPolicy(
-  options: CreateProductionToolRuntimeOptions,
+  options: CreateProductionCommandRuntimeOptions,
 ): DecideApproval {
   return makeApprovalPolicy(
     options.config,
@@ -120,4 +90,39 @@ function createDecisionPolicy(
     options.mode,
     options.readRoots ?? (() => []),
   );
+}
+
+function withAdditionalCommandApproval(
+  command: CommandDefinition,
+  decide: DecideApproval,
+): CommandDefinition {
+  if (command.approval !== undefined) return command;
+  return {
+    ...command,
+    approval: (input, context) => {
+      const invocation = context.invocation;
+      const readOnly =
+        invocation?.readOnly === true && invocation.destructive === false;
+      const permission = readOnly
+        ? 'read'
+        : command.name.startsWith('mcp__')
+          ? 'mcp'
+          : command.name;
+      return decide(
+        {
+          permission,
+          patterns: [command.name],
+          always: [command.name],
+          metadata: { kind: 'generic', inputPreview: previewInput(input) },
+        },
+        context,
+      );
+    },
+  };
+}
+
+function previewInput(input: unknown): string {
+  const value = JSON.stringify(input);
+  if (value === undefined) return '-';
+  return value.length > 200 ? `${value.slice(0, 200)}...` : value;
 }

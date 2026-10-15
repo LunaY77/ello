@@ -12,16 +12,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ContextSnapshot } from '../../src/features/agent/context/context-snapshot.js';
 import { loadInstructionSources } from '../../src/features/agent/context/instructions.js';
+import { createCodingSystemPromptSection } from '../../src/features/agent/context/prompts.js';
 import {
   loadContextBundle,
   type ContextEvent,
 } from '../../src/features/agent/context/source-registry.js';
-import { compactMessages } from '../../src/features/agent/engine/model-input.js';
+import type { AgentRunContext } from '../../src/features/agent/engine/contracts.js';
+import { preserveToolCallPairs } from '../../src/features/agent/engine/model-input.js';
 import {
   CodingAgentConfigSchema,
   type CodingAgentConfig,
 } from '../../src/features/config/schema.js';
 import { createThreadRoutes } from '../../src/features/thread/routes.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 
 describe('context source contract', () => {
@@ -102,6 +105,92 @@ describe('context source contract', () => {
     expect(nextRun.fingerprint).not.toBe(beforeChange.fingerprint);
   });
 
+  it('Command Run 说明固定唯一 Tool 与 step 调度语义', async () => {
+    const root = await temporaryRoot();
+    const section = createCodingSystemPromptSection(configFor(root, []), {
+      model: 'test-model',
+    });
+    const prompt = await section(promptRunContext());
+
+    expect(prompt).toContain('`command_run` is the only model-visible Tool');
+    expect(prompt).toContain(
+      'Commands in the same `step` must be independent; dependent Commands use a later `step`',
+    );
+    expect(prompt).toContain(
+      'Include all currently known actions whose inputs are available',
+    );
+    expect(prompt).toContain(
+      'Prefer the registered `search` Command for repository search',
+    );
+    expect(prompt).toContain(
+      'Treat the current Command Catalog as authoritative. Do not invent Commands, fields, arguments, or calling conventions',
+    );
+    expect(prompt).not.toContain(
+      'Use `read`, `search`, `write`, `apply_patch`, and `bash` for direct environment operations',
+    );
+    expect(prompt).not.toContain(
+      'Before overwriting an existing file with `write`',
+    );
+    expect(prompt).not.toContain('multi_tool_use.parallel');
+  });
+
+  it('关闭 subagent 时同时移除委派规则和 runtime delegation context', async () => {
+    const root = await temporaryRoot();
+    const config = CodingAgentConfigSchema.parse({
+      cwd: root,
+      initial_mode: 'ask-before-changes',
+      ...modelConfig(),
+      subagents: { enabled: false },
+      context: {
+        instructions: {
+          global: [],
+          project: [],
+          extra: [],
+          nearby: false,
+        },
+      },
+    });
+    const section = createCodingSystemPromptSection(config, {
+      model: 'test-model',
+    });
+
+    const prompt = await section(promptRunContext());
+
+    expect(prompt).not.toContain('# Delegation');
+    expect(prompt).not.toContain('<delegation>');
+  });
+
+  it('把 coding scope 标为 Tool Policy 而不是 Environment 隔离能力', async () => {
+    const root = await temporaryRoot();
+    const sibling = path.join(path.dirname(root), 'authorized-sibling');
+    const config = CodingAgentConfigSchema.parse({
+      cwd: root,
+      allowed_paths: [sibling],
+      initial_mode: 'ask-before-changes',
+      ...modelConfig(),
+    });
+
+    const rendered = await new ContextSnapshot(
+      config,
+      {},
+      'coding',
+      'base-hash',
+    ).render();
+
+    expect(rendered.system).toContain(
+      '<policy-context id="policy:runtime" title="Runtime tool policy"',
+    );
+    expect(rendered.system).toContain('<coding-scope>');
+    expect(rendered.system).toContain('<authorized-paths>');
+    expect(rendered.system).toContain(root);
+    expect(rendered.system).toContain(sibling);
+    expect(rendered.system).toContain(
+      'it is not an Environment isolation claim',
+    );
+    expect(rendered.system).not.toContain('<file-system>');
+    expect(rendered.system).not.toContain('<shell>');
+  });
+
   it('glob 结果稳定排序，并按真实文件来源去重', async () => {
     const root = await temporaryRoot();
     await mkdir(path.join(root, 'rules'));
@@ -162,14 +251,24 @@ describe('context source contract', () => {
     ).rejects.toThrow('HTTP 503');
   });
 
-  it('手动压缩调用生产 runner 并返回真实 job id', async () => {
+  it('手动压缩返回完整持久化报告', async () => {
     const compactThread = vi.fn(async () => ({
+      id: 'compaction-12',
+      threadId: 'thr_context_contract',
+      turnId: 'turn_context_contract',
+      createdAt: '2026-07-28T00:00:00.000Z',
       compactor: 'ello-thread-compactor',
+      beforeMessageCount: 12,
+      afterMessageCount: 3,
+      keptMessageCount: 2,
+      tokensBefore: 4_000,
+      summary: 'compact checkpoint',
     }));
     const services = {
       routes: createThreadRoutes({
         artifacts: {} as never,
         compact: compactThread,
+        interruptCompact: () => undefined,
         threads: {} as never,
       }),
     };
@@ -178,37 +277,67 @@ describe('context source contract', () => {
       invokeServiceRoute(services, createTestPeer(), 'thread/compact/start', {
         threadId: 'thr_context_contract',
       }),
-    ).resolves.toMatchObject({ jobId: expect.stringMatching(/^job_/u) });
+    ).resolves.toMatchObject({
+      id: 'compaction-12',
+      summary: 'compact checkpoint',
+      beforeMessageCount: 12,
+      afterMessageCount: 3,
+    });
     expect(compactThread).toHaveBeenCalledWith('thr_context_contract');
   });
 
-  it('按输入预算保留最新消息，并拒绝无可用输入空间的参数', async () => {
-    const transform = compactMessages({
-      maxInputTokens: 10,
-      reservedOutputTokens: 2,
-    });
-    const messages = [
-      { role: 'user' as const, content: '1111111111111111' },
-      { role: 'assistant' as const, content: '2222222222222222' },
-      { role: 'user' as const, content: '3333333333333333' },
-    ];
-
-    await expect(transform(messages, {} as never)).resolves.toEqual(
-      messages.slice(1),
-    );
-    expect(() => compactMessages({ maxInputTokens: 0 })).toThrow(
-      'maxInputTokens must be a positive safe integer',
-    );
-    expect(() =>
-      compactMessages({ maxInputTokens: 8, reservedOutputTokens: 8 }),
-    ).toThrow('reservedOutputTokens must be');
-    expect(() =>
-      CodingAgentConfigSchema.parse({
-        cwd: '/workspace',
-        initial_mode: 'ask-before-changes',
-        context: { max_input_tokens: 8, reserved_output_tokens: 8 },
+  it('手动压缩中断路由转发目标 Thread', async () => {
+    const interruptCompact = vi.fn();
+    const services = {
+      routes: createThreadRoutes({
+        artifacts: {} as never,
+        compact: vi.fn(async () => null),
+        interruptCompact,
+        threads: {} as never,
       }),
-    ).toThrow('must be below max_input_tokens');
+    };
+
+    await expect(
+      invokeServiceRoute(
+        services,
+        createTestPeer(),
+        'thread/compact/interrupt',
+        { threadId: 'thr_context_contract' },
+      ),
+    ).resolves.toEqual({ ok: true });
+    expect(interruptCompact).toHaveBeenCalledWith('thr_context_contract');
+  });
+
+  it('上下文裁剪只保留完整的 outer command_run call/result 配对', () => {
+    const call = {
+      role: 'assistant' as const,
+      content: [
+        {
+          type: 'tool-call' as const,
+          toolCallId: 'outer-command-run',
+          toolName: 'command_run',
+          input: { commands: [{ step: 1, command: 'read' }] },
+        },
+      ],
+    };
+    const result = {
+      role: 'tool' as const,
+      content: [
+        {
+          type: 'tool-result' as const,
+          toolCallId: 'outer-command-run',
+          toolName: 'command_run',
+          output: {
+            type: 'json' as const,
+            value: { status: 'completed', commands: [] },
+          },
+        },
+      ],
+    };
+
+    expect(preserveToolCallPairs([call, result])).toEqual([call, result]);
+    expect(preserveToolCallPairs([call])).toEqual([]);
+    expect(preserveToolCallPairs([result])).toEqual([]);
   });
 
   async function temporaryRoot(): Promise<string> {
@@ -225,6 +354,7 @@ function configFor(
   return CodingAgentConfigSchema.parse({
     cwd,
     initial_mode: 'ask-before-changes',
+    ...modelConfig(),
     context: {
       instructions: {
         global: [],
@@ -234,6 +364,37 @@ function configFor(
       },
     },
   });
+}
+
+function modelConfig() {
+  return {
+    models: {
+      test: {
+        protocol: 'openai' as const,
+        endpoint: 'responses' as const,
+        api_model: 'test-model',
+        base_url: 'https://api.example.test/v1',
+        api_key_env: 'TEST_API_KEY',
+        context_window: 128_000,
+        max_output_tokens: 16_000,
+        reasoning_effort: 'medium' as const,
+      },
+    },
+    primary_model: 'test',
+    auxiliary_model: 'test',
+  };
+}
+
+function promptRunContext(): AgentRunContext {
+  return {
+    runId: 'run-tool-list-contract',
+    agentName: 'build',
+    input: '你有哪些工具？',
+    context: undefined,
+    options: {},
+    environment: createTestEnvironmentHandle(),
+    metadata: {},
+  };
 }
 
 function source(id: string, priority: number, content: string, stale = false) {

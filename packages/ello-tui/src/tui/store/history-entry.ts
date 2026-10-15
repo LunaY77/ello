@@ -1,4 +1,4 @@
-import type { UserInputResolution } from '../../api/protocol-types.js';
+import type { Usage, UserInputResolution } from '../../api/protocol-types.js';
 import type { ClientServerRequest } from '../../api/server-requests.js';
 
 export interface ToolCallView {
@@ -10,6 +10,31 @@ export interface ToolCallView {
   readonly error?: { readonly message: string; readonly code?: string };
 }
 
+export interface CommandRunCommandView extends ToolCallView {
+  readonly index: number;
+  readonly step: number;
+  readonly commandStatus:
+    | 'pending'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'denied'
+    | 'blocked'
+    | 'deferred'
+    | 'interrupted';
+  readonly approval?: {
+    readonly status: 'required' | 'approved' | 'denied';
+    readonly reason?: string;
+  };
+}
+
+export interface CommandRunView {
+  readonly id: string;
+  readonly status: 'running' | 'ok' | 'fail' | 'interrupted';
+  readonly commands: readonly CommandRunCommandView[];
+  readonly error?: string;
+}
+
 export interface ToolResultView {
   readonly kind?: string;
   readonly title?: string;
@@ -19,13 +44,22 @@ export interface ToolResultView {
 
 export interface SubagentRunView {
   readonly runId: string;
+  readonly revision?: number;
   readonly agentName: string;
   readonly description: string;
-  readonly background: boolean;
-  readonly status: 'running' | 'completed' | 'fail';
+  readonly status:
+    | 'queued'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'blocked'
+    | 'stopped'
+    | 'fail';
   readonly startedAt: string;
   readonly completedAt?: string;
+  readonly toolCount?: number;
   readonly tools: readonly ToolCallView[];
+  readonly usage?: Usage;
   readonly output?: string;
   readonly error?: string;
 }
@@ -41,8 +75,7 @@ export type HistoryEntry =
       readonly id: string;
       readonly threadId: string;
       readonly cwd: string;
-      readonly profile: string;
-      readonly model: string;
+      readonly agent: string;
       readonly mode: string;
       readonly version?: string;
     }
@@ -59,8 +92,27 @@ export type HistoryEntry =
       readonly entryId?: string;
       readonly text: string;
     }
+  | {
+      readonly kind: 'reasoning';
+      readonly id: string;
+      readonly text: string;
+    }
+  | {
+      readonly kind: 'compaction';
+      readonly id: string;
+      readonly summary: string;
+      readonly tokensBefore: number;
+      readonly beforeMessageCount?: number;
+      readonly afterMessageCount?: number;
+      readonly keptMessageCount?: number;
+    }
   | { readonly kind: 'skill'; readonly id: string; readonly name: string }
   | { readonly kind: 'tool'; readonly id: string; readonly tool: ToolCallView }
+  | {
+      readonly kind: 'command_run';
+      readonly id: string;
+      readonly run: CommandRunView;
+    }
   | {
       readonly kind: 'user_input';
       readonly id: string;

@@ -5,20 +5,22 @@ import { useNavigate } from 'react-router';
 
 import {
   buildCommands,
-  pickModel,
-  usePaletteStore,
+  pickAgent,
   type PaletteCommand,
 } from '../commands';
+import { usePaletteStore } from '../palette-store';
 
 import { Kbd } from '@/components/ui/Kbd';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { loadAgentCatalog } from '@/features/composer';
 import { openThread, threadDisplayName } from '@/features/thread';
 import { cn } from '@/lib/cn';
+import { useGlobalHotkey } from '@/lib/keyboard/shortcuts';
 import { runOperation } from '@/lib/report';
 import { useAppStore, useThreadRows, type ThreadRow } from '@/store/store';
 
 
-type Page = { readonly kind: 'root' } | { readonly kind: 'models' };
+type Page = { readonly kind: 'root' } | { readonly kind: 'agents' };
 
 interface FlatRow {
   readonly id: string;
@@ -30,22 +32,15 @@ interface FlatRow {
   readonly action: () => void;
 }
 
-/** Cmd+K 全局命令入口:Acrylic 浮层,分组命令 + 会话,栈式 drill。 */
+/** Cmd/Ctrl+K 全局命令入口:Acrylic 浮层,分组命令 + 会话,栈式 drill。 */
 export function CommandPalette() {
   const open = usePaletteStore((s) => s.open);
   const setOpen = usePaletteStore((s) => s.setOpen);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.metaKey && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        setOpen(!usePaletteStore.getState().open);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [setOpen]);
+  useGlobalHotkey({ key: 'k', mod: true }, () => {
+    setOpen(!usePaletteStore.getState().open);
+  });
 
   if (!open) return null;
   return (
@@ -68,32 +63,44 @@ function PaletteSurface(props: {
   const listRef = useRef<HTMLDivElement>(null);
 
   const threadRows = useThreadRows();
-  const models = useAppStore((s) => s.entities.catalogs.models);
-  const currentModel = useAppStore((s) => {
+  const agents = useAppStore((s) => s.entities.catalogs.agents);
+  const currentAgent = useAppStore((s) => {
     const id = s.view.selectedThreadId;
-    return id === null ? null : (s.entities.snapshots[id]?.settings.model ?? null);
+    return id === null ? null : (s.entities.snapshots[id]?.settings.agent ?? null);
   });
+  const cwd = useAppStore((s) => {
+    const id = s.view.selectedThreadId;
+    return id === null ? null : (s.entities.snapshots[id]?.thread.cwd ?? null);
+  });
+
+  useEffect(() => {
+    if (page.kind === 'agents' && agents.length === 0 && cwd !== null) {
+      void runOperation(loadAgentCatalog(cwd));
+    }
+  }, [page, agents.length, cwd]);
 
   const commands = useMemo(() => buildCommands(navigate), [navigate]);
 
   const rows: readonly FlatRow[] = useMemo(() => {
-    if (page.kind === 'models') {
-      return models.map((entry) => ({
-        id: entry.id,
-        group: '模型',
-        label: entry.title ?? entry.name,
-        icon:
-          entry.id === currentModel ? (
-            <Check size={14} className="text-fluent" />
-          ) : (
-            <Bot size={14} className="text-tertiary" />
-          ),
-        hint: entry.id === currentModel ? '当前' : undefined,
-        action: () => {
-          pickModel(entry.id);
-          onClose();
-        },
-      }));
+    if (page.kind === 'agents') {
+      return agents
+        .filter((entry) => entry.metadata.runtime === 'primary' && entry.enabled)
+        .map((entry) => ({
+          id: entry.id,
+          group: 'Agent',
+          label: entry.title ?? entry.name,
+          icon:
+            entry.id === currentAgent ? (
+              <Check size={14} className="text-fluent" />
+            ) : (
+              <Bot size={14} className="text-tertiary" />
+            ),
+          hint: entry.id === currentAgent ? '当前' : undefined,
+          action: () => {
+            pickAgent(entry.id);
+            onClose();
+          },
+        }));
     }
     const q = query.trim().toLowerCase();
     const matchedCommands = commands
@@ -106,7 +113,7 @@ function PaletteSurface(props: {
       )
       .map((command) =>
         commandRow(command, onClose, () => {
-          setPage({ kind: 'models' });
+          setPage({ kind: 'agents' });
           setHighlight(0);
         }),
       );
@@ -125,7 +132,7 @@ function PaletteSurface(props: {
         .slice(0, 8)
         .map((row) => threadRow(row, onClose)),
     ];
-  }, [page, models, currentModel, commands, query, threadRows, onClose]);
+  }, [page, agents, currentAgent, commands, query, threadRows, onClose]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -193,7 +200,7 @@ function PaletteSurface(props: {
             }}
             onKeyDown={onKeyDown}
             placeholder={
-              page.kind === 'models' ? '选择模型…' : '输入命令或搜索会话…'
+              page.kind === 'agents' ? '选择 Agent…' : '输入命令或搜索会话…'
             }
             className="h-full w-full bg-transparent text-[14px] text-primary outline-none placeholder:text-disabled"
           />
@@ -248,7 +255,7 @@ function PaletteSurface(props: {
 function commandRow(
   command: PaletteCommand,
   onClose: () => void,
-  drillModels: () => void,
+  drillAgents: () => void,
 ): FlatRow {
   const Icon = command.icon;
   return {
@@ -263,8 +270,8 @@ function commandRow(
       ) : undefined,
     shortcut: command.shortcut,
     action: () => {
-      if (command.drill === 'models') {
-        drillModels();
+      if (command.drill === 'agents') {
+        drillAgents();
         return;
       }
       onClose();

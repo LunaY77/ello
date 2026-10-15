@@ -126,7 +126,7 @@ export class RulesStore {
       pattern,
       action,
       scope: scopeToPermissionScope(scope),
-      source: `approval:${meta.proxiedTool ?? item.toolName}`,
+      source: `approval:${item.commandName}`,
     }));
     if (action === 'allow' && meta.externalDirs !== undefined) {
       rules.push(
@@ -135,7 +135,7 @@ export class RulesStore {
           pattern: externalDir,
           action: 'allow' as const,
           scope: scopeToPermissionScope(scope),
-          source: `approval:${meta.proxiedTool ?? item.toolName}`,
+          source: `approval:${item.commandName}`,
         })),
       );
     }
@@ -224,14 +224,10 @@ function extractPolicyMetadata(
   const metadata = item.metadata;
   if (metadata === undefined) {
     throw new Error(
-      `Approval item for ${item.toolName} has no policy metadata.`,
+      `Approval item for ${item.commandName} has no policy metadata.`,
     );
   }
-  const parsed = ApprovalPolicyMetadataSchema.parse(metadata);
-  if (item.toolName !== 'call_tool') {
-    return parsed;
-  }
-  return { ...parsed, proxiedTool: readString(metadata, 'proxiedTool') };
+  return ApprovalPolicyMetadataSchema.parse(metadata);
 }
 
 const ApprovalPolicyMetadataSchema = {
@@ -252,7 +248,7 @@ const ApprovalPolicyMetadataSchema = {
 
 type ApprovalRuleMetadata = Pick<
   ApprovalPolicyMetadata,
-  'permission' | 'patterns' | 'always' | 'externalDirs' | 'proxiedTool'
+  'permission' | 'patterns' | 'always' | 'externalDirs'
 >;
 
 function readString(record: object, key: string): string {

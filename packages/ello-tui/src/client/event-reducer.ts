@@ -84,7 +84,7 @@ export function applyNotification(
     case 'thread/archived':
       return {
         ...snapshot,
-        thread: { ...snapshot.thread, archived: true },
+        thread: { ...snapshot.thread, archived: true, status: 'archived' },
       };
     case 'thread/unarchived':
       return { ...snapshot, thread: notification.params.thread };
@@ -108,7 +108,16 @@ export function applyNotification(
         notification.params.item,
         false,
       );
+    case 'item/updated':
+      return replaceItem(
+        snapshot,
+        notification.params.turnId,
+        notification.params.itemId,
+        notification.params.item,
+        false,
+      );
     case 'item/agentMessage/delta':
+    case 'item/reasoning/delta':
     case 'item/plan/delta':
     case 'item/commandExecution/outputDelta':
     case 'thread/started':
@@ -120,6 +129,9 @@ export function applyNotification(
     case 'skills/changed':
     case 'fs/changed':
     case 'memory/job/updated':
+    case 'agent/task/updated':
+    case 'agent/task/event':
+    case 'agent/task/removed':
     case 'warning':
     case 'server/ready':
       return snapshot;

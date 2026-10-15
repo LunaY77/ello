@@ -12,7 +12,11 @@ declare const item: ThreadItem;
 
 if (isToolItem(item)) {
   item satisfies ToolThreadItem;
-  item.type satisfies 'commandExecution' | 'fileChange' | 'toolCall';
+  item.type satisfies
+    | 'commandExecution'
+    | 'fileChange'
+    | 'toolCall'
+    | 'commandRun';
 }
 
 const kind = itemKind(item);

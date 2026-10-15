@@ -14,8 +14,6 @@ export function registerRunCommands(program: Command): void {
     .command('run [prompt...]')
     .description('start a thread turn')
     .option('--thread <threadId>')
-    .option('--model <model>')
-    .option('--profile <profile>')
     .option(
       '--mode <mode>',
       'ask-before-changes, accept-edits, plan, or bypass',
@@ -39,17 +37,12 @@ export function registerRunCommands(program: Command): void {
   program
     .command('resume [threadId]')
     .description('resume a thread')
-    .option('--all', 'select the most recent thread from every directory')
     .option('--json')
     .option('--no-tui')
     .action(
       async (
         threadId: string | undefined,
-        commandOptions: {
-          readonly all?: boolean;
-          readonly json?: boolean;
-          readonly tui?: boolean;
-        },
+        commandOptions: Record<string, unknown>,
         command: Command,
       ) => {
         const global = resolveGlobalOptions(command);
@@ -60,9 +53,6 @@ export function registerRunCommands(program: Command): void {
             (
               await connection.client.request('thread/list', {
                 archived: false,
-                ...(commandOptions.all === true
-                  ? {}
-                  : { cwd: global.root ?? process.cwd() }),
                 limit: 1,
               })
             ).data[0]?.id;
@@ -98,8 +88,6 @@ export async function runPrompt(
   prompt: string,
   options: GlobalCliOptions & {
     thread?: string;
-    model?: string;
-    profile?: string;
     mode?: string;
   },
 ): Promise<void> {
@@ -144,8 +132,6 @@ export async function runPrompt(
       notifications.push(notification);
       if (options.json === true) writeJson(notification);
     });
-    if (options.model !== undefined) await thread.setModel(options.model);
-    if (options.profile !== undefined) await thread.setProfile(options.profile);
     if (options.mode !== undefined) {
       await thread.setMode(parseMode(options.mode));
     }

@@ -43,6 +43,12 @@ const META: Record<string, CommandMeta> = {
     keywords: ['plan', 'permissions'],
     shortcut: 'shift+tab',
   },
+  effort: {
+    id: 'model.effort',
+    group: 'Model',
+    title: 'Set thinking effort',
+    keywords: ['reasoning', 'thinking'],
+  },
   plan: {
     id: 'session.plan',
     group: 'Session',
@@ -62,12 +68,6 @@ const META: Record<string, CommandMeta> = {
     title: 'Switch model',
     keywords: ['catalog'],
   },
-  profiles: {
-    id: 'model.profile',
-    group: 'Model',
-    title: 'Switch profile',
-    keywords: ['suite'],
-  },
   settings: {
     id: 'config.open',
     group: 'General',
@@ -79,18 +79,6 @@ const META: Record<string, CommandMeta> = {
     group: 'Session',
     title: 'Resume session',
     keywords: ['open'],
-  },
-  archive: {
-    id: 'session.archive',
-    group: 'Session',
-    title: 'Archive session',
-    keywords: ['hide'],
-  },
-  unarchive: {
-    id: 'session.unarchive',
-    group: 'Session',
-    title: 'Unarchive session',
-    keywords: ['restore'],
   },
   tasks: {
     id: 'task.list',

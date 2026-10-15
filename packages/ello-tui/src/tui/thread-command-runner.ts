@@ -1,4 +1,3 @@
-import type { ThreadSummary } from '../api/protocol-types.js';
 import {
   handleSlashCommand,
   type CommandResult,
@@ -11,10 +10,9 @@ import type { CatalogData } from './hooks/use-catalogs.js';
 import { rewindTargets } from './hooks/use-runtime-actions.js';
 import type { useRuntimeActions } from './hooks/use-runtime-actions.js';
 import type { useRuntimeEvents } from './hooks/use-runtime-events.js';
-import { loadSettings } from './profile-config.js';
 import { isResumableThread } from './screen-utils.js';
+import { loadSettings } from './settings/config.js';
 import type { TuiEventState } from './store/tui-event-store.js';
-import type { SelectOption } from './ui/List.js';
 
 type Dispatch = ReturnType<typeof useRuntimeEvents>['dispatch'];
 type RuntimeActions = ReturnType<typeof useRuntimeActions>;
@@ -23,8 +21,6 @@ interface ThreadCommandRunnerInput {
   readonly thread: ThreadClient;
   readonly state: TuiEventState;
   readonly catalogs: Pick<CatalogData, 'agents' | 'skills' | 'tasks'>;
-  readonly modelOptions: readonly SelectOption[];
-  readonly profileOptions: readonly SelectOption[];
   readonly runtime: RuntimeActions;
   readonly dispatch: Dispatch;
   setOverlay(overlay: OverlayState): void;
@@ -43,14 +39,7 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
         input.setOverlay({ type: 'help' });
         return;
       case 'models':
-        input.setOverlay({
-          type: 'models',
-          title: 'Model catalog',
-          options: input.modelOptions,
-        });
-        return;
-      case 'profiles':
-        input.setOverlay({ type: 'profiles', options: input.profileOptions });
+        input.setOverlay({ type: 'model-selector' });
         return;
       case 'settings':
         input.setOverlay({
@@ -73,11 +62,15 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
         return;
       }
       case 'session-selector': {
-        await openSessionSelector(false, 'resume');
-        return;
-      }
-      case 'archived-session-selector': {
-        await openSessionSelector(true, 'unarchive');
+        const result = await input.thread.request('thread/list', {
+          cwd: input.thread.cwd,
+          archived: false,
+          limit: 50,
+        });
+        input.setOverlay({
+          type: 'session-selector',
+          sessions: result.data.filter(isResumableThread),
+        });
         return;
       }
       case 'rewind-selector':
@@ -90,19 +83,6 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
         name satisfies never;
         throw new Error(`Unhandled overlay: ${String(name)}`);
     }
-  };
-
-  const openSessionSelector = async (
-    archived: boolean,
-    action: 'resume' | 'unarchive',
-  ): Promise<void> => {
-    const sessions = await listThreads(input.thread, archived);
-    input.setOverlay({
-      type: 'session-selector',
-      action,
-      sessions: sessions.filter(isResumableThread),
-      currentCwd: input.thread.cwd,
-    });
   };
 
   const runShellCommand = async (command: string): Promise<void> => {
@@ -132,9 +112,18 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
       case 'set-mode':
         await input.thread.setMode(command.mode);
         return;
-      case 'set-profile':
-        await input.thread.setProfile(command.profile);
+      case 'set-effort': {
+        const result = await input.thread.request('agent/effort/update', {
+          cwd: input.thread.cwd,
+          agent: input.state.settings.agent,
+          effort: command.effort,
+        });
+        input.dispatch({
+          type: 'ui.message',
+          text: `Thinking effort set to ${result.effort} for ${result.model}; applies next turn.`,
+        });
         return;
+      }
       case 'open-overlay':
         await openOverlay(command.overlay);
         return;
@@ -166,27 +155,4 @@ export function createThreadCommandRunner(input: ThreadCommandRunnerInput): {
   };
 
   return { submitPrompt };
-}
-
-async function listThreads(
-  thread: ThreadClient,
-  archived: boolean,
-): Promise<readonly ThreadSummary[]> {
-  const sessions: ThreadSummary[] = [];
-  const cursors = new Set<string>();
-  let cursor: string | undefined;
-  while (true) {
-    const page = await thread.request('thread/list', {
-      archived,
-      limit: 100,
-      ...(cursor === undefined ? {} : { cursor }),
-    });
-    sessions.push(...page.data);
-    if (page.nextCursor === undefined) return sessions;
-    if (cursors.has(page.nextCursor)) {
-      throw new Error(`thread/list repeated cursor ${page.nextCursor}.`);
-    }
-    cursors.add(page.nextCursor);
-    cursor = page.nextCursor;
-  }
 }

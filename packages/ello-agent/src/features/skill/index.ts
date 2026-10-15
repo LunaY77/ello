@@ -24,4 +24,4 @@ export function createSkillFeature() {
 
 export { SkillActivationService } from './internal/activation.js';
 export { SkillCatalog } from './internal/index.js';
-export { createActivateSkillTool } from './internal/tool.js';
+export { createActivateSkillCommand } from './internal/tool.js';

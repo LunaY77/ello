@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 
 import type { UserInputResolution } from '../../api/protocol-types.js';
+import { createSteerId } from '../../client/steer-id.js';
 import { ThreadClient } from '../../client/thread-client.js';
 import {
   createInitialTuiEventState,
@@ -8,13 +9,14 @@ import {
   type TuiEventInput,
   type TuiEventState,
 } from '../store/tui-event-store.js';
+import { clearTerminalScrollback } from '../terminal-screen.js';
 
 export function useRuntimeEvents(thread: ThreadClient): {
   readonly state: TuiEventState;
   readonly historyResetKey: number;
   readonly workingSeconds: number | undefined;
   dispatch(event: TuiEventInput): void;
-  queueSteer(text: string): void;
+  queueSteer(text: string): string;
   resolveInteraction(requestId: string, resolution?: UserInputResolution): void;
 } {
   const [state, dispatch] = useReducer(
@@ -30,6 +32,7 @@ export function useRuntimeEvents(thread: ThreadClient): {
   useEffect(
     () =>
       thread.subscribe((event) => {
+        // snapshot 替换会重挂 Static 并重放全部历史，先清 scrollback 才不会留两份。
         if (event.type === 'snapshot') clearTerminalScrollback();
         dispatch(event);
       }),
@@ -48,8 +51,10 @@ export function useRuntimeEvents(thread: ThreadClient): {
     return () => clearInterval(timer);
   }, [state.runStartedAt]);
 
-  const queueSteer = useCallback((text: string) => {
-    dispatch({ type: 'steer.queued', text });
+  const queueSteer = useCallback((text: string): string => {
+    const steerId = createSteerId();
+    dispatch({ type: 'steer.queued', steerId, text });
+    return steerId;
   }, []);
   const resolveInteraction = useCallback(
     (requestId: string, resolution?: UserInputResolution) => {
@@ -75,9 +80,4 @@ export function useRuntimeEvents(thread: ThreadClient): {
     queueSteer,
     resolveInteraction,
   };
-}
-
-export function clearTerminalScrollback(): void {
-  if (process.stdout.isTTY !== true) return;
-  process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
 }

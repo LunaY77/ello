@@ -17,7 +17,7 @@ export interface StdioChildTransportOptions {
 export class StdioChildTransport implements ClientTransport {
   readonly kind = 'stdio' as const;
   private readonly child: ChildProcessWithoutNullStreams;
-  private readonly framer = new JsonlFramer();
+  private readonly framer: JsonlFramer;
   private readonly shutdownTimeoutMs: number;
   private writeQueue: Promise<void> = Promise.resolve();
   private closed = false;
@@ -34,6 +34,10 @@ export class StdioChildTransport implements ClientTransport {
       ],
       { stdio: ['pipe', 'pipe', 'pipe'] },
     );
+    this.framer = new JsonlFramer(undefined, (backpressured) => {
+      if (backpressured) this.child.stdout.pause();
+      else this.child.stdout.resume();
+    });
     this.child.stdout.on('data', (chunk: Buffer) => this.framer.push(chunk));
     this.child.stdout.once('end', () => this.framer.end());
     this.child.once('error', (error) => this.framer.fail(error));

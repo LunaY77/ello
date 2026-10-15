@@ -1,0 +1,21 @@
+schema = "ello.benchmark.config.v2"
+suite = "swe-bench-pro-calibration"
+agents_file = "agents.toml"
+
+[execution]
+replicates = 1
+concurrency = 2
+max_infrastructure_retries = 1
+
+[report]
+render_charts = true
+
+[report.publishability]
+require_complete_matrix = true
+require_complete_usage = true
+require_tool_audit = true
+
+[container]
+pull_policy = "if-absent"
+network = "bridge"
+cleanup = "always"

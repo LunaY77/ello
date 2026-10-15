@@ -22,7 +22,7 @@ import {
 } from '../../protocol/v1/index.js';
 
 const RecordBaseShape = {
-  schema: z.literal(1),
+  schema: z.literal(2),
   seq: z.number().int().positive(),
   threadId: OpaqueIdSchema,
   createdAt: IsoDateTimeSchema,
@@ -47,21 +47,8 @@ export const ThreadMetadataRecordSchema = z
     kind: z.literal('thread.metadata'),
     name: z.string().optional(),
     preview: z.string().optional(),
+    archived: z.boolean().optional(),
     settings: ThreadSettingsSchema.optional(),
-  })
-  .strict();
-
-export const ThreadArchivedRecordSchema = z
-  .object({
-    ...RecordBaseShape,
-    kind: z.literal('thread.archived'),
-  })
-  .strict();
-
-export const ThreadUnarchivedRecordSchema = z
-  .object({
-    ...RecordBaseShape,
-    kind: z.literal('thread.unarchived'),
   })
   .strict();
 
@@ -125,6 +112,7 @@ export const ItemDeltaRecordSchema = z
     itemId: OpaqueIdSchema,
     delta: z.discriminatedUnion('type', [
       z.object({ type: z.literal('agentMessage'), text: z.string() }).strict(),
+      z.object({ type: z.literal('reasoning'), text: z.string() }).strict(),
       z.object({ type: z.literal('plan'), text: z.string() }).strict(),
       z
         .object({
@@ -141,6 +129,15 @@ export const ItemCompletedRecordSchema = z
   .object({
     ...RecordBaseShape,
     kind: z.literal('item.completed'),
+    turnId: OpaqueIdSchema,
+    item: ThreadItemSchema,
+  })
+  .strict();
+
+export const ItemUpdatedRecordSchema = z
+  .object({
+    ...RecordBaseShape,
+    kind: z.literal('item.updated'),
     turnId: OpaqueIdSchema,
     item: ThreadItemSchema,
   })
@@ -164,6 +161,9 @@ export const CompactionRecordSchema = z
     summary: z.string(),
     firstKeptSeq: z.number().int().positive(),
     tokensBefore: NonNegativeIntegerSchema,
+    beforeMessageCount: NonNegativeIntegerSchema.optional(),
+    afterMessageCount: NonNegativeIntegerSchema.optional(),
+    keptMessageCount: NonNegativeIntegerSchema.optional(),
   })
   .strict();
 
@@ -226,8 +226,6 @@ export const UsageRecordSchema = z
 export const ThreadRecordSchema = z.discriminatedUnion('kind', [
   ThreadCreatedRecordSchema,
   ThreadMetadataRecordSchema,
-  ThreadArchivedRecordSchema,
-  ThreadUnarchivedRecordSchema,
   ThreadStatusRecordSchema,
   TurnStartedRecordSchema,
   TurnCompletedRecordSchema,
@@ -235,6 +233,7 @@ export const ThreadRecordSchema = z.discriminatedUnion('kind', [
   TurnFailedRecordSchema,
   ItemStartedRecordSchema,
   ItemDeltaRecordSchema,
+  ItemUpdatedRecordSchema,
   ItemCompletedRecordSchema,
   TranscriptEntryRecordSchema,
   CompactionRecordSchema,

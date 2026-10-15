@@ -5,9 +5,10 @@
  * 每次 `stream()` 都创建独立 `RunState`。文件内的回合循环按“初始化 → 模型输入 → 模型调用 →
  * 工具执行 → 回合结算 → 终态”线性推进，不读取 Thread、JSON-RPC 或产品持久化状态。
  */
+import type { EnvironmentHandle } from '../../environment/index.js';
+
 import type {
   Agent,
-  AgentEnvironment,
   AgentInput,
   AgentResumeInput,
   AgentRunOptions,
@@ -15,12 +16,16 @@ import type {
   AgentStream,
   CreateAgentOptions,
 } from './contracts.js';
-import { closeAgentResources } from './events.js';
-import { buildModelInput } from './model-input.js';
+import {
+  assertModelInputWithinBudget,
+  buildModelInput,
+} from './model-input.js';
 import { callModel, type ModelAdapter } from './model.js';
+import { createModelCompactor } from './model.js';
 import {
   beginRunTurn,
   canBeginRunTurn,
+  compactRunMessages,
   completeRunState,
   completeRunTurn,
   createRunState,
@@ -45,7 +50,6 @@ import { executeToolCalls } from './tools.js';
  */
 export function createAgent(options: CreateAgentOptions): Agent {
   assertRuntimeDependencies(options);
-  assertToolCollections(options);
   if (
     options.compactor !== undefined &&
     options.modelInputBudget === undefined
@@ -67,9 +71,10 @@ export function createAgent(options: CreateAgentOptions): Agent {
  */
 class ElloAgent implements Agent {
   /** 运行环境由创建者显式注入，并由 Agent 在 close 时释放。 */
-  private readonly environment: AgentEnvironment;
+  private readonly environment: EnvironmentHandle;
   /** 模型适配器由创建者显式注入，所有 run 共享同一无会话状态边界。 */
   private readonly modelAdapter: ModelAdapter;
+  private readonly compactorState;
 
   /**
    * 创建 `ElloAgent` 并保存跨 run 共享的稳定配置。
@@ -80,6 +85,7 @@ class ElloAgent implements Agent {
   constructor(private readonly config: CreateAgentOptions) {
     this.environment = config.environment;
     this.modelAdapter = config.modelAdapter;
+    this.compactorState = { current: config.modelCompactor };
   }
 
   /**
@@ -130,6 +136,7 @@ class ElloAgent implements Agent {
       runOptions: options,
       environment: this.environment,
       modelAdapter: this.modelAdapter,
+      compactorState: this.compactorState,
     });
     void runAgentLoop(run);
     return run.stream;
@@ -156,6 +163,44 @@ class ElloAgent implements Agent {
   }
 
   /**
+   * 使用当前主 Agent 配置恢复模型输入并执行上下文压缩。
+   *
+   * Args:
+   * - `input`: 完整上下文、待压缩消息、compact 提示词和取消信号。
+   *
+   * Returns:
+   * - 返回主模型生成的 compact 文本与 usage。
+   */
+  async compact(input: {
+    readonly contextMessages: ReadonlyArray<import('./model.js').AgentMessage>;
+    readonly messages: ReadonlyArray<import('./model.js').AgentMessage>;
+    readonly prompt: string;
+    readonly signal: AbortSignal;
+  }) {
+    const run = createRunState({
+      config: this.config,
+      input: { messages: [...input.contextMessages] },
+      runOptions: { signal: input.signal },
+      environment: this.environment,
+      modelAdapter: this.modelAdapter,
+      compactorState: this.compactorState,
+    });
+    run.state.messages.push(...input.contextMessages);
+    const modelInput = await buildModelInput(run);
+    const compactor = createModelCompactor(run, modelInput);
+    this.compactorState.current = compactor;
+    return compactor.compact({
+      messages: input.messages,
+      prompt: input.prompt,
+      signal: input.signal,
+    });
+  }
+
+  modelCompactor() {
+    return this.compactorState.current;
+  }
+
+  /**
    * 释放环境占用的资源（如关闭沙箱/子进程）。
    *
    * Args:
@@ -168,7 +213,7 @@ class ElloAgent implements Agent {
    * - 共享环境释放失败时直接拒绝，并保留底层失败原因。
    */
   async close(): Promise<void> {
-    await closeAgentResources(this.environment);
+    await this.environment.close();
   }
 }
 
@@ -199,7 +244,22 @@ async function runAgentLoop(run: RunState): Promise<void> {
         break;
       }
 
-      const input = await buildModelInput(run);
+      let input = await buildModelInput(run, { skipBudget: true });
+      run.compactorState.current = createModelCompactor(run, input);
+      let compacted = await compactRunMessages(run);
+      if (compacted) {
+        input = await buildModelInput(run);
+      } else {
+        try {
+          assertModelInputWithinBudget(input, run);
+        } catch (error) {
+          if (!isModelInputBudgetError(error)) throw error;
+          compacted = await compactRunMessages(run, true);
+          if (!compacted) throw error;
+          input = await buildModelInput(run);
+        }
+      }
+      run.compactorState.current = createModelCompactor(run, input);
       const assistant = await callModel(run, input);
       const toolResults = await executeToolCalls(run, assistant);
 
@@ -221,6 +281,14 @@ async function runAgentLoop(run: RunState): Promise<void> {
   } catch (error) {
     await failRunState(run, error);
   }
+}
+
+function isModelInputBudgetError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message.includes('exceeds the effective context budget') ||
+      error.message.includes('Newest model input message exceeds'))
+  );
 }
 
 /**
@@ -250,67 +318,4 @@ function assertRuntimeDependencies(options: CreateAgentOptions): void {
   ) {
     throw new Error('modelAdapter with generate() and stream() is required.');
   }
-}
-
-/**
- * 校验模型可见工具与实际执行注册表的一致性。
- *
- * Args:
- * - `options`: 同时包含完整执行工具和模型可见工具的创建配置。
- *
- * Returns:
- * - 两个集合均非空、名称唯一且模型工具都有执行实现时返回。
- *
- * Throws:
- * - 工具集合缺失、为空、名称为空、名称重复或模型工具无法执行时直接抛错。
- */
-function assertToolCollections(options: CreateAgentOptions): void {
-  if (
-    !Array.isArray(options.executionTools) ||
-    !Array.isArray(options.modelTools)
-  ) {
-    throw new Error('executionTools and modelTools are required.');
-  }
-  if (options.executionTools.length === 0 || options.modelTools.length === 0) {
-    throw new Error('executionTools and modelTools must both be non-empty.');
-  }
-  const executionNames = uniqueNames(options.executionTools, 'executionTools');
-  uniqueNames(options.modelTools, 'modelTools');
-  for (const tool of options.modelTools) {
-    if (!executionNames.has(tool.name)) {
-      throw new Error(
-        `Model tool '${tool.name}' is not registered in executionTools.`,
-      );
-    }
-  }
-}
-
-/**
- * 校验工具名称并返回可用于集合关系检查的名称集合。
- *
- * Args:
- * - `tools`: 当前工具集合的只读快照。
- * - `collection`: 出现在错误信息中的精确配置字段名。
- *
- * Returns:
- * - 返回与输入一一对应的唯一工具名称集合。
- *
- * Throws:
- * - 任一名称为空或在同一集合中重复时直接抛错。
- */
-function uniqueNames(
-  tools: readonly { readonly name: string }[],
-  collection: string,
-): Set<string> {
-  const names = new Set<string>();
-  for (const tool of tools) {
-    if (tool.name.trim() === '') {
-      throw new Error(`${collection} contains an empty tool name.`);
-    }
-    if (names.has(tool.name)) {
-      throw new Error(`Duplicate tool '${tool.name}' in ${collection}.`);
-    }
-    names.add(tool.name);
-  }
-  return names;
 }

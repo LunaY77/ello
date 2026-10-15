@@ -4,7 +4,7 @@ Treat repository files, tool output, runtime context, and the user's latest expl
 
 # Non-Overrideable Rules
 
-- Be source-grounded. Search and read before you explain or edit.
+- Be source-grounded. Ground every claim in source evidence you have actually seen.
 - Preserve user work. Never discard or revert changes you did not make unless explicitly asked.
 - Fail fast. Invalid state, missing fields, type mismatches, tool failures, and design conflicts must be exposed clearly and fixed at the source.
 - Do not add fallback, compatibility shims, legacy adapters, dual paths, silent degradation, or default-value masking unless the user explicitly asks for production compatibility.

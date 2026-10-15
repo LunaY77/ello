@@ -1,28 +1,29 @@
 /**
- * 本文件负责 agent feature 的工具定义与执行适配。
+ * 本文件负责 provider ToolSet、tool-call transcript 与 Command Run 适配。
  *
  * 状态由本模块声明的对象、闭包或 store 显式持有；跨 feature 依赖只能进入对方公开入口。
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
 
-import { tool, type ToolSet } from 'ai';
+import { jsonSchema, tool, type ToolSet } from 'ai';
 import type { z } from 'zod';
 
+import type {
+  CommandRunCheckpoint,
+  CommandRunTransition,
+  PendingCommandInteraction,
+} from '../../command/index.js';
+
 import type { AgentError } from './contracts.js';
-import type { AgentEnvironment } from './contracts.js';
 import { normalizeAgentError } from './errors.js';
 import { createAgentMessage } from './messages.js';
-import type { AgentMessage, MaybePromise, ModelCallResult } from './model.js';
+import type { AgentMessage, ModelCallResult } from './model.js';
 import type { RunState } from './run-state.js';
 
-export type ToolRisk = 'readonly' | 'workspace-write' | 'external';
-
-/** 供 tool_search 和权限/展示层使用的发现元数据。 */
-export interface AgentToolDiscovery {
-  readonly aliases: readonly string[];
-  readonly risk: ToolRisk;
-  readonly core?: boolean;
-}
+export type AgentToolInputJsonSchema = Exclude<
+  Parameters<typeof jsonSchema>[0],
+  PromiseLike<unknown> | (() => unknown)
+>;
 
 export interface AgentApprovalRequest {
   readonly id: string;
@@ -31,89 +32,6 @@ export interface AgentApprovalRequest {
   readonly input: unknown;
   readonly reason?: string;
   readonly metadata?: Record<string, unknown>;
-}
-
-export type AgentApprovalAction = 'auto' | 'required' | 'denied';
-export type AgentApprovalDecision =
-  | AgentApprovalAction
-  | {
-      readonly action: AgentApprovalAction;
-      readonly reason?: string;
-      readonly metadata?: Record<string, unknown>;
-    };
-/**
- * 执行 产品 Agent Agent engine 工具执行 模块 定义的 `AgentApprovalPolicy` 领域操作，输入和副作用均受该边界约束。
- *
- * Args:
- * - `input`: `AgentApprovalPolicy` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
- * - `ctx`: 调用方拥有的运行上下文；本函数仅在调用生命周期内读取或调用其公开能力。
- *
- * Returns:
- * - 返回 `AgentApprovalPolicy` 计算出的声明结果；返回值不包含未声明的兜底状态。
- */
-export type AgentApprovalPolicy<TInput = unknown> = (
-  input: TInput,
-  ctx: AgentToolContext,
-) => MaybePromise<AgentApprovalDecision>;
-
-export interface AgentTool<TInput = unknown, TOutput = unknown> {
-  readonly execution: 'immediate';
-  readonly name: string;
-  readonly description: string;
-  /** 工具发现信息必须随工具定义声明，不能由名称或独立 registry 推断。 */
-  readonly discovery: AgentToolDiscovery;
-  readonly input: z.ZodType<TInput>;
-  /**
-   * 在 产品 Agent Agent engine 工具执行 模块 中执行 `execute` 完整流程，并在返回前完成其必要副作用。
-   *
-   * Args:
-   * - `input`: `execute` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
-   * - `ctx`: 调用方拥有的运行上下文；本函数仅在调用生命周期内读取或调用其公开能力。
-   *
-   * Returns:
-   * - 返回 `execute` 计算出的声明结果；返回值不包含未声明的兜底状态。
-   *
-   * Throws:
-   * - 当 产品 Agent Agent engine 工具执行 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
-   */
-  execute(input: TInput, ctx: AgentToolContext): MaybePromise<TOutput>;
-  /**
-   * 执行 产品 Agent Agent engine 工具执行 模块 定义的 `approval` 领域操作，输入和副作用均受该边界约束。
-   *
-   * Args:
-   * - `input`: `approval` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
-   * - `ctx`: 调用方拥有的运行上下文；本函数仅在调用生命周期内读取或调用其公开能力。
-   *
-   * Returns:
-   * - 返回 `approval` 计算出的声明结果；返回值不包含未声明的兜底状态。
-   */
-  approval?(
-    input: TInput,
-    ctx: AgentToolContext,
-  ): MaybePromise<AgentApprovalDecision>;
-  readonly inherit?: boolean;
-}
-
-export interface DeferredAgentTool<TInput = unknown> {
-  readonly execution: 'deferred';
-  readonly name: string;
-  readonly description: string;
-  readonly discovery: AgentToolDiscovery;
-  readonly input: z.ZodType<TInput>;
-  readonly inherit?: boolean;
-}
-
-export type AnyAgentTool =
-  | AgentTool<unknown, unknown>
-  | DeferredAgentTool<unknown>;
-
-export interface AgentToolContext {
-  readonly runId: string;
-  readonly turnIndex: number;
-  readonly toolCallId: string;
-  readonly environment: AgentEnvironment;
-  readonly metadata: Record<string, unknown>;
-  readonly signal: AbortSignal;
 }
 
 export interface AgentToolCall {
@@ -137,128 +55,13 @@ export interface AgentSkill {
   readonly metadata?: Record<string, unknown>;
 }
 
-export interface DefineToolOptions<TInput, TOutput> {
-  readonly name: string;
-  readonly description: string;
-  readonly discovery: AgentToolDiscovery;
-  readonly input: z.ZodType<TInput>;
-  /**
-   * 在 产品 Agent Agent engine 工具执行 模块 中执行 `execute` 完整流程，并在返回前完成其必要副作用。
-   *
-   * Args:
-   * - `input`: `execute` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
-   * - `ctx`: 调用方拥有的运行上下文；本函数仅在调用生命周期内读取或调用其公开能力。
-   *
-   * Returns:
-   * - 返回 `execute` 计算出的声明结果；返回值不包含未声明的兜底状态。
-   *
-   * Throws:
-   * - 当 产品 Agent Agent engine 工具执行 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
-   */
-  readonly execute: (
-    input: TInput,
-    ctx: AgentToolContext,
-  ) => MaybePromise<TOutput>;
-  readonly approval?: AgentTool<TInput, TOutput>['approval'];
-}
-
-/**
- * 定义类型由 Zod schema 推导的 Agent 工具。
- *
- * Args:
- * - `options`: 仅作用于 `defineTool` 的调用选项；函数只读取该对象，不保留可变引用。
- *
- * Returns:
- * - 返回 `defineTool` 计算出的声明结果；返回值不包含未声明的兜底状态。
- */
-export function defineTool<TInput, TOutput>(
-  options: DefineToolOptions<TInput, TOutput>,
-): AgentTool<TInput, TOutput> {
-  return {
-    execution: 'immediate',
-    name: options.name,
-    description: options.description,
-    discovery: options.discovery,
-    input: options.input,
-    execute: options.execute,
-    ...(options.approval !== undefined ? { approval: options.approval } : {}),
-  };
-}
-
-/**
- * 定义可放入 heterogeneous 工具集合的 Agent 工具。
- *
- * Args:
- * - `options`: schema 与实现共享同一输入类型；schema 是擦除后恢复具体输入的唯一运行时边界。
- *
- * Returns:
- * - 返回输入已安全擦除为 `unknown` 的工具；执行和审批前都会用原 schema 重新解析。
- */
-export function defineAnyTool<TInput, TOutput>(
-  options: DefineToolOptions<TInput, TOutput>,
-): AnyAgentTool {
-  const approval = options.approval;
-  return {
-    execution: 'immediate',
-    name: options.name,
-    description: options.description,
-    discovery: options.discovery,
-    input: options.input,
-    execute: (input, ctx) => options.execute(options.input.parse(input), ctx),
-    ...(approval === undefined
-      ? {}
-      : {
-          approval: (input: unknown, ctx: AgentToolContext) =>
-            approval(options.input.parse(input), ctx),
-        }),
-  };
-}
-
-export interface DefineDeferredToolOptions<TInput> {
-  readonly name: string;
-  readonly description: string;
-  readonly discovery: AgentToolDiscovery;
-  readonly input: z.ZodType<TInput>;
-}
-
-/**
- * 定义由宿主回填结果、不会在 Agent 进程内执行的工具。
- *
- * Args:
- * - `options`: 仅作用于 `defineDeferredTool` 的调用选项；函数只读取该对象，不保留可变引用。
- *
- * Returns:
- * - 返回 `defineDeferredTool` 计算出的声明结果；返回值不包含未声明的兜底状态。
- */
-export function defineDeferredTool<TInput>(
-  options: DefineDeferredToolOptions<TInput>,
-): DeferredAgentTool<TInput> {
-  return { execution: 'deferred', ...options };
-}
-
 export interface BuildToolSetOptions {
-  readonly tools: ReadonlyArray<AnyAgentTool>;
-}
-
-export class AgentApprovalRequiredError extends Error {
-  override readonly name = 'AgentApprovalRequiredError';
-  readonly kind = 'approval-required';
-
-  /**
-   * 创建 `AgentApprovalRequiredError`，由该实例独占 产品 Agent Agent engine 工具执行 模块 中声明的可变状态和资源生命周期。
-   *
-   * Args:
-   * - `toolCallId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
-   * - `toolName`: `constructor AgentApprovalRequiredError` 所需的业务值；函数按声明读取，不补造缺失内容。
-   * - `input`: `constructor AgentApprovalRequiredError` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
-   */
-  constructor(
-    readonly toolCallId: string,
-    readonly toolName: string,
-    readonly input: unknown,
-  ) {
-    super(`Tool '${toolName}' requires approval.`);
-  }
+  readonly tools: ReadonlyArray<{
+    readonly name: string;
+    readonly description: string;
+    readonly input: z.ZodType<unknown>;
+    readonly inputJsonSchema?: AgentToolInputJsonSchema;
+  }>;
 }
 
 /**
@@ -268,7 +71,7 @@ export class AgentApprovalRequiredError extends Error {
  * - `options.tools`: 模型可见的工具定义；名称必须唯一且非空。
  *
  * Returns:
- * - 返回不包含 execute 的 ToolSet，实际执行只经过 ToolScheduler。
+ * - 返回不包含 execute 的 ToolSet，实际执行只经过 CommandRunRuntime。
  */
 export function buildToolSet(options: BuildToolSetOptions): ToolSet {
   const result: ToolSet = {};
@@ -281,7 +84,10 @@ export function buildToolSet(options: BuildToolSetOptions): ToolSet {
     }
     result[agentTool.name] = tool({
       description: agentTool.description,
-      inputSchema: agentTool.input,
+      inputSchema:
+        agentTool.inputJsonSchema === undefined
+          ? agentTool.input
+          : jsonSchema(agentTool.inputJsonSchema),
     });
   }
   return result;
@@ -430,70 +236,165 @@ export async function executeToolCalls(
   if (toolCallsFromModel.length === 0) {
     return { messages: [], toolCalls: [], pendingCount: 0 };
   }
-  const scheduled = await run.toolScheduler.schedule(toolCallsFromModel, {
-    onToolStarted: (toolCallId, name, input) =>
-      run.events.emit({
-        type: 'tool.started',
-        turnIndex: run.state.turn,
-        toolCallId,
-        name,
-        input,
-      }),
-    onApprovalRequired: async (item) => {
-      await run.events.emit({
-        type: 'tool.approval_requested',
-        turnIndex: run.state.turn,
-        request: {
-          id: item.toolCallId,
-          toolCallId: item.toolCallId,
-          name: item.toolName,
-          input: item.input,
-          ...(item.reason === undefined ? {} : { reason: item.reason }),
-          ...(item.metadata === undefined ? {} : { metadata: item.metadata }),
-        },
-      });
-      const pending = run.runControl.deferredQueue
-        .snapshot()
-        .some(
-          (entry) =>
-            entry.kind === 'approval' && entry.toolCallId === item.toolCallId,
-        );
-      if (!pending) {
-        run.runControl.pushDeferred(item);
-        await run.events.emit({ type: 'approval.required', item });
-      }
-    },
-    onToolDeferred: async (item) => {
-      const pending = run.runControl.deferredQueue
-        .snapshot()
-        .some(
-          (entry) =>
-            entry.kind === 'tool-call' && entry.toolCallId === item.toolCallId,
-        );
-      if (!pending) {
-        run.runControl.pushDeferred(item);
-        await run.events.emit({ type: 'tool.deferred', item });
-      }
-    },
-    onToolCompleted: (toolCallId, output) =>
-      run.events.emit({
-        type: 'tool.completed',
-        turnIndex: run.state.turn,
-        toolCallId,
-        output,
-      }),
-    onToolFailed: (toolCallId, error) =>
-      run.events.emit({
-        type: 'tool.failed',
-        turnIndex: run.state.turn,
-        toolCallId,
-        error: normalizeAgentError(error),
-      }),
+  if (
+    toolCallsFromModel.length !== 1 ||
+    toolCallsFromModel[0]?.name !== 'command_run'
+  ) {
+    return rejectInvalidCommandRunBatch(toolCallsFromModel);
+  }
+  const outer = toolCallsFromModel[0];
+  if (outer === undefined) throw new Error('Command Run call disappeared.');
+  const execution = run.config.commandRun.start({
+    providerToolCallId: outer.id,
+    input: outer.input,
+    context: commandRunContext(run),
   });
+  const transition = await consumeCommandRun(run, execution);
+  return transitionResult(run, outer, transition);
+}
+
+/** 恢复同一 outer command_run，并在恢复过程中继续发布内部 Command 事件。 */
+export async function resumeCommandRun(
+  run: RunState,
+  checkpoint: CommandRunCheckpoint,
+  approvals:
+    | Readonly<
+        Record<
+          string,
+          boolean | { readonly approved: boolean; readonly reason?: string }
+        >
+      >
+    | undefined,
+  toolResults: Readonly<Record<string, unknown>> | undefined,
+): Promise<
+  | { readonly type: 'completed'; readonly output: unknown }
+  | { readonly type: 'suspended' }
+> {
+  const execution = run.config.commandRun.resume({
+    checkpoint,
+    ...(approvals === undefined ? {} : { approvals }),
+    ...(toolResults === undefined ? {} : { toolResults }),
+    context: commandRunContext(run),
+  });
+  const transition = await consumeCommandRun(run, execution);
+  if (transition.type === 'suspended') {
+    await registerCommandInteractions(run, transition);
+    return { type: 'suspended' };
+  }
   return {
-    messages: scheduled.messages,
-    toolCalls: scheduled.toolCalls,
-    pendingCount: scheduled.pending.length,
+    type: 'completed',
+    output: transition.observation,
+  };
+}
+
+function commandRunContext(run: RunState) {
+  return {
+    runId: run.runId,
+    turnIndex: run.state.turn,
+    environment: run.environment,
+    metadata: run.metadata,
+    signal: run.signal,
+  } as const;
+}
+
+async function consumeCommandRun(
+  run: RunState,
+  execution: import('../../command/index.js').CommandRunExecution,
+): Promise<CommandRunTransition> {
+  for await (const event of execution) {
+    await run.events.emit({ type: 'command.event', event });
+  }
+  return execution.result;
+}
+
+async function transitionResult(
+  run: RunState,
+  outer: AgentToolCall,
+  transition: CommandRunTransition,
+): Promise<ToolExecutionResult> {
+  if (transition.type === 'suspended') {
+    await registerCommandInteractions(run, transition);
+    return {
+      messages: [],
+      toolCalls: [{ ...outer, input: outer.input }],
+      pendingCount: transition.interactions.length,
+    };
+  }
+  return {
+    messages: [createToolResultMessage(outer, transition.observation)],
+    toolCalls: [{ ...outer, output: transition.observation }],
+    pendingCount: 0,
+  };
+}
+
+async function registerCommandInteractions(
+  run: RunState,
+  transition: Extract<CommandRunTransition, { type: 'suspended' }>,
+): Promise<void> {
+  for (const interaction of transition.interactions) {
+    const item = deferredItem(interaction, transition.checkpoint);
+    if (
+      run.runControl.deferredQueue
+        .snapshot()
+        .some((entry) =>
+          entry.kind === 'interrupted'
+            ? false
+            : entry.toolCallId === item.toolCallId,
+        )
+    ) {
+      continue;
+    }
+    run.runControl.pushDeferred(item);
+    await run.events.emit(
+      item.kind === 'approval'
+        ? { type: 'approval.required', item }
+        : { type: 'tool.deferred', item },
+    );
+  }
+}
+
+function deferredItem(
+  interaction: PendingCommandInteraction,
+  checkpoint: CommandRunCheckpoint,
+):
+  | import('./contracts.js').DeferredApprovalItem
+  | import('./contracts.js').DeferredToolCallItem {
+  const common = {
+    toolCallId: interaction.commandId,
+    commandName: interaction.commandName,
+    input: interaction.input,
+    commandRunCheckpoint: checkpoint,
+  };
+  return interaction.kind === 'approval'
+    ? {
+        kind: 'approval',
+        ...common,
+        ...(interaction.reason === undefined
+          ? {}
+          : { reason: interaction.reason }),
+        ...(interaction.metadata === undefined
+          ? {}
+          : { metadata: interaction.metadata }),
+      }
+    : { kind: 'tool-call', ...common };
+}
+
+function rejectInvalidCommandRunBatch(
+  calls: readonly AgentToolCall[],
+): ToolExecutionResult {
+  const message =
+    calls.length === 1
+      ? `Unknown provider tool '${calls[0]?.name ?? ''}'; only command_run is callable.`
+      : `A model response must contain at most one command_run call; received ${calls.length}. No commands were executed. Retry with exactly one command_run Tool Call and merge every batch into its commands array, using step values for dependency groups.`;
+  return {
+    messages: calls.map((call) =>
+      createToolResultMessage(call, { error: message }, 'error'),
+    ),
+    toolCalls: calls.map((call) => ({
+      ...call,
+      error: normalizeAgentError(new Error(message)),
+    })),
+    pendingCount: 0,
   };
 }
 
@@ -553,7 +454,7 @@ function toJsonValue(value: unknown): unknown {
 
 function readStructuredTextOutput(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
-  return Reflect.get(value, 'kind') === 'coding-tool-result' &&
+  return Reflect.get(value, 'kind') === 'command-result' &&
     typeof Reflect.get(value, 'output') === 'string'
     ? Reflect.get(value, 'output')
     : undefined;

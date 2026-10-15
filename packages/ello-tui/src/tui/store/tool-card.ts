@@ -12,6 +12,7 @@ import path from 'node:path';
 import type { FileChange } from '../../api/protocol-types.js';
 
 import {
+  InvalidFileChangeMetadataError,
   readFileChanges,
   summarizeDiff,
   unifiedDiffFromFileChanges,
@@ -33,6 +34,8 @@ export interface ToolCardModel {
   readonly metrics: readonly string[];
   readonly details: readonly string[];
   readonly outputPreview: readonly string[];
+  /** 工具执行已完成，但部分展示元数据损坏时给出的非致命诊断。 */
+  readonly presentationError?: string;
   /** TUI 只展示短路径，完整路径留给后续展开或复制操作。 */
   readonly artifact?: {
     readonly displayPath: string;
@@ -53,6 +56,7 @@ export interface ToolCardDisplayOptions {
 }
 
 const DEFAULT_MAX_PATH_LENGTH = 56;
+const INVALID_FILE_CHANGES = 'Invalid file change metadata; diff unavailable.';
 
 /** 从工具结果对象里取出 {@link ToolMetadata}（CodingToolResult.metadata）。 */
 export function readToolMetadata(output: unknown): ToolMetadata | undefined {
@@ -95,10 +99,19 @@ function summarize(
   }
   if (typeof input === 'object' && input !== null) {
     const record = input as Record<string, unknown>;
-    for (const key of ['path', 'command', 'pattern', 'url', 'query']) {
+    for (const key of [
+      'filePath',
+      'path',
+      'command',
+      'pattern',
+      'url',
+      'query',
+    ]) {
       const value = record[key];
       if (typeof value === 'string' && value !== '') {
-        return key === 'path' ? formatToolPath(value, options) : value;
+        return key === 'filePath' || key === 'path'
+          ? formatToolPath(value, options)
+          : value;
       }
     }
   }
@@ -227,9 +240,9 @@ function headline(
   if (kind === 'network') {
     return `Fetched ${text(metadata?.url) || inputString(call.input, 'url')}`;
   }
-  if (kind === 'task' || call.name === 'delegate_to_subagent') {
-    const agent = inputString(call.input, 'name') || text(metadata?.agentName);
-    return `Delegate${agent !== '' ? ` ${agent}` : ''}`;
+  if (kind === 'task' || call.name === 'spawn_agent') {
+    const agent = inputString(call.input, 'agent') || text(metadata?.agentName);
+    return `Spawn${agent !== '' ? ` ${agent}` : ''}`;
   }
   return `${formatName(call.name)}${path !== '' ? ` ${path}` : ''}`;
 }
@@ -248,7 +261,11 @@ function searchTarget(
   options: ToolCardDisplayOptions,
 ): string {
   const pattern = text(metadata?.pattern) || inputString(input, 'pattern');
-  const targetPath = text(metadata?.path) || inputString(input, 'path');
+  const targetPath =
+    text(metadata?.filePath) ||
+    text(metadata?.path) ||
+    inputString(input, 'filePath') ||
+    inputString(input, 'path');
   const displayPath = formatToolPath(targetPath, options);
   if (pattern === '') {
     return displayPath !== '' ? ` in ${displayPath}` : '';
@@ -338,7 +355,14 @@ export function buildToolCardModel(
   options: ToolCardDisplayOptions,
 ): ToolCardModel {
   const metadata = readToolMetadata(call.output);
-  const sourceFileChanges = readFileChanges(metadata?.fileChanges);
+  let sourceFileChanges: readonly FileChange[] = [];
+  let presentationError: string | undefined;
+  try {
+    sourceFileChanges = readFileChanges(metadata?.fileChanges);
+  } catch (error) {
+    if (!(error instanceof InvalidFileChangeMetadataError)) throw error;
+    presentationError = INVALID_FILE_CHANGES;
+  }
   const fileChanges = sourceFileChanges.map((change) => ({
     ...change,
     path: formatToolPath(change.path, options),
@@ -349,6 +373,7 @@ export function buildToolCardModel(
   const diff = unifiedDiffFromFileChanges(sourceFileChanges);
   const hasDiff = diff !== '';
   const outputPath = text(metadata?.outputPath);
+  const artifactId = text(metadata?.artifactId);
 
   return {
     status: call.status,
@@ -360,14 +385,22 @@ export function buildToolCardModel(
     metrics: metricList(metadata),
     details: detailList(metadata, diff),
     outputPreview:
-      metadata?.kind === 'shell' || call.name === 'bash'
-        ? outputPreview(call.output)
-        : [],
-    ...(outputPath !== ''
+      call.status === 'fail' && call.error?.message !== undefined
+        ? outputPreview(call.error.message)
+        : presentationError !== undefined
+          ? [presentationError]
+          : metadata?.kind === 'shell' || call.name === 'bash'
+            ? outputPreview(call.output)
+            : [],
+    ...(presentationError === undefined ? {} : { presentationError }),
+    ...(outputPath !== '' || artifactId !== ''
       ? {
           artifact: {
-            displayPath: formatArtifactPath(outputPath),
-            fullPath: outputPath,
+            displayPath:
+              outputPath === ''
+                ? compactArtifactId(artifactId)
+                : formatArtifactPath(outputPath),
+            fullPath: outputPath || artifactId,
           },
         }
       : {}),
@@ -375,8 +408,15 @@ export function buildToolCardModel(
     ...(fileChanges.length > 0 ? { fileChanges } : {}),
     hasDiff,
     // 默认折叠普通成功工具；diff / 失败默认展开。
-    defaultCollapsed: !hasDiff && call.status !== 'fail',
+    defaultCollapsed:
+      !hasDiff && call.status !== 'fail' && presentationError === undefined,
   };
+}
+
+function compactArtifactId(artifactId: string): string {
+  return artifactId.length <= 16
+    ? artifactId
+    : `${artifactId.slice(0, 8)}…${artifactId.slice(-4)}`;
 }
 
 function compactToolPath(value: string, maxLength: number): string {
@@ -418,7 +458,7 @@ function displayMetadataPath(
   metadata: ToolMetadata | undefined,
   options: ToolCardDisplayOptions,
 ): string {
-  const metadataPath = text(metadata?.path);
+  const metadataPath = text(metadata?.filePath) || text(metadata?.path);
   const metadataPaths = Array.isArray(metadata?.paths)
     ? metadata.paths.filter(
         (value): value is string => typeof value === 'string',

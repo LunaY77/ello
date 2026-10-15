@@ -5,33 +5,51 @@
  * 任一资源创建或释放失败都必须保留错误原因，不能通过空实现或默认容器继续运行。
  */
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Writable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
+
+import { z } from 'zod';
 
 import {
-  defineDeferredTool,
-  defineTool,
   dynamicSystemSection,
   skillIndexContext,
-  z,
-  type AnyAgentTool,
 } from './features/agent/engine/index.js';
 import {
-  CheckpointStore,
   createAgentRegistry,
+  createAgentTaskEventPreparer,
   createAgentRoutes,
   createAgentFeature,
-  createCheckpointRecordStore,
   createCodingSystemPromptSection,
-  createRequestUserInputTool,
-  PLAN_EXIT_TOOL_NAME,
-  recordCheckpointChanges,
-  type CreateAgentTools,
+  createRequestUserInputCommand,
+  createSubagentCommands,
+  renderTaskPacket,
+  AgentTaskService,
+  AgentTaskStore,
+  AgentTaskRpcFeature,
+  PLAN_EXIT_COMMAND_NAME,
+  type AgentFeature,
+  type AgentTask,
+  type CreateAgentCommands,
+  type AgentRuntime,
+  type AgentRunRequest,
   type LoadAgentContext,
   type ResolveAgentDefinition,
   type ResolveAgentModel,
 } from './features/agent/index.js';
 import { createArtifactFeature } from './features/artifact/index.js';
 import { ArtifactStore } from './features/artifact/index.js';
+import {
+  cliInput,
+  commandInput,
+  createCommandRegistrySnapshot,
+  createCommandRunRuntime,
+  deferred,
+  defineCommand,
+  defineCommandModule,
+  type CommandDefinition,
+  type CommandModule,
+} from './features/command/index.js';
 import { loadCodingAgentConfig } from './features/config/index.js';
 import { createConfigFeature } from './features/config/index.js';
 import { createFsFeature } from './features/fs/index.js';
@@ -42,15 +60,15 @@ import {
 } from './features/memory/index.js';
 import {
   createAiSdkModelAdapter,
-  createProviderRegistry,
-  modelSettingsFromRole,
+  createModelRegistry,
+  modelInputBudgetFromRuntimeModel,
+  modelSettingsFromRuntimeModel,
+  providerOptionsFromRuntimeModel,
   prepareModelInputForRuntimeModel,
-  providerOptionsForRole,
-  type RuntimeRoleModel,
 } from './features/model/index.js';
 import { createModelFeature } from './features/model/index.js';
 import {
-  createActivateSkillTool,
+  createActivateSkillCommand,
   createSkillFeature,
   SkillActivationService,
   SkillCatalog,
@@ -62,6 +80,7 @@ import {
 } from './features/task/index.js';
 import {
   createExportRoutes,
+  compactionView,
   createProductionThreadCompactor,
   createThreadFeature,
   createThreadCompactor,
@@ -69,14 +88,13 @@ import {
   createThreadRoutes,
   createThreadStore,
   createThreadTitleGenerator,
+  type ThreadFeature,
   writePlanArtifact,
 } from './features/thread/index.js';
 import {
-  createMetaToolRuntime,
-  createProductionToolRuntime,
+  createProductionCommandRuntime,
   createToolFeature,
-  markCoreTool,
-  TOOL_ROUTING_INSTRUCTIONS,
+  SessionFileStateRegistry,
   type SessionModeState,
 } from './features/tool/index.js';
 import {
@@ -86,7 +104,6 @@ import {
 } from './features/workspace/index.js';
 import { openDatabase } from './infra/database/index.js';
 import { artifactsDir, elloHomeDir, stateDatabasePath } from './infra/paths.js';
-import { createTurnTracing } from './infra/telemetry/turn-tracing.js';
 import {
   AppServerError,
   type ParsedClientParams,
@@ -99,6 +116,7 @@ export interface CreateAppOptions {
   readonly root?: string;
   readonly stderr?: Writable;
   readonly transports: readonly ('stdio' | 'websocket' | 'unix')[];
+  readonly agentRuntime: AgentRuntime;
 }
 
 /**
@@ -121,7 +139,6 @@ export async function createApp(
   const artifactStore = new ArtifactStore(database.db, artifactsDir(root));
   const taskBoards = createTaskBoardStore(database.db);
   const threadStore = createThreadStore({ root, database: database.db });
-  const checkpoints = createCheckpointRecordStore(database.db, artifactStore);
   const repositories = createRepositoryStore(database.db);
   const workspaceStore = createWorkspaceRecordStore(database.db);
   const artifacts = createArtifactFeature(artifactStore);
@@ -136,63 +153,158 @@ export async function createApp(
     repositories,
     workspaces: workspaceStore,
   });
+  const agentHolder: { current?: AgentFeature } = {};
+  const threadHolder: { current?: ThreadFeature } = {};
+  const agentTasks = new AgentTaskService(
+    new AgentTaskStore(database.db),
+    (task) =>
+      requireAgentFeature(agentHolder.current).startRun(
+        agentTaskRunRequest(task, () =>
+          requireThreadFeature(threadHolder.current).currentMode(
+            task.rootThreadId,
+          ),
+        ),
+      ),
+    createAgentTaskEventPreparer(artifactStore),
+  );
   const agent = createAgentFeature({
-    createCheckpoints: () => {
-      const store = new CheckpointStore(checkpoints);
-      return {
-        record: (recordInput) =>
-          recordCheckpointChanges({ checkpoints: store, ...recordInput }),
-        async seal(runId) {
-          await store.seal(runId);
-        },
-      };
-    },
     resolveDefinition: resolveAgentDefinition,
     resolveModel: resolveAgentModel,
     loadContext: loadAgentContext,
-    createTools: createAgentTools(taskBoards),
+    createCommands: createAgentCommands(taskBoards, agentTasks),
     createCompactor: (compactorOptions) =>
       createThreadCompactor(compactorOptions),
-    createTracing: ({ config: agentConfig, threadId }) =>
-      createTurnTracing(agentConfig.observability?.langfuse, threadId),
+    runtime: options.agentRuntime,
   });
+  agentHolder.current = agent;
+  agentTasks.setNotifier((threadId, notificationId, message) =>
+    requireAgentFeature(agentHolder.current).notify(
+      threadId,
+      notificationId,
+      message,
+    ),
+  );
+  const agentTaskRpc = new AgentTaskRpcFeature(agentTasks);
   const threads = createThreadFeature({
     store: threadStore,
     startAgentRun: agent.startRun,
     unloadGraceMs: 30_000,
     titleGenerator: createThreadTitleGenerator({
-      store: threadStore,
       modelAdapter: createAiSdkModelAdapter(),
+      attachEnvironment: (workingDirectory) =>
+        options.agentRuntime.environments.attach(
+          {
+            environmentRef: options.agentRuntime.defaultEnvironmentRef,
+            workingDirectory,
+          },
+          options.agentRuntime.environmentGrant,
+        ),
     }),
+    beforeInterrupt: async (threadId, reason) => {
+      requireAgentFeature(agentHolder.current).interrupt(threadId, reason);
+      await agentTasks.stopRoot(threadId, reason);
+      await requireThreadFeature(threadHolder.current).cancelAgentInteractions(
+        threadId,
+        undefined,
+        reason,
+      );
+    },
     resolveInitialSettings,
     resolveSettingsUpdate,
   });
+  threadHolder.current = threads;
+  agentTasks.setInteractionHandler((task, interaction, run) =>
+    threads.registerAgentInteraction(
+      task.rootThreadId,
+      task.id,
+      task.startedAt ?? task.createdAt,
+      interaction,
+      run,
+      {
+        taskId: task.id,
+        name: task.name ?? task.definitionName,
+        definitionName: task.definitionName,
+        description: task.description,
+        cwd: task.cwd,
+      },
+    ),
+  );
+  agentTasks.setInteractionCanceller((threadId, taskIds, reason) =>
+    threads.cancelAgentInteractions(threadId, taskIds, reason),
+  );
+  const compactionControllers = new Map<string, AbortController>();
   const compact = async (threadId: string) => {
-    const snapshot = await threads.read({
-      threadId,
-      includeTurns: true,
-      includeItems: true,
-    });
-    if (snapshot.thread.status === 'running') {
+    if (compactionControllers.has(threadId)) {
       throw new AppServerError({
         type: 'threadBusy',
-        message: `Thread ${threadId} is running; interrupt it before compacting.`,
+        message: `Thread ${threadId} is already compacting.`,
       });
     }
-    const compactor = await createProductionThreadCompactor({
-      store: threadStore,
-      snapshot,
-    });
-    const lastTurnId = snapshot.turns.at(-1)?.id;
-    return compactor.compactNow(threadId, {
-      force: true,
-      ...(lastTurnId === undefined ? {} : { turnId: lastTurnId }),
-    });
+    const controller = new AbortController();
+    compactionControllers.set(threadId, controller);
+    try {
+      const snapshot = await threads.read({
+        threadId,
+        includeTurns: true,
+        includeItems: true,
+      });
+      if (snapshot.thread.status === 'running') {
+        throw new AppServerError({
+          type: 'threadBusy',
+          message: `Thread ${threadId} is running; interrupt it before compacting.`,
+        });
+      }
+      const history = compactionView(
+        await threadStore.read(threadId),
+      ).projectedMessages;
+      const lastTurnId = snapshot.turns.at(-1)?.id;
+      const request = {
+        threadId,
+        turnId: lastTurnId ?? threadId,
+        cwd: snapshot.thread.cwd,
+        selection: snapshot.settings,
+        history,
+        input: '',
+        goal:
+          snapshot.goal === null
+            ? null
+            : {
+                id: snapshot.goal.id,
+                objective: snapshot.goal.objective,
+                status: snapshot.goal.status,
+                tokensUsed: snapshot.goal.tokensUsed,
+                createdAt: snapshot.goal.createdAt,
+                updatedAt: snapshot.goal.updatedAt,
+                ...(snapshot.goal.tokenBudget === undefined
+                  ? {}
+                  : { tokenBudget: snapshot.goal.tokenBudget }),
+              },
+        permission: {
+          rules: () => [],
+          externalPaths: () => [],
+        },
+      } satisfies import('./features/agent/index.js').AgentRunInput;
+      const compactor = await createProductionThreadCompactor({
+        store: threadStore,
+        snapshot,
+        compact: (input) => agent.compact({ request, ...input }),
+      });
+      return await compactor.compactNow(threadId, {
+        force: true,
+        signal: controller.signal,
+        ...(lastTurnId === undefined ? {} : { turnId: lastTurnId }),
+      });
+    } finally {
+      if (compactionControllers.get(threadId) === controller) {
+        compactionControllers.delete(threadId);
+      }
+    }
   };
   const routes = {
     ...config.routes,
     ...models.routes,
     ...createAgentRoutes(),
+    ...agentTaskRpc.routes,
     ...tools.routes,
     ...skills.routes,
     ...memory.routes,
@@ -203,6 +315,11 @@ export async function createApp(
     ...createThreadRoutes({
       artifacts: artifactStore,
       compact,
+      interruptCompact: (threadId) => {
+        compactionControllers
+          .get(threadId)
+          ?.abort('user interrupted context compaction');
+      },
       threads,
     }),
     ...createExportRoutes({
@@ -219,15 +336,23 @@ export async function createApp(
     initialize: async () => {
       await artifacts.initialize();
       await threads.initialize();
+      agentTasks.initialize();
     },
     releaseConnection: async (connectionId) => {
       await threads.releaseConnection(connectionId);
       fs.releaseConnection(connectionId);
+      agentTaskRpc.releaseConnection(connectionId);
     },
     closeResources: () =>
       closeAppResources([
         () => threads.close(),
+        () => {
+          agentTaskRpc.close();
+          return Promise.resolve();
+        },
+        () => agentTasks.close(),
         () => agent.close(),
+        () => options.agentRuntime.environments.close(),
         () => fs.close(),
         () => artifacts.close(),
         () => {
@@ -241,7 +366,7 @@ export async function createApp(
 
 const resolveAgentDefinition: ResolveAgentDefinition = async (request) => {
   const config = await loadCodingAgentConfig({
-    cwd: request.cwd,
+    cwd: request.executionLocation.workingDirectory,
     initial_mode: request.selection.mode,
   });
   const agentRegistry = await createAgentRegistry(config);
@@ -250,11 +375,19 @@ const resolveAgentDefinition: ResolveAgentDefinition = async (request) => {
       ? config.default_agent
       : request.selection.agent;
   const definition = agentRegistry.get(agentName);
-  if (
-    (definition.mode !== 'primary' && definition.mode !== 'all') ||
-    definition.hidden === true
+  if (request.delegation === undefined) {
+    if (
+      (definition.mode !== 'primary' && definition.mode !== 'all') ||
+      definition.hidden === true
+    ) {
+      throw new Error(`Agent is not selectable as primary: ${agentName}`);
+    }
+  } else if (
+    !agentRegistry
+      .delegatable()
+      .some((candidate) => candidate.name === definition.name)
   ) {
-    throw new Error(`Agent is not selectable as primary: ${agentName}`);
+    throw new Error(`Agent is not delegatable: ${agentName}`);
   }
   return { config, definition, agentRegistry };
 };
@@ -263,58 +396,64 @@ const resolveAgentModel: ResolveAgentModel = async ({
   request,
   definition,
 }) => {
-  const providerRegistry = createProviderRegistry(definition.config);
-  const profileBinding = providerRegistry.resolveRole(
-    request.selection.profile,
-    'primary',
+  const registry = createModelRegistry(definition.config);
+  const selector =
+    request.delegation?.modelSelector ?? definition.definition.model;
+  const model = registry.resolveSelector(selector);
+  const modelInputBudget = modelInputBudgetFromRuntimeModel(
+    model,
+    definition.config.context,
   );
-  const binding: RuntimeRoleModel = {
-    ...profileBinding,
-    ref: request.selection.model,
-    model: providerRegistry.getModel(request.selection.model),
-  };
-  if (!binding.model.capabilities.toolCall) {
-    throw new Error(
-      `Coding model '${binding.ref}' does not support tool calls.`,
-    );
-  }
   return {
-    modelRef: binding.ref,
-    model: providerRegistry.resolveLanguageModel(binding.ref),
+    modelCall: {
+      agentName: definition.definition.name,
+      modelSelector: selector,
+      configuredModel: model.name,
+      protocol: model.protocol,
+      apiModel: model.apiModel,
+    },
+    model: registry.resolveLanguageModel(model.name),
     modelAdapter: createAiSdkModelAdapter(),
-    modelSettings: modelSettingsFromRole(binding),
-    contextWindow: Math.min(
-      binding.model.limit.context,
-      definition.config.context.max_input_tokens,
-    ),
-    providerOptions: () => providerOptionsForRole(binding),
+    modelSettings: modelSettingsFromRuntimeModel(model),
+    modelInputBudget,
+    contextWindow: model.contextWindow,
+    providerOptions: () => providerOptionsFromRuntimeModel(model),
     prepareModelInput: (modelInput) =>
       Promise.resolve(
-        prepareModelInputForRuntimeModel(binding.model, modelInput, {
-          promptProfile: definition.config.context.system_prompt_profile,
+        prepareModelInputForRuntimeModel(model, modelInput, {
+          promptProfile: definition.config.context.prompt_mode,
           cwdIdentity: definition.config.cwd,
         }),
       ),
   };
 };
 
-const loadAgentContext: LoadAgentContext = async ({ definition, model }) => {
+const loadAgentContext: LoadAgentContext = async ({
+  request,
+  definition,
+  model,
+}) => {
   const catalog = new SkillCatalog(definition.config);
   const skills = await catalog.initialize();
   const activation = new SkillActivationService(catalog);
   const resolvedMemoryRoots = memoryRoots(definition.config);
   return {
     skills,
-    activationTool: createActivateSkillTool({ service: activation }),
+    activationCommand: createActivateSkillCommand({ service: activation }),
     readRoots: () => skills.flatMap((skill) => [skill.baseDir, skill.realPath]),
     createSystemSections: ({
       memoryIndexLoader,
       goalSystemSection,
-      routingInstructions,
+      taskNotificationSection,
     }) => [
       skillIndexContext({ skills, contextWindow: model.contextWindow }),
       createCodingSystemPromptSection(definition.config, {
-        model: model.modelRef,
+        model: model.modelCall.configuredModel,
+        ...(definition.definition.mode === 'subagent' ||
+        (definition.definition.mode === 'all' &&
+          request.delegation !== undefined)
+          ? { profile: 'subagent' }
+          : {}),
         ...(memoryIndexLoader === undefined
           ? {}
           : {
@@ -325,22 +464,29 @@ const loadAgentContext: LoadAgentContext = async ({ definition, model }) => {
             }),
       }),
       dynamicSystemSection(goalSystemSection),
-      ...(routingInstructions === undefined
+      ...(taskNotificationSection === undefined
         ? []
-        : [dynamicSystemSection(() => routingInstructions)]),
+        : [dynamicSystemSection(taskNotificationSection)]),
     ],
   };
 };
 
-function createAgentTools(taskBoards: TaskBoardStore): CreateAgentTools {
+/** 创建生产 run 使用的 Command factory；CLI 诊断入口复用它读取模型可见定义。 */
+export function createAgentCommands(
+  taskBoards: TaskBoardStore,
+  agentTasks: AgentTaskService,
+): CreateAgentCommands {
+  const fileStates = new SessionFileStateRegistry();
   return async ({ request, definition, context }) => {
+    const isSubagent = request.delegation !== undefined;
     let modeState: SessionModeState = {
       mode: request.selection.mode,
       previousMode: null,
       source: 'resume',
       changedAt: new Date().toISOString(),
     };
-    const productionTools = createProductionToolRuntime({
+    const currentMode = () => request.modeSource?.() ?? modeState.mode;
+    const productionCommands = createProductionCommandRuntime({
       config: definition.config,
       taskBoards,
       taskBoardScope: {
@@ -348,45 +494,102 @@ function createAgentTools(taskBoards: TaskBoardStore): CreateAgentTools {
         sessionId: request.threadId,
       },
       rules: () => request.permission.rules(),
-      mode: () => modeState,
+      mode: () => ({ ...modeState, mode: currentMode() }),
       readRoots: context.readRoots,
+      fileState: fileStates.forSession(request.threadId),
     });
     const memory = createMemoryRunRuntime(
       definition.config,
-      productionTools.approval,
+      productionCommands.approval,
     );
     if (memory.enabled) {
       await memory.initialize();
     }
-    const availableTools = memory.enabled
-      ? [...productionTools.tools, ...memory.tools]
-      : productionTools.tools;
-    const selected = selectAgentTools(
-      availableTools,
-      definition.definition.tools,
+    const availableModules = [
+      productionCommands.module,
+      ...(memory.enabled ? [memory.module] : []),
+    ];
+    const goalRuntime = createThreadGoalRuntime(
+      isSubagent ? null : request.goal,
     );
-    const goalRuntime = createThreadGoalRuntime(request.goal);
-    const directTools: AnyAgentTool[] = [
-      context.activationTool,
-      createRequestUserInputTool(),
-      ...goalRuntime.tools,
-    ].map(markCoreTool);
-    if (request.selection.mode === 'plan') {
-      directTools.push(...createPlanAgentTools(request));
+    const baseModules: CommandModule[] = [
+      defineCommandModule({
+        id: 'skill',
+        commands: [context.activationCommand],
+      }),
+      ...(isSubagent
+        ? []
+        : [
+            defineCommandModule({
+              id: 'user-input',
+              commands: [createRequestUserInputCommand()],
+            }),
+            goalRuntime.module,
+          ]),
+    ];
+    if (!isSubagent && request.selection.mode === 'plan') {
+      baseModules.push(createPlanCommandModule(request));
     }
-    const runtime = createMetaToolRuntime(
-      selected,
-      directTools,
-      definition.config.tools,
+    const definitionWhitelist = definition.definition.commands;
+    const selected = selectCommandModules(
+      availableModules,
+      definitionWhitelist,
     );
+    const subagentModule = defineCommandModule({
+      id: 'subagent',
+      commands: createSubagentCommands({
+        request,
+        definition,
+        service: agentTasks,
+        approval: productionCommands.approval,
+      }),
+    });
+    const commandRun = createCommandRunRuntime(
+      createCommandRegistrySnapshot({
+        modules: [...selected, ...baseModules, subagentModule],
+        search: {
+          resultLimit: definition.config.commands.search.result_limit,
+          maxResultBytes: definition.config.commands.search.max_result_bytes,
+        },
+      }),
+    );
+    let systemNotification:
+      | import('./features/agent/subagents/index.js').AgentTaskNotificationDelivery
+      | undefined;
+    const takeSystemNotification = () => {
+      systemNotification ??= agentTasks.takeNotifications(request.threadId);
+      return systemNotification?.text ?? '';
+    };
+    const acknowledgeSystemNotification = () => {
+      if (systemNotification === undefined) return;
+      agentTasks.acknowledgeNotifications(systemNotification.notificationIds);
+      systemNotification = undefined;
+    };
+    const releaseSystemNotification = () => {
+      if (systemNotification === undefined) return;
+      agentTasks.releaseNotifications(systemNotification.notificationIds);
+      systemNotification = undefined;
+    };
     return {
-      executionTools: runtime.executionTools,
-      modelTools: runtime.modelTools,
+      commandRun,
       ...(memory.enabled ? { memoryIndexLoader: memory.indexLoader } : {}),
       goalSystemSection: goalRuntime.systemSection,
-      ...(runtime.usesToolRouting
-        ? { routingInstructions: TOOL_ROUTING_INSTRUCTIONS }
+      ...(isSubagent
+        ? {}
+        : { taskNotificationSection: takeSystemNotification }),
+      ...(!isSubagent
+        ? {
+            waitForTaskNotification: (signal: AbortSignal) =>
+              agentTasks.waitForNotification(request.threadId, signal),
+            acknowledgeTaskNotifications: (ids: readonly string[]) =>
+              agentTasks.acknowledgeNotifications(ids),
+            releaseTaskNotifications: (ids: readonly string[]) =>
+              agentTasks.releaseNotifications(ids),
+            acknowledgeSystemTaskNotifications: acknowledgeSystemNotification,
+            releaseSystemTaskNotifications: releaseSystemNotification,
+          }
         : {}),
+      mode: currentMode,
       setMode(mode) {
         modeState = {
           mode,
@@ -399,70 +602,150 @@ function createAgentTools(taskBoards: TaskBoardStore): CreateAgentTools {
   };
 }
 
-function createPlanAgentTools(
-  request: Parameters<CreateAgentTools>[0]['request'],
-): ReadonlyArray<AnyAgentTool> {
-  return [
-    markCoreTool(
-      defineTool({
-        name: 'write_plan',
-        description: 'Persist the complete Markdown plan for this thread.',
-        discovery: { aliases: ['save plan'], risk: 'workspace-write' },
-        input: z
-          .object({
-            content: z.string().min(1).describe('Markdown plan content'),
-          })
-          .strict(),
-        execute: async ({ content }) => {
-          const artifact = await writePlanArtifact({
-            cwd: request.cwd,
-            sessionId: request.threadId,
-            content,
-          });
-          return {
-            kind: 'thread-plan-written' as const,
-            plan: {
-              threadId: request.threadId,
-              status: 'draft' as const,
-              contentHash: artifact.contentHash,
-              content: artifact.content,
-              path: artifact.path,
-              updatedAt: new Date().toISOString(),
-            },
-          };
-        },
+function filterExactCommandModules(
+  modules: readonly CommandModule[],
+  exactCommandNames: readonly string[],
+): CommandModule[] {
+  const selected = new Set(exactCommandNames);
+  return modules
+    .map((module) =>
+      defineCommandModule({
+        id: module.id,
+        commands: module.commands.filter((command) =>
+          selected.has(command.name),
+        ),
       }),
-    ),
-    markCoreTool(
-      defineDeferredTool({
-        name: PLAN_EXIT_TOOL_NAME,
-        description: 'Request approval for the current persisted plan.',
-        discovery: { aliases: ['approve plan'], risk: 'workspace-write' },
-        input: z.object({}).strict(),
-      }),
-    ),
-  ];
+    )
+    .filter((module) => module.commands.length > 0);
 }
 
-function selectAgentTools(
-  tools: ReadonlyArray<AnyAgentTool>,
+function createPlanCommandModule(
+  request: Parameters<CreateAgentCommands>[0]['request'],
+): CommandModule {
+  const writePlanInput = z
+    .object({
+      content: z.string().min(1).describe('Complete Markdown plan content'),
+    })
+    .strict();
+  const exitPlanInput = z.object({}).strict();
+  return defineCommandModule({
+    id: 'plan',
+    commands: [
+      defineCommand({
+        name: 'write_plan',
+        summary: 'Persist the complete Markdown plan for this thread.',
+        aliases: ['save plan'],
+        risk: 'workspace-write',
+        invocation: cliInput(commandInput(writePlanInput), { body: 'content' }),
+        execution: {
+          kind: 'immediate',
+          run: async ({ content }) => {
+            const artifact = await writePlanArtifact({
+              cwd: request.executionLocation.workingDirectory,
+              sessionId: request.threadId,
+              content,
+            });
+            return {
+              kind: 'thread-plan-written' as const,
+              plan: {
+                threadId: request.threadId,
+                status: 'draft' as const,
+                contentHash: artifact.contentHash,
+                content: artifact.content,
+                path: artifact.path,
+                updatedAt: new Date().toISOString(),
+              },
+            };
+          },
+        },
+      }),
+      defineCommand({
+        name: PLAN_EXIT_COMMAND_NAME,
+        summary: 'Request approval for the current persisted plan.',
+        aliases: ['approve plan'],
+        risk: 'workspace-write',
+        invocation: cliInput(commandInput(exitPlanInput)),
+        execution: deferred(),
+      }),
+    ],
+  });
+}
+
+function selectCommandModules(
+  modules: readonly CommandModule[],
   whitelist: ReadonlyArray<string> | undefined,
-): ReadonlyArray<AnyAgentTool> {
-  if (whitelist === undefined) return tools;
-  const available = new Set(tools.map((tool) => tool.name));
+): readonly CommandModule[] {
+  if (whitelist === undefined) return modules;
+  const commands = commandDefinitions(modules);
+  const available = new Set(commands.map((command) => command.name));
   const missing = whitelist.filter((name) => !available.has(name));
   if (missing.length > 0) {
-    throw new Error(`Unknown tool in agent definition: ${missing.join(', ')}`);
+    throw new Error(
+      `Unknown Command in agent definition: ${missing.join(', ')}`,
+    );
   }
-  const selected = new Set(whitelist);
-  return tools.filter((tool) => selected.has(tool.name));
+  return filterExactCommandModules(modules, whitelist);
+}
+
+function commandDefinitions(
+  modules: readonly CommandModule[],
+): CommandDefinition[] {
+  return modules.flatMap((module) => [...module.commands]);
+}
+
+function agentTaskRunRequest(
+  task: AgentTask,
+  modeSource: () => AgentRunRequest['selection']['mode'],
+): import('./features/agent/index.js').AgentRunInput {
+  const mode = modeSource();
+  return {
+    threadId: task.id,
+    turnId: task.id,
+    cwd: task.cwd,
+    selection: {
+      mode,
+      agent: task.definitionName,
+    },
+    modeSource,
+    history: [],
+    input: renderTaskPacket(task.taskPacket),
+    goal: null,
+    permission: {
+      rules: () => task.permissionRules,
+      externalPaths: () => task.externalPaths,
+    },
+    delegation: {
+      taskId: task.id,
+      agentId: task.agentId,
+      rootThreadId: task.rootThreadId,
+      maxTurns: task.maxTurns,
+      ...(task.modelSelector === undefined
+        ? {}
+        : { modelSelector: task.modelSelector }),
+    },
+  };
+}
+
+function requireThreadFeature(
+  threads: ThreadFeature | undefined,
+): ThreadFeature {
+  if (threads === undefined) {
+    throw new Error('Thread feature is not ready for subagent execution.');
+  }
+  return threads;
+}
+
+function requireAgentFeature(agent: AgentFeature | undefined): AgentFeature {
+  if (agent === undefined) {
+    throw new Error('Agent feature is not ready for subagent execution.');
+  }
+  return agent;
 }
 
 async function resolveInitialSettings(
   params: ParsedClientParams<'thread/start'>,
 ) {
   const config = await loadCodingAgentConfig({ cwd: params.cwd });
-  const profile = params.profile ?? config.active_profile;
   const mode = params.mode ?? config.initial_mode;
   if (mode === 'bypass' && !config.bypass_enabled) {
     throw new AppServerError({
@@ -472,10 +755,6 @@ async function resolveInitialSettings(
   }
   return {
     mode,
-    profile,
-    model:
-      params.model ??
-      createProviderRegistry(config).resolveRole(profile, 'primary').ref,
     agent: params.agent ?? config.default_agent,
   };
 }
@@ -493,17 +772,6 @@ async function resolveSettingsUpdate(
   }
   return {
     ...(params.mode === undefined ? {} : { mode: params.mode }),
-    ...(params.profile === undefined ? {} : { profile: params.profile }),
-    ...(params.model !== undefined
-      ? { model: params.model }
-      : params.profile === undefined
-        ? {}
-        : {
-            model: createProviderRegistry(config).resolveRole(
-              params.profile,
-              'primary',
-            ).ref,
-          }),
     ...(params.agent === undefined ? {} : { agent: params.agent }),
   };
 }
@@ -525,8 +793,15 @@ async function closeAppResources(
 }
 
 async function packageVersion(): Promise<string> {
+  // bun --compile 打包的 sidecar 中模块 URL 是虚拟路径,宿主通过
+  // ELLO_AGENT_DIST_DIR 注入解包后的资源根,package.json 随资源分发。
+  const distRoot = process.env.ELLO_AGENT_DIST_DIR?.trim();
+  const packageJsonUrl =
+    distRoot !== undefined && distRoot !== ''
+      ? pathToFileURL(join(distRoot, 'package.json'))
+      : new URL('../package.json', import.meta.url);
   const packageJson: unknown = JSON.parse(
-    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    await readFile(packageJsonUrl, 'utf8'),
   );
   if (
     typeof packageJson !== 'object' ||

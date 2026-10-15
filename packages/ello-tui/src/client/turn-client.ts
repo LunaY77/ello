@@ -1,6 +1,8 @@
 import type { AppServerClient } from '../api/client.js';
 import type { UserInput } from '../api/protocol-types.js';
 
+import { createSteerId } from './steer-id.js';
+
 export class TurnClient {
   constructor(
     private readonly client: AppServerClient,
@@ -8,11 +10,12 @@ export class TurnClient {
     readonly turnId: string,
   ) {}
 
-  steer(input: readonly UserInput[]): Promise<void> {
+  steer(input: readonly UserInput[], steerId = createSteerId()): Promise<void> {
     return this.client
       .request('turn/steer', {
         threadId: this.threadId,
         expectedTurnId: this.turnId,
+        steerId,
         input,
       })
       .then(() => undefined);

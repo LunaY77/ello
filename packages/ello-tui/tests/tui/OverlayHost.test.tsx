@@ -4,32 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ApprovalServerRequest } from '../../src/api/server-requests.js';
 import { OverlayHost } from '../../src/tui/component/OverlayHost.js';
-import type { TuiProfile } from '../../src/tui/profile-types.js';
 import { overlayCallbacks } from '../support/overlay-fixture.js';
-
-const profile: TuiProfile = {
-  id: 'main',
-  name: 'main',
-  label: 'Main profile',
-  description: 'Primary coding profile',
-  models: {
-    primary: 'mock/primary',
-    small: 'mock/small',
-    compact: 'mock/compact',
-    title: 'mock/title',
-    review: 'mock/review',
-  },
-  raw: {
-    label: 'Main profile',
-    models: {
-      primary: 'mock/primary',
-      small: 'mock/small',
-      compact: 'mock/compact',
-      title: 'mock/title',
-      review: 'mock/review',
-    },
-  },
-};
 
 describe('OverlayHost product overlays', () => {
   it('从真实 overlay 入口收集并一次提交全部问题', async () => {
@@ -229,97 +204,32 @@ describe('OverlayHost product overlays', () => {
     denyView.unmount();
   });
 
-  it('profile selector 提供 create/delete/activate 快捷动作', () => {
-    const onCreateProfile = vi.fn();
-    const onRequestDeleteProfile = vi.fn();
-    const onActivateProfile = vi.fn();
-    const view = render(
+  it('先选择全局模型引用，再进入对应模型目录', () => {
+    const onSelectModelSelector = vi.fn();
+    const selectorView = render(
       <OverlayHost
-        {...overlayCallbacks({
-          onCreateProfile,
-          onRequestDeleteProfile,
-          onActivateProfile,
-        })}
-        overlay={{
-          type: 'profiles',
-          options: [{ value: 'main', label: 'main [active]' }],
-        }}
+        {...overlayCallbacks({ onSelectModelSelector })}
+        overlay={{ type: 'model-selector' }}
       />,
     );
+    selectorView.stdin.write('\r');
+    expect(onSelectModelSelector).toHaveBeenCalledWith('primary_model');
+    selectorView.unmount();
 
-    view.stdin.write('c');
-    view.stdin.write('d');
-    view.stdin.write('f');
-
-    expect(onCreateProfile).toHaveBeenCalledWith('main');
-    expect(onRequestDeleteProfile).toHaveBeenCalledWith('main');
-    expect(onActivateProfile).toHaveBeenCalledWith('main');
-    view.unmount();
-  });
-
-  it('profile create 和 delete confirm 返回明确配置意图', async () => {
-    const onSubmitNewProfile = vi.fn();
-    const createView = render(
-      <OverlayHost
-        {...overlayCallbacks({ onSubmitNewProfile })}
-        overlay={{ type: 'profile-create', sourceProfile: 'main' }}
-      />,
-    );
-    createView.stdin.write('reviewer');
-    await vi.waitFor(() =>
-      expect(createView.lastFrame()).toContain('Name: reviewer_'),
-    );
-    createView.stdin.write('\r');
-    await vi.waitFor(() =>
-      expect(onSubmitNewProfile).toHaveBeenCalledWith('reviewer', 'main'),
-    );
-    createView.unmount();
-
-    const onConfirmDeleteProfile = vi.fn();
-    const deleteView = render(
-      <OverlayHost
-        {...overlayCallbacks({ onConfirmDeleteProfile })}
-        overlay={{ type: 'profile-delete-confirm', profile: 'reviewer' }}
-      />,
-    );
-    deleteView.stdin.write('\r');
-    expect(onConfirmDeleteProfile).toHaveBeenCalledWith('reviewer');
-    deleteView.unmount();
-  });
-
-  it('profile role 进入 model catalog，并返回精确 role binding', () => {
-    const onSelectProfileRole = vi.fn();
-    const detailView = render(
-      <OverlayHost
-        {...overlayCallbacks({ onSelectProfileRole })}
-        overlay={{
-          type: 'profile-detail',
-          profile,
-          options: [{ value: 'primary', label: 'primary mock/primary' }],
-        }}
-      />,
-    );
-    detailView.stdin.write('\r');
-    expect(onSelectProfileRole).toHaveBeenCalledWith('main', 'primary');
-    detailView.unmount();
-
-    const onBindProfileRoleModel = vi.fn();
+    const onSelectModel = vi.fn();
     const modelView = render(
       <OverlayHost
-        {...overlayCallbacks({ onBindProfileRoleModel })}
+        {...overlayCallbacks({ onSelectModel })}
         overlay={{
-          type: 'profile-model-catalog',
-          target: { profileName: 'main', role: 'review' },
-          options: [{ value: 'mock/new-review', label: 'mock/new-review' }],
+          type: 'models',
+          selector: 'auxiliary_model',
+          title: 'Select auxiliary_model',
+          options: [{ value: 'benchmark-flash', label: 'benchmark-flash' }],
         }}
       />,
     );
     modelView.stdin.write('\r');
-    expect(onBindProfileRoleModel).toHaveBeenCalledWith(
-      'main',
-      'review',
-      'mock/new-review',
-    );
+    expect(onSelectModel).toHaveBeenCalledWith('benchmark-flash');
     modelView.unmount();
   });
 

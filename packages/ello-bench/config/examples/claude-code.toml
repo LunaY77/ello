@@ -1,0 +1,24 @@
+schema = "ello.benchmark.agents.v2"
+
+[[agent]]
+id = "claude-code"
+display_name = "Claude Code"
+kind = "claude-code"
+model = "your-model-id"
+reasoning_effort = "max"
+
+[agent.binary]
+path_env = "ELLO_BENCH_CLAUDE_EXE"
+expected_version = "2.1.220"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+
+[agent.connection]
+base_url = "https://api.example.com/anthropic"
+api_key_env = "ELLO_BENCH_API_KEY"
+
+[agent.connection.http_headers]
+Venus-Sticky-Routing = "Token"
+
+[agent.environment]
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = "true"

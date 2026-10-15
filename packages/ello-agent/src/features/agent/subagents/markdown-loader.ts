@@ -6,14 +6,15 @@
  */
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { errnoCode } from '../../../infra/filesystem.js';
+import { bundledAssetDir } from '../../../infra/paths.js';
 import {
   globalAgentsDir,
   parseYamlConfig,
   projectAgentsDir,
 } from '../../config/index.js';
+import { renderAgentPrompt } from '../context/prompts.js';
 
 import {
   MarkdownAgentFrontmatterSchema,
@@ -27,7 +28,8 @@ import {
  *
  * 目录优先级：bundled < global(`~/.ello/agents`) < project(`<cwd>/.ello/agents`)，同名时
  * 高优先级定义覆盖低优先级定义。frontmatter
- * 由 {@link MarkdownAgentFrontmatterSchema} 破坏性校验；正文即 prompt。
+ * 由 {@link MarkdownAgentFrontmatterSchema} 破坏性校验；正文通过共享 prompt
+ * loader 渲染后成为 instructions。
  *
  * Args:
  * - `cwd`: 调用方指定的文件系统位置；路径边界和存在性由当前操作显式校验。
@@ -49,7 +51,11 @@ export async function loadMarkdownAgents(
 }
 
 function bundledAgentsDir(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'bundled');
+  return bundledAssetDir({
+    moduleUrl: import.meta.url,
+    dirName: 'bundled',
+    distRelative: path.join('features', 'agent', 'subagents', 'bundled'),
+  });
 }
 
 async function loadFromDir(
@@ -65,10 +71,19 @@ async function loadFromDir(
     const filePath = path.join(dir, entry);
     const raw = await readFile(filePath, 'utf8');
     const { frontmatter, body } = parseMarkdown(raw, filePath);
+    const parsedFrontmatter = MarkdownAgentFrontmatterSchema.parse(frontmatter);
+    let prompt: string;
+    try {
+      prompt = renderAgentPrompt(body);
+    } catch (error) {
+      throw new Error(`Failed to render agent prompt: ${filePath}`, {
+        cause: error,
+      });
+    }
     definitions.push(
       agentDefinitionFromMarkdown({
-        frontmatter: MarkdownAgentFrontmatterSchema.parse(frontmatter),
-        body,
+        frontmatter: parsedFrontmatter,
+        body: prompt,
         defaultName: path.basename(entry, '.md'),
         source,
       }),
@@ -97,17 +112,25 @@ function parseMarkdown(
   readonly frontmatter: Record<string, unknown>;
   readonly body: string;
 } {
-  if (!raw.startsWith('---\n')) {
+  // 接受 LF 和 CRLF 行尾；Windows 检出常把 bundled .md 转成 CRLF。
+  const openMatch = /^---\r?\n/u.exec(raw);
+  const openDelimiter = openMatch?.[0];
+  if (openDelimiter === undefined) {
     throw new Error(
       `Agent markdown must start with YAML frontmatter: ${filePath}`,
     );
   }
-  const end = raw.indexOf('\n---', 4);
+  const end = raw.indexOf('\n---', openDelimiter.length);
   if (end === -1) {
     throw new Error(`Agent markdown frontmatter is not closed: ${filePath}`);
   }
   return {
-    frontmatter: parseYamlConfig(raw.slice(4, end)),
+    frontmatter: parseYamlConfig(
+      // CRLF 检出时切片会在 `\n` 处截断，末行残留孤立的 `\r`（无配对 `\n`），
+      // 被 YAML 当作标量值的一部分（如 max-turns: "-1\r"）破坏字段类型；
+      // frontmatter 值中 CR 无合法用途，统一剥离。
+      raw.slice(openDelimiter.length, end).replace(/\r/gu, ''),
+    ),
     body: raw.slice(end + 4).replace(/^\r?\n/u, ''),
   };
 }

@@ -7,6 +7,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { skillIndexContext } from '../../src/features/agent/engine/model-input.js';
+import type { CodingAgentConfig } from '../../src/features/config/index.js';
+import {
+  SkillActivationService,
+  SkillCatalog,
+} from '../../src/features/skill/index.js';
 
 describe('skills', () => {
   it('技能索引按预算输出摘要', () => {
@@ -47,5 +52,17 @@ describe('skills', () => {
       ],
     });
     expect(section({} as never)).toContain('- manual: Manual only.');
+  });
+
+  it('空技能目录给出明确的配置诊断', () => {
+    const service = new SkillActivationService(
+      new SkillCatalog({ cwd: '/workspace' } as CodingAgentConfig),
+    );
+
+    expect(() =>
+      service.activate({ name: 'missing', runId: 'run-empty-skills' }),
+    ).toThrow(
+      "Cannot activate skill 'missing': the Skill catalog is empty; no global or project Skills are registered.",
+    );
   });
 });

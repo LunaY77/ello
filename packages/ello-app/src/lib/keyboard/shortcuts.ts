@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 
+import { isMacPlatform } from '@/lib/platform';
+
 export interface Hotkey {
   readonly key: string;
   readonly mod?: boolean;
@@ -7,9 +9,9 @@ export interface Hotkey {
   readonly alt?: boolean;
 }
 
-/** mod 只匹配 Cmd。 */
+/** mod 在 macOS 匹配 Cmd,其他平台匹配 Ctrl。 */
 export function matchHotkey(event: KeyboardEvent, hotkey: Hotkey): boolean {
-  const modPressed = event.metaKey;
+  const modPressed = isMacPlatform() ? event.metaKey : event.ctrlKey;
   if (hotkey.mod === true && !modPressed) return false;
   if (hotkey.mod !== true && modPressed) return false;
   if ((hotkey.shift ?? false) !== event.shiftKey) return false;

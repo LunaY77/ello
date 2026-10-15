@@ -1,4 +1,5 @@
 import { dispatchStoreEvent, getAppClient } from '@/client/session';
+import { startThread } from '@/features/thread';
 import { appMutations, useAppStore } from '@/store/store';
 import type { WorkspaceKind } from '@/store/types';
 
@@ -20,8 +21,24 @@ export async function createWorkspace(options: {
     repos: [...options.repos],
   });
   await refreshWorkspaces();
-  toggleWorkspaceContext(result.workspace.id);
+  // 任务流打通:创建后立即在该工作区开会话,直达聊天(selectThread 会同步选中工作区)。
+  await startThread({
+    cwd: result.workspace.rootPath,
+    name: `${options.kind}/${options.name}`,
+  });
   return result.workspace.id;
+}
+
+/** 注册本地 git 仓库到 registry;注册后刷新仓库列表供工作区勾选。 */
+export async function addRepo(options: {
+  readonly key: string;
+  readonly source: string;
+}): Promise<void> {
+  await getAppClient().request('repo/add', {
+    key: options.key,
+    source: options.source,
+  });
+  await refreshRepos();
 }
 
 export async function archiveWorkspace(workspaceId: string): Promise<void> {

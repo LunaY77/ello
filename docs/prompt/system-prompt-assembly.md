@@ -16,7 +16,7 @@ flowchart TD
   Def[Agent definition prompt] --> S[System]
   Env[Runtime environment] --> S
   Skill[Skill index] --> S
-  Base[core-behavior + primary-agent] --> S
+  Base[rapid or thorough primary prompt] --> S
   Ctx[environment / instructions / memory] --> S
   Goal[active goal] --> S
   Route[tool routing rules] --> S
@@ -25,22 +25,26 @@ flowchart TD
 
 Agent definition 和 product base prompt 是两套来源。前者允许项目 agent 覆盖角色指令，后者提供全局的安全、工具和仓库工作流规则。
 
-## Prompt profile 如何解析
+## Prompt mode 如何解析
 
-`coding` profile 不是单文件。它由两个模板拼接：
+配置只暴露 `context.prompt_mode: rapid | thorough`，默认 `rapid`。`rapid` 使用
+`primary/rapid.md`，保留 Tura Direct 的快速 one-shot 行为；`thorough` 使用
+`primary/thorough.md`，要求调查、实现、针对性验证、失败修复重跑和 completion audit。
+两者统一 include Ello 的 Command Run、Skill 和可选 Delegation 协议。
 
 ```ts
-if (profile === 'coding') {
-  return [
-    readPromptFile('core-behavior.md'),
-    readPromptFile('primary-agent.md'),
-  ].join('\n\n');
-}
+['rapid', 'thorough'].includes(profile)
+  ? `primary/${profile}.md`
+  : `${profile}.md`;
 ```
 
 `subagent` 使用 `core-behavior.md + subagent.md`。`compact`、`title`、`summary`、`memory-extraction` 等 internal profile 各自读取单文件。
 
-profile 优先级为 runtime 显式 profile → `context.system_prompt_profile` → 兼容字段 `system_prompt_profile`。模板通过 Nunjucks 渲染，统一注入 `agent_name=ello` 和调用方变量。
+旧 `system_prompt_profile`、`coding`、`direct` 和 `balanced` 配置入口已删除。Tura 专属的
+`task_status`、Operation Manual、`.tura/script`、Command 字段和 commit trailer 不进入 Ello；
+对应位置使用 Ello 的精确 Command Frame、共享工作树、Skill、Delegation 和安全契约。
+
+primary 使用 `context.prompt_mode`；internal/subagent role 可通过 runtime 显式 profile 选择内部模板。模板通过 Nunjucks 渲染，统一注入 `agent_name=ello` 和调用方变量。
 
 ## 模板为什么进程内缓存
 

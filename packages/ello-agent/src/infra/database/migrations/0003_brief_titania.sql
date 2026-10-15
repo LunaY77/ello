@@ -1,0 +1,2 @@
+ALTER TABLE `agent_task_events` ADD `dedupe_key` text;--> statement-breakpoint
+CREATE UNIQUE INDEX `agent_task_events_task_dedupe_idx` ON `agent_task_events` (`task_id`,`dedupe_key`) WHERE "agent_task_events"."dedupe_key" is not null;

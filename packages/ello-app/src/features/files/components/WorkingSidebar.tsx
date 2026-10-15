@@ -1,11 +1,13 @@
 import { FileDiff, FolderTree, ListTodo, X } from 'lucide-react';
 
+
 import { ChangesTab } from './ChangesTab';
 import { FilesTab } from './FilesTab';
 
 import { IconButton } from '@/components/ui/IconButton';
 import { TaskBoard } from '@/features/tasks';
 import { cn } from '@/lib/cn';
+import { formatKeys } from '@/lib/platform';
 import {
   useAppStore,
   useSetRightPanelTab,
@@ -54,7 +56,7 @@ export function WorkingSidebar() {
         <div className="flex-1" />
         <IconButton
           icon={<X size={14} />}
-          tooltip="关闭面板 (⌘J)"
+          tooltip={formatKeys('关闭面板 (⌘J)')}
           size={24}
           onClick={() => setRightPanelVisible(false)}
         />

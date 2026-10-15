@@ -17,7 +17,7 @@ import {
 import { artifactReferences, artifacts } from '../../infra/database/schema.js';
 import { errnoCode } from '../../infra/filesystem.js';
 
-export type ArtifactOwnerKind = 'checkpoint' | 'tool-result' | 'session-export';
+export type ArtifactOwnerKind = 'tool-result' | 'session-export';
 
 export interface ArtifactOwner {
   readonly kind: ArtifactOwnerKind;
@@ -282,7 +282,7 @@ export class ArtifactStore {
   }
 
   /**
-   * checkpoint 永久保留；仅清理超过保留期的临时输出和导出引用。
+   * 清理超过保留期的工具输出和导出引用。
    *
    * Args:
    * - `createdBefore`: `deleteExpiredReferences` 所需的业务值；函数按声明读取，不补造缺失内容。

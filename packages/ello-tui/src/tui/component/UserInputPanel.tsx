@@ -79,6 +79,19 @@ export function UserInputPanel({
       paddingX={1}
     >
       <Text color={theme.accent}>Awaiting your input</Text>
+      {pending.params.agent === undefined ? null : (
+        <Box flexDirection="column">
+          <Text
+            color={theme.accent}
+          >{`Agent @${pending.params.agent.name}`}</Text>
+          <Text color={theme.textMuted}>
+            {pending.params.agent.description}
+          </Text>
+          <Text
+            color={theme.textMuted}
+          >{`cwd: ${pending.params.agent.cwd}`}</Text>
+        </Box>
+      )}
       {mode === 'question' && question !== undefined ? (
         <Box flexDirection="column">
           <Text

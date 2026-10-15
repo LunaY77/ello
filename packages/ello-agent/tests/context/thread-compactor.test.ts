@@ -5,9 +5,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { AgentMessage } from '../../src/features/agent/engine/index.js';
+import type {
+  AgentMessage,
+  ModelCompactor,
+} from '../../src/features/agent/engine/index.js';
+import { renderPromptTemplate } from '../../src/features/agent/index.js';
 import { CodingAgentConfigSchema } from '../../src/features/config/index.js';
 import {
   appendThreadCompaction,
@@ -17,6 +21,7 @@ import {
 import { ThreadLogStore } from '../../src/storage/threads/thread-log.js';
 
 const roots: string[] = [];
+const compact = () => Promise.reject(new Error('Unexpected model compact.'));
 
 afterEach(async () => {
   await Promise.all(
@@ -25,20 +30,116 @@ afterEach(async () => {
 });
 
 describe('thread compactor', () => {
+  it('使用 compact context prompt 压缩结构化消息', async () => {
+    const compactModel = vi.fn<ModelCompactor['compact']>(async () => ({
+      text: 'structured checkpoint',
+      usage: {
+        requests: 1,
+        inputTokens: 20,
+        outputTokens: 5,
+        cacheReadTokens: 10,
+        cacheWriteTokens: 0,
+        toolCalls: 0,
+      },
+    }));
+    const compactor = createThreadCompactor({
+      config: configFor('/workspace', false),
+      force: true,
+    });
+    const messages: AgentMessage[] = [
+      { role: 'user', content: 'old question' },
+      { role: 'assistant', content: 'old answer' },
+      { role: 'user', content: 'current question' },
+      { role: 'assistant', content: 'current answer' },
+    ];
+
+    await expect(
+      compactor.compact({
+        messages,
+        contextWindow: 100,
+        signal: new AbortController().signal,
+        compact: compactModel,
+      }),
+    ).resolves.toMatchObject({
+      report: { summary: 'structured checkpoint' },
+    });
+    expect(compactModel).toHaveBeenCalledOnce();
+    expect(compactModel).toHaveBeenCalledWith({
+      messages: [
+        { role: 'user', content: 'old question' },
+        { role: 'assistant', content: 'old answer' },
+      ],
+      prompt: renderPromptTemplate('compact'),
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('再次 compact 时把旧 checkpoint 作为结构化消息传入', async () => {
+    const compactModel = vi.fn<ModelCompactor['compact']>(async () => ({
+      text: 'updated checkpoint',
+      usage: {
+        requests: 1,
+        inputTokens: 20,
+        outputTokens: 5,
+        cacheReadTokens: 10,
+        cacheWriteTokens: 0,
+        toolCalls: 0,
+      },
+    }));
+    const compactor = createThreadCompactor({
+      config: configFor('/workspace', false),
+      force: true,
+    });
+
+    await compactor.compact({
+      messages: [
+        {
+          role: 'user',
+          content:
+            '<compact-checkpoint>\nold checkpoint\n</compact-checkpoint>',
+        },
+        { role: 'user', content: 'older question' },
+        { role: 'assistant', content: 'older answer' },
+        { role: 'user', content: 'latest question' },
+        { role: 'assistant', content: 'latest answer' },
+      ],
+      contextWindow: 100,
+      signal: new AbortController().signal,
+      compact: compactModel,
+    });
+
+    expect(compactModel.mock.calls[0]?.[0].messages).toEqual([
+      {
+        role: 'user',
+        content: '<compact-checkpoint>\nold checkpoint\n</compact-checkpoint>',
+      },
+      { role: 'user', content: 'older question' },
+      { role: 'assistant', content: 'older answer' },
+    ]);
+  });
+
   it('自动压缩超预算历史，并由 Thread 写入 checkpoint 边界', async () => {
     const { logs, threadId } = await createThread();
     await appendMessages(logs, threadId);
     const before = compactionView(await logs.read(threadId));
     const compactor = createThreadCompactor({
       config: configFor('/workspace', true),
-      profileName: 'main',
+      contextWindow: 10,
       generateCheckpoint: async () => 'checkpoint',
     });
 
+    const starts: Array<{
+      readonly beforeMessageCount: number;
+      readonly tokensBefore: number;
+    }> = [];
     const compacted = await compactor.compact({
       messages: before.projectedMessages,
-      contextWindow: 10,
+      contextWindow: 100,
       signal: new AbortController().signal,
+      compact,
+      onStart: (input) => {
+        starts.push(input);
+      },
     });
     if (compacted === null) throw new Error('Expected automatic compaction.');
     await appendThreadCompaction({
@@ -52,6 +153,12 @@ describe('thread compactor', () => {
     expect(compacted.report).toMatchObject({
       compactor: 'ello-thread-compactor',
     });
+    expect(starts).toEqual([
+      {
+        beforeMessageCount: before.projectedMessages.length,
+        tokensBefore: before.projectedTokens,
+      },
+    ]);
     const records = await logs.read(threadId);
     expect(records.some((record) => record.kind === 'compaction')).toBe(true);
     expect(compactionView(records).projectedMessages).toEqual([
@@ -64,13 +171,49 @@ describe('thread compactor', () => {
     ]);
   });
 
+  it('按配置百分比达到有效输入容量水位时自动压缩', async () => {
+    const messages: AgentMessage[] = [
+      { role: 'user', content: 'a'.repeat(180) },
+      { role: 'assistant', content: 'b'.repeat(180) },
+    ];
+    const generateCheckpoint = vi.fn(async () => 'percentage checkpoint');
+    const compactor = createThreadCompactor({
+      config: configFor('/workspace', true),
+      generateCheckpoint,
+    });
+
+    await expect(
+      compactor.compact({
+        messages,
+        contextWindow: 100,
+        signal: new AbortController().signal,
+        compact,
+      }),
+    ).resolves.toMatchObject({
+      report: { summary: 'percentage checkpoint', tokensBefore: 90 },
+    });
+    expect(generateCheckpoint).toHaveBeenCalledOnce();
+
+    await expect(
+      compactor.compact({
+        messages: [
+          { role: 'user', content: 'a'.repeat(176) },
+          { role: 'assistant', content: 'b'.repeat(176) },
+        ],
+        contextWindow: 100,
+        signal: new AbortController().signal,
+        compact,
+      }),
+    ).resolves.toBeNull();
+    expect(generateCheckpoint).toHaveBeenCalledOnce();
+  });
+
   it('手动压缩即使 auto 关闭也保留最近一个 user turn', async () => {
     const { logs, threadId } = await createThread();
     await appendMessages(logs, threadId);
     const view = compactionView(await logs.read(threadId));
     const compactor = createThreadCompactor({
       config: configFor('/workspace', false),
-      profileName: 'main',
       force: true,
       generateCheckpoint: async () => 'manual checkpoint',
     });
@@ -80,6 +223,7 @@ describe('thread compactor', () => {
         messages: view.projectedMessages,
         contextWindow: 10,
         signal: new AbortController().signal,
+        compact,
       }),
     ).resolves.toMatchObject({
       report: { afterMessageCount: 3, keptMessageCount: 2 },
@@ -95,7 +239,6 @@ describe('thread compactor', () => {
     const createCompactor = () =>
       createThreadCompactor({
         config: configFor('/workspace', false),
-        profileName: 'main',
         force: true,
         generateCheckpoint: async (messages, previousCheckpoint) => {
           calls.push({
@@ -135,7 +278,6 @@ describe('thread compactor', () => {
     let generated = false;
     const compactor = createThreadCompactor({
       config: configFor('/workspace', true),
-      profileName: 'main',
       generateCheckpoint: async () => {
         generated = true;
         return 'unexpected';
@@ -149,6 +291,7 @@ describe('thread compactor', () => {
         messages: view.projectedMessages,
         contextWindow: 1,
         signal: new AbortController().signal,
+        compact,
       }),
     ).resolves.toBeNull();
     expect(generated).toBe(false);
@@ -166,6 +309,7 @@ async function compactAndPersist(
     messages: view.projectedMessages,
     contextWindow: 10,
     signal: new AbortController().signal,
+    compact,
   });
   if (compacted === null) throw new Error('Expected manual compaction.');
   await appendThreadCompaction({
@@ -192,8 +336,6 @@ async function createThread(): Promise<{
     name: '',
     settings: {
       mode: 'ask-before-changes',
-      profile: 'main',
-      model: 'mock/model',
       agent: 'primary',
     },
     metadata: {},
@@ -234,14 +376,27 @@ function configFor(cwd: string, auto: boolean) {
   return CodingAgentConfigSchema.parse({
     cwd,
     initial_mode: 'ask-before-changes',
+    models: {
+      compact: {
+        protocol: 'openai',
+        endpoint: 'responses',
+        api_model: 'compact-model',
+        base_url: 'https://api.example.test/v1',
+        api_key_env: 'TEST_API_KEY',
+        context_window: 100,
+        max_output_tokens: 10,
+        reasoning_effort: 'low',
+      },
+    },
+    primary_model: 'compact',
+    auxiliary_model: 'compact',
     context: {
       max_input_tokens: 100,
-      reserved_output_tokens: 10,
       compaction: {
         auto,
         tail_turns: 1,
         preserve_recent_tokens: 2,
-        reserved_tokens: 5,
+        threshold_percent: 90,
         prune_tool_output: false,
         tool_output_max_chars: 2_000,
         split_turns: true,

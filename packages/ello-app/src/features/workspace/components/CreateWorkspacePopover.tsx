@@ -1,7 +1,7 @@
 import { Check, ChevronDown } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
-import { createWorkspace, refreshRepos } from '../workspace';
+import { addRepo, createWorkspace, refreshRepos } from '../workspace';
 
 import { Button } from '@/components/ui/Button';
 import { Popover } from '@/components/ui/Popover';
@@ -30,6 +30,9 @@ export function CreateWorkspacePopover(props: {
   const [name, setName] = useState('');
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
+  const [repoKey, setRepoKey] = useState('');
+  const [repoPath, setRepoPath] = useState('');
+  const [addingRepo, setAddingRepo] = useState(false);
   const repos = useAppStore((s) => s.entities.repos);
   const ready = useAppStore((s) => s.connection.phase === 'ready');
 
@@ -53,6 +56,22 @@ export function CreateWorkspacePopover(props: {
     .replace(/[^a-z0-9一-鿿]+/g, '-')
     .replace(/^-+|-+$/g, '');
   const canSubmit = slug !== '' && selected.size > 0 && !submitting;
+  const trimmedKey = repoKey.trim();
+  const trimmedPath = repoPath.trim();
+  const canAddRepo = trimmedKey !== '' && trimmedPath !== '' && !addingRepo;
+
+  const registerRepo = async () => {
+    setAddingRepo(true);
+    try {
+      await runOperation(addRepo({ key: trimmedKey, source: trimmedPath }));
+    } finally {
+      setAddingRepo(false);
+    }
+    // 注册即勾选,保持"注册→建任务"的连续流。
+    setSelected(new Set([trimmedKey]));
+    setRepoKey('');
+    setRepoPath('');
+  };
 
   const submit = async () => {
     setSubmitting(true);
@@ -120,9 +139,38 @@ export function CreateWorkspacePopover(props: {
           <div>
             <div className="mb-1 text-[11px] text-tertiary">关联仓库(至少一个)</div>
             <div className="max-h-36 overflow-y-auto rounded-md border border-border-subtle">
-              {repos.length === 0 && (
+              {repos.length === 0 && !ready && (
                 <div className="px-3 py-2 text-[11px] leading-4 text-tertiary">
-                  {ready ? '仓库注册表为空。请先在 ello 中注册仓库(repo/add)。' : '未连接到 ello-agent。'}
+                  未连接到 ello-agent。
+                </div>
+              )}
+              {repos.length === 0 && ready && (
+                <div className="flex flex-col gap-1.5 px-2 py-2">
+                  <div className="text-[11px] leading-4 text-tertiary">
+                    还没有注册仓库;添加一个本地 git 仓库后再创建任务:
+                  </div>
+                  <input
+                    value={repoKey}
+                    onChange={(event) => setRepoKey(event.target.value)}
+                    placeholder="仓库标识,如 ello"
+                    className="h-7 w-full rounded-md border border-border-default bg-surface-1 px-2 text-[12px] text-primary outline-none placeholder:text-disabled focus:border-card-border-accent"
+                  />
+                  <input
+                    value={repoPath}
+                    onChange={(event) => setRepoPath(event.target.value)}
+                    placeholder="本地仓库路径,如 D:\\projects\\ello"
+                    className="h-7 w-full rounded-md border border-border-default bg-surface-1 px-2 font-mono text-[12px] text-primary outline-none placeholder:text-disabled focus:border-card-border-accent"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && canAddRepo) void registerRepo();
+                    }}
+                  />
+                  <Button
+                    variant="secondary"
+                    disabled={!canAddRepo}
+                    onClick={() => void registerRepo()}
+                  >
+                    {addingRepo ? '注册中…' : '注册仓库'}
+                  </Button>
                 </div>
               )}
               {repos.map((repo) => {

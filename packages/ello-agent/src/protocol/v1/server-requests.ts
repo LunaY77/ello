@@ -17,7 +17,18 @@ const ServerRequestBaseShape = {
   threadId: OpaqueIdSchema,
   turnId: OpaqueIdSchema,
   itemId: OpaqueIdSchema,
+  commandId: OpaqueIdSchema.optional(),
   reason: z.string(),
+  agent: z
+    .object({
+      taskId: OpaqueIdSchema,
+      name: z.string().min(1),
+      definitionName: z.string().min(1),
+      description: z.string().min(1),
+      cwd: z.string().min(1),
+    })
+    .strict()
+    .optional(),
 };
 
 const ApprovalParamsSchema = z

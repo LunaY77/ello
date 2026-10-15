@@ -14,6 +14,13 @@ export interface DiffSummary {
   readonly removed: number;
 }
 
+export class InvalidFileChangeMetadataError extends Error {
+  constructor() {
+    super('Invalid file change metadata.');
+    this.name = 'InvalidFileChangeMetadataError';
+  }
+}
+
 export type PatchDiffRow =
   | {
       readonly kind: 'file';
@@ -100,7 +107,7 @@ export function summarizeDiff(
 export function readFileChanges(value: unknown): readonly FileChange[] {
   if (!Array.isArray(value)) return [];
   return value.map((entry) => {
-    if (!isFileChange(entry)) throw new Error('Invalid file change metadata.');
+    if (!isFileChange(entry)) throw new InvalidFileChangeMetadataError();
     return entry;
   });
 }

@@ -20,19 +20,28 @@ import type {
   ThreadRecord,
 } from '../../storage/threads/thread-record.js';
 import type { AgentInteraction, AgentRun } from '../agent/index.js';
-import { PLAN_EXIT_TOOL_NAME } from '../agent/index.js';
+import { PLAN_EXIT_COMMAND_NAME } from '../agent/index.js';
 import {
-  REQUEST_USER_INPUT_TOOL_NAME,
+  REQUEST_USER_INPUT_COMMAND_NAME,
   UserInputRequestSchema,
   validateUserInputResolution,
 } from '../agent/index.js';
-import { projectApprovalItem, type RulesStore } from '../tool/index.js';
+import type { RulesStore } from '../tool/index.js';
 
 import { readPlanArtifact } from './plan.js';
 
 interface PendingInteraction {
+  readonly taskId: string;
   readonly interaction: AgentInteraction;
   readonly run: AgentRun;
+}
+
+export interface AgentInteractionAttribution {
+  readonly taskId: string;
+  readonly name: string;
+  readonly definitionName: string;
+  readonly description: string;
+  readonly cwd: string;
 }
 
 interface ThreadInteractionsOptions {
@@ -79,10 +88,17 @@ export function createThreadInteractions(options: ThreadInteractionsOptions) {
     turn: Turn,
     interaction: AgentInteraction,
     run: AgentRun,
+    attribution?: AgentInteractionAttribution,
   ): Promise<void> => {
     const requestId = createEntityId('srvreq');
-    const request = await projectRequest(options, requestId, turn, interaction);
-    pending.set(requestId, { interaction, run });
+    const request = await projectRequest(
+      options,
+      requestId,
+      turn,
+      interaction,
+      attribution,
+    );
+    pending.set(requestId, { taskId: turn.id, interaction, run });
     try {
       await options.append({ kind: 'serverRequest.created', request });
     } catch (error) {
@@ -138,7 +154,66 @@ export function createThreadInteractions(options: ThreadInteractionsOptions) {
     pending.delete(requestId);
   };
 
-  return { register, resolve, reject };
+  const close = async (error: {
+    readonly code: number;
+    readonly message: string;
+  }): Promise<void> => {
+    const failures: unknown[] = [];
+    for (const [requestId, entry] of [...pending]) {
+      try {
+        if (
+          options
+            .snapshot()
+            .pendingServerRequests.some((request) => request.id === requestId)
+        ) {
+          await appendResolution(options, requestId, 'rejected');
+        }
+        pending.delete(requestId);
+        entry.run.resume({
+          type: 'rejected',
+          interactionId: entry.interaction.interactionId,
+          error,
+        });
+      } catch (closeError) {
+        failures.push(closeError);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        'Thread interactions failed to close cleanly.',
+      );
+    }
+  };
+
+  const cancel = async (
+    taskIds: readonly string[] | undefined,
+    error: { readonly code: number; readonly message: string },
+  ): Promise<void> => {
+    const selected = taskIds === undefined ? undefined : new Set(taskIds);
+    for (const [requestId, entry] of [...pending]) {
+      if (selected !== undefined && !selected.has(entry.taskId)) continue;
+      if (
+        options
+          .snapshot()
+          .pendingServerRequests.some((request) => request.id === requestId)
+      ) {
+        await appendResolution(options, requestId, 'rejected');
+      }
+      pending.delete(requestId);
+      try {
+        entry.run.resume({
+          type: 'rejected',
+          interactionId: entry.interaction.interactionId,
+          error,
+        });
+      } catch {
+        // run 可能已经收到中断；持久请求已收口，不再用晚到的 resume 覆盖取消结果。
+      }
+    }
+  };
+
+  return { register, resolve, reject, cancel, close };
 }
 
 async function projectRequest(
@@ -146,22 +221,28 @@ async function projectRequest(
   requestId: string,
   turn: Turn,
   interaction: AgentInteraction,
+  attribution?: AgentInteractionAttribution,
 ): Promise<PendingServerRequest> {
   if (interaction.type === 'approval') {
-    const projected = projectApprovalItem(interaction.item);
+    const projected = interaction.item;
+    const identity = interactionIdentity(projected);
     const metadata = readRecord(projected.metadata, 'Approval metadata');
     const requestMetadata = readRecord(
       metadata.request,
       'Approval request metadata',
     );
-    const method = approvalMethod(projected.toolName, requestMetadata);
+    const method = approvalMethod(projected.commandName, requestMetadata);
     const base = {
       threadId: turn.threadId,
       turnId: turn.id,
-      itemId: projected.toolCallId,
+      itemId: identity.itemId,
+      ...(identity.commandId === undefined
+        ? {}
+        : { commandId: identity.commandId }),
       reason:
         projected.reason ?? readString(metadata.reason) ?? 'Approval required.',
       availableDecisions: ['accept', 'acceptForSession', 'decline', 'cancel'],
+      ...(attribution === undefined ? {} : { agent: attribution }),
     } as const;
     const params =
       method === 'item/commandExecution/requestApproval'
@@ -176,7 +257,7 @@ async function projectRequest(
           ? {
               ...base,
               paths: readStringArray(metadata.patterns, 'Approval paths'),
-              summary: projected.reason ?? `Run ${projected.toolName}`,
+              summary: projected.reason ?? `Run ${projected.commandName}`,
             }
           : {
               ...base,
@@ -191,25 +272,36 @@ async function projectRequest(
       method,
       threadId: turn.threadId,
       turnId: turn.id,
-      itemId: projected.toolCallId,
+      itemId: identity.itemId,
+      ...(identity.commandId === undefined
+        ? {}
+        : { commandId: identity.commandId }),
       params,
       createdAt: interaction.occurredAt,
     };
   }
 
-  if (interaction.item.toolName === REQUEST_USER_INPUT_TOOL_NAME) {
+  if (interaction.item.commandName === REQUEST_USER_INPUT_COMMAND_NAME) {
+    const identity = interactionIdentity(interaction.item);
     const input = UserInputRequestSchema.parse(interaction.item.input);
     return {
       id: requestId,
       method: 'item/tool/requestUserInput',
       threadId: turn.threadId,
       turnId: turn.id,
-      itemId: interaction.item.toolCallId,
+      itemId: identity.itemId,
+      ...(identity.commandId === undefined
+        ? {}
+        : { commandId: identity.commandId }),
       params: {
         threadId: turn.threadId,
         turnId: turn.id,
-        itemId: interaction.item.toolCallId,
+        itemId: identity.itemId,
+        ...(identity.commandId === undefined
+          ? {}
+          : { commandId: identity.commandId }),
         reason: 'The agent needs user input to continue.',
+        ...(attribution === undefined ? {} : { agent: attribution }),
         questions: input.questions.map((question) => ({
           id: question.id,
           header: question.header,
@@ -221,8 +313,10 @@ async function projectRequest(
       createdAt: interaction.occurredAt,
     };
   }
-  if (interaction.item.toolName !== PLAN_EXIT_TOOL_NAME) {
-    throw new Error(`Unsupported deferred tool: ${interaction.item.toolName}`);
+  if (interaction.item.commandName !== PLAN_EXIT_COMMAND_NAME) {
+    throw new Error(
+      `Unsupported deferred Command: ${interaction.item.commandName}`,
+    );
   }
   const plan = options.snapshot().plan;
   if (plan === null) {
@@ -234,16 +328,23 @@ async function projectRequest(
     updatedAt: new Date().toISOString(),
   };
   await options.append({ kind: 'plan.state', plan: awaitingApproval });
+  const identity = interactionIdentity(interaction.item);
   return {
     id: requestId,
     method: 'item/plan/requestApproval',
     threadId: turn.threadId,
     turnId: turn.id,
-    itemId: interaction.item.toolCallId,
+    itemId: identity.itemId,
+    ...(identity.commandId === undefined
+      ? {}
+      : { commandId: identity.commandId }),
     params: {
       threadId: turn.threadId,
       turnId: turn.id,
-      itemId: interaction.item.toolCallId,
+      itemId: identity.itemId,
+      ...(identity.commandId === undefined
+        ? {}
+        : { commandId: identity.commandId }),
       reason: 'Approve the current plan.',
       availableDecisions: ['accept', 'decline', 'cancel'],
       contentHash: awaitingApproval.contentHash,
@@ -251,6 +352,16 @@ async function projectRequest(
     },
     createdAt: interaction.occurredAt,
   };
+}
+
+function interactionIdentity(item: AgentInteraction['item']): {
+  readonly itemId: string;
+  readonly commandId?: string;
+} {
+  const checkpoint = item.commandRunCheckpoint;
+  return checkpoint === undefined
+    ? { itemId: item.toolCallId }
+    : { itemId: checkpoint.commandRunId, commandId: item.toolCallId };
 }
 
 async function resolveApproval(
@@ -286,7 +397,7 @@ async function resolveToolResult(
   run: AgentRun,
   result: unknown,
 ): Promise<void> {
-  if (interaction.item.toolName === REQUEST_USER_INPUT_TOOL_NAME) {
+  if (interaction.item.commandName === REQUEST_USER_INPUT_COMMAND_NAME) {
     run.resume({
       type: 'toolResult',
       interactionId: interaction.interactionId,
@@ -297,8 +408,10 @@ async function resolveToolResult(
     });
     return;
   }
-  if (interaction.item.toolName !== PLAN_EXIT_TOOL_NAME) {
-    throw new Error(`Unsupported deferred tool: ${interaction.item.toolName}`);
+  if (interaction.item.commandName !== PLAN_EXIT_COMMAND_NAME) {
+    throw new Error(
+      `Unsupported deferred Command: ${interaction.item.commandName}`,
+    );
   }
   const decision = ApprovalDecisionSchema.parse(result);
   const snapshot = options.snapshot();
@@ -375,17 +488,17 @@ function appendResolution(
 }
 
 function approvalMethod(
-  toolName: string,
+  commandName: string,
   request: Record<string, unknown>,
 ):
   | 'item/commandExecution/requestApproval'
   | 'item/fileChange/requestApproval'
   | 'item/permissions/requestApproval' {
-  if (toolName === 'bash' || request.kind === 'shell') {
+  if (commandName === 'bash' || request.kind === 'shell') {
     return 'item/commandExecution/requestApproval';
   }
   if (
-    ['write', 'edit', 'apply_patch'].includes(toolName) ||
+    ['write', 'edit', 'apply_patch'].includes(commandName) ||
     request.kind === 'edit'
   ) {
     return 'item/fileChange/requestApproval';

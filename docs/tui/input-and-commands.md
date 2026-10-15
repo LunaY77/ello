@@ -19,32 +19,52 @@ Turn 运行期间提交的普通文本会追加到当前运行。实时区域会
 同时检查刷新令牌过期后的处理。
 ```
 
-`Ctrl+C` 可以中断运行。Agent 尚未产生完整运行轨迹时，TUI 会把刚提交的内容放回输入框，
-便于修改后重试。
+主 Turn 运行时，`Ctrl+C` 会中断主 Agent，并由 Server 停止当前 root 下全部 queued/running
+Subagent 及其后代。Agent 尚未产生完整运行轨迹时，TUI 会把刚提交的内容放回输入框，便于
+修改后重试。
 
 ## 编辑多行内容
 
 输入框保存多行文本和光标位置。`Shift+Enter` 插入换行；终端无法区分
 `Shift+Enter` 时，可以在行尾输入 `\` 后按 `Enter`。TUI 会移除行尾的 `\` 并插入换行。
 
-| 按键          | 输入框行为                                       |
-| ------------- | ------------------------------------------------ |
-| `Enter`       | 提交当前内容                                     |
-| `Shift+Enter` | 插入换行                                         |
-| `Tab`         | 接受当前补全候选                                 |
-| `↑` / `↓`     | 移动多行光标、切换候选，或在空输入时浏览历史输入 |
-| `←` / `→`     | 移动光标                                         |
-| `Ctrl+A`      | 移到当前行行首                                   |
-| `Ctrl+E`      | 移到当前行行尾                                   |
-| `Ctrl+K`      | 删除光标到当前行行尾的内容                       |
-| `Ctrl+U`      | 删除当前行行首到光标的内容                       |
-| `Ctrl+W`      | 删除光标前一个词                                 |
-| `Ctrl+C`      | 运行时中断；空闲时先清空草稿，输入框为空时退出   |
-| `Esc`         | 关闭普通面板；没有面板且 Turn 运行时中断         |
-| `Shift+Tab`   | 循环切换可用的会话模式                           |
+视觉换行按终端单元格计算，不按 JavaScript 字符串长度计算。中文全角字符按 2 列参与
+换行；emoji 和组合字符按完整 grapheme 处理。显式换行仍是逻辑行，终端宽度产生的是视觉
+行，两者共同决定光标的 `↑` / `↓` 移动。
 
-方向键会优先处理当前多行光标。单行输入存在补全候选时，`↑` 和 `↓` 切换候选；空输入时，
-它们读取当前会话中已经提交过的输入。
+| 按键          | 输入框行为                                             |
+| ------------- | ------------------------------------------------------ |
+| `Enter`       | 提交当前内容                                           |
+| `Shift+Enter` | 插入换行                                               |
+| `Tab`         | 接受当前补全候选                                       |
+| `↑` / `↓`     | 移动多行光标、切换候选；最后一行按 `↓` 进入 Agent 列表 |
+| `←` / `→`     | 移动光标                                               |
+| `Ctrl+A`      | 移到当前行行首                                         |
+| `Ctrl+E`      | 移到当前行行尾                                         |
+| `Ctrl+K`      | 删除光标到当前行行尾的内容                             |
+| `Ctrl+U`      | 删除当前行行首到光标的内容                             |
+| `Ctrl+W`      | 删除光标前一个词                                       |
+| `Ctrl+C`      | 运行时中断 main 与全部 child；空闲时清空草稿或退出     |
+| `Esc`         | 关闭普通面板；没有面板且 Turn 运行时中断               |
+| `Shift+Tab`   | 循环切换可用的会话模式                                 |
+
+方向键会优先处理补全候选和多行光标。没有补全候选、光标位于最后一个视觉行且当前存在
+child 时，`↓` 把焦点交给 footer 下方的 Agent 列表，并保留草稿与光标。中文软换行产生的
+中间视觉行必须先正常移动。没有 child 时，空输入继续使用既有的历史浏览行为。
+
+## 选择和停止 Subagent
+
+Agent 列表固定显示在 cache/token footer 行下方。进入选择态后：
+
+| 按键      | 行为                                         |
+| --------- | -------------------------------------------- |
+| `↑` / `↓` | 移动高亮 Agent                               |
+| `Enter`   | 查看选中 Agent 的完整 transcript             |
+| `x`       | 停止选中的 queued/running child 及其活动后代 |
+| `Esc`     | 返回 composer，不中断任务                    |
+
+只有活动 child 被高亮时才显示 `Enter to view · x to stop`。停止单个 child 不影响 main 和无关
+sibling；中断整棵运行树使用 `Ctrl+C`。
 
 ## 引用文件
 
@@ -84,30 +104,31 @@ Skill 目录和覆盖规则见 [Skills 技能目录](../skills/README.md)。
 行首输入 `/` 会显示命令候选。输入部分名称后使用方向键选择，按 `Tab` 补全，按 `Enter`
 执行。`/help` 在 TUI 内显示常用命令。
 
-| 命令                              | 用途                                       |
-| --------------------------------- | ------------------------------------------ |
-| `/help` 或 `/?`                   | 显示帮助                                   |
-| `/mode <mode>`                    | 设置当前会话模式                           |
-| `/plan`                           | 进入 Plan 模式                             |
-| `/models`                         | 浏览并切换 Model                           |
-| `/profiles [name]`                | 浏览 Profile，或切换到指定 Profile         |
-| `/settings`                       | 搜索和修改全局、项目及 TUI 设置            |
-| `/resume`                         | 打开当前工作目录的会话列表                 |
-| `/clear`                          | 创建空白 Thread 并切换过去                 |
-| `/fork [turnId]`                  | 从当前 Thread 创建分支                     |
-| `/rewind [entryId]`               | 选择旧输入，在对应位置创建分支并回填输入框 |
-| `/compact`                        | 压缩当前 Thread 的模型上下文               |
-| `/export [markdown\|html\|jsonl]` | 导出当前 Thread，默认使用 Markdown         |
-| `/goal get`                       | 查看当前 Goal                              |
-| `/goal set <objective>`           | 设置当前 Thread 的 Goal                    |
-| `/goal clear`                     | 清除当前 Goal                              |
-| `/agents`                         | 查看可委派的 Subagent                      |
-| `/skills`                         | 查看可用 Skill                             |
-| `/tasks`                          | 查看任务列表                               |
-| `/workspace`                      | 查看 Workspace                             |
-| `/memory [reload]`                | 查看 Memory 状态，可在查看前重新加载       |
-| `/dream`                          | 启动 Memory consolidation job              |
-| `/quit` 或 `/exit`                | 关闭当前会话连接并退出 TUI                 |
+| 命令                                      | 用途                                       |
+| ----------------------------------------- | ------------------------------------------ |
+| `/help` 或 `/?`                           | 显示帮助                                   |
+| `/mode <mode>`                            | 设置当前会话模式                           |
+| `/plan`                                   | 进入 Plan 模式                             |
+| `/models`                                 | 浏览并切换 Model                           |
+| `/effort <low\|medium\|high\|xhigh\|max>` | 设置当前 Agent 模型的 thinking 强度        |
+| `/profiles [name]`                        | 浏览 Profile，或切换到指定 Profile         |
+| `/settings`                               | 搜索和修改全局、项目及 TUI 设置            |
+| `/resume`                                 | 打开当前工作目录的会话列表                 |
+| `/clear`                                  | 创建空白 Thread 并切换过去                 |
+| `/fork [turnId]`                          | 从当前 Thread 创建分支                     |
+| `/rewind [entryId]`                       | 选择旧输入，在对应位置创建分支并回填输入框 |
+| `/compact`                                | 压缩当前 Thread 的模型上下文               |
+| `/export [markdown\|html\|jsonl]`         | 导出当前 Thread，默认使用 Markdown         |
+| `/goal get`                               | 查看当前 Goal                              |
+| `/goal set <objective>`                   | 设置当前 Thread 的 Goal                    |
+| `/goal clear`                             | 清除当前 Goal                              |
+| `/agents`                                 | 查看可委派的 Subagent                      |
+| `/skills`                                 | 查看可用 Skill                             |
+| `/tasks`                                  | 查看任务列表                               |
+| `/workspace`                              | 查看 Workspace                             |
+| `/memory [reload]`                        | 查看 Memory 状态，可在查看前重新加载       |
+| `/dream`                                  | 启动 Memory consolidation job              |
+| `/quit` 或 `/exit`                        | 关闭当前会话连接并退出 TUI                 |
 
 会话分支、回退和上下文压缩的适用范围见
 [会话、模式与上下文](sessions-modes-and-context.md)。Goal 的多轮用法见

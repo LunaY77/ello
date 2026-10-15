@@ -118,6 +118,7 @@ export async function createAgentRegistry(
       );
     },
     delegatable() {
+      if (!config.subagents.enabled) return [];
       return merged.filter(
         (def) =>
           (def.mode === 'subagent' || def.mode === 'all') &&

@@ -9,6 +9,7 @@ import { usePaletteStore } from '@/features/command-palette';
 import { ModeSwitcher } from '@/features/composer/components/ModeSwitcher';
 import { openThread, threadDisplayName } from '@/features/thread';
 import { useGlobalHotkey } from '@/lib/keyboard/shortcuts';
+import { formatKeys, isMacPlatform } from '@/lib/platform';
 import { runOperation } from '@/lib/report';
 import { applyTheme, resolveTheme, watchSystemTheme } from '@/lib/theme/theme';
 import {
@@ -54,7 +55,7 @@ export function TopBarCenter() {
   return (
     <div className="flex items-center gap-2 rounded-full border border-border-subtle bg-surface-2/70 py-1 pr-2 pl-3">
       <span className="max-w-40 truncate text-[12px] text-secondary">
-        {snapshot.settings.model}
+        {snapshot.settings.agent}
       </span>
       <span className="h-3 w-px bg-divider" />
       <ModeSwitcher threadId={thread.id} mode={snapshot.settings.mode} />
@@ -92,8 +93,8 @@ export function TopBarTrailing() {
           onClick={() => setPaletteOpen(true)}
           className="flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-border-subtle bg-surface-2/60 px-2 text-[12px] text-tertiary transition-colors duration-150 hover:text-primary"
         >
-          <Command size={12} />
-          <span className="font-mono text-[10px]">⌘K</span>
+          {isMacPlatform() && <Command size={12} />}
+          <span className="font-mono text-[10px]">{formatKeys('⌘K')}</span>
         </button>
       </Tooltip>
       <IconButton

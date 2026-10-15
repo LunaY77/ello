@@ -6,10 +6,8 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import type {
-  AgentRunContext,
-  AgentToolContext,
-} from '../../src/features/agent/engine/index.js';
+import type { AgentRunContext } from '../../src/features/agent/engine/index.js';
+import type { CommandContext } from '../../src/features/command/index.js';
 import {
   formatGoalStatus,
   goalUsage,
@@ -21,6 +19,7 @@ import {
   type GoalPersistencePort,
 } from '../../src/features/thread/goals/service.js';
 import type { GoalState } from '../../src/features/thread/goals/types.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
 function createHarness(maxContinuations = 20) {
   let snapshot: GoalState | null = null;
@@ -286,12 +285,12 @@ describe('Goal 生产 Turn 契约', () => {
     expect(section).not.toContain('<objective>完成 <真实>');
     expect(section).toContain('20/100');
 
-    const getGoal = immediateTool(runtime.tools, 'get_goal');
+    const getGoal = immediateTool(runtime.module.commands, 'get_goal');
     expect(getGoal.execute({}, TOOL_CONTEXT)).toMatchObject({
       id: goal.id,
       remainingTokens: 80,
     });
-    const updateGoal = immediateTool(runtime.tools, 'update_goal');
+    const updateGoal = immediateTool(runtime.module.commands, 'update_goal');
     expect(
       updateGoal.execute({ status: 'complete' }, TOOL_CONTEXT),
     ).toMatchObject({
@@ -304,36 +303,48 @@ describe('Goal 生产 Turn 契约', () => {
     expect(runtime.systemSection({} as AgentRunContext)).toBeNull();
   });
 
-  it('没有 Goal 时查询和更新都明确失败', async () => {
-    const runtime = createThreadGoalRuntime(null);
-    expect(() =>
-      immediateTool(runtime.tools, 'get_goal').execute({}, TOOL_CONTEXT),
-    ).toThrow('No goal exists');
-    expect(() =>
-      immediateTool(runtime.tools, 'update_goal').execute(
-        { status: 'complete' },
-        TOOL_CONTEXT,
-      ),
-    ).toThrow('No goal exists');
+  it('仅在 Goal 显式活动时向模型注入 Goal 工具', async () => {
+    const absent = createThreadGoalRuntime(null);
+    expect(absent.module.commands).toEqual([]);
+    expect(absent.systemSection({} as AgentRunContext)).toBeNull();
+
+    const paused = createThreadGoalRuntime({
+      id: 'goal-paused',
+      objective: '等待用户恢复',
+      status: 'paused',
+      tokensUsed: 10,
+      createdAt: '2026-07-19T00:00:00.000Z',
+      updatedAt: '2026-07-19T00:00:00.000Z',
+    });
+    expect(paused.module.commands).toEqual([]);
+    expect(paused.systemSection({} as AgentRunContext)).toBeNull();
   });
 });
 
-const TOOL_CONTEXT: AgentToolContext = {
+const TOOL_CONTEXT: CommandContext = {
   runId: 'run-goal',
   turnIndex: 0,
-  toolCallId: 'call-goal',
-  environment: {},
+  commandId: 'call-goal',
+  environment: createTestEnvironmentHandle(),
   metadata: {},
   signal: new AbortController().signal,
 };
 
 function immediateTool(
-  tools: ReturnType<typeof createThreadGoalRuntime>['tools'],
+  commands: ReturnType<typeof createThreadGoalRuntime>['module']['commands'],
   name: string,
 ) {
-  const tool = tools.find((candidate) => candidate.name === name);
-  if (tool === undefined || tool.execution !== 'immediate') {
-    throw new Error(`Missing immediate tool ${name}.`);
+  const command = commands.find((candidate) => candidate.name === name);
+  if (command === undefined || command.execution.kind !== 'immediate') {
+    throw new Error(`Missing immediate Command ${name}.`);
   }
-  return tool;
+  return {
+    execute: (input: unknown, context: CommandContext) =>
+      command.execution.kind === 'immediate'
+        ? command.execution.run(
+            command.invocation.input.schema.parse(input),
+            context,
+          )
+        : undefined,
+  };
 }

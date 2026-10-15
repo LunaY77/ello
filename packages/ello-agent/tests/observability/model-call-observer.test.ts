@@ -6,44 +6,48 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type {
+import {
+  createAgent as createBaseAgent,
+  z,
   AgentEventRecorder,
   AgentModelRequest,
   AgentModelResponse,
+  type CreateAgentOptions,
   EngineEvent,
   ModelAdapter,
-  AnyAgentTool,
-  CreateAgentOptions,
 } from '../../src/features/agent/engine/index.js';
-import {
-  createAgent as createBaseAgent,
-  defineTool,
-  z,
-} from '../../src/features/agent/engine/index.js';
+import type { CommandDefinition } from '../../src/features/command/index.js';
+import { createTestCommandRun, defineTestCommand } from '../support/command.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
-const testTool = defineTool({
+const testTool = defineTestCommand({
   name: 'test_noop',
-  description: 'No-op tool for model observer tests.',
-  discovery: { aliases: ['noop'], risk: 'readonly' },
-  input: z.object({}).strict(),
-  execute: () => null,
+  summary: 'No-op tool for model observer tests.',
+  schema: z.object({}).strict(),
+  run: () => null,
 });
 
 function createAgent(
   options: Omit<
     CreateAgentOptions,
-    'executionTools' | 'modelTools' | 'environment'
+    'commandRun' | 'environment' | 'modelCall'
   > & {
-    readonly tools?: readonly AnyAgentTool[];
+    readonly tools?: readonly CommandDefinition[];
   },
 ) {
   const { tools, ...rest } = options;
-  const selected = tools ?? [testTool as AnyAgentTool];
+  const selected = tools ?? [testTool];
   return createBaseAgent({
     ...rest,
-    environment: {},
-    executionTools: selected,
-    modelTools: selected,
+    modelCall: {
+      agentName: 'test-agent',
+      modelSelector: 'primary_model',
+      configuredModel: 'test-model',
+      protocol: 'openai',
+      apiModel: 'model-a',
+    },
+    environment: createTestEnvironmentHandle(),
+    commandRun: createTestCommandRun(selected),
   });
 }
 
@@ -94,7 +98,14 @@ describe('model-call lifecycle', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
-      identity: { turnIndex: 0, provider: 'test', model: 'model-a' },
+      identity: {
+        turnIndex: 0,
+        agentName: 'test-agent',
+        modelSelector: 'primary_model',
+        configuredModel: 'test-model',
+        protocol: 'openai',
+        apiModel: 'model-a',
+      },
       response: { finishReason: 'stop', usage },
       diagnostics: { compactionBoundary: false },
     });
@@ -106,19 +117,20 @@ describe('model-call lifecycle', () => {
     expect(calls[0]?.diagnostics.messagePrefixFingerprint).toHaveLength(64);
   });
 
-  it('工具 schema 变化会改变 toolset fingerprint', async () => {
+  it('领域能力 schema 变化不改变唯一 provider toolset fingerprint', async () => {
     const fingerprints: string[] = [];
-    const runWithSchema = async (input: z.ZodType): Promise<void> => {
+    const runWithSchema = async <TInput extends Record<string, unknown>>(
+      input: z.ZodType<TInput>,
+    ): Promise<void> => {
       const agent = createAgent({
         model: 'test:model-a',
         modelAdapter: new FinalAdapter(),
         tools: [
-          defineTool({
+          defineTestCommand({
             name: 'lookup',
-            description: 'Lookup a value',
-            discovery: { aliases: ['lookup'], risk: 'readonly' },
-            input,
-            execute: () => 'unused',
+            summary: 'Lookup a value',
+            schema: input,
+            run: () => 'unused',
           }),
         ],
         eventRecorder: {
@@ -137,6 +149,6 @@ describe('model-call lifecycle', () => {
     await runWithSchema(z.object({ key: z.number() }));
 
     expect(fingerprints).toHaveLength(2);
-    expect(fingerprints[0]).not.toBe(fingerprints[1]);
+    expect(fingerprints[0]).toBe(fingerprints[1]);
   });
 });

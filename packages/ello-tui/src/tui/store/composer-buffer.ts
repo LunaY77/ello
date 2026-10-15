@@ -1,3 +1,10 @@
+import {
+  layoutTerminalText,
+  nextGraphemeBoundary,
+  offsetAtDisplayColumn,
+  previousGraphemeBoundary,
+} from './terminal-text.js';
+
 /**
  * 多行输入缓冲区。
  *
@@ -102,15 +109,16 @@ export function insertNewline(buffer: ComposerBuffer): ComposerBuffer {
   return insertText(buffer, '\n');
 }
 
-/** 退格：删除光标前一个字符，必要时合并到上一行。 */
+/** 退格：删除光标前一个完整字符，必要时合并到上一行。 */
 export function backspace(buffer: ComposerBuffer): ComposerBuffer {
   const { line, column } = buffer.cursor;
   if (column > 0) {
     const current = lineAt(buffer, line);
-    const nextLine = current.slice(0, column - 1) + current.slice(column);
+    const previous = previousGraphemeBoundary(current, column);
+    const nextLine = current.slice(0, previous) + current.slice(column);
     const lines = [...buffer.lines];
     lines[line] = nextLine;
-    return { lines, cursor: { line, column: column - 1 } };
+    return { lines, cursor: { line, column: previous } };
   }
   if (line === 0) {
     return buffer;
@@ -126,12 +134,13 @@ export function backspace(buffer: ComposerBuffer): ComposerBuffer {
   return { lines, cursor: { line: line - 1, column: previous.length } };
 }
 
-/** 向后删除：删除光标处字符，必要时合并下一行。 */
+/** 向后删除：删除光标处完整字符，必要时合并下一行。 */
 export function deleteForward(buffer: ComposerBuffer): ComposerBuffer {
   const { line, column } = buffer.cursor;
   const current = lineAt(buffer, line);
   if (column < current.length) {
-    const nextLine = current.slice(0, column) + current.slice(column + 1);
+    const next = nextGraphemeBoundary(current, column);
+    const nextLine = current.slice(0, column) + current.slice(next);
     const lines = [...buffer.lines];
     lines[line] = nextLine;
     return { lines, cursor: buffer.cursor };
@@ -151,7 +160,13 @@ export function deleteForward(buffer: ComposerBuffer): ComposerBuffer {
 export function moveLeft(buffer: ComposerBuffer): ComposerBuffer {
   const { line, column } = buffer.cursor;
   if (column > 0) {
-    return { ...buffer, cursor: { line, column: column - 1 } };
+    return {
+      ...buffer,
+      cursor: {
+        line,
+        column: previousGraphemeBoundary(lineAt(buffer, line), column),
+      },
+    };
   }
   if (line === 0) {
     return buffer;
@@ -165,7 +180,13 @@ export function moveLeft(buffer: ComposerBuffer): ComposerBuffer {
 export function moveRight(buffer: ComposerBuffer): ComposerBuffer {
   const { line, column } = buffer.cursor;
   if (column < lineAt(buffer, line).length) {
-    return { ...buffer, cursor: { line, column: column + 1 } };
+    return {
+      ...buffer,
+      cursor: {
+        line,
+        column: nextGraphemeBoundary(lineAt(buffer, line), column),
+      },
+    };
   }
   if (line >= buffer.lines.length - 1) {
     return buffer;
@@ -210,7 +231,7 @@ export function moveDownVisual(
 }
 
 export function visualLineCount(buffer: ComposerBuffer, width: number): number {
-  return visualRows(buffer.lines, width).length;
+  return layoutTerminalText(buffer.lines, buffer.cursor, width).rows.length;
 }
 
 function moveVisual(
@@ -218,41 +239,20 @@ function moveVisual(
   width: number,
   delta: -1 | 1,
 ): ComposerBuffer {
-  const rows = visualRows(buffer.lines, width);
-  const { line, column } = buffer.cursor;
-  let currentRow = 0;
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index]!;
-    if (row.line === line && row.start <= column) currentRow = index;
-  }
-  const target = rows[currentRow + delta];
+  const layout = layoutTerminalText(buffer.lines, buffer.cursor, width);
+  const target = layout.rows[layout.cursorRow + delta];
   if (target === undefined) return buffer;
-  const visualColumn = column - rows[currentRow]!.start;
   return {
     ...buffer,
     cursor: {
-      line: target.line,
-      column: Math.min(
-        lineAt(buffer, target.line).length,
-        target.start + visualColumn,
+      line: target.logicalLine,
+      column: offsetAtDisplayColumn(
+        lineAt(buffer, target.logicalLine),
+        target,
+        layout.cursorDisplayColumn,
       ),
     },
   };
-}
-
-function visualRows(
-  lines: readonly string[],
-  width: number,
-): readonly { readonly line: number; readonly start: number }[] {
-  const safeWidth = Math.max(1, Math.floor(width));
-  const rows: { line: number; start: number }[] = [];
-  for (const [line, text] of lines.entries()) {
-    const rowCount = Math.max(1, Math.floor(text.length / safeWidth) + 1);
-    for (let row = 0; row < rowCount; row += 1) {
-      rows.push({ line, start: row * safeWidth });
-    }
-  }
-  return rows;
 }
 
 export function moveLineStart(buffer: ComposerBuffer): ComposerBuffer {

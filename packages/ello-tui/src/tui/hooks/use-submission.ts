@@ -18,7 +18,7 @@ export function useSubmission(input: {
   readonly running: boolean;
   readonly draft: string;
   readonly dispatch: Dispatch;
-  queueSteer(text: string): void;
+  queueSteer(text: string): string;
   setDraft(value: string): void;
   onError(error: unknown): void;
 }) {
@@ -78,8 +78,13 @@ export function useSubmission(input: {
   const submitText = async (value: string): Promise<void> => {
     if (input.running) {
       const userInput = await resolveUserInput(input.thread, value);
-      input.queueSteer(value);
-      await input.thread.steerInput(userInput);
+      const steerId = input.queueSteer(value);
+      try {
+        await input.thread.steerInput(userInput, steerId);
+      } catch (error) {
+        input.dispatch({ type: 'steer.failed', steerId });
+        throw error;
+      }
       return;
     }
     pendingSubmittedInput.current = { value };

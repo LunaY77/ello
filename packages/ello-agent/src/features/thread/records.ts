@@ -5,7 +5,6 @@
  * 外部输入在边界完成校验，非法状态和资源失败直接抛出，调用顺序由公开契约约束。
  */
 import {
-  AppServerError,
   type PendingServerRequest,
   type ThreadItem,
   type ThreadSnapshot,
@@ -147,12 +146,6 @@ function applyThreadRecord(
     return;
   }
   const snapshot = requireSnapshot(state);
-  if (snapshot.thread.archived && record.kind !== 'thread.unarchived') {
-    throw projectionCorrupt(
-      record.threadId,
-      `${record.kind} cannot follow thread.archived`,
-    );
-  }
   snapshot.seq = record.seq;
   snapshot.thread.updatedAt = record.createdAt;
   switch (record.kind) {
@@ -160,25 +153,11 @@ function applyThreadRecord(
       if (record.name !== undefined) snapshot.thread.name = record.name;
       if (record.preview !== undefined)
         snapshot.thread.preview = record.preview;
+      if (record.archived !== undefined) {
+        snapshot.thread.archived = record.archived;
+        snapshot.thread.status = record.archived ? 'archived' : 'idle';
+      }
       if (record.settings !== undefined) snapshot.settings = record.settings;
-      return;
-    case 'thread.archived':
-      if (snapshot.thread.archived) {
-        throw projectionCorrupt(record.threadId, 'Thread is already archived');
-      }
-      if (activeTurn(snapshot) || snapshot.pendingServerRequests.length > 0) {
-        throw projectionCorrupt(
-          record.threadId,
-          'Thread was archived with active work',
-        );
-      }
-      snapshot.thread.archived = true;
-      return;
-    case 'thread.unarchived':
-      if (!snapshot.thread.archived) {
-        throw projectionCorrupt(record.threadId, 'Thread is not archived');
-      }
-      snapshot.thread.archived = false;
       return;
     case 'thread.status':
       snapshot.thread.status = record.status;
@@ -204,6 +183,7 @@ function applyThreadRecord(
     case 'item.delta':
       applyItemDelta(state, record.itemId, record.delta);
       return;
+    case 'item.updated':
     case 'item.completed':
       replaceItem(state, record.turnId, record.item);
       return;
@@ -243,18 +223,53 @@ function applyThreadRecord(
     case 'usage.updated':
       snapshot.usage = record.usage;
       return;
-    case 'transcript.entry':
     case 'compaction':
+      projectCompactionItem(state, record);
+      return;
+    case 'transcript.entry':
     case 'content.replacement':
       return;
   }
 }
 
-function projectionCorrupt(threadId: string, reason: string): AppServerError {
-  return new AppServerError({
-    type: 'storageCorrupt',
-    message: `Thread ${threadId} record sequence is invalid: ${reason}.`,
-    details: { threadId, reason },
+function projectCompactionItem(
+  state: MutableProjection,
+  record: Extract<ThreadRecord, { kind: 'compaction' }>,
+): void {
+  const snapshot = requireSnapshot(state);
+  const turnIndex = state.turnIndexes.get(record.turnId);
+  if (turnIndex === undefined) {
+    throw new Error(`Unknown compaction turn ${record.turnId}.`);
+  }
+  const turn = snapshot.turns[turnIndex];
+  if (turn === undefined) {
+    throw new Error(`Missing compaction turn ${record.turnId}.`);
+  }
+  if (
+    turn.items.some(
+      (item) =>
+        item.type === 'contextCompaction' && item.status === 'inProgress',
+    )
+  ) {
+    return;
+  }
+  addItem(state, record.turnId, {
+    type: 'contextCompaction',
+    id: `compaction-${record.seq}`,
+    turnId: record.turnId,
+    createdAt: record.createdAt,
+    summary: record.summary,
+    tokensBefore: record.tokensBefore,
+    ...(record.beforeMessageCount === undefined
+      ? {}
+      : { beforeMessageCount: record.beforeMessageCount }),
+    ...(record.afterMessageCount === undefined
+      ? {}
+      : { afterMessageCount: record.afterMessageCount }),
+    ...(record.keptMessageCount === undefined
+      ? {}
+      : { keptMessageCount: record.keptMessageCount }),
+    status: 'completed',
   });
 }
 
@@ -353,6 +368,10 @@ export function projectThreadItemDelta(
   const projected = structuredClone(item);
   if (delta.type === 'agentMessage' && projected.type === 'agentMessage') {
     projected.text += delta.text;
+    return projected;
+  }
+  if (delta.type === 'reasoning' && projected.type === 'reasoning') {
+    projected.summary += delta.text;
     return projected;
   }
   if (delta.type === 'plan' && projected.type === 'plan') {

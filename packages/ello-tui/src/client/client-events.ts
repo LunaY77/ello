@@ -25,6 +25,10 @@ export type ThreadClientEvent =
   | {
       readonly type: 'error';
       readonly error: Error;
+    }
+  | {
+      readonly type: 'connectionClosed';
+      readonly error: Error;
     };
 
 export type ThreadClientListener = (event: ThreadClientEvent) => void;

@@ -1,0 +1,1 @@
+This is a structured Subagent result. Respect its terminal status. Use its evidence directly within the declared scope; do not repeat covered work merely to confirm it. Integrate `completed`, diagnose or replace `failed`, ask the user yourself only when a `blocked` question is necessary, and preserve partial evidence from `stopped`.

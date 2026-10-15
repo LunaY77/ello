@@ -6,3 +6,11 @@ allowBuilds:
   esbuild: true
   protobufjs: true
   unrs-resolver: true
+
+minimumReleaseAgeExclude:
+  - '@ai-sdk/gateway@4.0.30'
+  - '@ai-sdk/provider-utils@5.0.14'
+  - '@ai-sdk/provider@4.0.4'
+  - ai@7.0.40
+  - '@ai-sdk/openai@4.0.22'
+  - '@modelcontextprotocol/sdk@1.30.0'

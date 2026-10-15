@@ -12,24 +12,13 @@ import {
   Sparkles,
   Sun,
 } from 'lucide-react';
-import { create } from 'zustand';
 
 import {
   newThreadInContext,
+  setThreadAgent,
   setThreadMode,
-  setThreadModel,
 } from '@/features/thread';
 import { appMutations, useAppStore } from '@/store/store';
-
-interface PaletteState {
-  readonly open: boolean;
-  setOpen: (open: boolean) => void;
-}
-
-export const usePaletteStore = create<PaletteState>()((set) => ({
-  open: false,
-  setOpen: (open) => set({ open }),
-}));
 
 export interface PaletteCommand {
   readonly id: string;
@@ -40,7 +29,7 @@ export interface PaletteCommand {
   readonly enabled: () => boolean;
   readonly run: () => void;
   /** 有二级页的命令(栈式 drill,不弹新层)。 */
-  readonly drill?: 'models';
+  readonly drill?: 'agents';
 }
 
 const MODE_KEYWORDS: Record<SessionMode, string> = {
@@ -136,18 +125,18 @@ export function buildCommands(navigate: (path: string) => void): readonly Palett
       }),
     ),
     {
-      id: 'pick-model',
-      label: '选择模型…',
+      id: 'pick-agent',
+      label: '切换 Agent',
       shortcut: '⌘M',
-      keywords: 'model moxing',
+      keywords: 'agent qiehuan model',
       enabled: hasThread,
       run: () => undefined,
-      drill: 'models',
+      drill: 'agents',
     },
   ];
 }
 
-export function pickModel(modelId: string): void {
+export function pickAgent(agentId: string): void {
   const threadId = useAppStore.getState().view.selectedThreadId;
-  if (threadId !== null) void setThreadModel(threadId, modelId);
+  if (threadId !== null) void setThreadAgent(threadId, agentId);
 }

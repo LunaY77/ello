@@ -11,33 +11,50 @@ import {
   readdir,
   rm,
   stat,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
 
 import {
-  defineTool,
-  type AgentFileSystem,
-  type AgentToolContext,
-} from '../../src/features/agent/engine/index.js';
-import type { CodingAgentConfig } from '../../src/features/config/index.js';
+  createCommandRegistrySnapshot,
+  createCommandRunRuntime,
+  defineCommandModule,
+  type CommandContext,
+  type CommandDefinition,
+} from '../../src/features/command/index.js';
+import {
+  CodingAgentConfigSchema,
+  type CodingAgentConfig,
+} from '../../src/features/config/index.js';
+import type {
+  EnvironmentFileSystem,
+  EnvironmentProcesses,
+} from '../../src/features/environment/index.js';
+import { createTaskService } from '../../src/features/task/index.js';
+import {
+  CommandExecutionError,
+  CommandFailureTracker,
+} from '../../src/features/tool/index.js';
 import {
   parseApplyPatch,
   prepareApplyPatch,
 } from '../../src/features/tool/internal/apply-patch.js';
-import { projectToolEvent } from '../../src/features/tool/internal/event-projection.js';
-import {
-  createCallTool,
-  createMetaToolRuntime,
-  createToolSearchTool,
-} from '../../src/features/tool/internal/meta-tools.js';
-import type { CodingToolContext } from '../../src/features/tool/internal/runtime/coding-tool.js';
-import { createToolSearchIndex } from '../../src/features/tool/internal/search-index.js';
-import { createSearchTools } from '../../src/features/tool/internal/search.js';
+import { createFsCommands } from '../../src/features/tool/internal/fs.js';
+import { createProductionCommandRuntime } from '../../src/features/tool/internal/production.js';
+import type { CommandResult } from '../../src/features/tool/internal/runtime/command-result.js';
+import { SessionFileState } from '../../src/features/tool/internal/runtime/file-state.js';
+import { persistLargeOutput } from '../../src/features/tool/internal/runtime/output-store.js';
+import type { SearchProvider } from '../../src/features/tool/internal/search-provider.js';
+import { createSearchCommands } from '../../src/features/tool/internal/search.js';
+import { createShellCommands } from '../../src/features/tool/internal/shell.js';
+import { createTaskCommands } from '../../src/features/tool/internal/task.js';
+import { makeApprovalPolicy } from '../../src/features/tool/permissions/policy.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
+import { createTestStores } from '../support/stores.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -54,6 +71,150 @@ async function temporaryDirectory(prefix: string): Promise<string> {
   temporaryDirectories.push(directory);
   return directory;
 }
+
+describe('Environment 进程能力边界', () => {
+  it('保留内部进程 interface，但不注册模型可见 process 工具', async () => {
+    const root = await temporaryDirectory('ello-process-boundary-');
+    const environment = createTestEnvironmentHandle(root);
+    expect(typeof environment.processes.exec).toBe('function');
+    expect(typeof environment.processes.spawn).toBe('function');
+
+    const config = CodingAgentConfigSchema.parse({
+      cwd: root,
+      session_dir: path.join(root, '.ello', 'sessions'),
+      initial_mode: 'ask-before-changes',
+      models: {
+        test: {
+          protocol: 'openai',
+          endpoint: 'responses',
+          api_model: 'test-model',
+          base_url: 'https://api.example.test/v1',
+          api_key_env: 'TEST_API_KEY',
+          context_window: 128_000,
+          max_output_tokens: 16_000,
+        },
+      },
+      primary_model: 'test',
+      auxiliary_model: 'test',
+    });
+    const stores = createTestStores({ databasePath: ':memory:' });
+    try {
+      const runtime = createProductionCommandRuntime({
+        config,
+        taskBoards: stores.taskBoards,
+        taskBoardScope: { type: 'session', sessionId: 'process-boundary' },
+        mode: () => ({
+          mode: 'ask-before-changes',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-08-01T00:00:00.000Z',
+        }),
+      });
+      const toolNames = runtime.module.commands.map((command) => command.name);
+
+      expect(toolNames).toContain('bash');
+      expect(toolNames).not.toContain('test');
+      expect(toolNames).not.toContain('workspace_snapshot');
+      expect(toolNames).not.toContain('process');
+    } finally {
+      stores.close();
+    }
+  });
+});
+
+describe('Command Run 工具说明', () => {
+  it('从生产 Command 定义自动渲染可直接调用的 Frame 示例', () => {
+    const commands = [
+      ...createFsCommands({} as CodingAgentConfig, () => 'auto'),
+      ...createSearchCommands({} as CodingAgentConfig, () => 'auto'),
+      ...createShellCommands({} as CodingAgentConfig, () => 'auto'),
+    ];
+    const runtime = createCommandRunRuntime(
+      createCommandRegistrySnapshot({
+        modules: [defineCommandModule({ id: 'example-test', commands })],
+        search: { resultLimit: 6, maxResultBytes: 24_000 },
+      }),
+    );
+
+    expect(runtime.modelTool.description).toContain(
+      '  Batch: {"commands":[{"step":1,"command":"read","args":["README.md","--limit","80"]},{"step":2,"command":"write","args":["notes.txt"],"body":"First line\\n"}]}',
+    );
+    expect(runtime.modelTool.description).toContain(
+      '  Object arguments: {"step":1,"command":"command_invoke","input":{"name":"<command_search result>","arguments":{}}}',
+    );
+    expect(
+      runtime.modelTool.input.safeParse({
+        commands: [
+          { step: 1, command: 'read', args: ['README.md', '--limit', '80'] },
+          {
+            step: 2,
+            command: 'write',
+            args: ['notes.txt'],
+            body: 'First line\n',
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
+  it('核心命令不再引用已移除的直接工具或旧的模型响应并发语义', () => {
+    const descriptions = new Map(
+      [
+        ...createFsCommands({} as CodingAgentConfig, () => 'auto'),
+        ...createSearchCommands({} as CodingAgentConfig, () => 'auto'),
+        ...createShellCommands({} as CodingAgentConfig, () => 'auto'),
+      ].map((command) => [
+        command.name,
+        [command.summary, command.details]
+          .filter((value): value is string => value !== undefined)
+          .join(' '),
+      ]),
+    );
+
+    for (const name of ['read', 'write', 'apply_patch', 'bash']) {
+      const description = descriptions.get(name);
+      if (description === undefined) throw new Error(`Missing ${name} tool.`);
+      expect(description).not.toContain('edit');
+      expect(description).not.toContain('grep');
+      expect(description).not.toContain('glob');
+      expect(description).not.toContain('model response');
+    }
+    expect(descriptions.get('write')).toContain('STALE_WRITE');
+    expect(descriptions.get('apply_patch')).toContain('*** Begin Patch');
+    expect(descriptions.get('search')).toContain('Unicode regular expression');
+    expect(descriptions.get('search')).not.toContain('model response');
+  });
+});
+
+describe('Task Command 命名空间', () => {
+  it('持久任务 Command 收到子代理 job id 时指向正确的控制 Command', async () => {
+    const root = await temporaryDirectory('ello-task-command-namespace-');
+    const stores = createTestStores({ databasePath: ':memory:' });
+    try {
+      const taskGet = codingCommand(
+        createTaskCommands(
+          () => () => 'auto',
+          createTaskService(stores.taskBoards, {
+            type: 'session',
+            sessionId: 'namespace-test',
+          }),
+        ),
+        'task_get',
+      );
+
+      await expect(
+        taskGet.execute(
+          { id: 'job_c260a350714844dd9d65d353d0c13b37' },
+          toolContext(root, noNativeProcesses()),
+        ),
+      ).rejects.toThrow(
+        'This is a Subagent job ID; use get_agent to read it or stop_agent to stop it.',
+      );
+    } finally {
+      stores.close();
+    }
+  });
+});
 
 describe('Apply Patch 契约', () => {
   it('解析新增、删除、更新和移动操作', () => {
@@ -200,8 +361,28 @@ describe('搜索工具契约', () => {
       { pattern: 'abc-\\d+', filePath: '.', limit: 1 },
       searchContext(root),
     );
-    expect(limited.output).toBe('a.txt:1:abc-123');
+    expect(limited.output).toBe(
+      'a.txt:1:abc-123\n[More matches available. Retry with offset 1.]',
+    );
     expect(limited.metadata.matchCount).toBe(1);
+    expect(limited.metadata).toMatchObject({
+      truncated: true,
+      nextOffset: 1,
+    });
+
+    const next = await grep.execute(
+      {
+        pattern: 'abc-\\d+',
+        filePath: '.',
+        limit: 1,
+        offset: 1,
+        context: 1,
+      },
+      searchContext(root),
+    );
+    expect(next.output).toContain('a.txt-1-abc-123');
+    expect(next.output).toContain('a.txt:2:abc-456');
+    expect(next.output).toContain('a.txt-3-abc-xyz');
 
     const empty = await grep.execute(
       { pattern: 'missing', filePath: '.', limit: 10 },
@@ -248,310 +429,473 @@ describe('搜索工具契约', () => {
       { pattern: '**/*.ts', filePath: '.', limit: 2 },
       searchContext(root),
     );
-    expect(result.output.split('\n')).toEqual(['src/a.ts', 'src/nested/b.ts']);
+    expect(result.output.split('\n')).toEqual([
+      'src/a.ts',
+      'src/nested/b.ts',
+      '[More paths available. Retry with offset 2.]',
+    ]);
     expect(result.metadata.matchCount).toBe(2);
+
+    const next = await glob.execute(
+      { pattern: '**/*.ts', filePath: '.', limit: 2, offset: 2 },
+      searchContext(root),
+    );
+    expect(next.output).toBe('src/z.ts');
+    expect(next.metadata.truncated).toBe(false);
+  });
+
+  it('原生 provider 安全处理空格和 shell 元字符，且可回退 JS 遍历', async () => {
+    const root = await temporaryDirectory('ello-native-search-');
+    await writeFile(
+      path.join(root, 'a b.txt'),
+      'needle;touch injected\n',
+      'utf8',
+    );
+    const native = searchTool('grep');
+
+    const nativeResult = await native.execute(
+      { pattern: 'needle;touch injected', filePath: '.', limit: 10 },
+      searchContext(root),
+    );
+    expect(nativeResult.output).toBe('a b.txt:1:needle;touch injected');
+    await expect(stat(path.join(root, 'injected'))).rejects.toThrow();
+
+    const fallback: SearchProvider = {
+      grep: vi.fn(async () => null),
+      listFiles: vi.fn(async () => null),
+    };
+    const fallbackGrep = searchTool('grep', fallback);
+    const fallbackGlob = searchTool('glob', fallback);
+    await expect(
+      fallbackGrep.execute(
+        { pattern: 'needle', filePath: '.', limit: 10 },
+        searchContext(root),
+      ),
+    ).resolves.toMatchObject({ metadata: { matchCount: 1 } });
+    await expect(
+      fallbackGlob.execute(
+        { pattern: '**/*.txt', filePath: '.', limit: 10 },
+        searchContext(root),
+      ),
+    ).resolves.toMatchObject({ metadata: { matchCount: 1 } });
+    expect(fallback.grep).toHaveBeenCalledOnce();
+    expect(fallback.listFiles).toHaveBeenCalledOnce();
   });
 });
 
-describe('Meta Tool 路由契约', () => {
-  const tools = [
-    targetTool('read', 'Read a file or directory.', 'cat file'),
-    targetTool('grep', 'Search file contents with a regex.', 'search text'),
-    targetTool('write', 'Write a complete file.', 'create file'),
-  ];
-  const config = {
-    routing_enabled: true,
-    search: { result_limit: 6, max_result_bytes: 24_000 },
-  };
-
-  it('路由关闭时直接暴露目标，开启时模型只看到两个 meta tools', () => {
-    const direct = createMetaToolRuntime(tools, [], {
-      ...config,
-      routing_enabled: false,
-    });
-    expect(direct.usesToolRouting).toBe(false);
-    expect(direct.modelTools.map((tool) => tool.name)).toEqual([
+describe('读取工具契约', () => {
+  it('相同未变更区间只返回短标记，文件变化后重新返回内容', async () => {
+    const root = await temporaryDirectory('ello-read-cache-');
+    const targetPath = path.join(root, 'a.txt');
+    await writeFile(targetPath, 'first\nsecond\n', 'utf8');
+    const initialVersion = await stat(targetPath);
+    const fileState = new SessionFileState();
+    const read = codingCommand(
+      createFsCommands({} as CodingAgentConfig, () => 'auto', fileState),
       'read',
-      'grep',
-      'write',
-    ]);
-
-    const routed = createMetaToolRuntime(tools, [], config);
-    expect(routed.usesToolRouting).toBe(true);
-    expect(routed.executionTools.map((tool) => tool.name)).toEqual([
+    );
+    const nextRunRead = codingCommand(
+      createFsCommands({} as CodingAgentConfig, () => 'auto', fileState),
       'read',
-      'grep',
-      'write',
-      'tool_search',
-      'call_tool',
-    ]);
-    expect(routed.modelTools.map((tool) => tool.name)).toEqual([
-      'tool_search',
-      'call_tool',
-    ]);
+    );
+    const context = searchContext(root);
+    const input = { filePath: 'a.txt', offset: 1, limit: 10 };
+
+    const first = await read.execute(input, context);
+    expect(first.output).toContain('first');
+    expect(first.output).toContain('[Read lines 1-3 of 3.]');
+    expect(first.metadata.unchanged).toBeUndefined();
+
+    const duplicate = await nextRunRead.execute(input, context);
+    expect(duplicate.output).toContain('File unchanged');
+    expect(duplicate.metadata.unchanged).toBe(true);
+
+    // 即使文件大小和修改时间没有变化，主动清除缓存后也必须读到最新内容。
+    await writeFile(targetPath, 'third\nfourth\n', 'utf8');
+    await utimes(targetPath, initialVersion.atime, initialVersion.mtime);
+    fileState.invalidate([targetPath]);
+    const changed = await nextRunRead.execute(input, context);
+    expect(changed.output).toContain('third');
+    expect(changed.metadata.unchanged).toBeUndefined();
   });
 
-  it('保留 core tools 的定义顺序，只把非 core tools 放入懒加载索引', async () => {
-    const coreRead = {
-      ...tools[0]!,
-      discovery: { ...tools[0]!.discovery, core: true },
-    };
-    const runtime = createMetaToolRuntime(
-      [coreRead, tools[1]!, tools[2]!],
-      [],
-      config,
+  it('返回完整原始结果并由上层 output store 统一限制上下文', async () => {
+    const root = await temporaryDirectory('ello-read-output-');
+    const source = Array.from(
+      { length: 500 },
+      (_, index) => `${String(index).padStart(4, '0')} ${'x'.repeat(40)}`,
+    ).join('\n');
+    await writeFile(path.join(root, 'large.txt'), source, 'utf8');
+    const read = codingCommand(
+      createFsCommands({} as CodingAgentConfig, () => 'auto'),
+      'read',
     );
 
-    expect(runtime.modelTools.map((tool) => tool.name)).toEqual([
-      'read',
-      'tool_search',
-      'call_tool',
-    ]);
-    const search = runtime.modelTools.find(
-      (tool) => tool.name === 'tool_search',
+    const result = await read.execute(
+      { filePath: 'large.txt', offset: 1, limit: 500 },
+      searchContext(root),
     );
-    if (search === undefined || search.execution !== 'immediate') {
-      throw new Error('tool_search missing');
-    }
-    const result = (await search.execute(
-      { query: 'file', limit: 6 },
-      agentToolContext,
-    )) as { readonly results: readonly { readonly name: string }[] };
-    expect(result.results.map(({ name }) => name)).not.toContain('read');
+
+    expect(result.output.length).toBeGreaterThan(12_000);
+    expect(result.output).toContain('[Read lines 1-500 of 500.]');
   });
+});
 
-  it('全部目标都是 core 时不启用工具路由', () => {
-    const coreTools = tools.map((tool) => ({
-      ...tool,
-      discovery: { ...tool.discovery, core: true },
-    }));
-    const runtime = createMetaToolRuntime(coreTools, [], config);
+describe('Command 输出预算', () => {
+  it('按 byte budget 截断超长单行并把完整输出写入 artifact', async () => {
+    const output = 'x'.repeat(64 * 1024);
+    let persisted = '';
 
-    expect(runtime.usesToolRouting).toBe(false);
-    expect(runtime.executionTools.map((tool) => tool.name)).toEqual([
-      'read',
-      'grep',
-      'write',
-    ]);
-    expect(runtime.modelTools.map((tool) => tool.name)).toEqual([
-      'read',
-      'grep',
-      'write',
-    ]);
-    expect(
-      runtime.modelTools.every((tool) => tool.discovery.core === true),
-    ).toBe(true);
-  });
-
-  it('库存分页不泄露 schema，精确搜索可返回当前模式的 Plan 工具', async () => {
-    const planTools = [
-      defineTool({
-        name: 'write_plan',
-        description: 'Write the complete plan.',
-        discovery: { aliases: ['save plan'], risk: 'workspace-write' },
-        input: z.object({ content: z.string() }).strict(),
-        execute: async () => 'written',
-      }),
-      defineTool({
-        name: 'request_plan_exit',
-        description: 'Request approval for the complete plan.',
-        discovery: { aliases: ['approve plan'], risk: 'workspace-write' },
-        input: z.object({}).strict(),
-        execute: async () => 'requested',
-      }),
-    ];
-    const runtime = createMetaToolRuntime([...tools, ...planTools], [], config);
-    const search = runtime.modelTools.find(
-      (tool) => tool.name === 'tool_search',
-    );
-    if (search === undefined || search.execution !== 'immediate') {
-      throw new Error('tool_search missing');
-    }
-
-    const inventory = (await search.execute(
-      { limit: 2 },
-      agentToolContext,
-    )) as {
-      readonly results: readonly Record<string, unknown>[];
-      readonly truncated: boolean;
-      readonly nextOffset?: number;
-    };
-    expect(inventory.truncated).toBe(true);
-    expect(inventory.nextOffset).toBe(2);
-    expect(
-      inventory.results.every((result) => !('inputSchema' in result)),
-    ).toBe(true);
-
-    const planSearch = (await search.execute(
-      { query: 'plan', limit: 6 },
-      agentToolContext,
-    )) as { readonly results: readonly { readonly name: string }[] };
-    expect(planSearch.results.map((result) => result.name)).toEqual(
-      expect.arrayContaining(['write_plan', 'request_plan_exit']),
-    );
-  });
-
-  it('搜索支持 exact、prefix、fuzzy、多词且结果排序稳定', () => {
-    const index = createToolSearchIndex(tools);
-
-    expect(index.search('read', 8)[0]?.name).toBe('read');
-    expect(index.search('rea', 8)[0]?.name).toBe('read');
-    expect(index.search('reed', 8)[0]?.name).toBe('read');
-    expect(index.search('search regex', 8)[0]?.name).toBe('grep');
-    expect(index.search('unrelated-capability', 8)).toEqual([]);
-    expect(index.search('file', 8)).toEqual(index.search('file', 8));
-  });
-
-  it('搜索拒绝空查询、非法 limit、非法 offset 和超大结果', async () => {
-    const index = createToolSearchIndex(tools);
-    expect(() => index.search(' ', 2)).toThrow('searchable text');
-    expect(() => index.search('read', 9)).toThrow('1 to 8');
-    expect(() => index.list(1, -1)).toThrow('non-negative integer');
-
-    const search = createToolSearchTool({
-      index,
-      resultLimit: 6,
-      maxResultBytes: 10,
-    });
-    expect(() =>
-      search.execute({ query: 'read', limit: 1 }, agentToolContext),
-    ).toThrow('exceeding');
-  });
-
-  it('call_tool 复用目标 schema 与审批策略并原样保留输出', async () => {
-    const output = { value: 42 };
-    const execute = vi.fn(() => output);
-    const approval = vi.fn(() => ({
-      action: 'required' as const,
-      metadata: {
-        permission: 'edit',
-        patterns: ['a.txt'],
-        always: ['a.txt'],
+    const result = await persistLargeOutput({
+      output,
+      limits: { maxBytes: 1_024, maxLines: 100, previewLines: 20 },
+      store: {
+        writeLargeOutput(input) {
+          persisted = input.content;
+          return Promise.resolve({
+            outputPath: '/workspace/artifacts/bash.txt',
+          });
+        },
       },
-    }));
-    const write = defineTool({
-      name: 'write',
-      description: 'Write a file.',
-      discovery: { aliases: ['save file'], risk: 'workspace-write' },
-      input: z.object({ path: z.string() }).strict(),
-      approval,
-      execute,
+      sessionId: 'session',
+      runId: 'run',
+      callId: 'call',
+      preferredName: 'bash.txt',
     });
-    const proxy = createCallTool([write]);
-    const input = { name: 'write', arguments: { path: 'a.txt' } };
 
-    await expect(
-      proxy.approval?.(input, agentToolContext),
-    ).resolves.toMatchObject({
-      action: 'required',
-      metadata: { proxiedTool: 'write' },
-    });
-    await expect(proxy.execute(input, agentToolContext)).resolves.toBe(output);
-    expect(approval).toHaveBeenCalledOnce();
-    expect(execute).toHaveBeenCalledOnce();
-  });
-
-  it('call_tool 拒绝未知、递归、重复和 schema 非法的目标调用', async () => {
-    const proxy = createCallTool([
-      targetTool('read', 'Read a file.', 'cat file'),
-    ]);
-    await expect(
-      proxy.execute({ name: 'missing', arguments: {} }, agentToolContext),
-    ).rejects.toThrow('Unknown or disabled');
-    await expect(
-      proxy.execute({ name: 'call_tool', arguments: {} }, agentToolContext),
-    ).rejects.toThrow('recursively');
-    await expect(
-      proxy.execute({ name: 'read', arguments: {} }, agentToolContext),
-    ).rejects.toThrow("Invalid arguments for tool 'read': path");
-    expect(() => createCallTool([tools[0]!, tools[0]!])).toThrow(
-      'Duplicate call_tool target',
-    );
-  });
-
-  it('事件投影向观察者呈现真实目标而非 wrapper', () => {
-    expect(
-      projectToolEvent({
-        type: 'tool.started',
-        runId: 'run-1',
-        sequence: 1,
-        occurredAt: new Date().toISOString(),
-        turnIndex: 0,
-        toolCallId: 'call-1',
-        name: 'call_tool',
-        input: { name: 'read', arguments: { path: 'a.txt' } },
-      }),
-    ).toMatchObject({ name: 'read', input: { path: 'a.txt' } });
+    expect(result.truncated).toBe(true);
+    if (!result.truncated) throw new Error('Expected a truncated output.');
+    expect(Buffer.byteLength(result.output, 'utf8')).toBeLessThanOrEqual(1_024);
+    expect(result.output).toContain('truncated');
+    expect(result.outputPath).toBe('/workspace/artifacts/bash.txt');
+    expect(persisted).toBe(output);
   });
 });
 
-const agentToolContext: AgentToolContext = {
-  runId: 'run-1',
-  turnIndex: 0,
-  toolCallId: 'call-1',
-  environment: {},
-  metadata: {},
-  signal: new AbortController().signal,
-};
-
-function targetTool(name: string, description: string, alias: string) {
-  return defineTool({
-    name,
-    description,
-    discovery: { aliases: [alias], risk: 'readonly' },
-    input: z
-      .object({ path: z.string().describe('Workspace file path') })
-      .strict(),
-    execute: ({ path: targetPath }) => ({ name, path: targetPath }),
-  });
-}
-
-function searchTool(name: 'grep' | 'glob') {
-  const tool = createSearchTools({} as CodingAgentConfig, () => 'auto').find(
-    (candidate) => candidate.name === name,
-  );
-  if (tool === undefined) {
-    throw new Error(`${name} tool missing`);
-  }
-  return tool;
-}
-
-function searchContext(root: string): CodingToolContext {
-  const fileSystem = testFileSystem(root);
-  return {
-    cwd: root,
-    allowedPaths: [root],
-    sessionId: 'session',
-    runId: 'run',
-    callId: 'call',
-    agent: {
-      runId: 'run',
-      turnIndex: 0,
-      toolCallId: 'call',
-      environment: { fileSystem },
-      metadata: {},
-      signal: new AbortController().signal,
+describe('文件写入审批边界', () => {
+  it.each([
+    {
+      name: 'write',
+      input: {
+        filePath: '/external/write.txt',
+        content: 'new\n',
+      },
+      externalDirs: ['/external/write.txt'],
     },
+    {
+      name: 'edit',
+      input: {
+        filePath: '/external/edit.txt',
+        oldText: 'old',
+        newText: 'new',
+      },
+      externalDirs: ['/external/edit.txt'],
+    },
+    {
+      name: 'apply_patch',
+      input: {
+        patch: `*** Begin Patch
+*** Update File: /external/source.txt
+*** Move to: /external/destination.txt
+@@
+-old
++new
+*** End Patch`,
+      },
+      externalDirs: ['/external/source.txt', '/external/destination.txt'],
+    },
+  ])(
+    '$name 在 external_directory 获批前不读取 Environment',
+    async ({ name, input, externalDirs }) => {
+      const readText = vi.fn(() =>
+        Promise.reject(new Error('approval performed filesystem I/O')),
+      );
+      const environment = createTestEnvironmentHandle('/workspace');
+      const context: CommandContext = {
+        runId: 'run',
+        turnIndex: 0,
+        commandId: 'call',
+        environment: {
+          ...environment,
+          fileSystem: { ...environment.fileSystem, readText },
+        },
+        metadata: {},
+        signal: new AbortController().signal,
+      };
+      const config = CodingAgentConfigSchema.parse({
+        cwd: '/workspace',
+        allowed_paths: [],
+        initial_mode: 'ask-before-changes',
+        models: {
+          test: {
+            protocol: 'openai',
+            endpoint: 'responses',
+            api_model: 'test-model',
+            base_url: 'https://api.example.test/v1',
+            api_key_env: 'TEST_API_KEY',
+            context_window: 128_000,
+            max_output_tokens: 16_000,
+          },
+        },
+        primary_model: 'test',
+        auxiliary_model: 'test',
+      });
+      const decide = makeApprovalPolicy(
+        config,
+        () => [],
+        () => ({
+          mode: 'ask-before-changes',
+          previousMode: null,
+          source: 'config',
+          changedAt: '2026-07-31T00:00:00.000Z',
+        }),
+      );
+      const tool = codingCommand(createFsCommands(config, decide), name);
+      if (tool.approval === undefined) {
+        throw new Error(`${name} approval missing`);
+      }
+
+      await expect(tool.approval(input, context)).resolves.toMatchObject({
+        action: 'required',
+        metadata: {
+          externalDirs,
+          request: { kind: 'edit' },
+        },
+      });
+      expect(readText).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('文件写入执行契约', () => {
+  it('使用 read 返回的 digest 覆写并拒绝 stale digest', async () => {
+    const root = await temporaryDirectory('ello-write-digest-');
+    await writeFile(path.join(root, 'existing.txt'), 'before\n', 'utf8');
+    const commands = createFsCommands({} as CodingAgentConfig, () => 'auto');
+    const read = codingCommand(commands, 'read');
+    const write = codingCommand(commands, 'write');
+    const context = searchContext(root);
+    const observed = await read.execute(
+      { filePath: 'existing.txt', offset: 1, limit: 10 },
+      context,
+    );
+    const expectedDigest = observed.metadata.sha256;
+    expect(expectedDigest).toMatch(/^[a-f\d]{64}$/u);
+
+    await expect(
+      write.execute(
+        { filePath: 'existing.txt', content: 'after\n', expectedDigest },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      metadata: { before: 'before\n', after: 'after\n' },
+    });
+
+    await writeFile(path.join(root, 'existing.txt'), 'other\n', 'utf8');
+    await expect(
+      write.execute(
+        { filePath: 'existing.txt', content: 'stale\n', expectedDigest },
+        context,
+      ),
+    ).rejects.toThrow('STALE_WRITE');
+    await expect(
+      readFile(path.join(root, 'existing.txt'), 'utf8'),
+    ).resolves.toBe('other\n');
+  });
+
+  it('在 Environment 报告 ENOENT 时创建新文件', async () => {
+    const root = await temporaryDirectory('ello-write-missing-');
+    const writeText = vi.fn(async (targetPath: string, content: string) => {
+      await mkdir(path.dirname(path.resolve(root, targetPath)), {
+        recursive: true,
+      });
+      await writeFile(path.resolve(root, targetPath), content, 'utf8');
+    });
+    const environment = createTestEnvironmentHandle(root);
+    const fileSystem = {
+      ...environment.fileSystem,
+      readText: vi.fn(() =>
+        Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+      ),
+      writeText,
+    };
+    const tool = codingCommand(
+      createFsCommands({} as CodingAgentConfig, () => 'auto'),
+      'write',
+    );
+
+    await expect(
+      tool.execute(
+        { filePath: 'nested/new.txt', content: 'created\n' },
+        {
+          runId: 'run',
+          turnIndex: 0,
+          commandId: 'call',
+          environment: { ...environment, fileSystem },
+          metadata: {},
+          signal: new AbortController().signal,
+        },
+      ),
+    ).resolves.toMatchObject({
+      metadata: { before: null, after: 'created\n' },
+    });
+    expect(writeText).toHaveBeenCalledWith('nested/new.txt', 'created\n');
+    await expect(
+      readFile(path.join(root, 'nested/new.txt'), 'utf8'),
+    ).resolves.toBe('created\n');
+  });
+});
+
+describe('工具失败恢复契约', () => {
+  it('相同错误生成稳定指纹，并在第二次失败后要求切换策略', () => {
+    const tracker = new CommandFailureTracker();
+    const first = tracker.create(
+      'read',
+      new Error('No such file at line 12: missing-123.txt'),
+    );
+    const second = tracker.create(
+      'read',
+      new Error('No such file at line 99: missing-456.txt'),
+    );
+
+    expect(first).toBeInstanceOf(CommandExecutionError);
+    expect(first.diagnostic).toMatchObject({
+      code: 'PATH_NOT_FOUND',
+      attempt: 1,
+      attemptsRemaining: 1,
+      retryable: true,
+      strategy: 'retry_with_context',
+    });
+    expect(second.diagnostic).toMatchObject({
+      fingerprint: first.diagnostic.fingerprint,
+      attempt: 2,
+      attemptsRemaining: 0,
+      retryable: false,
+      strategy: 'switch_strategy',
+    });
+  });
+});
+
+function codingCommand(commands: readonly CommandDefinition[], name: string) {
+  const command = commands.find((candidate) => candidate.name === name);
+  if (command === undefined || command.execution.kind !== 'immediate') {
+    throw new Error(`Missing immediate Command ${name}.`);
+  }
+  const execution = command.execution;
+  const parse = (input: unknown) =>
+    command.invocation.input.schema.parse(input);
+  return {
+    approval:
+      command.approval === undefined
+        ? undefined
+        : async (input: unknown, context: CommandContext) =>
+            command.approval?.(parse(input), context),
+    execute: async (
+      input: unknown,
+      context: CommandContext,
+    ): Promise<CommandResult> =>
+      (await execution.run(
+        input === undefined ? input : parse(input),
+        context,
+      )) as CommandResult,
   };
 }
 
-function testFileSystem(root: string): AgentFileSystem & {
-  resolvePath(targetPath: string): string;
-  stat(targetPath: string): ReturnType<typeof stat>;
-} {
+function searchTool(name: 'grep' | 'glob', provider?: SearchProvider) {
+  const command = codingCommand(
+    createSearchCommands({} as CodingAgentConfig, () => 'auto', provider),
+    'search',
+  );
+  return {
+    execute: (input: unknown, context: CommandContext) =>
+      command.execute(
+        {
+          kind: name === 'grep' ? 'text' : 'files',
+          ...(input as Record<string, unknown>),
+        },
+        context,
+      ),
+  };
+}
+
+function searchContext(root: string): CommandContext {
+  const fileSystem = testFileSystem(root);
+  const environment = createTestEnvironmentHandle(root);
+  return {
+    runId: 'run',
+    turnIndex: 0,
+    commandId: 'call',
+    environment: {
+      ...environment,
+      fileSystem,
+      processes: noNativeProcesses(),
+    },
+    metadata: {},
+    signal: new AbortController().signal,
+  };
+}
+
+function toolContext(
+  root: string,
+  processes: EnvironmentProcesses,
+): CommandContext {
+  const context = searchContext(root);
+  return {
+    ...context,
+    environment: { ...context.environment, processes },
+  };
+}
+
+function testFileSystem(root: string): EnvironmentFileSystem {
   const resolvePath = (targetPath: string): string =>
     path.isAbsolute(targetPath)
       ? path.resolve(targetPath)
       : path.resolve(root, targetPath);
   return {
     resolvePath,
+    readFile: (targetPath) => readFile(resolvePath(targetPath)),
     readText: (targetPath) => readFile(resolvePath(targetPath), 'utf8'),
+    async writeFile(targetPath, content) {
+      const resolved = resolvePath(targetPath);
+      await mkdir(path.dirname(resolved), { recursive: true });
+      await writeFile(resolved, content);
+    },
     async writeText(targetPath, content) {
       const resolved = resolvePath(targetPath);
       await mkdir(path.dirname(resolved), { recursive: true });
       await writeFile(resolved, content);
     },
     listDir: (targetPath) => readdir(resolvePath(targetPath)),
-    stat: (targetPath) => stat(resolvePath(targetPath)),
+    async stat(targetPath) {
+      const value = await stat(resolvePath(targetPath));
+      return {
+        kind: value.isDirectory()
+          ? 'directory'
+          : value.isFile()
+            ? 'file'
+            : value.isSymbolicLink()
+              ? 'symlink'
+              : 'other',
+        size: value.size,
+        modifiedAtMs: value.mtimeMs,
+      };
+    },
+    remove: (targetPath) => rm(resolvePath(targetPath)),
   };
+}
+
+function testProcesses(
+  exec: EnvironmentProcesses['exec'],
+): EnvironmentProcesses {
+  return { ...createTestEnvironmentHandle().processes, exec };
+}
+
+function noNativeProcesses(): EnvironmentProcesses {
+  return testProcesses(() =>
+    Promise.reject(
+      Object.assign(new Error('Native process unavailable.'), {
+        code: 'ENOENT',
+      }),
+    ),
+  );
 }

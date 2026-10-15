@@ -5,7 +5,6 @@ import { ElloMark } from './TurnView';
 import { Button } from '@/components/ui/Button';
 import { Kbd } from '@/components/ui/Kbd';
 import { newThreadInContext } from '@/features/thread';
-import { runOperation } from '@/lib/report';
 import {
   useRequestComposerPrefill,
   useSelectedWorkspace,
@@ -40,7 +39,7 @@ export function TimelineEmpty(props: {
           <Button
             variant="primary"
             icon={<MessageSquarePlus size={15} />}
-            onClick={() => void runOperation(newThreadInContext())}
+            onClick={() => newThreadInContext()}
           >
             新建会话
           </Button>

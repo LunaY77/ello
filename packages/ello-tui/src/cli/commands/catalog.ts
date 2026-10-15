@@ -26,31 +26,11 @@ export function registerCatalogCommands(program: Command): void {
         );
       },
     );
-
-  program
-    .command('providers [operation] [providerId]')
-    .description('list providers')
-    .option('--json')
-    .action(
-      async (
-        operation = 'list',
-        providerId: string | undefined,
-        _options: Record<string, unknown>,
-        command: Command,
-      ) => {
-        await runCatalog(
-          resolveGlobalOptions(command),
-          'provider/list',
-          operation,
-          providerId,
-        );
-      },
-    );
 }
 
 async function runCatalog(
   global: GlobalCliOptions,
-  method: 'model/list' | 'provider/list',
+  method: 'model/list',
   operation: string,
   id: string | undefined,
 ): Promise<void> {

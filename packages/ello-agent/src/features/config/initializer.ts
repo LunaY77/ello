@@ -14,9 +14,9 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { errnoCode } from '../../infra/filesystem.js';
+import { bundledAssetDir } from '../../infra/paths.js';
 
 import {
   globalCacheDir,
@@ -54,7 +54,7 @@ export async function ensureElloHome(): Promise<void> {
  * 初始化全局配置和运行目录。
  *
  * 只会在文件不存在时复制模板；传入 force 时才覆盖现有 config/mcp 文件。
- * 工具配置写在 config.yaml 的 `tools` 分组中。
+ * Command 配置写在 config.yaml 的 `commands` 分组中。
  *
  * Args:
  * - `options`: 仅作用于 `ensureGlobalConfig` 的调用选项；函数只读取该对象，不保留可变引用；省略时使用声明中明确的调用语义。
@@ -169,8 +169,14 @@ async function readTextIfExists(filePath: string): Promise<string> {
  * - 返回相对于当前模块解析的绝对路径，源码与构建产物使用同一目录关系。
  */
 function templatePath(name: string): string {
-  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(moduleDir, 'templates', name);
+  return path.join(
+    bundledAssetDir({
+      moduleUrl: import.meta.url,
+      dirName: 'templates',
+      distRelative: path.join('features', 'config', 'templates'),
+    }),
+    name,
+  );
 }
 
 /**

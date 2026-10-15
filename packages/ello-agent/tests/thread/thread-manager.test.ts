@@ -13,9 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   AgentRun,
   AgentRunEvent,
+  AgentRunInput,
   AgentRunResult,
-  AgentRunRequest,
 } from '../../src/features/agent/index.js';
+import type { CommandRunCheckpoint } from '../../src/features/command/index.js';
 import { compactionView } from '../../src/features/thread/compact.js';
 import {
   createThreadFeature,
@@ -45,8 +46,6 @@ const EMPTY_USAGE: Usage = {
 function testInitialSettings(params: ParsedClientParams<'thread/start'>) {
   return Promise.resolve({
     mode: params.mode ?? 'ask-before-changes',
-    profile: params.profile ?? 'test',
-    model: params.model ?? 'test:model',
     agent: params.agent ?? 'build',
   } as const);
 }
@@ -56,8 +55,6 @@ function testSettingsUpdate(
 ): Promise<Partial<ThreadSnapshot['settings']>> {
   return Promise.resolve({
     ...(params.mode === undefined ? {} : { mode: params.mode }),
-    ...(params.profile === undefined ? {} : { profile: params.profile }),
-    ...(params.model === undefined ? {} : { model: params.model }),
     ...(params.agent === undefined ? {} : { agent: params.agent }),
   });
 }
@@ -98,8 +95,6 @@ describe('ThreadFeature', () => {
 
     expect(attachment.snapshot.settings).toEqual({
       mode: 'ask-before-changes',
-      profile: 'test',
-      model: 'test:model',
       agent: 'build',
     });
   });
@@ -146,7 +141,7 @@ describe('ThreadFeature', () => {
     const attachment = await startThread(manager, 'connection-1');
     await attachment.runtime.startTurn([{ type: 'text', text: 'first' }]);
     await expect(
-      attachment.runtime.steerTurn('turn_stale', [
+      attachment.runtime.steerTurn('turn_stale', 'steer_stale', [
         { type: 'text', text: 'steer' },
       ]),
     ).rejects.toMatchObject({ type: 'turnMismatch' });
@@ -157,6 +152,41 @@ describe('ThreadFeature', () => {
       status: 'completed',
       usage: EMPTY_USAGE,
     });
+  });
+
+  it('Agent 消费 steer 后把它持久化为带关联 id 的用户消息', async () => {
+    const attachment = await startThread(manager, 'connection-1');
+    const turn = await attachment.runtime.startTurn([
+      { type: 'text', text: 'first' },
+    ]);
+    const run = agent.run(attachment.snapshot.thread.id);
+
+    await attachment.runtime.steerTurn(turn.id, 'steer_focus', [
+      { type: 'text', text: 'focus tests' },
+    ]);
+    expect(run.steers).toEqual([
+      { steerId: 'steer_focus', text: 'focus tests' },
+    ]);
+
+    run.emit({
+      type: 'steeringConsumed',
+      steerId: 'steer_focus',
+      text: 'focus tests',
+      occurredAt: '2026-07-28T00:00:00.000Z',
+    });
+
+    await vi.waitFor(async () => {
+      expect(
+        (await attachment.runtime.snapshot()).turns[0]?.items,
+      ).toContainEqual(
+        expect.objectContaining({
+          type: 'userMessage',
+          steerId: 'steer_focus',
+          text: 'focus tests',
+        }),
+      );
+    });
+    run.finish({ status: 'completed', usage: EMPTY_USAGE });
   });
 
   it('fork 生成新 thread、turn 和 item id，原 thread 不变', async () => {
@@ -255,6 +285,7 @@ describe('ThreadFeature', () => {
     expect(snapshot.usage).toEqual({
       requests: 5,
       inputTokens: 50,
+      lastInputTokens: 30,
       outputTokens: 12,
       cacheReadTokens: 10,
       cacheWriteTokens: 3,
@@ -308,24 +339,57 @@ describe('ThreadFeature', () => {
     await attachment.runtime.startTurn([{ type: 'text', text: 'finish' }]);
     const handle = agent.run(attachment.snapshot.thread.id);
     handle.emit({
-      type: 'toolStarted',
-      toolCallId: 'item_goal_update',
-      name: 'update_goal',
-      input: { status: 'complete' },
-      occurredAt: new Date().toISOString(),
+      type: 'commandRunEvent',
+      event: {
+        type: 'command_run.started',
+        commandRunId: 'command-run:goal',
+        providerToolCallId: 'outer_goal',
+        commands: [
+          {
+            index: 0,
+            step: 1,
+            command: 'command_invoke',
+            input: {
+              name: 'update_goal',
+              arguments: { status: 'complete' },
+            },
+            inputDigest: 'a'.repeat(64),
+            commandId: 'command-run:goal:0',
+            onFailure: 'stop',
+          },
+        ],
+        occurredAt: new Date().toISOString(),
+      },
     });
     handle.emit({
-      type: 'toolCompleted',
-      toolCallId: 'item_goal_update',
-      output: {
-        kind: 'thread-goal-updated',
-        goal: {
-          ...goal,
-          status: 'complete',
-          updatedAt: new Date().toISOString(),
+      type: 'commandRunEvent',
+      event: {
+        type: 'command.completed',
+        record: {
+          commandRunId: 'command-run:goal',
+          commandId: 'command-run:goal:0',
+          index: 0,
+          step: 1,
+          name: 'update_goal',
+          input: {
+            name: 'update_goal',
+            arguments: { status: 'complete' },
+          },
+          inputDigest: 'a'.repeat(64),
+          status: 'completed',
+          output: {
+            kind: 'thread-goal-updated',
+            goal: {
+              ...goal,
+              status: 'complete',
+              updatedAt: new Date().toISOString(),
+            },
+          },
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
         },
+        occurredAt: new Date().toISOString(),
       },
-      occurredAt: new Date().toISOString(),
     });
     handle.finish({
       status: 'completed',
@@ -340,12 +404,119 @@ describe('ThreadFeature', () => {
     });
 
     await vi.waitFor(async () => {
-      expect((await attachment.runtime.snapshot()).goal).toMatchObject({
+      const current = await attachment.runtime.snapshot();
+      expect(current.goal).toMatchObject({
         id: goal.id,
         status: 'complete',
         tokensUsed: 15,
       });
     });
+  });
+
+  it('将 Command Run 编辑结果投影为协议 FileChange', async () => {
+    const attachment = await startThread(manager, 'connection-command-file');
+    await attachment.runtime.startTurn([{ type: 'text', text: 'write' }]);
+    const handle = agent.run(attachment.snapshot.thread.id);
+    const occurredAt = new Date().toISOString();
+    const commandRunId = 'command-run:file-change';
+    const commandId = `${commandRunId}:0`;
+    const inputDigest = 'a'.repeat(64);
+    handle.emit({
+      type: 'commandRunEvent',
+      event: {
+        type: 'command_run.started',
+        commandRunId,
+        providerToolCallId: 'file-change',
+        commands: [
+          {
+            index: 0,
+            step: 1,
+            command: 'write',
+            input: { filePath: 'test.txt', content: 'new\n' },
+            inputDigest,
+            commandId,
+            onFailure: 'stop',
+          },
+        ],
+        occurredAt,
+      },
+    });
+    const internalFileChanges = [
+      {
+        kind: 'added' as const,
+        path: 'test.txt',
+        after: 'new\n',
+        additions: 1,
+        deletions: 0 as const,
+        hunks: [],
+        unifiedDiff: '--- /dev/null\n+++ test.txt\n@@ -0,0 +1 @@\n+new',
+      },
+    ];
+    handle.emit({
+      type: 'commandRunEvent',
+      event: {
+        type: 'command.completed',
+        record: {
+          commandRunId,
+          commandId,
+          index: 0,
+          step: 1,
+          name: 'write',
+          input: { filePath: 'test.txt', content: 'new\n' },
+          inputDigest,
+          status: 'completed',
+          output: {
+            kind: 'command-result',
+            title: 'Write test.txt',
+            output: 'Wrote test.txt.',
+            metadata: { kind: 'edit', fileChanges: internalFileChanges },
+          },
+          metadata: { kind: 'edit', fileChanges: internalFileChanges },
+          startedAt: occurredAt,
+          completedAt: occurredAt,
+        },
+        occurredAt,
+      },
+    });
+
+    await vi.waitFor(async () => {
+      const snapshot = await attachment.runtime.snapshot();
+      const item = snapshot.turns[0]?.items.find(
+        (candidate) => candidate.type === 'commandRun',
+      );
+      expect(item).toMatchObject({
+        type: 'commandRun',
+        commands: [
+          {
+            output: {
+              metadata: {
+                fileChanges: [
+                  {
+                    kind: 'add',
+                    path: 'test.txt',
+                    additions: 1,
+                    deletions: 0,
+                    diff: internalFileChanges[0]?.unifiedDiff,
+                  },
+                ],
+              },
+            },
+            metadata: {
+              fileChanges: [
+                {
+                  kind: 'add',
+                  path: 'test.txt',
+                  additions: 1,
+                  deletions: 0,
+                  diff: internalFileChanges[0]?.unifiedDiff,
+                },
+              ],
+            },
+          },
+        ],
+      });
+    });
+    handle.finish({ status: 'completed', usage: EMPTY_USAGE });
   });
 
   it('thread/read 不加载 executor', async () => {
@@ -426,8 +597,6 @@ describe('ThreadFeature', () => {
       name: 'recovery',
       settings: {
         mode: 'ask-before-changes',
-        profile: 'main',
-        model: 'test:model',
         agent: 'primary',
       },
       metadata: {},
@@ -477,6 +646,72 @@ describe('ThreadFeature', () => {
         status: 'inProgress',
       },
     });
+    const digest = 'a'.repeat(64);
+    await logs.append(recoveryThreadId, {
+      kind: 'transcript.entry',
+      turnId: recoveryTurnId,
+      role: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'outer_recovery',
+            toolName: 'command_run',
+            input: {
+              commands: [{ step: 1, command: 'bash', body: 'sleep 30' }],
+            },
+          },
+        ],
+      },
+    });
+    await logs.append(recoveryThreadId, {
+      kind: 'item.started',
+      turnId: recoveryTurnId,
+      item: {
+        type: 'commandRun',
+        id: 'command-run:outer_recovery',
+        turnId: recoveryTurnId,
+        createdAt,
+        providerToolCallId: 'outer_recovery',
+        status: 'inProgress',
+        commands: [
+          {
+            commandId: 'command-run:outer_recovery:0',
+            index: 0,
+            step: 1,
+            name: 'bash',
+            input: { command: 'sleep 30', timeoutMs: 30_000 },
+            inputDigest: digest,
+            status: 'running',
+            startedAt: createdAt,
+          },
+        ],
+        checkpoint: {
+          schema: 1,
+          commandRunId: 'command-run:outer_recovery',
+          providerToolCallId: 'outer_recovery',
+          inputDigest: digest,
+          catalogRevision: digest,
+          compiledFrames: [
+            {
+              index: 0,
+              step: 1,
+              command: 'bash',
+              input: { command: 'sleep 30', timeoutMs: 30_000 },
+              inputDigest: digest,
+              commandId: 'command-run:outer_recovery:0',
+              onFailure: 'stop',
+            },
+          ],
+          results: [],
+          phaseCursor: 0,
+          approvals: [],
+          pendingCommandIds: ['command-run:outer_recovery:0'],
+          pendingKind: 'approval',
+        },
+      },
+    });
     await logs.append(recoveryThreadId, {
       kind: 'serverRequest.created',
       request: {
@@ -484,7 +719,8 @@ describe('ThreadFeature', () => {
         method: 'item/tool/requestUserInput',
         threadId: recoveryThreadId,
         turnId: recoveryTurnId,
-        itemId: 'item_recovery',
+        itemId: 'command-run:outer_recovery',
+        commandId: 'command-run:outer_recovery:0',
         params: {},
         createdAt,
       },
@@ -510,7 +746,48 @@ describe('ThreadFeature', () => {
     expect(
       snapshot.turns[0]?.items.find((item) => item.type === 'agentMessage'),
     ).toMatchObject({ status: 'failed' });
+    expect(
+      snapshot.turns[0]?.items.find((item) => item.type === 'commandRun'),
+    ).toMatchObject({
+      id: 'command-run:outer_recovery',
+      status: 'interrupted',
+      commands: [{ status: 'interrupted' }],
+    });
     expect(snapshot.pendingServerRequests).toEqual([]);
+    const recoveredRecords = await logs.read(recoveryThreadId);
+    expect(
+      recoveredRecords.find(
+        (record) =>
+          record.kind === 'turn.interrupted' &&
+          record.turn.id === recoveryTurnId,
+      ),
+    ).toMatchObject({
+      turn: {
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'commandRun',
+            status: 'interrupted',
+          }),
+        ]),
+      },
+    });
+    expect(
+      recoveredRecords.find(
+        (record) =>
+          record.kind === 'transcript.entry' && record.role === 'tool',
+      ),
+    ).toMatchObject({
+      message: {
+        role: 'tool',
+        content: [
+          expect.objectContaining({
+            type: 'tool-result',
+            toolCallId: 'outer_recovery',
+            toolName: 'command_run',
+          }),
+        ],
+      },
+    });
     expect(storage.threads.state(recoveryThreadId)?.seq).toBe(snapshot.seq);
     expect(recoveryAgent.started).toBe(0);
   });
@@ -693,81 +970,19 @@ describe('ThreadFeature', () => {
     const threadId = attachment.snapshot.thread.id;
 
     await expect(manager.archive(threadId)).resolves.toMatchObject({
-      thread: { id: threadId, archived: true, status: 'idle' },
-      seq: 2,
+      id: threadId,
+      archived: true,
+      status: 'archived',
     });
     expect(storage.threads.state(threadId)?.archived).toBe(true);
-    await expect(manager.archive(threadId)).rejects.toMatchObject({
-      type: 'invalidParams',
-    });
-    await expect(
-      manager.resume(
-        'connection-archived',
-        { threadId, subscribe: false },
-        undefined,
-      ),
-    ).rejects.toThrow('must be unarchived before resume');
-    await expect(
-      manager.fork(
-        'connection-fork-archived',
-        { threadId, subscribe: false },
-        undefined,
-      ),
-    ).rejects.toThrow('must be unarchived before fork');
-    await expect(
-      attachment.runtime.startTurn([{ type: 'text', text: 'too late' }]),
-    ).rejects.toThrow(`Thread ${threadId} is closing.`);
     await expect(manager.unarchive(threadId)).resolves.toMatchObject({
-      thread: { id: threadId, archived: false, status: 'idle' },
-      seq: 3,
+      id: threadId,
+      archived: false,
+      status: 'idle',
     });
     expect(storage.threads.state(threadId)?.archived).toBe(false);
-    await expect(manager.unarchive(threadId)).rejects.toMatchObject({
-      type: 'invalidParams',
-    });
     await manager.delete(threadId);
     expect(storage.threads.state(threadId)).toBeNull();
-  });
-
-  it('active turn 或 pending Server Request 存在时拒绝 archive', async () => {
-    const attachment = await startThread(manager, 'connection-archive-busy');
-    const threadId = attachment.snapshot.thread.id;
-    await attachment.runtime.startTurn([{ type: 'text', text: 'busy' }]);
-
-    await expect(manager.archive(threadId)).rejects.toMatchObject({
-      type: 'threadBusy',
-    });
-    expect(storage.threads.state(threadId)?.archived).toBe(false);
-
-    const handle = agent.run(threadId);
-    handle.emit({
-      type: 'interactionRequired',
-      interaction: {
-        type: 'approval',
-        interactionId: 'item_archive_pending',
-        item: {
-          kind: 'approval',
-          toolCallId: 'item_archive_pending',
-          toolName: 'bash',
-          input: { command: 'pwd' },
-          metadata: {
-            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
-          },
-        },
-        occurredAt: new Date().toISOString(),
-      },
-    });
-    await vi.waitFor(async () => {
-      expect(
-        (await attachment.runtime.snapshot()).pendingServerRequests,
-      ).toHaveLength(1);
-    });
-
-    await expect(manager.archive(threadId)).rejects.toMatchObject({
-      type: 'threadBusy',
-    });
-    expect(storage.threads.state(threadId)?.archived).toBe(false);
-    handle.finish({ status: 'completed', usage: EMPTY_USAGE });
   });
 
   it('启动时重建偏离 catalog 并删除孤儿目录', async () => {
@@ -779,7 +994,7 @@ describe('ThreadFeature', () => {
       parseThreadRecord(
         {
           kind: 'thread.created',
-          schema: 1,
+          schema: 2,
           seq: 1,
           threadId: 'thr_orphan',
           createdAt: new Date().toISOString(),
@@ -788,8 +1003,6 @@ describe('ThreadFeature', () => {
           name: 'orphan',
           settings: {
             mode: 'ask-before-changes',
-            profile: 'main',
-            model: 'test:model',
             agent: 'primary',
           },
           metadata: {},
@@ -851,6 +1064,101 @@ describe('ThreadFeature', () => {
     });
   });
 
+  it('child 交互通过 root thread 上浮，并携带 Agent 归属信息', async () => {
+    const attachment = await startThread(manager, 'connection-1');
+    const childRun = new FakeAgentRun();
+    const childStartedAt = new Date().toISOString();
+    await attachment.runtime.registerAgentInteraction(
+      'job_child',
+      childStartedAt,
+      {
+        type: 'approval',
+        interactionId: 'child_approval',
+        item: {
+          kind: 'approval',
+          toolCallId: 'child_approval',
+          commandName: 'bash',
+          input: { command: 'pwd' },
+          metadata: {
+            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
+          },
+        },
+        occurredAt: childStartedAt,
+      },
+      childRun,
+      {
+        taskId: 'job_child',
+        name: 'explore',
+        definitionName: 'explore',
+        description: '检查仓库',
+        cwd: '/workspace',
+      },
+    );
+
+    const pending = (await attachment.runtime.snapshot())
+      .pendingServerRequests[0];
+    expect(pending?.params).toMatchObject({
+      agent: {
+        taskId: 'job_child',
+        name: 'explore',
+        description: '检查仓库',
+        cwd: '/workspace',
+      },
+    });
+    if (pending === undefined) throw new Error('Missing child approval.');
+    await attachment.runtime.resolveServerRequest(pending.id, {
+      decision: 'accept',
+    });
+    expect(childRun.resolutions).toEqual(['child_approval']);
+  });
+
+  it('正常关闭会持久拒绝 child 待处理交互，不留下失去运行句柄的请求', async () => {
+    const attachment = await startThread(manager, 'connection-1');
+    const childRun = new FakeAgentRun();
+    const childStartedAt = new Date().toISOString();
+    await attachment.runtime.registerAgentInteraction(
+      'job_child_close',
+      childStartedAt,
+      {
+        type: 'approval',
+        interactionId: 'child_approval_close',
+        item: {
+          kind: 'approval',
+          toolCallId: 'child_approval_close',
+          commandName: 'bash',
+          input: { command: 'pwd' },
+          metadata: {
+            request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
+          },
+        },
+        occurredAt: childStartedAt,
+      },
+      childRun,
+      {
+        taskId: 'job_child_close',
+        name: 'explore',
+        definitionName: 'explore',
+        description: '检查关闭流程',
+        cwd: '/workspace',
+      },
+    );
+
+    await manager.close();
+
+    expect(childRun.rejections).toEqual([
+      expect.objectContaining({
+        type: 'rejected',
+        interactionId: 'child_approval_close',
+      }),
+    ]);
+    expect(await logs.read(attachment.snapshot.thread.id)).toContainEqual(
+      expect.objectContaining({
+        kind: 'serverRequest.resolved',
+        resolution: 'rejected',
+      }),
+    );
+  });
+
   it('Server Request 只接受第一条 response', async () => {
     const attachment = await startThread(manager, 'connection-1');
     await attachment.runtime.startTurn([{ type: 'text', text: 'approval' }]);
@@ -863,8 +1171,13 @@ describe('ThreadFeature', () => {
         item: {
           kind: 'approval',
           toolCallId: 'item_approval',
-          toolName: 'bash',
+          commandName: 'bash',
           input: { command: 'pwd' },
+          commandRunCheckpoint: commandRunCheckpoint(
+            'command-run:item_approval',
+            'item_approval',
+            'approval',
+          ),
           metadata: {
             request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
           },
@@ -877,18 +1190,89 @@ describe('ThreadFeature', () => {
         (await attachment.runtime.snapshot()).pendingServerRequests,
       ).toHaveLength(1);
     });
-    const requestId = (await attachment.runtime.snapshot())
-      .pendingServerRequests[0]?.id;
-    if (requestId === undefined) throw new Error('Missing Server Request.');
-    await attachment.runtime.resolveServerRequest(requestId, {
+    const pending = (await attachment.runtime.snapshot())
+      .pendingServerRequests[0];
+    if (pending === undefined) throw new Error('Missing Server Request.');
+    expect(pending).toMatchObject({
+      itemId: 'command-run:item_approval',
+      commandId: 'item_approval',
+      params: {
+        itemId: 'command-run:item_approval',
+        commandId: 'item_approval',
+      },
+    });
+    await attachment.runtime.resolveServerRequest(pending.id, {
       decision: 'accept',
     });
     await expect(
-      attachment.runtime.resolveServerRequest(requestId, {
+      attachment.runtime.resolveServerRequest(pending.id, {
         decision: 'accept',
       }),
     ).rejects.toMatchObject({ type: 'requestResolved' });
     expect(handle.resolutions).toEqual(['item_approval']);
+    handle.finish({ status: 'completed', usage: EMPTY_USAGE });
+  });
+
+  it('request_user_input Server Request 同时标识 Command Run group 与组内 Command', async () => {
+    const attachment = await startThread(manager, 'connection-user-input');
+    await attachment.runtime.startTurn([{ type: 'text', text: 'question' }]);
+    const handle = agent.run(attachment.snapshot.thread.id);
+    handle.emit({
+      type: 'interactionRequired',
+      interaction: {
+        type: 'toolResult',
+        interactionId: 'command-user-input',
+        item: {
+          kind: 'tool-call',
+          toolCallId: 'command-user-input',
+          commandName: 'request_user_input',
+          input: {
+            questions: [
+              {
+                id: 'continue_work',
+                header: 'Continue',
+                question: 'Continue with the change?',
+                options: [
+                  { label: 'Yes', description: 'Continue now.' },
+                  { label: 'No', description: 'Stop here.' },
+                ],
+                multiSelect: false,
+              },
+            ],
+          },
+          commandRunCheckpoint: commandRunCheckpoint(
+            'command-run:outer-user-input',
+            'command-user-input',
+            'deferred',
+          ),
+        },
+        occurredAt: new Date().toISOString(),
+      },
+    });
+
+    await vi.waitFor(async () => {
+      expect(
+        (await attachment.runtime.snapshot()).pendingServerRequests,
+      ).toHaveLength(1);
+    });
+    const pending = (await attachment.runtime.snapshot())
+      .pendingServerRequests[0];
+    if (pending === undefined) throw new Error('Missing Server Request.');
+    expect(pending).toMatchObject({
+      method: 'item/tool/requestUserInput',
+      itemId: 'command-run:outer-user-input',
+      commandId: 'command-user-input',
+      params: {
+        itemId: 'command-run:outer-user-input',
+        commandId: 'command-user-input',
+      },
+    });
+
+    await attachment.runtime.resolveServerRequest(pending.id, {
+      status: 'submitted',
+      answers: [{ questionId: 'continue_work', selected: ['Yes'] }],
+    });
+    expect(handle.resolutions).toEqual(['command-user-input']);
     handle.finish({ status: 'completed', usage: EMPTY_USAGE });
   });
 
@@ -922,7 +1306,7 @@ describe('ThreadFeature', () => {
         item: {
           kind: 'approval',
           toolCallId: 'item_approval',
-          toolName: 'bash',
+          commandName: 'bash',
           input: { command: 'pwd' },
           metadata: {
             request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
@@ -956,7 +1340,7 @@ describe('ThreadFeature', () => {
         item: {
           kind: 'approval',
           toolCallId: 'item_approval_failed',
-          toolName: 'bash',
+          commandName: 'bash',
           input: { command: 'pwd' },
           metadata: {
             request: { kind: 'shell', command: 'pwd', cwd: '/workspace' },
@@ -992,6 +1376,37 @@ function startParams() {
   } as const;
 }
 
+function commandRunCheckpoint(
+  commandRunId: string,
+  commandId: string,
+  pendingKind: CommandRunCheckpoint['pendingKind'],
+): CommandRunCheckpoint {
+  const digest = 'd'.repeat(64);
+  return {
+    schema: 1,
+    commandRunId,
+    providerToolCallId: commandRunId.replace('command-run:', ''),
+    inputDigest: digest,
+    catalogRevision: 'c'.repeat(64),
+    compiledFrames: [
+      {
+        index: 0,
+        step: 1,
+        command: pendingKind === 'approval' ? 'bash' : 'command_invoke',
+        input: {},
+        inputDigest: digest,
+        commandId,
+        onFailure: 'stop',
+      },
+    ],
+    results: [],
+    phaseCursor: 0,
+    approvals: [],
+    pendingCommandIds: [commandId],
+    pendingKind,
+  };
+}
+
 class FakeAgent {
   started = 0;
   private readonly runs = new Map<string, FakeAgentRun>();
@@ -1008,7 +1423,7 @@ class FakeAgent {
    * Throws:
    * - 当 测试夹具的 `thread-manager.test` 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
    */
-  startRun(input: AgentRunRequest): Promise<AgentRun> {
+  startRun(input: AgentRunInput): Promise<AgentRun> {
     this.started += 1;
     const run = new FakeAgentRun();
     this.runs.set(input.threadId, run);
@@ -1024,6 +1439,8 @@ class FakeAgent {
 
 class FakeAgentRun implements AgentRun {
   readonly resolutions: string[] = [];
+  readonly steers: Array<{ readonly steerId: string; readonly text: string }> =
+    [];
   readonly rejections: Array<
     Extract<Parameters<AgentRun['resume']>[0], { type: 'rejected' }>
   > = [];
@@ -1048,6 +1465,8 @@ class FakeAgentRun implements AgentRun {
   emit(event: AgentRunEvent): void {
     this.queue.push(event);
   }
+
+  acknowledgeCompaction(): void {}
 
   agentMessage(_turnId: string, text: string): void {
     const itemId = `item_${text.replaceAll(' ', '_')}`;
@@ -1076,7 +1495,11 @@ class FakeAgentRun implements AgentRun {
     this.resolveResult(result);
   }
 
-  steer(_input: string): void {}
+  steer(steerId: string, input: string): void {
+    this.steers.push({ steerId, text: input });
+  }
+
+  notify(): void {}
 
   interrupt(reason: string): void {
     this.finish({ status: 'interrupted', usage: EMPTY_USAGE, reason });

@@ -8,7 +8,7 @@ import type { AgentSkill } from '../../agent/engine/index.js';
 
 import type { SkillCatalog } from './index.js';
 
-export const ACTIVATE_SKILL_TOOL_NAME = 'activate_skill';
+export const ACTIVATE_SKILL_COMMAND_NAME = 'activate_skill';
 
 export interface SkillActivationRequest {
   readonly name: string;
@@ -60,6 +60,11 @@ export class SkillActivationService {
     if (name === '') throw new Error('Skill name must not be empty.');
     const skill = this.catalog.get(name);
     if (skill === undefined) {
+      if (this.catalog.list().length === 0) {
+        throw new Error(
+          `Cannot activate skill '${name}': the Skill catalog is empty; no global or project Skills are registered.`,
+        );
+      }
       const suggestions = this.catalog
         .search(name)
         .slice(0, 3)

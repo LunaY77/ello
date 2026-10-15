@@ -7,18 +7,19 @@
 export { createAgent } from './agent.js';
 export { createAgentMessage } from './messages.js';
 export {
+  MAX_MODEL_OUTPUT_TOKENS,
+  MAX_REASONING_CHARS_PER_CALL,
+} from './model.js';
+export {
   AgentStreamBackpressureError,
   ModelAdapterProtocolError,
 } from './errors.js';
-export { defineAnyTool, defineDeferredTool, defineTool } from './tools.js';
 export {
-  compactMessages,
   dynamicSystemSection,
   joinSystemCacheSegments,
   preserveToolCallPairs,
   skillIndexContext,
   splitSystemCacheSegments,
-  trimMessages,
   wrapDynamicSystemContent,
 } from './model-input.js';
 export { createEmptyUsage, mapAiSdkUsage } from './result.js';

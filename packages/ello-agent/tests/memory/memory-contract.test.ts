@@ -21,9 +21,11 @@ import { createCodingSystemPromptSection } from '../../src/features/agent/contex
 import type {
   AgentInput,
   AgentRunContext,
-  AgentToolContext,
-  AnyAgentTool,
 } from '../../src/features/agent/engine/index.js';
+import type {
+  CommandContext,
+  CommandDefinition,
+} from '../../src/features/command/index.js';
 import { CodingAgentConfigSchema } from '../../src/features/config/schema.js';
 import {
   createMemoryFeature,
@@ -32,7 +34,8 @@ import {
   MemoryIndexLoader,
   type MemoryStore,
 } from '../../src/features/memory/index.js';
-import { createProductionToolRuntime } from '../../src/features/tool/internal/production.js';
+import { createProductionCommandRuntime } from '../../src/features/tool/internal/production.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 import { createTestStores } from '../support/stores.js';
 
@@ -82,7 +85,7 @@ function memoryRunContext(input: AgentInput): AgentRunContext {
     input,
     context: undefined,
     options: {},
-    environment: {},
+    environment: createTestEnvironmentHandle(),
     metadata: {},
   };
 }
@@ -361,6 +364,7 @@ describe('Memory 上下文加载契约', () => {
       cwd: root,
       session_dir: path.join(root, 'sessions'),
       initial_mode: 'ask-before-changes',
+      ...modelConfig(),
       context: {
         memory: {
           enabled: true,
@@ -408,6 +412,7 @@ describe('Memory 生产装配契约', () => {
         cwd: root,
         session_dir: path.join(root, '.ello', 'sessions'),
         initial_mode: 'ask-before-changes',
+        ...modelConfig(),
         context: {
           memory: {
             enabled: true,
@@ -416,7 +421,7 @@ describe('Memory 生产装配契约', () => {
           },
         },
       });
-      const toolRuntime = createProductionToolRuntime({
+      const toolRuntime = createProductionCommandRuntime({
         config,
         taskBoards: storage.taskBoards,
         taskBoardScope: { type: 'session', sessionId: 'memory-runtime' },
@@ -432,7 +437,7 @@ describe('Memory 生产装配契约', () => {
         throw new Error('Memory runtime must be enabled by the test config.');
       }
       await memory.initialize();
-      expect(memory.tools.map((tool) => tool.name)).toEqual(
+      expect(memory.module.commands.map((tool) => tool.name)).toEqual(
         expect.arrayContaining([
           'memory_list',
           'memory_read',
@@ -441,19 +446,20 @@ describe('Memory 生产装配契约', () => {
           'memory_search',
         ]),
       );
-      expect(memory.tools.every((tool) => tool.discovery.core === true)).toBe(
-        true,
-      );
+      expect(
+        memory.module.commands.every(
+          (command) => command.exposure === 'inline',
+        ),
+      ).toBe(true);
       expect(
         (await memory.indexLoader.load()).sources[0]?.content,
       ).not.toContain('Runtime preference');
 
-      const write = immediateTool(memory.tools, 'memory_write');
+      const write = immediateTool(memory.module.commands, 'memory_write');
       await write.execute(
         {
           scope: 'private',
           file: 'runtime-preference.md',
-          expectedRevision: null,
           content: topic({
             name: 'Runtime preference',
             description: 'Production memory wiring',
@@ -480,6 +486,7 @@ describe('Memory 生产装配契约', () => {
         cwd: path.dirname(repository.roots.team),
         session_dir: path.join(repository.roots.team, '..', 'sessions'),
         initial_mode: 'plan',
+        ...modelConfig(),
         context: {
           memory: {
             enabled: true,
@@ -488,7 +495,7 @@ describe('Memory 生产装配契约', () => {
           },
         },
       });
-      const toolRuntime = createProductionToolRuntime({
+      const toolRuntime = createProductionCommandRuntime({
         config,
         taskBoards: storage.taskBoards,
         taskBoardScope: { type: 'session', sessionId: 'memory-plan' },
@@ -503,13 +510,12 @@ describe('Memory 生产装配契约', () => {
       if (!memory.enabled) {
         throw new Error('Memory runtime must be enabled by the test config.');
       }
-      const write = immediateTool(memory.tools, 'memory_write');
+      const write = immediateTool(memory.module.commands, 'memory_write');
       expect(
         write.approval?.(
           {
             scope: 'team',
             file: 'blocked.md',
-            expectedRevision: null,
             content: topic({
               name: 'Blocked',
               description: 'Must not write in Plan mode',
@@ -544,35 +550,80 @@ describe('Memory 生产装配契约', () => {
     );
     const notifications = vi.fn();
     const services = createMemoryFeature();
+    const previousHome = process.env.ELLO_HOME;
+    process.env.ELLO_HOME = root;
 
-    await expect(
-      invokeServiceRoute(
-        services,
-        createTestPeer({ notify: notifications }),
-        'memory/dream/start',
-        { cwd: root },
-      ),
-    ).rejects.toMatchObject({
-      type: 'invalidParams',
-      message: expect.stringContaining('no production dream runner'),
-    });
-    expect(notifications).not.toHaveBeenCalled();
+    try {
+      await expect(
+        invokeServiceRoute(
+          services,
+          createTestPeer({ notify: notifications }),
+          'memory/dream/start',
+          { cwd: root },
+        ),
+      ).rejects.toMatchObject({
+        type: 'invalidParams',
+        message: expect.stringContaining('no production dream runner'),
+      });
+      expect(notifications).not.toHaveBeenCalled();
+    } finally {
+      if (previousHome === undefined) delete process.env.ELLO_HOME;
+      else process.env.ELLO_HOME = previousHome;
+    }
   });
 });
 
-const TOOL_CONTEXT: AgentToolContext = {
+const TOOL_CONTEXT: CommandContext = {
   runId: 'run-memory',
   turnIndex: 0,
-  toolCallId: 'call-memory',
-  environment: {},
+  commandId: 'call-memory',
+  environment: createTestEnvironmentHandle(),
   metadata: {},
   signal: new AbortController().signal,
 };
 
-function immediateTool(tools: ReadonlyArray<AnyAgentTool>, name: string) {
-  const tool = tools.find((candidate) => candidate.name === name);
-  if (tool === undefined || tool.execution !== 'immediate') {
-    throw new Error(`Missing immediate tool ${name}.`);
+function modelConfig() {
+  return {
+    models: {
+      test: {
+        protocol: 'openai' as const,
+        endpoint: 'responses' as const,
+        api_model: 'test-model',
+        base_url: 'https://api.example.test/v1',
+        api_key_env: 'TEST_API_KEY',
+        context_window: 128_000,
+        max_output_tokens: 16_000,
+        reasoning_effort: 'medium' as const,
+      },
+    },
+    primary_model: 'test',
+    auxiliary_model: 'test',
+  };
+}
+
+function immediateTool(
+  commands: ReadonlyArray<CommandDefinition>,
+  name: string,
+) {
+  const command = commands.find((candidate) => candidate.name === name);
+  if (command === undefined || command.execution.kind !== 'immediate') {
+    throw new Error(`Missing immediate Command ${name}.`);
   }
-  return tool;
+  return {
+    approval:
+      command.approval === undefined
+        ? undefined
+        : (input: unknown, context: CommandContext) =>
+            command.approval?.(
+              command.invocation.input.schema.parse(input),
+              context,
+            ),
+    execute: (input: unknown, context: CommandContext) =>
+      command.execution.kind === 'immediate'
+        ? command.execution.run(
+            command.invocation.input.schema.parse(input),
+            context,
+          )
+        : undefined,
+  };
 }

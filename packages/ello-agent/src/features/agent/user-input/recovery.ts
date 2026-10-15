@@ -11,7 +11,7 @@ import {
   type PendingUserInput,
   type UserInputResolution,
 } from './schema.js';
-import { REQUEST_USER_INPUT_TOOL_NAME } from './tool.js';
+import { REQUEST_USER_INPUT_COMMAND_NAME } from './tool.js';
 
 /**
  * 从 raw active transcript 恢复唯一未配对的问询调用。
@@ -40,7 +40,8 @@ export function recoverPendingUserInput(
       if (
         message.role === 'assistant' &&
         part.type === 'tool-call' &&
-        readString(part.toolName ?? part.name) === REQUEST_USER_INPUT_TOOL_NAME
+        readString(part.toolName ?? part.name) ===
+          REQUEST_USER_INPUT_COMMAND_NAME
       ) {
         if (calls.has(id)) {
           throw new Error(

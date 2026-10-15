@@ -30,7 +30,8 @@ export type PermissionMetadata =
   | {
       readonly kind: 'edit';
       readonly path: string;
-      readonly fileChanges: readonly FileChange[];
+      /** external_directory 预检不读取文件，因此尚无可展示的 diff。 */
+      readonly fileChanges?: readonly FileChange[];
     }
   | {
       readonly kind: 'shell';

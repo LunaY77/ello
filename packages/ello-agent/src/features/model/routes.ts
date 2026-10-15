@@ -11,47 +11,33 @@ import {
 import type { RpcRouteFragment } from '../../server/rpc/route.js';
 import { loadCodingAgentConfig } from '../config/index.js';
 
-import { createProviderRegistry } from './providers/catalog/index.js';
+import { createModelRegistry } from './providers/catalog/index.js';
 
-type ModelMethod = 'model/list' | 'provider/list';
+type ModelMethod = 'model/list';
 
 /** model catalog 把 provider 内部描述投影为稳定的公开 CatalogEntry。 */
 const modelHandlers = {
   'model/list': async (_context, params) => {
     const config = await loadCodingAgentConfig({ cwd: params.cwd });
     return {
-      data: createProviderRegistry(config)
+      data: createModelRegistry(config)
         .listModels()
         .map((model) => ({
-          id: model.ref,
+          id: model.name,
           name: model.name,
-          title: model.ref,
-          enabled: model.status === 'active',
+          title: model.apiModel,
+          enabled: true,
           metadata: {
-            provider: model.providerId,
-            status: model.status,
-            context: model.limit.context,
-            output: model.limit.output,
-            toolCall: model.capabilities.toolCall,
-            reasoning: model.capabilities.reasoning,
-          },
-        })),
-    };
-  },
-  'provider/list': async (_context, params) => {
-    const config = await loadCodingAgentConfig({ cwd: params.cwd });
-    return {
-      data: createProviderRegistry(config)
-        .listProviders()
-        .map((provider) => ({
-          id: provider.id,
-          name: provider.name,
-          enabled: provider.enabled,
-          metadata: {
-            kind: provider.kind,
-            source: provider.source,
-            apiKeyConfigured: provider.apiKey !== undefined,
-            baseUrlConfigured: provider.baseUrl !== undefined,
+            protocol: model.protocol,
+            apiModel: model.apiModel,
+            contextWindow: model.contextWindow,
+            maxOutputTokens: model.maxOutputTokens,
+            selector:
+              config.primary_model === model.name
+                ? 'primary_model'
+                : config.auxiliary_model === model.name
+                  ? 'auxiliary_model'
+                  : null,
           },
         })),
     };
@@ -75,6 +61,5 @@ export function createModelRoutes(): RpcRouteFragment<ModelMethod> {
     bindFeatureRoute(modelHandlers, () => undefined, method);
   return {
     'model/list': bind('model/list'),
-    'provider/list': bind('provider/list'),
   };
 }

@@ -33,9 +33,9 @@ describe('ArtifactStore', () => {
   it('按 sha256 去重，并在最后一个引用释放后删除文件', async () => {
     const storage = await createTestStorage();
     const firstOwner = {
-      kind: 'checkpoint' as const,
-      id: 'checkpoint-1',
-      relation: 'before',
+      kind: 'session-export' as const,
+      id: 'export-1',
+      relation: 'content',
     };
     const secondOwner = {
       kind: 'tool-result' as const,
@@ -43,7 +43,7 @@ describe('ArtifactStore', () => {
       relation: 'full-output',
     };
     const first = await storage.artifacts.put({
-      kind: 'checkpoint',
+      kind: 'session-export',
       content: 'same content',
       contentType: 'text/plain; charset=utf-8',
       owner: firstOwner,
@@ -104,38 +104,6 @@ describe('ArtifactStore', () => {
       'sha256 mismatch',
     );
     expect(await readFile(row.path, 'utf8')).toBe('tampered');
-    storage.close();
-  });
-
-  it('仅回收过期临时引用，checkpoint 引用不受保留期影响', async () => {
-    const storage = await createTestStorage();
-    const retained = await storage.artifacts.put({
-      kind: 'checkpoint',
-      content: 'retained',
-      contentType: 'text/plain',
-      owner: { kind: 'checkpoint', id: 'checkpoint-old', relation: 'before' },
-    });
-    const expired = await storage.artifacts.put({
-      kind: 'shell-output',
-      content: 'expired',
-      contentType: 'text/plain',
-      owner: { kind: 'tool-result', id: 'job-old', relation: 'output' },
-    });
-    storage.db.$client
-      .prepare(
-        "update artifact_references set created_at = '2000-01-01T00:00:00.000Z'",
-      )
-      .run();
-
-    await expect(
-      storage.artifacts.deleteExpiredReferences('2001-01-01T00:00:00.000Z'),
-    ).resolves.toEqual({ deleted: 1, bytesFreed: 7 });
-    await expect(storage.artifacts.read(retained.id)).resolves.toEqual(
-      Buffer.from('retained'),
-    );
-    await expect(storage.artifacts.read(expired.id)).rejects.toThrow(
-      'Unknown artifact',
-    );
     storage.close();
   });
 

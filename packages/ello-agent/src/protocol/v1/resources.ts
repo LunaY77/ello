@@ -22,6 +22,7 @@ export const ThreadStatusSchema = z.enum([
   'awaitingUserInput',
   'interrupted',
   'failed',
+  'archived',
 ]);
 
 export const TurnStatusSchema = z.enum([
@@ -60,6 +61,7 @@ export const UserMessageItemSchema = z
     ...ItemBaseShape,
     type: z.literal('userMessage'),
     text: z.string(),
+    steerId: OpaqueIdSchema.optional(),
   })
   .strict();
 
@@ -123,9 +125,152 @@ export const ToolCallItemSchema = z
     toolName: z.string().min(1),
     headline: z.string(),
     status: ItemStatusSchema,
+    error: z.string().min(1).optional(),
     outputPreview: z.string().optional(),
     artifactId: OpaqueIdSchema.optional(),
     metadata: z.record(z.string(), JsonValueSchema).optional(),
+  })
+  .strict();
+
+export const CommandRunCommandSchema = z
+  .object({
+    commandId: OpaqueIdSchema,
+    index: NonNegativeIntegerSchema,
+    step: z.number().int().positive(),
+    name: z.string().min(1),
+    input: JsonValueSchema,
+    inputDigest: z.string().regex(/^[a-f\d]{64}$/u),
+    status: z.enum([
+      'pending',
+      'running',
+      'completed',
+      'failed',
+      'denied',
+      'blocked',
+      'deferred',
+      'interrupted',
+    ]),
+    output: JsonValueSchema.optional(),
+    error: z.string().min(1).optional(),
+    blockedBy: OpaqueIdSchema.optional(),
+    startedAt: IsoDateTimeSchema.optional(),
+    completedAt: IsoDateTimeSchema.optional(),
+    metadata: z.record(z.string(), JsonValueSchema).optional(),
+    approval: z
+      .object({
+        status: z.enum(['required', 'approved', 'denied']),
+        reason: z.string().optional(),
+        metadata: z.record(z.string(), JsonValueSchema).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export const CommandRunCheckpointSchema = z
+  .object({
+    schema: z.literal(1),
+    commandRunId: OpaqueIdSchema,
+    providerToolCallId: OpaqueIdSchema,
+    inputDigest: z.string().regex(/^[a-f\d]{64}$/u),
+    catalogRevision: z.string().regex(/^[a-f\d]{64}$/u),
+    compiledFrames: z
+      .array(
+        z
+          .object({
+            index: NonNegativeIntegerSchema,
+            step: z.number().int().positive(),
+            command: z.string().min(1),
+            input: JsonValueSchema,
+            inputDigest: z.string().regex(/^[a-f\d]{64}$/u),
+            commandId: OpaqueIdSchema,
+            onFailure: z.enum(['stop', 'diagnose', 'continue']),
+          })
+          .strict(),
+      )
+      .readonly(),
+    results: z
+      .array(
+        z
+          .object({
+            commandRunId: OpaqueIdSchema,
+            commandId: OpaqueIdSchema,
+            index: NonNegativeIntegerSchema,
+            step: z.number().int().positive(),
+            name: z.string().min(1),
+            input: JsonValueSchema,
+            inputDigest: z.string().regex(/^[a-f\d]{64}$/u),
+            status: z.enum([
+              'pending',
+              'running',
+              'completed',
+              'failed',
+              'denied',
+              'blocked',
+              'deferred',
+              'interrupted',
+            ]),
+            output: JsonValueSchema.optional(),
+            error: z.string().min(1).optional(),
+            blockedBy: OpaqueIdSchema.optional(),
+            startedAt: IsoDateTimeSchema.optional(),
+            completedAt: IsoDateTimeSchema.optional(),
+            metadata: z.record(z.string(), JsonValueSchema).optional(),
+            approval: z
+              .object({
+                status: z.enum(['approved', 'denied']),
+                reason: z.string().optional(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict(),
+      )
+      .readonly(),
+    phaseCursor: NonNegativeIntegerSchema,
+    barrier: z
+      .object({
+        step: z.number().int().positive(),
+        commandId: OpaqueIdSchema,
+        commandName: z.string().min(1),
+        status: z.enum(['failed', 'denied']),
+      })
+      .strict()
+      .optional(),
+    approvals: z
+      .array(
+        z
+          .object({
+            commandId: OpaqueIdSchema,
+            command: z.string().min(1),
+            inputDigest: z.string().regex(/^[a-f\d]{64}$/u),
+            catalogRevision: z.string().regex(/^[a-f\d]{64}$/u),
+            decision: z.enum(['approved', 'denied']),
+            reason: z.string().optional(),
+          })
+          .strict(),
+      )
+      .readonly(),
+    pendingCommandIds: z.array(OpaqueIdSchema).readonly(),
+    pendingKind: z.enum(['approval', 'deferred']),
+  })
+  .strict();
+
+export const CommandRunItemSchema = z
+  .object({
+    ...ItemBaseShape,
+    type: z.literal('commandRun'),
+    providerToolCallId: OpaqueIdSchema,
+    status: z.enum([
+      'inProgress',
+      'completed',
+      'failed',
+      'denied',
+      'interrupted',
+    ]),
+    commands: z.array(CommandRunCommandSchema).readonly(),
+    checkpoint: CommandRunCheckpointSchema.optional(),
+    error: z.string().min(1).optional(),
   })
   .strict();
 
@@ -147,6 +292,9 @@ export const ContextCompactionItemSchema = z
     type: z.literal('contextCompaction'),
     summary: z.string(),
     tokensBefore: NonNegativeIntegerSchema,
+    beforeMessageCount: NonNegativeIntegerSchema.optional(),
+    afterMessageCount: NonNegativeIntegerSchema.optional(),
+    keptMessageCount: NonNegativeIntegerSchema.optional(),
     status: ItemStatusSchema,
   })
   .strict();
@@ -177,6 +325,7 @@ export const ThreadItemSchema = z.discriminatedUnion('type', [
   CommandExecutionItemSchema,
   FileChangeItemSchema,
   ToolCallItemSchema,
+  CommandRunItemSchema,
   SubagentItemSchema,
   ContextCompactionItemSchema,
   NoticeItemSchema,
@@ -218,6 +367,7 @@ export const PendingServerRequestSchema = z
     threadId: OpaqueIdSchema,
     turnId: OpaqueIdSchema,
     itemId: OpaqueIdSchema,
+    commandId: OpaqueIdSchema.optional(),
     params: z.record(z.string(), JsonValueSchema),
     createdAt: IsoDateTimeSchema,
   })
@@ -249,8 +399,6 @@ export const PlanSchema = z
 export const ThreadSettingsSchema = z
   .object({
     mode: SessionModeSchema,
-    profile: z.string().min(1),
-    model: z.string().min(1),
     agent: z.string().min(1),
   })
   .strict();
@@ -268,6 +416,144 @@ export const ThreadSnapshotSchema = z
   })
   .strict();
 
+export const AgentTaskStatusSchema = z.enum([
+  'queued',
+  'running',
+  'completed',
+  'failed',
+  'blocked',
+  'stopped',
+]);
+
+export const AgentTaskPacketSchema = z
+  .object({
+    objective: z.string().min(1),
+    scope: z.string().min(1),
+    knownFacts: z.array(z.string().min(1)).readonly(),
+    constraints: z.array(z.string().min(1)).readonly(),
+    expectedOutcome: z.string().min(1),
+    acceptanceEvidence: z.array(z.string().min(1)).min(1).readonly(),
+  })
+  .strict();
+
+const AgentTaskEvidenceSchema = z.array(z.string().min(1)).readonly();
+
+export const AgentTaskResultSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('completed'),
+      summary: z.string().min(1),
+      evidence: AgentTaskEvidenceSchema,
+      remainingRisks: AgentTaskEvidenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('failed'),
+      summary: z.string().min(1),
+      error: z.string().min(1),
+      evidence: AgentTaskEvidenceSchema,
+      retryable: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('blocked'),
+      summary: z.string().min(1),
+      blockingReason: z.string().min(1),
+      questionForUser: z.string().min(1),
+      completedWork: AgentTaskEvidenceSchema,
+      evidence: AgentTaskEvidenceSchema,
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('stopped'),
+      summary: z.string().min(1),
+      reason: z.string().min(1),
+      partialWork: AgentTaskEvidenceSchema,
+      evidence: AgentTaskEvidenceSchema,
+    })
+    .strict(),
+]);
+
+export const AgentTaskToolSummarySchema = z
+  .object({
+    toolCallId: z.string().min(1),
+    name: z.string().min(1),
+    invocationPreview: z.string(),
+    status: z.enum(['running', 'completed', 'failed']),
+    startedAt: IsoDateTimeSchema,
+    completedAt: IsoDateTimeSchema.optional(),
+  })
+  .strict();
+
+/** Composer 下 Agent switcher 使用的稳定任务摘要。 */
+export const AgentTaskSummarySchema = z
+  .object({
+    taskId: OpaqueIdSchema,
+    agentId: OpaqueIdSchema,
+    rootThreadId: OpaqueIdSchema,
+    name: z.string().min(1).optional(),
+    definitionName: z.string().min(1),
+    description: z.string().min(1),
+    status: AgentTaskStatusSchema,
+    cwd: z.string().min(1),
+    isolation: z.literal('shared'),
+    revision: NonNegativeIntegerSchema,
+    eventSequence: NonNegativeIntegerSchema,
+    usage: UsageSchema.optional(),
+    currentTool: z
+      .object({
+        toolCallId: z.string().min(1),
+        name: z.string().min(1),
+        startedAt: IsoDateTimeSchema,
+      })
+      .strict()
+      .optional(),
+    toolCount: NonNegativeIntegerSchema,
+    recentTools: z.array(AgentTaskToolSummarySchema).max(4).readonly(),
+    resultPreview: z.string().max(480).optional(),
+    errorPreview: z.string().max(480).optional(),
+    createdAt: IsoDateTimeSchema,
+    startedAt: IsoDateTimeSchema.optional(),
+    completedAt: IsoDateTimeSchema.optional(),
+    updatedAt: IsoDateTimeSchema,
+  })
+  .strict();
+
+/** 子代理 transcript 的持久事件。payload 必须是闭合 JSON 值。 */
+export const AgentTaskEventSchema = z
+  .object({
+    rootThreadId: OpaqueIdSchema,
+    taskId: OpaqueIdSchema,
+    sequence: z.number().int().positive(),
+    rootSequence: z.number().int().positive(),
+    eventType: z.string().min(1),
+    payload: JsonValueSchema,
+    createdAt: IsoDateTimeSchema,
+  })
+  .strict();
+
+export const AgentTaskTreeSnapshotSchema = z
+  .object({
+    rootThreadId: OpaqueIdSchema,
+    seq: NonNegativeIntegerSchema,
+    tasks: z.array(AgentTaskSummarySchema).readonly(),
+  })
+  .strict();
+
+export const AgentTaskDetailSchema = z
+  .object({
+    task: AgentTaskSummarySchema,
+    taskPacket: AgentTaskPacketSchema,
+    output: z.string().optional(),
+    error: z.string().optional(),
+    result: AgentTaskResultSchema.optional(),
+    events: z.array(AgentTaskEventSchema).readonly(),
+  })
+  .strict();
+
 export type ThreadStatus = z.infer<typeof ThreadStatusSchema>;
 export type TurnStatus = z.infer<typeof TurnStatusSchema>;
 export type FileChange = z.infer<typeof FileChangeSchema>;
@@ -279,3 +565,11 @@ export type PendingServerRequest = z.infer<typeof PendingServerRequestSchema>;
 export type Goal = z.infer<typeof GoalSchema>;
 export type Plan = z.infer<typeof PlanSchema>;
 export type ThreadSettings = z.infer<typeof ThreadSettingsSchema>;
+export type AgentTaskStatus = z.infer<typeof AgentTaskStatusSchema>;
+export type AgentTaskPacket = z.infer<typeof AgentTaskPacketSchema>;
+export type AgentTaskResult = z.infer<typeof AgentTaskResultSchema>;
+export type AgentTaskToolSummary = z.infer<typeof AgentTaskToolSummarySchema>;
+export type AgentTaskSummary = z.infer<typeof AgentTaskSummarySchema>;
+export type AgentTaskEvent = z.infer<typeof AgentTaskEventSchema>;
+export type AgentTaskTreeSnapshot = z.infer<typeof AgentTaskTreeSnapshotSchema>;
+export type AgentTaskDetail = z.infer<typeof AgentTaskDetailSchema>;

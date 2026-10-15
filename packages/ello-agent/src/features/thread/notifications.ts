@@ -74,24 +74,6 @@ export function notificationsFor(
         ];
       }
       return [sequenceAdvanced(record)];
-    case 'thread.archived':
-      return [
-        {
-          method: 'thread/archived',
-          params: { threadId: record.threadId, seq: record.seq },
-        },
-      ];
-    case 'thread.unarchived':
-      return [
-        {
-          method: 'thread/unarchived',
-          params: {
-            threadId: record.threadId,
-            seq: record.seq,
-            thread: snapshot.thread,
-          },
-        },
-      ];
     case 'turn.started':
       return [
         {
@@ -146,6 +128,19 @@ export function notificationsFor(
           },
         },
       ];
+    case 'item.updated':
+      return [
+        {
+          method: 'item/updated',
+          params: {
+            threadId: record.threadId,
+            turnId: record.turnId,
+            itemId: record.item.id,
+            seq: record.seq,
+            item: record.item,
+          },
+        },
+      ];
     case 'item.delta': {
       const base = {
         threadId: record.threadId,
@@ -158,6 +153,13 @@ export function notificationsFor(
           return [
             {
               method: 'item/agentMessage/delta',
+              params: { ...base, delta: record.delta.text },
+            },
+          ];
+        case 'reasoning':
+          return [
+            {
+              method: 'item/reasoning/delta',
               params: { ...base, delta: record.delta.text },
             },
           ];

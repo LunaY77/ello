@@ -152,6 +152,7 @@ export const UsageSchema = z
   .object({
     requests: NonNegativeIntegerSchema,
     inputTokens: NonNegativeIntegerSchema,
+    lastInputTokens: NonNegativeIntegerSchema.optional(),
     outputTokens: NonNegativeIntegerSchema,
     cacheReadTokens: NonNegativeIntegerSchema,
     cacheWriteTokens: NonNegativeIntegerSchema,

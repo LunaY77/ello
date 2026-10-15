@@ -8,13 +8,6 @@ import { z } from 'zod';
 
 import { SessionModeSchema } from '../../protocol/v1/index.js';
 
-const ZeroCostSchema = z.object({
-  input: z.number().nonnegative().default(0),
-  output: z.number().nonnegative().default(0),
-  cache_read: z.number().nonnegative().default(0),
-  cache_write: z.number().nonnegative().default(0),
-});
-
 export const PermissionActionSchema = z.enum(['allow', 'ask', 'deny']);
 export type PermissionAction = z.infer<typeof PermissionActionSchema>;
 
@@ -37,7 +30,7 @@ export const PermissionRuleSchema = z.object({
 });
 export type PermissionRule = z.infer<typeof PermissionRuleSchema>;
 
-/** agent 运行形态；与 provider profile suite 的 role 正交。 */
+/** agent 运行形态与模型选择正交。 */
 export const AgentModeSchema = z.enum([
   'primary',
   'subagent',
@@ -45,157 +38,155 @@ export const AgentModeSchema = z.enum([
   'all',
 ]);
 
-/** agent 绑定的 profile role 名；与 provider/types.ts 的 ModelRole 保持一致。 */
-export const AgentRoleSchema = z.enum([
-  'primary',
-  'small',
-  'compact',
-  'title',
-  'review',
+export const AgentModelSelectorSchema = z.enum([
+  'primary_model',
+  'auxiliary_model',
+]);
+export type AgentModelSelector = z.infer<typeof AgentModelSelectorSchema>;
+
+const HttpHeaderNameSchema = z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u);
+const HttpHeaderValueSchema = z
+  .string()
+  .min(1)
+  .regex(/^[^\r\n]+$/u);
+const HttpHeadersSchema = z.record(HttpHeaderNameSchema, HttpHeaderValueSchema);
+
+/** Agent 回合上限；`-1` 明确表示不设置回合上限。 */
+export const AgentMaxTurnsSchema = z.union([
+  z.literal(-1),
+  z.number().int().positive(),
 ]);
 
 /** config.yaml `agent:` 映射下单个 agent 的声明。 */
-export const AgentConfigSchema = z.object({
-  mode: AgentModeSchema.default('primary'),
-  role: AgentRoleSchema.default('primary'),
-  description: z.string().optional(),
-  hidden: z.boolean().optional(),
-  prompt: z.string().optional(),
-  model: z.string().optional(),
-  tools: z.array(z.string()).optional(),
-  permission: z.array(PermissionRuleSchema).optional(),
-  max_turns: z.number().int().positive(),
-  color: z.string().optional(),
-});
+export const AgentConfigSchema = z
+  .object({
+    mode: AgentModeSchema.default('primary'),
+    model: AgentModelSelectorSchema,
+    description: z.string().optional(),
+    hidden: z.boolean().optional(),
+    prompt: z.string().optional(),
+    commands: z.array(z.string()).optional(),
+    permission: z.array(PermissionRuleSchema).optional(),
+    max_turns: AgentMaxTurnsSchema,
+    color: z.string().optional(),
+  })
+  .strict();
 
-/** provider 只描述模型服务连接方式，不承载模型人格或 agent 行为。 */
-export const ProviderConnectionSchema = z.object({
-  name: z.string().optional(),
-  enabled: z.boolean().optional(),
-  kind: z.enum(['openai', 'anthropic', 'openai-compatible']),
-  api_key_env: z.string().optional(),
-  api_key: z.string().optional(),
-  api_key_file: z.string().optional(),
-  base_url: z.string().optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  options: z.record(z.string(), z.unknown()).optional(),
-});
-
-/** 单个模型的 catalog 元数据和真实 API 映射。 */
-export const ModelCatalogEntrySchema = z.object({
-  id: z.string().optional(),
-  provider: z.string(),
-  name: z.string().optional(),
-  api_id: z.string(),
-  endpoint: z.enum(['languageModel', 'chat', 'responses', 'custom']).optional(),
-  status: z.enum(['active', 'beta', 'alpha']).default('active'),
-  release_date: z.string().optional(),
-  context: z.number().int().positive().default(128_000),
-  input: z.number().int().nonnegative().optional(),
-  output: z.number().int().positive().default(16_000),
-  cost: z
-    .union([ZeroCostSchema, z.literal('zeroCost')])
-    .default('zeroCost')
-    .transform((value) =>
-      value === 'zeroCost'
-        ? { input: 0, output: 0, cache_read: 0, cache_write: 0 }
-        : value,
-    ),
-  temperature: z.boolean().default(true),
-  reasoning: z.boolean().default(false),
-  tool_call: z.boolean().default(true),
-  input_modalities: z
-    .array(z.enum(['text', 'audio', 'image', 'video', 'pdf']))
-    .default(['text']),
-  output_modalities: z
-    .array(z.enum(['text', 'audio', 'image', 'video', 'pdf']))
-    .default(['text']),
-  interleaved_reasoning_field: z
-    .enum(['reasoning', 'reasoning_content', 'reasoning_details'])
-    .optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  options: z.record(z.string(), z.unknown()).optional(),
-  variants: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
-});
-
-/** role 级调用参数，表达同一 profile suite 中不同用途的模型调用偏好。 */
-export const ModelRoleSettingsSchema = z.object({
+const CommonModelFields = {
+  api_model: z.string().min(1),
+  base_url: z.url(),
+  api_key_env: z.string().min(1),
+  http_headers: HttpHeadersSchema.optional(),
+  context_window: z.number().int().positive(),
+  max_output_tokens: z.number().int().positive(),
   reasoning_effort: z
-    .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh'])
-    .optional(),
-  temperature: z.number().optional(),
-  top_p: z.number().optional(),
-  top_k: z.number().optional(),
-  provider_options: z.record(z.string(), z.unknown()).optional(),
-});
+    .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+    .default('medium'),
+};
 
-/** 一个 profile 是一组 role 到模型的明确绑定，运行时不会补齐缺失 role。 */
-export const ProfileSuiteSchema = z.object({
-  label: z.string().optional(),
-  description: z.string().optional(),
-  models: z.object({
-    primary: z.string(),
-    small: z.string(),
-    compact: z.string(),
-    title: z.string(),
-    review: z.string(),
-  }),
-  settings: z
-    .object({
-      primary: ModelRoleSettingsSchema.optional(),
-      small: ModelRoleSettingsSchema.optional(),
-      compact: ModelRoleSettingsSchema.optional(),
-      title: ModelRoleSettingsSchema.optional(),
-      review: ModelRoleSettingsSchema.optional(),
-    })
-    .default({}),
-});
+export const AnthropicAuthSchemeSchema = z.enum(['api-key', 'bearer']);
+export type AnthropicAuthScheme = z.infer<typeof AnthropicAuthSchemeSchema>;
 
-const DEFAULT_TOOL_SEARCH_CONFIG = {
+export const ModelConfigSchema = z
+  .discriminatedUnion('protocol', [
+    z
+      .object({
+        protocol: z.literal('openai'),
+        endpoint: z.enum(['responses', 'chat']),
+        ...CommonModelFields,
+      })
+      .strict(),
+    z
+      .object({
+        protocol: z.literal('anthropic'),
+        auth_scheme: AnthropicAuthSchemeSchema,
+        ...CommonModelFields,
+      })
+      .strict(),
+    z
+      .object({
+        protocol: z.literal('openai-compatible'),
+        endpoint: z.enum(['responses', 'chat']),
+        ...CommonModelFields,
+      })
+      .strict(),
+  ])
+  .superRefine((model, context) => {
+    if (model.max_output_tokens > model.context_window) {
+      context.addIssue({
+        code: 'custom',
+        path: ['max_output_tokens'],
+        message: 'must not exceed context_window',
+      });
+    }
+    if (model.http_headers === undefined) return;
+
+    const reservedHeader =
+      model.protocol === 'anthropic' && model.auth_scheme === 'api-key'
+        ? 'x-api-key'
+        : 'authorization';
+    const seen = new Set<string>();
+    for (const headerName of Object.keys(model.http_headers)) {
+      const normalizedName = headerName.toLowerCase();
+      if (seen.has(normalizedName)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['http_headers', headerName],
+          message: 'must not repeat a header name case-insensitively',
+        });
+      }
+      seen.add(normalizedName);
+      if (normalizedName === reservedHeader) {
+        context.addIssue({
+          code: 'custom',
+          path: ['http_headers', headerName],
+          message: `must not override provider authentication header ${reservedHeader}`,
+        });
+      }
+    }
+  });
+
+const DEFAULT_COMMAND_SEARCH_CONFIG = {
   result_limit: 6,
   max_result_bytes: 24_000,
 };
 
-const DEFAULT_TOOL_CONFIG: {
+const DEFAULT_COMMAND_CONFIG: {
   readonly disabled: string[];
   readonly need_approval: string[];
-  readonly routing_enabled: boolean;
-  readonly search: typeof DEFAULT_TOOL_SEARCH_CONFIG;
+  readonly search: typeof DEFAULT_COMMAND_SEARCH_CONFIG;
 } = {
   disabled: [],
   need_approval: [],
-  routing_enabled: false,
-  search: DEFAULT_TOOL_SEARCH_CONFIG,
+  search: DEFAULT_COMMAND_SEARCH_CONFIG,
 };
 
-/** tool_search 的单次结果数量与总字节限制。 */
-export const ToolSearchConfigSchema = z
+/** command_search 的单次结果数量与总字节限制。 */
+export const CommandSearchConfigSchema = z
   .object({
     result_limit: z
       .number()
       .int()
       .min(1)
       .max(8)
-      .default(DEFAULT_TOOL_SEARCH_CONFIG.result_limit),
+      .default(DEFAULT_COMMAND_SEARCH_CONFIG.result_limit),
     max_result_bytes: z
       .number()
       .int()
       .positive()
-      .default(DEFAULT_TOOL_SEARCH_CONFIG.max_result_bytes),
+      .default(DEFAULT_COMMAND_SEARCH_CONFIG.max_result_bytes),
   })
   .strict();
 
-export const ToolConfigSchema = z
+export const CommandConfigSchema = z
   .object({
-    /** 完全不注册的核心 coding 工具名。 */
-    disabled: z.array(z.string()).default(DEFAULT_TOOL_CONFIG.disabled),
-    /** 非 Plan 模式下始终需要审批的工具名。 */
+    /** 完全不注册的 Command 名。 */
+    disabled: z.array(z.string()).default(DEFAULT_COMMAND_CONFIG.disabled),
+    /** 非 Plan 模式下始终需要审批的 Command 名。 */
     need_approval: z
       .array(z.string())
-      .default(DEFAULT_TOOL_CONFIG.need_approval),
-    /** 存在非 core 工具时加入 tool_search/call_tool，并通过它们路由非 core 工具。 */
-    routing_enabled: z.boolean().default(DEFAULT_TOOL_CONFIG.routing_enabled),
-    search: ToolSearchConfigSchema.default(DEFAULT_TOOL_SEARCH_CONFIG),
+      .default(DEFAULT_COMMAND_CONFIG.need_approval),
+    search: CommandSearchConfigSchema.default(DEFAULT_COMMAND_SEARCH_CONFIG),
   })
   .strict();
 
@@ -221,21 +212,15 @@ export const ContextCompactionConfigSchema = z.object({
   auto: z.boolean().default(true),
   tail_turns: z.number().int().positive().default(2),
   preserve_recent_tokens: z.number().int().positive().default(20_000),
-  reserved_tokens: z.number().int().positive().default(16_384),
+  threshold_percent: z.number().positive().max(100).default(90),
   prune_tool_output: z.boolean().default(false),
   tool_output_max_chars: z.number().int().positive().default(2_000),
   /** 单 turn 超预算时允许切到 turn 内 assistant 边界（split turn，§1.5）。 */
   split_turns: z.boolean().default(true),
 });
 
-/**
- * 大 tool 输出预算替换配置（§2）。模型输入前把超限 tool_result 写入 artifact，
- * 上下文里替换为 preview + stub。默认关闭，避免改变现有 tool 输出测试语义。
- */
-export const ContextToolResultBudgetConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  max_chars: z.number().int().positive().default(20_000),
-});
+export const PromptModeSchema = z.enum(['rapid', 'thorough']);
+export type PromptMode = z.infer<typeof PromptModeSchema>;
 
 /** 文件型 memory 注入配置。 */
 export const ContextMemoryConfigSchema = z.object({
@@ -258,10 +243,9 @@ export const ContextMemoryConfigSchema = z.object({
 /** context pipeline 总配置。 */
 export const ContextConfigSchema = z
   .object({
-    max_input_tokens: z.number().int().positive().default(160_000),
-    reserved_output_tokens: z.number().int().positive().default(8_000),
+    max_input_tokens: z.number().int().positive().default(1_000_000),
     show_sources_in_tui: z.boolean().default(true),
-    system_prompt_profile: z.string().default('coding'),
+    prompt_mode: PromptModeSchema.default('rapid'),
     instructions: ContextInstructionsConfigSchema.default({
       global: ['~/.ello/ELLO.md'],
       project: ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'],
@@ -272,14 +256,10 @@ export const ContextConfigSchema = z
       auto: true,
       tail_turns: 2,
       preserve_recent_tokens: 20_000,
-      reserved_tokens: 16_384,
+      threshold_percent: 90,
       prune_tool_output: false,
       tool_output_max_chars: 2_000,
       split_turns: true,
-    }),
-    tool_result_budget: ContextToolResultBudgetConfigSchema.default({
-      enabled: false,
-      max_chars: 20_000,
     }),
     memory: ContextMemoryConfigSchema.default({
       enabled: false,
@@ -292,15 +272,7 @@ export const ContextConfigSchema = z
       },
     }),
   })
-  .superRefine((value, context) => {
-    if (value.reserved_output_tokens >= value.max_input_tokens) {
-      context.addIssue({
-        code: 'custom',
-        path: ['reserved_output_tokens'],
-        message: 'must be below max_input_tokens',
-      });
-    }
-  });
+  .strict();
 
 export const GoalConfigSchema = z.object({
   max_continuations: z.number().int().positive().default(20),
@@ -344,29 +316,32 @@ export const WorkspaceConfigSchema = z.object({
   mount: z.string().default('~/.ello'),
 });
 
+export const SubagentsConfigSchema = z.object({
+  enabled: z.boolean().default(true),
+  cwd_policy: z.enum(['workspace', 'allowed_paths']).default('allowed_paths'),
+});
+
 /**
  * 运行时最终配置 schema。
  *
- * 模型配置采用三层结构：
- * - provider：连接和认证；
- * - model：catalog 元数据和真实 API 映射；
- * - profile：用户/agent 的使用意图。
+ * `models` 是完整模型配置的命名目录；两个顶层引用字段决定 Agent 的模型选择。
  */
 export const CodingAgentConfigSchema = z
   .object({
-    active_profile: z.string().default('main'),
     /** 默认主 agent；必须解析到一个 mode=primary|all 且非 hidden 的 agent。 */
     default_agent: z.string().default('build'),
     /** 用户自定义/覆盖的 agent 声明，与内置 agent 合并。 */
     agent: z.record(z.string(), AgentConfigSchema).default({}),
-    provider: z.record(z.string(), ProviderConnectionSchema).default({}),
-    models: z
-      .record(z.string(), z.record(z.string(), ModelCatalogEntrySchema))
-      .default({}),
-    profile: z.record(z.string(), ProfileSuiteSchema).default({}),
+    models: z.record(z.string().min(1), ModelConfigSchema),
+    primary_model: z.string().min(1),
+    auxiliary_model: z.string().min(1),
     projects: z.record(z.string(), ProjectTrustSchema).default({}),
     workspace: WorkspaceConfigSchema.default({ mount: '~/.ello' }),
-    tools: ToolConfigSchema.default(DEFAULT_TOOL_CONFIG),
+    subagents: SubagentsConfigSchema.default({
+      enabled: true,
+      cwd_policy: 'allowed_paths',
+    }),
+    commands: CommandConfigSchema.default(DEFAULT_COMMAND_CONFIG),
     tool_output: ToolOutputConfigSchema.default({
       max_bytes: 12_000,
       max_lines: 400,
@@ -380,14 +355,14 @@ export const CodingAgentConfigSchema = z
     initial_mode: SessionModeSchema,
     /** bypass 的独立安全闸门；仅配置 initial_mode=bypass 仍不足以启用。 */
     bypass_enabled: z.boolean().default(false),
+    /** 开启后使用 title role 模型生成 Thread 标题；关闭时直接使用第一条用户消息。 */
+    title_generation: z.boolean().default(false),
     permission_rules: z.array(PermissionRuleSchema).default([]),
     mcp_config_path: z.string().nullable().default(null),
-    system_prompt_profile: z.string().default('coding'),
     context: ContextConfigSchema.default({
-      max_input_tokens: 160_000,
-      reserved_output_tokens: 8_000,
+      max_input_tokens: 1_000_000,
       show_sources_in_tui: true,
-      system_prompt_profile: 'coding',
+      prompt_mode: 'rapid',
       instructions: {
         global: ['~/.ello/ELLO.md'],
         project: ['AGENTS.md', '.ello/ELLO.md', '.ello/instructions.md'],
@@ -398,14 +373,10 @@ export const CodingAgentConfigSchema = z
         auto: true,
         tail_turns: 2,
         preserve_recent_tokens: 20_000,
-        reserved_tokens: 16_384,
+        threshold_percent: 90,
         prune_tool_output: false,
         tool_output_max_chars: 2_000,
         split_turns: true,
-      },
-      tool_result_budget: {
-        enabled: false,
-        max_chars: 20_000,
       },
       memory: {
         enabled: false,
@@ -432,20 +403,23 @@ export const CodingAgentConfigSchema = z
         message: 'bypass_enabled must be true when initial_mode is bypass.',
       });
     }
+    for (const field of ['primary_model', 'auxiliary_model'] as const) {
+      if (config.models[config[field]] === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `references unknown model: ${config[field]}`,
+        });
+      }
+    }
   });
 
 export type AgentConfigEntry = z.infer<typeof AgentConfigSchema>;
-export type ProviderConnectionConfig = z.infer<typeof ProviderConnectionSchema>;
-export type ModelCatalogEntryConfig = z.infer<typeof ModelCatalogEntrySchema>;
-export type ModelRoleSettingsConfig = z.infer<typeof ModelRoleSettingsSchema>;
-export type ProfileSuiteConfig = z.infer<typeof ProfileSuiteSchema>;
-export type ToolConfig = z.infer<typeof ToolConfigSchema>;
+export type ModelConfig = z.infer<typeof ModelConfigSchema>;
+export type CommandConfig = z.infer<typeof CommandConfigSchema>;
 export type ToolOutputConfig = z.infer<typeof ToolOutputConfigSchema>;
 export type ContextCompactionConfig = z.infer<
   typeof ContextCompactionConfigSchema
->;
-export type ContextToolResultBudgetConfig = z.infer<
-  typeof ContextToolResultBudgetConfigSchema
 >;
 export type ContextMemoryConfig = z.infer<typeof ContextMemoryConfigSchema>;
 export type ContextConfig = z.infer<typeof ContextConfigSchema>;
@@ -459,5 +433,6 @@ export type LangfuseTracingConfig = Extract<
 >;
 export type ObservabilityConfig = z.infer<typeof ObservabilityConfigSchema>;
 export type WorkspaceConfig = z.infer<typeof WorkspaceConfigSchema>;
+export type SubagentsConfig = z.infer<typeof SubagentsConfigSchema>;
 export type CodingAgentConfig = z.infer<typeof CodingAgentConfigSchema>;
 export type CodingAgentConfigOverrides = Partial<CodingAgentConfig>;

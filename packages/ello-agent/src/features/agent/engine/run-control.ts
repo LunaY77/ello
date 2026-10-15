@@ -10,11 +10,12 @@ import { modelMessageSchema } from 'ai';
 import { z } from 'zod';
 
 import type {
+  DeferredApprovalItem,
   DeferredRunItem,
   DeferredRunResults,
+  DeferredToolCallItem,
   QueueDrainDiagnostic,
 } from './contracts.js';
-import { normalizeAgentError } from './errors.js';
 import type { AgentMessage } from './model.js';
 import type {
   AgentMessageQueue,
@@ -27,24 +28,27 @@ import {
   createToolCallMessage,
   createToolResultMessage,
 } from './tools.js';
+import { resumeCommandRun } from './tools.js';
 
 const DeferredRunItemSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('approval'),
       toolCallId: z.string().min(1),
-      toolName: z.string().min(1),
+      commandName: z.string().min(1),
       input: z.unknown().optional(),
       reason: z.string().optional(),
       metadata: z.record(z.string(), z.unknown()).optional(),
+      commandRunCheckpoint: z.unknown().optional(),
     })
     .strict(),
   z
     .object({
       kind: z.literal('tool-call'),
       toolCallId: z.string().min(1),
-      toolName: z.string().min(1),
+      commandName: z.string().min(1),
       input: z.unknown().optional(),
+      commandRunCheckpoint: z.unknown().optional(),
     })
     .strict(),
   z
@@ -92,17 +96,29 @@ function parseDeferredRunResults(value: unknown): DeferredRunResults {
         return {
           kind: item.kind,
           toolCallId: item.toolCallId,
-          toolName: item.toolName,
+          commandName: item.commandName,
           ...(item.input === undefined ? {} : { input: item.input }),
           ...(item.reason === undefined ? {} : { reason: item.reason }),
           ...(item.metadata === undefined ? {} : { metadata: item.metadata }),
+          ...(item.commandRunCheckpoint === undefined
+            ? {}
+            : {
+                commandRunCheckpoint:
+                  item.commandRunCheckpoint as import('../../command/index.js').CommandRunCheckpoint,
+              }),
         };
       case 'tool-call':
         return {
           kind: item.kind,
           toolCallId: item.toolCallId,
-          toolName: item.toolName,
+          commandName: item.commandName,
           ...(item.input === undefined ? {} : { input: item.input }),
+          ...(item.commandRunCheckpoint === undefined
+            ? {}
+            : {
+                commandRunCheckpoint:
+                  item.commandRunCheckpoint as import('../../command/index.js').CommandRunCheckpoint,
+              }),
         };
       case 'interrupted':
         return {
@@ -547,14 +563,14 @@ export class AgentRunControl {
           messages.push(
             createToolCallMessage({
               id: item.toolCallId,
-              name: item.toolName,
+              name: item.commandName,
               input: item.input,
             }),
           );
         }
         messages.push(
           createToolResultMessage(
-            { id: item.toolCallId, name: item.toolName, input: item.input },
+            { id: item.toolCallId, name: item.commandName, input: item.input },
             output,
             approved ? 'success' : 'denied',
           ),
@@ -567,14 +583,14 @@ export class AgentRunControl {
           messages.push(
             createToolCallMessage({
               id: item.toolCallId,
-              name: item.toolName,
+              name: item.commandName,
               input: item.input,
             }),
           );
         }
         messages.push(
           createToolResultMessage(
-            { id: item.toolCallId, name: item.toolName, input: item.input },
+            { id: item.toolCallId, name: item.commandName, input: item.input },
             requireToolResult(resume.toolResults, item.toolCallId),
           ),
         );
@@ -729,78 +745,45 @@ export async function prepareResume(
   const parsedResume = parseDeferredRunResults(resume);
   if (parsedResume.deferred === undefined) return parsedResume;
   validateResumeReferences(parsedResume.deferred, parsedResume);
-  const approvalItems = parsedResume.deferred.filter(
-    (item): item is Extract<DeferredRunItem, { kind: 'approval' }> =>
-      item.kind === 'approval',
+  const commandRunItems = parsedResume.deferred.filter(
+    (
+      item,
+    ): item is (DeferredApprovalItem | DeferredToolCallItem) & {
+      readonly commandRunCheckpoint: import('../../command/index.js').CommandRunCheckpoint;
+    } => item.kind !== 'interrupted' && item.commandRunCheckpoint !== undefined,
   );
-  if (approvalItems.length === 0) return parsedResume;
-  const toolResults: Record<string, unknown> = {};
-  if (parsedResume.toolResults !== undefined) {
-    Object.assign(toolResults, parsedResume.toolResults);
-  }
-  for (const item of approvalItems) {
-    const decision = requireApprovalDecision(
-      parsedResume.approvals,
-      item.toolCallId,
-    );
-    const approved =
-      typeof decision === 'boolean' ? decision : decision.approved;
-    if (!approved) {
-      const reason = typeof decision === 'object' ? decision.reason : undefined;
-      await run.events.emit({
-        type: 'tool.failed',
-        turnIndex: run.state.turn,
-        toolCallId: item.toolCallId,
-        error: normalizeAgentError(
-          new Error(
-            reason ?? `Tool '${item.toolName}' was denied by the user.`,
-          ),
-        ),
-      });
-      continue;
+  if (commandRunItems.length > 0) {
+    const checkpoint = commandRunItems[0]?.commandRunCheckpoint;
+    if (checkpoint === undefined)
+      throw new Error('Command Run checkpoint is missing.');
+    if (
+      commandRunItems.some(
+        (item) =>
+          item.commandRunCheckpoint.commandRunId !== checkpoint.commandRunId,
+      )
+    ) {
+      throw new Error('Resume mixes interactions from different Command Runs.');
     }
-    if (Object.hasOwn(toolResults, item.toolCallId)) continue;
-    const result = await run.toolScheduler.executeApproved(
-      { id: item.toolCallId, name: item.toolName, input: item.input },
-      {
-        onToolStarted: (toolCallId, name, input) =>
-          run.events.emit({
-            type: 'tool.started',
-            turnIndex: run.state.turn,
-            toolCallId,
-            name,
-            input,
-          }),
-        onApprovalRequired: () => {
-          throw new Error(
-            `Approved tool '${item.toolName}' requested approval again.`,
-          );
-        },
-        onToolDeferred: () => {
-          throw new Error(
-            `Approved tool '${item.toolName}' became deferred during execution.`,
-          );
-        },
-        onToolCompleted: (toolCallId, output) =>
-          run.events.emit({
-            type: 'tool.completed',
-            turnIndex: run.state.turn,
-            toolCallId,
-            output,
-          }),
-        onToolFailed: (toolCallId, error) =>
-          run.events.emit({
-            type: 'tool.failed',
-            turnIndex: run.state.turn,
-            toolCallId,
-            error: normalizeAgentError(error),
-          }),
-      },
+    const resumed = await resumeCommandRun(
+      run,
+      checkpoint,
+      parsedResume.approvals,
+      parsedResume.toolResults,
     );
-    toolResults[item.toolCallId] =
-      result.error === undefined
-        ? result.output
-        : { error: result.error.message };
+    if (resumed.type === 'suspended') return undefined;
+    return {
+      deferred: [
+        {
+          kind: 'tool-call',
+          toolCallId: checkpoint.providerToolCallId,
+          commandName: 'command_run',
+          input: checkpoint.compiledFrames.map((frame) => frame.input),
+        },
+      ],
+      toolResults: { [checkpoint.providerToolCallId]: resumed.output },
+    };
   }
-  return { ...parsedResume, toolResults };
+  throw new Error(
+    'Legacy direct Tool approval resume is no longer supported; Command Run checkpoints are required.',
+  );
 }

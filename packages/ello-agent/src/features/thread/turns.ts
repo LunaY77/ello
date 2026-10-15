@@ -160,12 +160,17 @@ export interface TurnOperations {
    *
    * Args:
    * - `turnId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   * - `steerId`: 客户端生成的关联标识；消费后原样进入用户消息记录。
    * - `input`: `steer` 的完整领域输入；调用期间只读，缺字段或非法组合直接失败。
    *
    * Returns:
    * - Promise 在 Thread turn 编排 模块 的异步副作用完整提交后兑现，不返回业务值。
    */
-  steer(turnId: string, input: ReadonlyArray<UserInput>): Promise<void>;
+  steer(
+    turnId: string,
+    steerId: string,
+    input: ReadonlyArray<UserInput>,
+  ): Promise<void>;
   /**
    * 中止 Thread turn 编排 模块 中正在进行的工作，并保留调用方提供的终止原因。
    *
@@ -221,8 +226,6 @@ export interface TurnOperations {
 }
 
 export interface TurnSettings {
-  readonly model?: string;
-  readonly profile?: string;
   readonly mode?: ThreadSnapshot['settings']['mode'];
 }
 
@@ -341,10 +344,12 @@ export function createTurnOperations(
 
   const steer = (
     turnId: string,
+    steerId: string,
     input: ReadonlyArray<UserInput>,
   ): Promise<void> =>
     options.enqueue(async () => {
       requireActiveTurn(activeTurn, turnId).run.steer(
+        steerId,
         input.map(formatUserInput).join('\n'),
       );
     });
@@ -411,11 +416,7 @@ async function applySettings(
   settings: TurnSettings | undefined,
 ): Promise<void> {
   if (settings === undefined) return;
-  if (
-    settings.model === undefined &&
-    settings.profile === undefined &&
-    settings.mode === undefined
-  ) {
+  if (settings.mode === undefined) {
     return;
   }
   const snapshot = input.snapshot();
@@ -423,8 +424,6 @@ async function applySettings(
     kind: 'thread.metadata',
     settings: {
       ...snapshot.settings,
-      ...(settings.model === undefined ? {} : { model: settings.model }),
-      ...(settings.profile === undefined ? {} : { profile: settings.profile }),
       ...(settings.mode === undefined ? {} : { mode: settings.mode }),
     },
   });

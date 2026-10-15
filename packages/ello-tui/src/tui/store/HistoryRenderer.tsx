@@ -1,18 +1,19 @@
 import { Box, Text } from 'ink';
+import stringWidth from 'string-width';
 
 import type { UserInputResolution } from '../../api/protocol-types.js';
+import { SubagentActivity } from '../component/SubagentActivity.js';
+import { useTerminalSize } from '../hooks/use-terminal-size.js';
 import { DiffPreview } from '../presenters/index.js';
 import { useTheme, type TuiTheme } from '../theme/index.js';
 import { glyphs } from '../ui/glyphs.js';
 
 import type {
+  CommandRunView,
   HistoryEntry,
-  SubagentRunView,
   ToolCallView,
 } from './history-entry.js';
 import { buildToolCardModel } from './tool-card.js';
-
-const SUBAGENT_VISIBLE_TOOL_LIMIT = 4;
 
 export function HistoryEntryRenderer({
   entry,
@@ -58,10 +59,16 @@ function renderHistoryEntryContent(
           ))}
         </Box>
       );
+    case 'reasoning':
+      return <ReasoningText text={entry.text} />;
+    case 'compaction':
+      return <HistoryCompaction entry={entry} />;
     case 'skill':
       return <Text color={theme.accent}>{`loaded [${entry.name}]`}</Text>;
     case 'tool':
       return <HistoryTool tool={entry.tool} cwd={cwd} />;
+    case 'command_run':
+      return <CommandRunGroup run={entry.run} cwd={cwd} />;
     case 'user_input':
       return (
         <Box
@@ -84,7 +91,7 @@ function renderHistoryEntryContent(
         </Box>
       );
     case 'subagent':
-      return <HistorySubagent run={entry.run} />;
+      return <SubagentActivity run={entry.run} cwd={cwd} />;
     case 'separator':
       return <RunSeparator text={entry.text} />;
     case 'system':
@@ -92,6 +99,90 @@ function renderHistoryEntryContent(
     case 'diagnostic':
       return <Text color={theme.error}>{`x ${entry.text}`}</Text>;
   }
+}
+
+export function CommandRunGroup({
+  run,
+  cwd,
+}: {
+  readonly run: CommandRunView;
+  readonly cwd: string;
+}) {
+  const theme = useTheme();
+  const color =
+    run.status === 'running'
+      ? theme.warning
+      : run.status === 'ok'
+        ? theme.success
+        : theme.error;
+  return (
+    <Box flexDirection="column">
+      <Text color={color}>{`Command Run · ${run.status}`}</Text>
+      {run.commands.map((command) => (
+        <Box key={command.id} flexDirection="column" marginLeft={2}>
+          <Text color={toolStatusColor(theme, command.status)}>
+            {`step ${command.step} · ${command.name} · ${command.commandStatus}`}
+          </Text>
+          <HistoryTool tool={command} cwd={cwd} />
+          {command.approval?.status === 'required' ? (
+            <Text color={theme.warning}>
+              {`  approval required${command.approval.reason === undefined ? '' : `: ${command.approval.reason}`}`}
+            </Text>
+          ) : null}
+        </Box>
+      ))}
+      {run.error === undefined ? null : (
+        <Text color={theme.error}>{`  ${run.error}`}</Text>
+      )}
+    </Box>
+  );
+}
+
+function HistoryCompaction({
+  entry,
+}: {
+  readonly entry: Extract<HistoryEntry, { kind: 'compaction' }>;
+}) {
+  const theme = useTheme();
+  const messageCounts =
+    entry.beforeMessageCount === undefined ||
+    entry.afterMessageCount === undefined
+      ? ''
+      : ` · ${entry.beforeMessageCount} -> ${entry.afterMessageCount} messages`;
+  return (
+    <Box flexDirection="column">
+      <Text color={theme.accent}>
+        {`- Context compacted${messageCounts} · ${formatHistoryTokens(entry.tokensBefore)} tokens before`}
+      </Text>
+      {entry.summary.split('\n').map((line, index) => (
+        <Text key={`${entry.id}:summary:${index}`} color={theme.textMuted}>
+          {`  ${line}`}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+function ReasoningText({ text }: { readonly text: string }) {
+  const theme = useTheme();
+  return (
+    <Box>
+      <Text color={theme.textMuted}>Thinking: </Text>
+      <Box flexDirection="column" flexShrink={1}>
+        {text.split('\n').map((line, index) => (
+          <Text key={`${index}:${line}`} color={theme.textMuted} wrap="wrap">
+            {line}
+          </Text>
+        ))}
+      </Box>
+    </Box>
+  );
+}
+
+function formatHistoryTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return String(tokens);
 }
 
 function summarizeUserInputResolution(resolution: UserInputResolution): string {
@@ -108,6 +199,7 @@ function SessionHeader({
   readonly entry: Extract<HistoryEntry, { kind: 'session_header' }>;
 }) {
   const theme = useTheme();
+  const { columns } = useTerminalSize();
   return (
     <Box
       flexDirection="column"
@@ -122,16 +214,12 @@ function SessionHeader({
         <Text color={theme.success}>ready</Text>
       </Box>
       <Text>
-        <Text color={theme.textMuted}>profile: </Text>
-        <Text color={theme.text}>{entry.profile}</Text>
-      </Text>
-      <Text>
         <Text color={theme.textMuted}>directory: </Text>
-        <Text color={theme.text}>{compactPath(entry.cwd)}</Text>
+        <Text color={theme.text}>{compactPath(entry.cwd, columns)}</Text>
       </Text>
       <Text>
-        <Text color={theme.textMuted}>model: </Text>
-        <Text color={theme.text}>{entry.model}</Text>
+        <Text color={theme.textMuted}>agent: </Text>
+        <Text color={theme.text}>{entry.agent}</Text>
       </Text>
       <Text>
         <Text color={theme.textMuted}>mode: </Text>
@@ -215,54 +303,28 @@ function toolStatusColor(
   }
 }
 
+/** 分隔线按实际终端宽度补齐；写死长度在窄终端会换行，在宽终端又填不满。 */
 function RunSeparator({ text }: { readonly text: string }) {
   const theme = useTheme();
-  return <Text color={theme.border}>{`─ ${text} ${'─'.repeat(72)}`}</Text>;
-}
-
-function HistorySubagent({ run }: { readonly run: SubagentRunView }) {
-  const theme = useTheme();
-  const hidden = Math.max(0, run.tools.length - SUBAGENT_VISIBLE_TOOL_LIMIT);
-  const visibleTools = run.tools.slice(-SUBAGENT_VISIBLE_TOOL_LIMIT);
+  const { columns } = useTerminalSize();
+  const label = `─ ${text} `;
+  const fill = Math.max(1, columns - 2 - stringWidth(label));
   return (
-    <Box flexDirection="column">
-      <Text color={run.status === 'fail' ? theme.error : theme.warning}>
-        {`${glyphs.subagent} ${run.agentName} ${run.background ? 'background' : 'foreground'} ${run.status}`}
-      </Text>
-      <Text color={theme.text}>{`  ${run.description}`}</Text>
-      {hidden > 0 ? (
-        <Text color={theme.textMuted}>{`  +${hidden} earlier tool calls`}</Text>
-      ) : null}
-      {visibleTools.map((tool) => (
-        <Text key={tool.id} color={theme.textMuted}>
-          {`  ${tool.name} ${tool.status}`}
-        </Text>
-      ))}
-      {run.output !== undefined && run.output.trim() !== '' ? (
-        <Text color={theme.textMuted}>{`  ${compactText(run.output)}`}</Text>
-      ) : null}
-      {run.error !== undefined ? (
-        <Text color={theme.error}>{`  ${run.error}`}</Text>
-      ) : null}
-    </Box>
+    <Text color={theme.border} wrap="truncate">
+      {`${label}${'─'.repeat(fill)}`}
+    </Text>
   );
 }
 
-function compactText(text: string): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  return normalized.length <= 240
-    ? normalized
-    : `${normalized.slice(0, 239)}...`;
-}
-
-function compactPath(cwd: string): string {
+/** 目录过长时保留尾部；上限跟随终端宽度，避免 header 边框被挤出屏幕。 */
+function compactPath(cwd: string, columns: number): string {
   const home = process.env.HOME;
   const display =
     home !== undefined && cwd.startsWith(home) ? cwd.replace(home, '~') : cwd;
-  if (display.length <= 68) {
-    return display;
-  }
-  return `...${display.slice(-67)}`;
+  // 边框 2 + paddingX 2 + `directory: ` 11。
+  const limit = Math.max(8, columns - 15);
+  if (stringWidth(display) <= limit) return display;
+  return `...${display.slice(-(limit - 3))}`;
 }
 
 function formatPermission(mode: string): string {

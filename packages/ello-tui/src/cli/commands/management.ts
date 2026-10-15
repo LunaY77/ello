@@ -19,25 +19,14 @@ export function registerManagementCommands(program: Command): void {
   program
     .command('sessions')
     .alias('threads')
-    .description('list threads in the current directory')
-    .option('--archived', 'list archived threads')
-    .option('--all', 'list threads from every directory')
+    .description('list threads')
     .option('--json')
-    .action(
-      async (
-        options: { archived?: boolean; all?: boolean },
-        command: Command,
-      ) => {
-        const global = resolveGlobalOptions(command);
-        await runManagement(global, 'thread/list', {
-          archived: options.archived === true,
-          ...(options.all === true
-            ? {}
-            : { cwd: global.root ?? process.cwd() }),
-          limit: 50,
-        });
-      },
-    );
+    .action(async (_options: Record<string, unknown>, command: Command) => {
+      await runManagement(resolveGlobalOptions(command), 'thread/list', {
+        archived: false,
+        limit: 50,
+      });
+    });
 
   program
     .command('tools')
@@ -150,104 +139,56 @@ export function registerManagementCommands(program: Command): void {
       },
     );
 
-  const thread = program
-    .command('thread')
+  program
+    .command('thread <operation> [threadId]')
     .description('read or manage threads')
-    .option('--json');
-
-  thread
-    .command('list')
-    .description('list threads from every directory')
-    .option('--archived', 'list archived threads')
-    .option('--json')
-    .action(async (options: { archived?: boolean }, command: Command) => {
-      await runManagement(resolveGlobalOptions(command), 'thread/list', {
-        archived: options.archived === true,
-        limit: 50,
-      });
-    });
-
-  thread
-    .command('loaded')
-    .description('list loaded thread runtimes')
-    .option('--json')
-    .action(async (_options: unknown, command: Command) => {
-      await runManagement(
-        resolveGlobalOptions(command),
-        'thread/loaded/list',
-        {},
-      );
-    });
-
-  thread
-    .command('read <threadId>')
-    .description('read a thread snapshot')
-    .option('--json')
-    .action(async (threadId: string, _options: unknown, command: Command) => {
-      await runManagement(resolveGlobalOptions(command), 'thread/read', {
-        threadId,
-        includeTurns: true,
-        includeItems: true,
-      });
-    });
-
-  thread
-    .command('archive <threadId>')
-    .description('archive a thread')
-    .option('--json')
-    .action(async (threadId: string, _options: unknown, command: Command) => {
-      await runManagement(resolveGlobalOptions(command), 'thread/archive', {
-        threadId,
-      });
-    });
-
-  thread
-    .command('unarchive <threadId>')
-    .description('unarchive a thread')
-    .option('--json')
-    .action(async (threadId: string, _options: unknown, command: Command) => {
-      await runManagement(resolveGlobalOptions(command), 'thread/unarchive', {
-        threadId,
-      });
-    });
-
-  thread
-    .command('delete <threadId>')
-    .description('delete a thread')
-    .option('--json')
-    .action(async (threadId: string, _options: unknown, command: Command) => {
-      await runManagement(resolveGlobalOptions(command), 'thread/delete', {
-        threadId,
-      });
-    });
-
-  thread
-    .command('compact <threadId>')
-    .description('start thread context compaction')
-    .option('--json')
-    .action(async (threadId: string, _options: unknown, command: Command) => {
-      await runManagement(
-        resolveGlobalOptions(command),
-        'thread/compact/start',
-        { threadId },
-      );
-    });
-
-  thread
-    .command('export <threadId>')
-    .description('export a thread')
+    .option('--archived')
     .option('--format <format>', 'jsonl, html, or markdown', 'markdown')
     .option('--json')
     .action(
       async (
-        threadId: string,
-        options: { format: string },
+        operation: string,
+        threadId: string | undefined,
+        options: { archived?: boolean; format: string },
         command: Command,
       ) => {
-        await runManagement(resolveGlobalOptions(command), 'thread/export', {
-          threadId,
-          format: parseThreadExportFormat(options.format),
-        });
+        const global = resolveGlobalOptions(command);
+        if (operation === 'list') {
+          await runManagement(global, 'thread/list', {
+            archived: options.archived === true,
+            limit: 50,
+          });
+          return;
+        }
+        if (operation === 'loaded') {
+          await runManagement(global, 'thread/loaded/list', {});
+          return;
+        }
+        if (threadId === undefined) {
+          throw new Error(`thread ${operation} requires a thread id.`);
+        }
+        if (operation === 'read') {
+          await runManagement(global, 'thread/read', {
+            threadId,
+            includeTurns: true,
+            includeItems: true,
+          });
+        } else if (operation === 'archive') {
+          await runManagement(global, 'thread/archive', { threadId });
+        } else if (operation === 'unarchive') {
+          await runManagement(global, 'thread/unarchive', { threadId });
+        } else if (operation === 'delete') {
+          await runManagement(global, 'thread/delete', { threadId });
+        } else if (operation === 'compact') {
+          await runManagement(global, 'thread/compact/start', { threadId });
+        } else if (operation === 'export') {
+          await runManagement(global, 'thread/export', {
+            threadId,
+            format: parseThreadExportFormat(options.format),
+          });
+        } else {
+          throw new Error(`Unsupported thread operation ${operation}.`);
+        }
       },
     );
 

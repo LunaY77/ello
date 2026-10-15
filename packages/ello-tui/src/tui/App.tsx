@@ -10,38 +10,53 @@ import React, {
 import { cycleSessionMode } from '../api/protocol-types.js';
 import { ThreadClient } from '../client/thread-client.js';
 
+import { AgentSwitcher } from './component/AgentSwitcher.js';
+import {
+  AgentTranscript,
+  AgentTranscriptHistoryOutput,
+} from './component/AgentTranscript.js';
 import { AppShell } from './component/AppShell.js';
-import { Composer } from './component/Composer.js';
+import {
+  Composer,
+  composerRowCount,
+  composerTextWidthForTerminal,
+} from './component/Composer.js';
 import { OverlayHost } from './component/OverlayHost.js';
 import { TerminalHistoryOutput } from './component/TerminalHistoryOutput.js';
+import { useAgentNavigation } from './hooks/use-agent-navigation.js';
+import { useAgentTasks } from './hooks/use-agent-tasks.js';
 import { useCatalogs } from './hooks/use-catalogs.js';
 import type { CatalogLoadState } from './hooks/use-catalogs.js';
 import { useComposerState } from './hooks/use-composer-state.js';
 import { useComposerSuggestions } from './hooks/use-composer-suggestions.js';
 import { useOverlay } from './hooks/use-overlay.js';
-import { useProfileSettings } from './hooks/use-profile-settings.js';
 import { useRequestResolution } from './hooks/use-request-resolution.js';
 import {
   rewindTargets,
   useRuntimeActions,
 } from './hooks/use-runtime-actions.js';
 import { useRuntimeEvents } from './hooks/use-runtime-events.js';
+import { useSettings } from './hooks/use-settings.js';
 import { useStableInput } from './hooks/use-stable-input.js';
 import { useSubmission } from './hooks/use-submission.js';
+import { useTerminalSize } from './hooks/use-terminal-size.js';
 import { useThemeState } from './hooks/use-theme-state.js';
-import {
-  buildModelCatalogOptions,
-  buildProfileSelectorOptions,
-} from './model-selectors.js';
-import {
-  activeProfileFromConfig,
-  bypassEnabledFromConfig,
-} from './profile-config.js';
+import { buildModelCatalogOptions } from './model-selectors.js';
 import {
   isDisposableThread,
   isShiftTab,
   overlayForRequest,
 } from './screen-utils.js';
+import {
+  bypassEnabledFromConfig,
+  globalModelSelectionsFromConfig,
+} from './settings/config.js';
+import {
+  agentTaskToRunView,
+  terminalAgentTaskEntry,
+} from './store/agent-task-view.js';
+import { AGENT_SWITCHER_MAX_TASK_ROWS } from './store/live-budget.js';
+import { layoutTerminalText } from './store/terminal-text.js';
 import { resolveTheme, ThemeProvider } from './theme/index.js';
 import { createThreadCommandRunner } from './thread-command-runner.js';
 
@@ -126,28 +141,40 @@ function ReadyThreadScreen({
   onError(error: unknown): void;
 }): React.ReactElement {
   const { exit } = useApp();
+  const terminal = useTerminalSize();
+  const composerTextWidth = composerTextWidthForTerminal(terminal.columns);
   const { state, workingSeconds, dispatch, queueSteer } = runtimeEvents;
   const { overlay, setOverlay } = useOverlay();
+  const commitTerminalTask = useCallback(
+    (task: Parameters<typeof terminalAgentTaskEntry>[0]) => {
+      const entry = terminalAgentTaskEntry(task);
+      if (entry !== undefined) {
+        dispatch({ type: 'ui.subagent.committed', entry });
+      }
+    },
+    [dispatch],
+  );
+  const agentTasks = useAgentTasks(thread, onError, commitTerminalTask);
+  useEffect(() => {
+    for (const task of agentTasks.tasks) commitTerminalTask(task);
+  }, [agentTasks.tasks, commitTerminalTask, state.historyResetKey]);
   const { draft, setDraft, cursor, setCursor, fileSearch, setFileSearch } =
     useComposerState(initialDraft);
   const { themeName, themeEpoch, setThemeName, setThemeEpoch } =
     useThemeState(onError);
-  const activeProfile = activeProfileFromConfig(catalogs.config);
   const bypassEnabled = bypassEnabledFromConfig(catalogs.config);
-  const modelOptions = useMemo(
-    () => buildModelCatalogOptions(catalogs.models, catalogs.providers),
-    [catalogs.models, catalogs.providers],
+  const globalModelSelections = globalModelSelectionsFromConfig(
+    catalogs.config,
   );
-  const profileOptions = useMemo(
-    () => buildProfileSelectorOptions(catalogs.profiles, activeProfile),
-    [activeProfile, catalogs.profiles],
+  const modelOptions = useMemo(
+    () => buildModelCatalogOptions(catalogs.models, globalModelSelections),
+    [catalogs.models, globalModelSelections],
   );
   const suggestions = useComposerSuggestions({
     thread,
     draft,
     cursor,
     fileSearch,
-    profiles: catalogs.profiles,
     skills: catalogs.skills,
     setFileSearch,
     onError,
@@ -156,6 +183,19 @@ function ReadyThreadScreen({
     state.status === 'running' ||
     state.status === 'awaitingApproval' ||
     state.status === 'awaitingUserInput';
+  const visibleAgentTasks = agentTasks.tasks.filter((task) => {
+    if (task.status === 'queued' || task.status === 'running') return true;
+    if (
+      agentTasks.activeView.kind === 'task' &&
+      agentTasks.activeView.taskId === task.taskId
+    ) {
+      return true;
+    }
+    return (
+      state.runStartedAt !== undefined &&
+      Date.parse(task.createdAt) >= state.runStartedAt
+    );
+  });
   const submission = useSubmission({
     thread,
     state,
@@ -195,14 +235,13 @@ function ReadyThreadScreen({
     switchThread,
     closeCurrentThread,
     exit,
+    onError,
   });
 
   const { submitPrompt } = createThreadCommandRunner({
     thread,
     state,
     catalogs,
-    modelOptions,
-    profileOptions,
     runtime,
     dispatch,
     setOverlay,
@@ -214,22 +253,17 @@ function ReadyThreadScreen({
     onError,
     submitPrompt,
   });
-  const profiles = useProfileSettings({
+  const settings = useSettings({
     thread,
-    profiles: catalogs.profiles,
-    activeProfile,
-    currentProfile: state.settings.profile,
-    modelOptions,
     themeName,
-    setProfiles: catalogs.setProfiles,
     setConfig: catalogs.setConfig,
     setOverlay,
     setThemeName,
     setThemeEpoch,
-    onError,
   });
 
   const handleCancel = (): void => {
+    if (runtime.cancelCompaction()) return;
     if (submission.cancel()) return;
     void closeCurrentThread().then(exit).catch(onError);
   };
@@ -237,21 +271,20 @@ function ReadyThreadScreen({
     if (effectiveOverlay.type === 'none' || !key.ctrl || input !== 'c') return;
     handleCancel();
   });
-  useInput(
-    (_input, key) => {
-      if (!key.escape) return;
-      if (effectiveOverlay.type !== 'none') {
-        setOverlay({ type: 'none' });
-      } else if (running) {
-        void thread.interrupt('user interrupted from TUI').catch(onError);
-      }
-    },
-    { isActive: true },
-  );
+  useAgentNavigation({
+    thread,
+    agentTasks,
+    visibleTasks: visibleAgentTasks,
+    overlay: effectiveOverlay,
+    running,
+    setOverlay,
+    onError,
+  });
   useInput(
     (input, key) => {
       if (
         effectiveOverlay.type !== 'none' ||
+        agentTasks.focus !== 'composer' ||
         !isShiftTab(input, key) ||
         switchingMode.current
       ) {
@@ -268,36 +301,98 @@ function ReadyThreadScreen({
     { isActive: true },
   );
 
-  const contextPercent = contextRemainingPercent(
-    catalogs.models,
-    state.settings.model,
-    state.usage.inputTokens + state.usage.outputTokens,
+  const selectedModel = selectedModelForAgent(
+    catalogs.agents,
+    state.settings.agent,
+    globalModelSelections,
   );
-  const ctrlCInterrupts = running || submission.submissionPending;
+  const contextWindow = modelContextWindow(catalogs.models, selectedModel);
+  const contextPercent = contextRemainingPercent(
+    contextWindow,
+    state.usage.lastInputTokens,
+  );
+  const ctrlCInterrupts =
+    running || submission.submissionPending || runtime.compactionRunning;
+  const taskRunViews = agentTasks.tasks.map(agentTaskToRunView);
+  const runningTaskViews = taskRunViews.filter(
+    (task) => task.status === 'queued' || task.status === 'running',
+  );
+  useEffect(() => {
+    if (
+      visibleAgentTasks.length === 0 &&
+      agentTasks.focus === 'agent-switcher'
+    ) {
+      agentTasks.setFocus('composer');
+    }
+  }, [agentTasks, visibleAgentTasks.length]);
+  // Composer 与 live 区共享同一份行数账：这里的输入必须和下面传给 <Composer> 的一致。
+  const composerSuggestions =
+    agentTasks.activeTask === undefined ? suggestions : undefined;
+  const composerRunning =
+    agentTasks.activeTask === undefined
+      ? ctrlCInterrupts
+      : agentTasks.activeTask.status === 'running';
+  const composerRows = composerRowCount({
+    textRows: layoutTerminalText(draft.split('\n'), cursor, composerTextWidth)
+      .rows.length,
+    running: composerRunning,
+    hasSteerTarget: agentTasks.activeTask !== undefined,
+    suggestionCount: composerSuggestions?.length ?? 0,
+  });
+  const activeHistoryResetKey =
+    state.historyResetKey + themeEpoch + agentTasks.viewEpoch * 1_000_000;
+  const activeAgentTask = agentTasks.activeTask;
   return (
     <ThemeProvider theme={resolveTheme(themeName)}>
       <TerminalHistoryOutput
-        entries={state.history}
-        resetKey={state.historyResetKey + themeEpoch}
+        entries={agentTasks.activeView.kind === 'main' ? state.history : []}
+        resetKey={activeHistoryResetKey}
         cwd={thread.cwd}
         settings={state.settings}
       />
+      {activeAgentTask === undefined ? null : (
+        <AgentTranscriptHistoryOutput
+          task={activeAgentTask}
+          {...(agentTasks.activeDetail === undefined
+            ? {}
+            : { detail: agentTasks.activeDetail })}
+          resetKey={activeHistoryResetKey}
+        />
+      )}
       <AppShell
         cwd={thread.cwd}
-        model={state.settings.model}
+        model={`primary: ${globalModelSelections.primaryModel} · auxiliary: ${globalModelSelections.auxiliaryModel}`}
         mode={{ mode: state.settings.mode }}
+        composerRows={composerRows}
+        agentRows={agentSwitcherRows(
+          visibleAgentTasks.length,
+          agentTasks.focus === 'agent-switcher',
+        )}
+        overlayOpen={effectiveOverlay.type !== 'none'}
         {...(contextPercent === undefined ? {} : { contextPercent })}
+        {...(contextWindow === undefined ? {} : { contextWindow })}
         pendingPlanApproval={effectiveOverlay.type === 'plan-approval'}
         liveAssistantText={state.live.assistantText}
+        liveReasoningText={state.live.reasoningText}
+        liveCompactionText={state.live.compactionText}
         runningTools={[...state.live.runningTools.values()]}
-        runningSubagents={[...state.live.runningSubagents.values()]}
-        running={running}
+        runningCommandRuns={[...state.live.runningCommandRuns.values()]}
+        runningSubagents={
+          agentTasks.activeView.kind === 'main'
+            ? runningTaskViews
+            : [...state.live.runningSubagents.values()]
+        }
+        running={
+          agentTasks.activeTask === undefined
+            ? running
+            : agentTasks.activeTask.status === 'running'
+        }
         {...(workingSeconds === undefined ? {} : { workingSeconds })}
         {...(state.interruptNotice === undefined
           ? {}
           : { interruptNotice: state.interruptNotice })}
-        pendingSteers={state.pendingSteers}
-        usage={state.usage}
+        pendingSteers={state.pendingSteers.map((steer) => steer.text)}
+        usage={agentTasks.activeTask?.usage ?? state.usage}
         {...(state.goal === undefined ? {} : { goal: state.goal })}
         overlay={
           <OverlayHost
@@ -311,29 +406,34 @@ function ReadyThreadScreen({
             onChatAboutPlan={requests.onChatAboutPlan}
             onDenyPlan={requests.onDenyPlan}
             onClosePlanPreview={() => setOverlay({ type: 'none' })}
+            onSelectModelSelector={(selector) => {
+              setOverlay({
+                type: 'models',
+                selector,
+                title: `Select ${selector}`,
+                options: modelOptions,
+              });
+            }}
             onSelectModel={(model) => {
+              if (effectiveOverlay.type !== 'models') {
+                throw new Error('Model selection requires a model overlay.');
+              }
               void thread
-                .setModel(model)
-                .then(() => setOverlay({ type: 'none' }))
+                .request('config/write', {
+                  cwd: thread.cwd,
+                  source: 'global',
+                  path: [effectiveOverlay.selector],
+                  operation: 'set',
+                  value: model,
+                })
+                .then((result) => {
+                  catalogs.setConfig(result.config);
+                  setOverlay({ type: 'none' });
+                })
                 .catch(onError);
             }}
-            onSelectProfile={profiles.openProfile}
-            onCreateProfile={profiles.createProfile}
-            onRequestDeleteProfile={profiles.requestDeleteProfile}
-            onConfirmDeleteProfile={profiles.confirmDeleteProfile}
-            onActivateProfile={profiles.activateProfile}
-            onSubmitNewProfile={profiles.submitNewProfile}
-            onSelectProfileRole={profiles.selectProfileRole}
-            onBindProfileRoleModel={profiles.bindProfileRoleModel}
-            onSaveProfile={profiles.saveProfile}
-            onSelectSession={(threadId, action) => {
-              const resume =
-                action === 'resume'
-                  ? thread.resume(threadId)
-                  : thread
-                      .request('thread/unarchive', { threadId })
-                      .then(() => thread.resume(threadId));
-              void resume.then(switchThread).catch(onError);
+            onSelectSession={(threadId) => {
+              void thread.resume(threadId).then(switchThread).catch(onError);
             }}
             onSelectRewind={(entryId) => {
               const target = rewindTargets(state.history).find(
@@ -343,17 +443,64 @@ function ReadyThreadScreen({
                 void runtime.rewindToTarget(target).catch(onError);
               }
             }}
-            onUpdateSetting={profiles.updateSetting}
-            onOpenProfiles={profiles.openProfiles}
+            onUpdateSetting={settings.updateSetting}
+            onConfirmAgentStop={(taskId) => {
+              void agentTasks.client
+                ?.stop(taskId)
+                .then(() => setOverlay({ type: 'none' }))
+                .catch(onError);
+            }}
+            onCancelAgentStop={() => setOverlay({ type: 'none' })}
+          />
+        }
+        {...(activeAgentTask === undefined
+          ? {}
+          : {
+              agentTranscript: ({
+                maxRows,
+                textWidth,
+              }: {
+                readonly maxRows: number;
+                readonly textWidth: number;
+              }) => (
+                <AgentTranscript
+                  task={activeAgentTask}
+                  {...(agentTasks.activeDetail === undefined
+                    ? {}
+                    : { detail: agentTasks.activeDetail })}
+                  maxRows={maxRows}
+                  textWidth={textWidth}
+                />
+              ),
+            })}
+        agentSwitcher={
+          <AgentSwitcher
+            tasks={visibleAgentTasks}
+            activeView={agentTasks.activeView}
+            focus={agentTasks.focus}
+            highlightedTaskId={agentTasks.highlightedTaskId}
           />
         }
         composer={
           <Composer
-            isActive={effectiveOverlay.type === 'none'}
-            running={ctrlCInterrupts}
+            isActive={
+              effectiveOverlay.type === 'none' &&
+              agentTasks.focus === 'composer'
+            }
+            running={composerRunning}
             history={submission.inputHistory}
-            {...(suggestions === undefined ? {} : { suggestions })}
+            {...(composerSuggestions === undefined
+              ? {}
+              : { suggestions: composerSuggestions })}
+            {...(agentTasks.activeTask === undefined
+              ? {}
+              : {
+                  target:
+                    agentTasks.activeTask.name ??
+                    agentTasks.activeTask.definitionName,
+                })}
             value={draft}
+            textWidth={composerTextWidth}
             onChange={(value, nextCursor) => {
               setDraft(value);
               setCursor(nextCursor);
@@ -361,17 +508,33 @@ function ReadyThreadScreen({
             onSuggestionAccepted={() => undefined}
             onSubmit={(value) => {
               submission.rememberInput(value);
-              void submitPrompt(value).catch(onError);
+              if (agentTasks.activeTask === undefined) {
+                void submitPrompt(value).catch(onError);
+              } else if (agentTasks.activeTask.status === 'running') {
+                void agentTasks.client
+                  ?.steer(value, agentTasks.activeTask.taskId)
+                  .catch(onError);
+              } else {
+                onError(
+                  new Error(
+                    `Agent task ${agentTasks.activeTask.taskId} is ${agentTasks.activeTask.status}; return to main to start a new Agent.`,
+                  ),
+                );
+              }
             }}
             onCancel={handleCancel}
-            onEscape={() => {
-              if (effectiveOverlay.type !== 'none') {
-                setOverlay({ type: 'none' });
-              } else if (running) {
-                void thread
-                  .interrupt('user interrupted from TUI')
-                  .catch(onError);
+            onEscape={() => undefined}
+            onMovePastEnd={() => {
+              if (visibleAgentTasks.length > 0) {
+                agentTasks.setHighlightedTaskId(
+                  agentTasks.activeView.kind === 'task'
+                    ? agentTasks.activeView.taskId
+                    : visibleAgentTasks[0]!.taskId,
+                );
+                agentTasks.setFocus('agent-switcher');
+                return true;
               }
+              return false;
             }}
           />
         }
@@ -380,21 +543,58 @@ function ReadyThreadScreen({
   );
 }
 
+/**
+ * AgentSwitcher 的行数：marginTop + main 行 + 有界的 child 行 + 溢出计数 + 选择态提示。
+ * 必须与 `AgentSwitcher` 的窗口逻辑一致，否则 live 区预算会算漏。
+ */
+function agentSwitcherRows(taskCount: number, focused: boolean): number {
+  if (taskCount === 0) return 0;
+  const visible = Math.min(taskCount, AGENT_SWITCHER_MAX_TASK_ROWS);
+  const overflow = taskCount > visible ? 1 : 0;
+  return 2 + visible + overflow + (focused ? 1 : 0);
+}
+
 function contextRemainingPercent(
+  contextWindow: number | undefined,
+  used: number | undefined,
+): number | undefined {
+  if (used === undefined || contextWindow === undefined) return undefined;
+  return Math.max(
+    0,
+    Math.round(((contextWindow - used) / contextWindow) * 100),
+  );
+}
+
+function modelContextWindow(
   models: readonly {
     readonly id: string;
     readonly metadata: Record<string, unknown>;
   }[],
   model: string,
-  used: number,
 ): number | undefined {
-  const contextWindow = models.find((entry) => entry.id === model)?.metadata
-    .context;
-  if (typeof contextWindow !== 'number' || contextWindow <= 0) return undefined;
-  return Math.max(
-    0,
-    Math.round(((contextWindow - used) / contextWindow) * 100),
-  );
+  const selected = models.find((entry) => entry.id === model);
+  const contextWindow = selected?.metadata.contextWindow;
+  return typeof contextWindow === 'number' && contextWindow > 0
+    ? contextWindow
+    : undefined;
+}
+
+function selectedModelForAgent(
+  agents: ReadyCatalogs['agents'],
+  agentName: string,
+  references: {
+    readonly primaryModel: string;
+    readonly auxiliaryModel: string;
+  },
+): string {
+  const agent = agents.find((entry) => entry.id === agentName);
+  if (agent === undefined) {
+    throw new Error(`Selected Agent is absent from the catalog: ${agentName}`);
+  }
+  const selector = agent.metadata.model;
+  if (selector === 'primary_model') return references.primaryModel;
+  if (selector === 'auxiliary_model') return references.auxiliaryModel;
+  throw new Error(`Agent ${agentName} has an invalid model selector.`);
 }
 
 function notify(

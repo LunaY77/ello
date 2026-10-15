@@ -14,67 +14,58 @@ import {
   AgentStreamBackpressureError,
   ModelAdapterProtocolError,
   createAgent as createBaseAgent,
-  defineDeferredTool,
-  defineTool as defineAgentTool,
   z,
   type AgentModelEvent,
   type AgentMessage,
   type AgentModelRequest,
   type AgentModelResponse,
   type EngineEvent,
-  type AnyAgentTool,
   type CreateAgentOptions,
-  type DefineToolOptions,
-  type AgentToolDiscovery,
   type ModelAdapter,
 } from '../../src/features/agent/engine/index.js';
-import { trimMessages } from '../../src/features/agent/engine/model-input.js';
 import {
   AgentRunControl,
   DefaultAgentMessageQueue,
 } from '../../src/features/agent/engine/run-control.js';
-import { createLocalEnvironment } from '../../src/features/agent/environment.js';
+import type { CommandDefinition } from '../../src/features/command/index.js';
+import {
+  createLocalEnvironments,
+  LOCAL_HOST_ENVIRONMENT_REFERENCE,
+} from '../../src/features/environment/index.js';
+import { createTestCommandRun, defineTestCommand } from '../support/command.js';
+import { createTestEnvironmentHandle } from '../support/environment.js';
 
-function defineTool<TInput, TOutput>(
-  options: Omit<DefineToolOptions<TInput, TOutput>, 'discovery'> & {
-    readonly discovery?: AgentToolDiscovery;
-  },
-) {
-  const { discovery, ...tool } = options;
-  return defineAgentTool({
-    ...tool,
-    discovery: discovery ?? { aliases: [], risk: 'readonly' },
-  });
-}
-
-const testTool = defineTool({
+const testCommand = defineTestCommand({
   name: 'test_noop',
-  description: 'No-op tool for agent loop tests.',
-  discovery: { aliases: ['noop'], risk: 'readonly' },
-  input: z.object({}).strict(),
-  execute: () => null,
+  summary: 'No-op Command for agent loop tests.',
+  aliases: ['noop'],
+  schema: z.object({}).strict(),
+  run: () => null,
 });
-
-const emptyTestEnvironment: CreateAgentOptions['environment'] = {};
 
 function createAgent(
   options: Omit<
     CreateAgentOptions,
-    'executionTools' | 'modelTools' | 'environment'
+    'commandRun' | 'environment' | 'modelCall'
   > & {
-    readonly tools?: readonly AnyAgentTool[];
-    readonly executionTools?: readonly AnyAgentTool[];
-    readonly modelTools?: readonly AnyAgentTool[];
+    readonly commands?: readonly CommandDefinition[];
     readonly environment?: CreateAgentOptions['environment'];
   },
 ) {
-  const { tools, executionTools, modelTools, environment, ...rest } = options;
-  const selected = tools ?? executionTools ?? [testTool as AnyAgentTool];
+  const { commands, environment, ...rest } = options;
+  const selected = commands ?? [testCommand];
   return createBaseAgent({
     ...rest,
-    environment: environment === undefined ? emptyTestEnvironment : environment,
-    executionTools: executionTools ?? selected,
-    modelTools: modelTools ?? selected,
+    modelCall: {
+      agentName: 'test-agent',
+      modelSelector: 'primary_model',
+      configuredModel: 'test-model',
+      protocol: 'openai',
+      apiModel: 'model',
+    },
+    environment:
+      environment === undefined ? createTestEnvironmentHandle() : environment,
+    commandRun: createTestCommandRun(selected),
   });
 }
 
@@ -139,6 +130,41 @@ describe('createAgent', () => {
     await agent.close();
   });
 
+  it('publishes reasoning as an independent lifecycle', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        generate: (request) => new EchoAdapter().generate(request),
+        async *stream(request) {
+          yield { type: 'reasoning-delta', text: 'inspect ' };
+          yield { type: 'reasoning-delta', text: 'state' };
+          yield {
+            type: 'final',
+            response: await new EchoAdapter().generate(request),
+          };
+        },
+      },
+    });
+    const stream = agent.stream('hi');
+    const events: EngineEvent[] = [];
+    for await (const event of stream) events.push(event);
+    await stream.final;
+
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        'reasoning.started',
+        'reasoning.delta',
+        'reasoning.completed',
+      ]),
+    );
+    expect(
+      events.find((event) => event.type === 'reasoning.completed'),
+    ).toMatchObject({
+      text: 'inspect state',
+    });
+    await agent.close();
+  });
+
   it('adds ephemeral run instructions to system without persisting them', async () => {
     let request: AgentModelRequest | undefined;
     const agent = createAgent({
@@ -173,7 +199,7 @@ describe('createAgent', () => {
     const result = await agent.run('task', {
       ephemeralInstructions: 'temporary skill instructions',
     });
-    expect(request?.system).toBe('temporary skill instructions');
+    expect(request?.instructions).toBe('temporary skill instructions');
     expect(request?.messages).not.toContainEqual(
       expect.objectContaining({ role: 'system' }),
     );
@@ -327,12 +353,12 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('defines tools and emits stable tool events with custom adapters', async () => {
-    const toolCall = defineTool({
+  it('只向 provider 暴露稳定的 command_run Tool', async () => {
+    const command = defineTestCommand({
       name: 'echo',
-      description: 'Echo input',
-      input: z.object({ text: z.string() }),
-      execute: ({ text }) => text,
+      summary: 'Echo input',
+      schema: z.object({ text: z.string() }),
+      run: ({ text }) => text,
     });
     const seenToolNames: string[] = [];
     const adapter: ModelAdapter = {
@@ -351,16 +377,16 @@ describe('createAgent', () => {
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: adapter,
-      tools: [toolCall],
+      commands: [command],
     });
     const result = await agent.run('hi');
 
     expect(result.output).toBe('hello');
-    expect(seenToolNames).toContain('echo');
+    expect(seenToolNames).toEqual(['command_run']);
     await agent.close();
   });
 
-  it('按工具名稳定发送 toolset，并拒绝重复名称', async () => {
+  it('领域能力变化不改变 provider toolset，并拒绝重复名称', async () => {
     const seen: string[][] = [];
     const adapter: ModelAdapter = {
       generate: (request) => new EchoAdapter().generate(request),
@@ -369,52 +395,55 @@ describe('createAgent', () => {
         yield { type: 'final', response: await this.generate(request) };
       },
     };
-    const makeTool = (name: string) =>
-      defineTool({
+    const makeCommand = (name: string) =>
+      defineTestCommand({
         name,
-        description: name,
-        input: z.object({}),
-        execute: () => name,
+        summary: name,
+        schema: z.object({}),
+        run: () => name,
       });
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: adapter,
-      tools: [makeTool('zeta'), makeTool('alpha')],
+      commands: [makeCommand('zeta'), makeCommand('alpha')],
     });
 
     await agent.run('hi');
-    expect(seen).toEqual([['alpha', 'zeta']]);
+    expect(seen).toEqual([['command_run']]);
     await agent.close();
 
     expect(() =>
       createAgent({
         model: 'test:model',
         modelAdapter: adapter,
-        tools: [makeTool('same'), makeTool('same')],
+        commands: [makeCommand('same'), makeCommand('same')],
       }),
-    ).toThrow("Duplicate tool 'same' in executionTools.");
+    ).toThrow("Duplicate Command 'same'.");
   });
 
   it('uses local environment and returns the current run messages', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'ello-agent-'));
     dirs.push(dir);
-    const environment = createLocalEnvironment({
-      cwd: dir,
-      allowedPaths: [dir],
-    });
-    await environment.fileSystem?.writeText('note.txt', 'content');
-    const entries = await environment.fileSystem?.listDir('.');
+    const environments = createLocalEnvironments();
+    const environment = await environments.attach(
+      {
+        environmentRef: LOCAL_HOST_ENVIRONMENT_REFERENCE,
+        workingDirectory: dir,
+      },
+      { isolation: 'none' },
+    );
+    await environment.fileSystem.writeText('note.txt', 'content');
+    const entries = await environment.fileSystem.listDir('.');
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: new EchoAdapter(),
       environment,
-      tools: [
-        defineTool({
+      commands: [
+        defineTestCommand({
           name: 'read_note',
-          description: 'Read note file',
-          input: z.object({ path: z.string() }),
-          execute: ({ path }, ctx) =>
-            ctx.environment.fileSystem?.readText(path) ?? '',
+          summary: 'Read note file',
+          schema: z.object({ path: z.string() }),
+          run: ({ path }, ctx) => ctx.environment.fileSystem.readText(path),
         }),
       ],
     });
@@ -426,14 +455,15 @@ describe('createAgent', () => {
       'assistant',
     ]);
     await agent.close();
+    await environments.close();
   });
 
-  it('passes the complete current messages to the pure compactor', async () => {
+  it('compacts the current input before the model call', async () => {
     let messagesSeenByCompactor: AgentMessage[] = [];
     const agent = createAgent({
       model: 'test:model',
       modelAdapter: new EchoAdapter(),
-      modelInputBudget: { maxInputTokens: 100 },
+      modelInputBudget: { maxInputTokens: 1_000 },
       compactor: {
         name: 'test-compactor',
         async compact(input) {
@@ -453,9 +483,16 @@ describe('createAgent', () => {
       },
     });
 
-    const result = await agent.run('current input');
+    const result = await agent.run({
+      messages: [{ role: 'user', content: 'history' }],
+      prompt: 'current input',
+    });
 
     expect(messagesSeenByCompactor.map((message) => message.role)).toEqual([
+      'user',
+      'user',
+    ]);
+    expect(result.newMessages.map((message) => message.role)).toEqual([
       'user',
       'assistant',
     ]);
@@ -465,31 +502,23 @@ describe('createAgent', () => {
     await agent.close();
   });
 
-  it('runs environment lifecycle and resource instructions inside the agent loop', async () => {
+  it('uses Environment instructions and closes the attached Handle', async () => {
     const events: string[] = [];
     const requests: AgentModelRequest[] = [];
-    const environment = createLocalEnvironment({
-      cwd: process.cwd(),
-      allowedPaths: [process.cwd()],
-    });
-    environment.resources?.register('test-resource', {
-      setup: () => {
-        events.push('resource.setup');
+    const environments = createLocalEnvironments();
+    const attached = await environments.attach(
+      {
+        environmentRef: LOCAL_HOST_ENVIRONMENT_REFERENCE,
+        workingDirectory: process.cwd(),
       },
-      getContextInstructions: () => 'Resource instruction.',
-      close: () => {
-        events.push('resource.close');
+      { isolation: 'none' },
+    );
+    const environment = {
+      ...attached,
+      close: async () => {
+        events.push('close');
+        await attached.close();
       },
-    });
-    const originalSetup = environment.setup?.bind(environment);
-    const originalClose = environment.close?.bind(environment);
-    environment.setup = async (ctx) => {
-      events.push(`setup:${ctx.runId.length > 0}`);
-      await originalSetup?.(ctx);
-    };
-    environment.close = async () => {
-      events.push('close');
-      await originalClose?.();
     };
     const agent = createAgent({
       model: 'test:model',
@@ -520,20 +549,24 @@ describe('createAgent', () => {
     });
 
     await agent.run('hi');
-    const shellResult = await environment.shell?.run('echo shell-ok');
+    const shellResult = await environment.processes.exec({
+      command: 'echo shell-ok',
+      maxRuntimeMs: 10_000,
+    });
     await agent.close();
 
-    expect(events[0]).toBe('setup:true');
-    expect(events).toContain('resource.setup');
     expect(events).toContain('run.started');
     expect(events).toContain('run.completed');
     expect(events).toContain('close');
-    expect(events).toContain('resource.close');
-    expect(shellResult?.stdout.trim()).toBe('shell-ok');
-    expect(requests[0]?.system).toContain('<environment-context>');
-    expect(requests[0]?.system).toContain('<file-system>');
-    expect(requests[0]?.system).toContain('<shell>');
-    expect(requests[0]?.system).toContain('Resource instruction.');
+    expect(Buffer.from(shellResult.stdout.data).toString('utf8').trim()).toBe(
+      'shell-ok',
+    );
+    expect(requests[0]?.instructions).toContain('<environment-context>');
+    expect(requests[0]?.instructions).toContain('<working-directory>');
+    await expect(environment.fileSystem.listDir('.')).rejects.toThrow(
+      'Environment Handle is closed',
+    );
+    await environments.close();
   });
 
   it('drains message queues in stable modes and run-control order', () => {
@@ -590,7 +623,7 @@ describe('createAgent', () => {
         {
           kind: 'approval',
           toolCallId: 'call_write',
-          toolName: 'write',
+          commandName: 'write',
           input: { path: 'tmp', content: 'abc' },
         },
       ],
@@ -684,7 +717,7 @@ describe('createAgent', () => {
       instructions: 'Be precise.',
       modelInput: {
         systemSections: [() => 'Working directory: /tmp/project'],
-        messageTransforms: [trimMessages({ maxMessages: 3 })],
+        messageTransforms: [async (messages) => messages.slice(-3)],
         providerOptions: () => ({ test: { enabled: true } }),
       },
       observers: [
@@ -703,8 +736,8 @@ describe('createAgent', () => {
       prompt: 'current',
     });
 
-    expect(seenMessages[0]?.system).toContain('Be precise.');
-    expect(seenMessages[0]?.system).toContain(
+    expect(seenMessages[0]?.instructions).toContain('Be precise.');
+    expect(seenMessages[0]?.instructions).toContain(
       'Working directory: /tmp/project',
     );
     expect(seenMessages[0]?.providerOptions).toEqual({
@@ -718,171 +751,6 @@ describe('createAgent', () => {
     ).toBeGreaterThan(0);
     expect(observed).toContain('turn-started');
     expect(observed).toContain('run.completed');
-    await agent.close();
-  });
-
-  it('returns pending approvals without executing the tool', async () => {
-    const toolCall = defineTool({
-      name: 'danger',
-      description: 'Dangerous tool',
-      input: z.object({ value: z.string() }),
-      approval: () => 'required',
-      execute: () => {
-        throw new Error('should not execute');
-      },
-    });
-    const toolsSeen: AgentModelRequest[] = [];
-    const agent = createAgent({
-      model: 'test:model',
-      tools: [toolCall],
-      modelAdapter: {
-        async generate(request) {
-          toolsSeen.push(request);
-          return {
-            text: '',
-            messages: [...request.messages],
-            newMessages: [],
-            toolCalls: [
-              { id: 'call_1', name: 'danger', input: { value: 'x' } },
-            ],
-            usage: {
-              requests: 1,
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              toolCalls: 0,
-            },
-            finishReason: 'tool-calls',
-            provider: null,
-          };
-        },
-        async *stream(request) {
-          yield { type: 'final', response: await this.generate(request) };
-        },
-      },
-    });
-    const result = await agent.run('use tool');
-
-    expect(toolsSeen.length).toBe(1);
-    expect(result.pending?.[0]).toMatchObject({
-      kind: 'approval',
-      toolCallId: 'call_1',
-      toolName: 'danger',
-    });
-    expect(result.pending).toHaveLength(1);
-    expect(result.finishReason).toBe('approval-required');
-    await agent.close();
-  });
-
-  it('resumes approved tools against explicit history without missing tool results', async () => {
-    const requests: AgentModelRequest[] = [];
-    const persistedToolCall = {
-      role: 'assistant',
-      content: [
-        {
-          type: 'tool-call',
-          toolCallId: 'call_write',
-          toolName: 'write_file',
-          input: { path: 'tmp', content: 'abc' },
-        },
-      ],
-    } as AgentMessage;
-    const agent = createAgent({
-      model: 'test:model',
-      tools: [
-        defineTool({
-          name: 'write_file',
-          description: 'Write a file',
-          input: z.object({ path: z.string(), content: z.string() }),
-          approval: () => 'required',
-          execute: ({ path, content }) => ({ path, content }),
-        }),
-      ],
-      modelAdapter: {
-        async generate(request) {
-          requests.push(request);
-          return {
-            text: 'done',
-            messages: [
-              ...request.messages,
-              { role: 'assistant', content: 'done' },
-            ],
-            newMessages: [{ role: 'assistant', content: 'done' }],
-            usage: {
-              requests: 1,
-              inputTokens: 1,
-              outputTokens: 1,
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              toolCalls: 0,
-            },
-            finishReason: 'stop',
-            provider: null,
-          };
-        },
-        async *stream(request) {
-          yield { type: 'final', response: await this.generate(request) };
-        },
-      },
-    });
-
-    const stream = agent.resume({
-      messages: [persistedToolCall],
-      deferred: {
-        deferred: [
-          {
-            kind: 'approval',
-            toolCallId: 'call_write',
-            toolName: 'write_file',
-            input: { path: 'tmp', content: 'abc' },
-          },
-        ],
-        approvals: { call_write: { approved: true } },
-      },
-    });
-    for await (const _event of stream) {
-      // drive stream
-    }
-    const result = await stream.final;
-
-    expect(result.output).toBe('done');
-    expect(requests).toHaveLength(1);
-    const requestMessages = requests[0]?.messages ?? [];
-    const assistantToolCalls = requestMessages.filter(
-      (message) =>
-        message.role === 'assistant' &&
-        Array.isArray(message.content) &&
-        message.content.some(
-          (part) =>
-            typeof part === 'object' &&
-            part !== null &&
-            (part as { toolCallId?: string }).toolCallId === 'call_write',
-        ),
-    );
-    const toolResults = requestMessages.filter(
-      (message) =>
-        message.role === 'tool' &&
-        Array.isArray(message.content) &&
-        message.content.some(
-          (part) =>
-            typeof part === 'object' &&
-            part !== null &&
-            (part as { toolCallId?: string }).toolCallId === 'call_write',
-        ),
-    );
-    expect(assistantToolCalls).toHaveLength(1);
-    expect(toolResults).toHaveLength(1);
-    expect(result.newMessages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: 'tool',
-          content: expect.arrayContaining([
-            expect.objectContaining({ toolCallId: 'call_write' }),
-          ]),
-        }),
-      ]),
-    );
     await agent.close();
   });
 
@@ -1095,6 +963,104 @@ describe('createAgent', () => {
     await agent.close();
   });
 
+  it('does not impose a turn limit when maxTurns is omitted', async () => {
+    let calls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          calls += 1;
+          const complete = calls === 101;
+          const content = complete ? 'done' : `continue-${calls}`;
+          return {
+            text: content,
+            messages: [...request.messages, { role: 'assistant', content }],
+            newMessages: [{ role: 'assistant', content }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: complete ? 'stop' : 'tool-calls',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('hi');
+
+    expect(calls).toBe(101);
+    expect(result.finishReason).toBe('stop');
+    await agent.close();
+  });
+
+  it('treats maxTurns -1 as no turn limit', async () => {
+    let calls = 0;
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate(request) {
+          calls += 1;
+          const complete = calls === 3;
+          const content = complete ? 'done' : `continue-${calls}`;
+          return {
+            text: content,
+            messages: [...request.messages, { role: 'assistant', content }],
+            newMessages: [{ role: 'assistant', content }],
+            usage: {
+              requests: 1,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              toolCalls: 0,
+            },
+            finishReason: complete ? 'stop' : 'tool-calls',
+            provider: null,
+          };
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    const result = await agent.run('hi', { maxTurns: -1 });
+
+    expect(calls).toBe(3);
+    expect(result.finishReason).toBe('stop');
+    await agent.close();
+  });
+
+  it('rejects an invalid maxTurns value', async () => {
+    const agent = createAgent({
+      model: 'test:model',
+      modelAdapter: {
+        async generate() {
+          throw new Error('Model must not be called.');
+        },
+        async *stream(request) {
+          yield { type: 'final', response: await this.generate(request) };
+        },
+      },
+    });
+
+    await expect(agent.run('hi', { maxTurns: 0 })).rejects.toThrow(
+      'maxTurns must be a positive integer or -1.',
+    );
+    await expect(agent.run('hi', { maxTurns: -2 })).rejects.toThrow(
+      'maxTurns must be a positive integer or -1.',
+    );
+    await agent.close();
+  });
+
   it('stops tool-calls without new messages as no-progress', async () => {
     let calls = 0;
     const agent = createAgent({
@@ -1172,12 +1138,12 @@ describe('createAgent', () => {
     const seen: AgentModelRequest[] = [];
     const agent = createAgent({
       model: 'test:model',
-      tools: [
-        defineTool({
+      commands: [
+        defineTestCommand({
           name: 'write',
-          description: 'Write a file',
-          input: z.object({ path: z.string(), content: z.string() }),
-          execute: ({ path: targetPath, content }) => ({
+          summary: 'Write a file',
+          schema: z.object({ path: z.string(), content: z.string() }),
+          run: ({ path: targetPath, content }) => ({
             path: targetPath,
             content,
           }),
@@ -1268,243 +1234,7 @@ describe('createAgent', () => {
     expect(secondTurn).toContain('"type":"tool-call"');
     expect(secondTurn).toContain('"type":"tool-result"');
     expect(secondTurn).toContain('call_1');
-    await agent.close();
-  });
-
-  it('resume approval injects a tool result and continues the loop', async () => {
-    const firstAgent = createAgent({
-      model: 'test:model',
-      tools: [
-        defineTool({
-          name: 'danger',
-          description: 'Dangerous tool',
-          input: z.object({ value: z.string() }),
-          approval: () => 'required',
-          execute: () => 'should not run',
-        }),
-      ],
-      modelAdapter: {
-        async generate(request) {
-          return {
-            text: '',
-            messages: [...request.messages],
-            newMessages: [],
-            toolCalls: [
-              { id: 'call_1', name: 'danger', input: { value: 'x' } },
-            ],
-            usage: {
-              requests: 1,
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              toolCalls: 0,
-            },
-            finishReason: 'tool-calls',
-            provider: null,
-          };
-        },
-        async *stream(request) {
-          yield { type: 'final', response: await this.generate(request) };
-        },
-      },
-    });
-    const pending = await firstAgent.run('use tool');
-    const resumedRequests: AgentModelRequest[] = [];
-    const resumedAgent = createAgent({
-      model: 'test:model',
-      tools: [
-        defineTool({
-          name: 'danger',
-          description: 'Dangerous tool',
-          input: z.object({ value: z.string() }),
-          approval: () => 'required',
-          execute: () => 'approved-output',
-        }),
-      ],
-      modelAdapter: {
-        async generate(request) {
-          resumedRequests.push(request);
-          return {
-            text: 'approved',
-            messages: [
-              ...request.messages,
-              { role: 'assistant', content: 'approved' },
-            ],
-            newMessages: [{ role: 'assistant', content: 'approved' }],
-            usage: {
-              requests: 1,
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              toolCalls: 0,
-            },
-            finishReason: 'stop',
-            provider: null,
-          };
-        },
-        async *stream(request) {
-          yield { type: 'final', response: await this.generate(request) };
-        },
-      },
-    });
-
-    const result = await resumedAgent.run([], {
-      resume: {
-        deferred: pending.pending ?? [],
-        approvals: { call_1: true },
-      },
-    });
-
-    expect(result.output).toBe('approved');
-    expect(resumedRequests[0]?.messages.map((message) => message.role)).toEqual(
-      ['assistant', 'tool'],
-    );
-    expect(JSON.stringify(resumedRequests[0]?.messages[1])).toContain(
-      '"type":"text"',
-    );
-    expect(JSON.stringify(resumedRequests[0]?.messages[1])).toContain(
-      'approved-output',
-    );
-    expect(result.diagnostics?.resumeSource).toBe('options.resume');
-    await firstAgent.close();
-    await resumedAgent.close();
-  });
-
-  it('stops for a deferred tool and resumes with the matching result', async () => {
-    let modelCalls = 0;
-    const deferredTool = defineDeferredTool({
-      name: 'ask',
-      description: 'Ask the host',
-      discovery: { aliases: [], risk: 'readonly' },
-      input: z.object({ question: z.string() }).strict(),
-    });
-    const agent = createAgent({
-      model: 'test:model',
-      tools: [deferredTool],
-      modelAdapter: {
-        async generate(request) {
-          modelCalls += 1;
-          if (modelCalls === 1) {
-            const assistant = {
-              role: 'assistant' as const,
-              content: [
-                {
-                  type: 'tool-call' as const,
-                  toolCallId: 'ask-1',
-                  toolName: 'ask',
-                  input: { question: 'Choose?' },
-                },
-              ],
-            };
-            return {
-              text: '',
-              messages: [...request.messages, assistant],
-              newMessages: [assistant],
-              toolCalls: [
-                { id: 'ask-1', name: 'ask', input: { question: 'Choose?' } },
-              ],
-              usage: {
-                requests: 1,
-                inputTokens: 0,
-                outputTokens: 0,
-                cacheReadTokens: 0,
-                cacheWriteTokens: 0,
-                toolCalls: 0,
-              },
-              finishReason: 'tool-calls',
-              provider: null,
-            };
-          }
-          expect(JSON.stringify(request.messages)).toContain('selected');
-          return new EchoAdapter().generate(request);
-        },
-        async *stream(request) {
-          yield { type: 'final', response: await this.generate(request) };
-        },
-      },
-    });
-    const pending = await agent.run('ask');
-    expect(pending.finishReason).toBe('tool-result-required');
-    expect(pending.pending).toEqual([
-      expect.objectContaining({ kind: 'tool-call', toolCallId: 'ask-1' }),
-    ]);
-    const deferred = pending.pending;
-
-    const stream = agent.resume({
-      messages: pending.messages,
-      deferred: {
-        deferred,
-        toolResults: { 'ask-1': { selected: 'A' } },
-      },
-    });
-    for await (const _event of stream) {
-      // consume
-    }
-    expect((await stream.final).output).toBe('hello');
-
-    const invalid = agent.resume({
-      messages: pending.messages,
-      deferred: {
-        deferred,
-        toolResults: { wrong: 'answer' },
-      },
-    });
-    await expect(async () => {
-      for await (const _event of invalid) {
-        // consume
-      }
-    }).rejects.toThrow('unknown tool calls');
-    await agent.close();
-  });
-
-  it('resume denial emits a terminal tool failure without executing', async () => {
-    let executions = 0;
-    const agent = createAgent({
-      model: 'test:model',
-      tools: [
-        defineTool({
-          name: 'danger',
-          description: 'Dangerous tool',
-          input: z.object({ value: z.string() }),
-          execute: () => {
-            executions += 1;
-            return 'unexpected';
-          },
-        }),
-      ],
-      modelAdapter: new EchoAdapter(),
-    });
-    const stream = agent.stream([], {
-      resume: {
-        deferred: [
-          {
-            kind: 'approval',
-            toolCallId: 'call_denied',
-            toolName: 'danger',
-            input: { value: 'x' },
-          },
-        ],
-        approvals: {
-          call_denied: { approved: false, reason: 'Denied by user' },
-        },
-      },
-    });
-    const events: EngineEvent[] = [];
-    for await (const event of stream) {
-      events.push(event);
-    }
-    await stream.final;
-
-    expect(executions).toBe(0);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'tool.failed',
-        toolCallId: 'call_denied',
-        error: expect.objectContaining({ message: 'Denied by user' }),
-      }),
-    );
+    expect(result.usage.toolCalls).toBe(1);
     await agent.close();
   });
 

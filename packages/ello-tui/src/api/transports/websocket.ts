@@ -31,7 +31,20 @@ class SocketClientTransport implements ClientTransport {
     private readonly socket: WebSocket,
   ) {
     socket.on('message', (data) => {
-      if (!this.incoming.push(toBytes(data))) socket.terminate();
+      if (!this.incoming.push(toBytes(data))) {
+        socket.terminate();
+        return;
+      }
+      if (this.incoming.shouldApplyBackpressure) socket.pause();
+    });
+    this.incoming.onCapacityAvailable(() => {
+      if (
+        !this.closed &&
+        socket.isPaused &&
+        !this.incoming.shouldApplyBackpressure
+      ) {
+        socket.resume();
+      }
     });
     socket.once('close', () => this.incoming.end());
     socket.once('error', (error) => this.incoming.fail(error));

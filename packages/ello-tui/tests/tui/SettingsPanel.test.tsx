@@ -24,9 +24,9 @@ describe('SettingsPanel', () => {
       />,
     );
 
-    view.stdin.write('routing');
+    view.stdin.write('subagents');
     await vi.waitFor(() => {
-      expect(view.lastFrame()).toContain('tools.routing_enabled');
+      expect(view.lastFrame()).toContain('subagents.enabled');
       expect(view.lastFrame()).not.toContain('context.max_input_tokens');
     });
     view.unmount();
@@ -47,7 +47,7 @@ describe('SettingsPanel', () => {
     );
     view.stdin.write('\r');
     await vi.waitFor(() =>
-      expect(view.lastFrame()).toContain('tools.routing_enabled → project'),
+      expect(view.lastFrame()).toContain('subagents.enabled → project'),
     );
     view.stdin.write('\u001b[B');
     await vi.waitFor(() =>
@@ -133,11 +133,11 @@ describe('SettingsPanel', () => {
 function setting(overrides: Partial<TuiSetting> = {}): TuiSetting {
   return {
     owner: 'server',
-    id: 'tools.routing_enabled',
-    path: ['tools', 'routing_enabled'],
-    label: 'Routing Enabled',
-    description: 'Route model tools through discovery.',
-    group: 'Tools',
+    id: 'subagents.enabled',
+    path: ['subagents', 'enabled'],
+    label: 'Subagents Enabled',
+    description: 'Enable delegated agents.',
+    group: 'Subagents',
     type: 'boolean',
     value: false,
     source: 'global',

@@ -6,6 +6,7 @@ import { APP_VERSION, startSession } from '@/client/session';
 import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { cn } from '@/lib/cn';
+import { formatKeys } from '@/lib/platform';
 import { runOperation } from '@/lib/report';
 import type { ThemePreference } from '@/lib/theme/theme';
 import { useAppStore, useSetEnterToSend, useSetTheme } from '@/store/store';
@@ -158,7 +159,7 @@ function EditorSection() {
         <div>
           <div className="text-[13px] text-primary">Enter 发送消息</div>
           <div className="text-[11.5px] text-tertiary">
-            开启:Enter 发送,Shift+Enter 换行;关闭:⌘Enter 发送。
+            {formatKeys('开启:Enter 发送,Shift+Enter 换行;关闭:⌘Enter 发送。')}
           </div>
         </div>
         <Switch checked={enterToSend} onChange={setEnterToSend} />

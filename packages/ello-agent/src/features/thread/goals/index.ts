@@ -12,7 +12,7 @@ export {
 } from './controller.js';
 export { createGoalSystemSection } from './prompt.js';
 export { GoalService, type GoalPersistencePort } from './service.js';
-export { createGoalTools, UPDATE_GOAL_DESCRIPTION } from './tools.js';
+export { createGoalCommands, UPDATE_GOAL_DESCRIPTION } from './tools.js';
 export type {
   GoalPauseReason,
   GoalState,

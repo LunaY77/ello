@@ -8,7 +8,6 @@ const MAX_SKILL_DESCRIPTION_LENGTH = 44;
 
 export function completeInput(
   input: string,
-  models: readonly string[],
   files: readonly string[],
   skills: readonly AgentSkill[] = [],
   cursor: { readonly line: number; readonly column: number } = {
@@ -49,12 +48,6 @@ export function completeInput(
       }));
   }
   const trimmedLeft = input.trimStart();
-  if (trimmedLeft.startsWith('/profiles ')) {
-    const query = trimmedLeft.slice('/profiles '.length).toLowerCase();
-    return models
-      .filter((item) => item.toLowerCase().includes(query))
-      .map((item) => `/profiles ${item}`);
-  }
   if (trimmedLeft.startsWith('/')) {
     const query = trimmedLeft.slice(1).toLowerCase();
     return buildCommands()

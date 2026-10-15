@@ -4,10 +4,6 @@
  * 测试通过被测入口观察协议值、错误和副作用；临时文件、进程与连接由用例生命周期显式释放。
  * 失败必须由原断言直接暴露，不使用宽松默认值或跳过分支掩盖行为漂移。
  */
-import {
-  createCheckpointRecordStore,
-  type CheckpointRecordStore,
-} from '../../src/features/agent/change/store.js';
 import { ArtifactStore } from '../../src/features/artifact/store.js';
 import {
   createTaskBoardStore,
@@ -40,7 +36,6 @@ export interface TestStores {
   readonly artifacts: ArtifactStore;
   readonly taskBoards: TaskBoardStore;
   readonly threads: ThreadCatalogProjection;
-  readonly checkpoints: CheckpointRecordStore;
   readonly repositories: RepositoryStore;
   readonly workspaces: WorkspaceRecordStore;
   readonly usage: UsageStore;
@@ -89,7 +84,6 @@ export function createTestStores(
     artifacts,
     taskBoards: createTaskBoardStore(database.db),
     threads: createThreadCatalog(database.db),
-    checkpoints: createCheckpointRecordStore(database.db, artifacts),
     repositories: createRepositoryStore(database.db),
     workspaces: createWorkspaceRecordStore(database.db),
     usage: createUsageStore(database.db),

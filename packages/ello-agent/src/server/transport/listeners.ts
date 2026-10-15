@@ -4,7 +4,8 @@
  * Fastify 只处理 upgrade 前的 HTTP 边界；连接建立后立即交给 `ServerConnection`，RPC method、Zod
  * 校验、顺序屏障和背压不进入 Fastify response pipeline。
  */
-import { chmod, unlink } from 'node:fs/promises';
+import { chmod, lstat, unlink } from 'node:fs/promises';
+import { createConnection } from 'node:net';
 
 import websocket from '@fastify/websocket';
 import Fastify, {
@@ -71,12 +72,87 @@ export async function listenEndpoint(
       port: requireWebSocketPort(address),
     });
   } else {
-    await app.listen({ path: requireSocketPath(address) });
-    await chmod(requireSocketPath(address), 0o600);
+    const socketPath = requireSocketPath(address);
+    await removeStaleUnixSocket(socketPath);
+    await app.listen({ path: socketPath });
+    await chmod(socketPath, 0o600);
   }
   return {
     close: () => closeListener(app, address, connections),
   };
+}
+
+/**
+ * 在绑定前回收已经没有 listener 的 Unix socket 文件。
+ *
+ * Args:
+ * - `socketPath`: 即将绑定的绝对 socket 路径。
+ *
+ * Returns:
+ * - 路径不存在或确认陈旧时完成；活动 listener 和非 socket 路径直接失败。
+ */
+async function removeStaleUnixSocket(socketPath: string): Promise<void> {
+  let initial;
+  try {
+    initial = await lstat(socketPath);
+  } catch (error) {
+    if (isErrnoException(error) && error.code === 'ENOENT') return;
+    throw error;
+  }
+  if (!initial.isSocket()) {
+    throw new Error(
+      `Unix listener path already exists and is not a socket: ${socketPath}`,
+    );
+  }
+  if (await hasActiveUnixListener(socketPath)) {
+    throw new Error(
+      `Unix listener path already has an active listener: ${socketPath}`,
+    );
+  }
+  let current;
+  try {
+    current = await lstat(socketPath);
+  } catch (error) {
+    if (isErrnoException(error) && error.code === 'ENOENT') return;
+    throw error;
+  }
+  if (
+    !current.isSocket() ||
+    current.dev !== initial.dev ||
+    current.ino !== initial.ino
+  ) {
+    throw new Error(
+      `Unix listener path changed while checking staleness: ${socketPath}`,
+    );
+  }
+  await unlink(socketPath);
+}
+
+/**
+ * 探测既有 Unix socket 是否仍由活动进程监听。
+ *
+ * Args:
+ * - `socketPath`: 已由 lstat 确认为 socket 的路径。
+ *
+ * Returns:
+ * - 连接成功返回 `true`；`ECONNREFUSED` 代表只剩陈旧文件并返回 `false`。
+ */
+function hasActiveUnixListener(socketPath: string): Promise<boolean> {
+  return new Promise<boolean>((resolve, reject) => {
+    const socket = createConnection(socketPath);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', (error: NodeJS.ErrnoException) => {
+      socket.destroy();
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOENT') {
+        resolve(false);
+      } else {
+        reject(error);
+      }
+    });
+  });
 }
 
 function requireWebSocketHost(address: ListenerAddress): string {

@@ -135,6 +135,9 @@ export class AgentEventStream implements AgentStream {
    *
    * Returns:
    * - 产品 Agent Agent engine 流控制 模块 的同步状态变更完成后返回，不产生业务结果。
+   *
+   * Throws:
+   * - 当事件流已经关闭时抛错，调用方不得把未入队的 steering 误认为已接受。
    */
   emit(event: EngineEvent): void {
     if (this.closed) {
@@ -210,7 +213,7 @@ export class AgentEventStream implements AgentStream {
    */
   steer(message: AgentMessage): void {
     if (this.closed) {
-      return;
+      throw new Error('Agent event stream is closed.');
     }
     this.onSteer(message);
   }

@@ -27,6 +27,7 @@ import {
 } from '../../server/rpc/route.js';
 import type { ArtifactStore } from '../artifact/index.js';
 
+import type { PersistedThreadCompactionReport } from './compact.js';
 import { readPlanArtifact } from './plan.js';
 import { ServerRequestControllerUnavailableError } from './state.js';
 
@@ -56,6 +57,7 @@ type CoreThreadMethod =
 
 type ThreadOperationMethod =
   | 'thread/compact/start'
+  | 'thread/compact/interrupt'
   | 'thread/shellCommand'
   | 'thread/goal/get'
   | 'thread/goal/set'
@@ -76,7 +78,11 @@ export interface ThreadRouteContext {
    * Returns:
    * - Promise 在 Thread route 适配 模块 的异步读取或状态变更完成后兑现为声明结果。
    */
-  readonly compact: (threadId: string) => Promise<unknown | null>;
+  readonly compact: (
+    threadId: string,
+  ) => Promise<PersistedThreadCompactionReport | null>;
+  /** 中断指定 Thread 当前正在进行的手动压缩；没有活动压缩时保持幂等。 */
+  readonly interruptCompact: (threadId: string) => void;
   readonly threads: ThreadFeature;
 }
 
@@ -86,7 +92,11 @@ const operationHandlers = {
     if (report === null) {
       throw invalidParams('Thread has no compactable history.');
     }
-    return { jobId: createEntityId('job') };
+    return report;
+  },
+  'thread/compact/interrupt': (context, params) => {
+    context.interruptCompact(params.threadId);
+    return { ok: true as const };
   },
   'thread/shellCommand': async (context, params) => {
     const snapshot = await context.threads.read({
@@ -94,11 +104,6 @@ const operationHandlers = {
       includeTurns: false,
       includeItems: false,
     });
-    if (snapshot.thread.archived) {
-      throw invalidParams(
-        `Thread ${params.threadId} must be unarchived before shell execution.`,
-      );
-    }
     if (snapshot.settings.mode === 'plan') {
       throw new AppServerError({
         type: 'permissionDenied',
@@ -265,26 +270,12 @@ export function createThreadRoutes(
       await context.threads.unsubscribe(peer.connectionId, params.threadId);
       return { ok: true };
     }),
-    'thread/archive': route('write', async (peer, params) => {
-      const result = await context.threads.archive(params.threadId);
-      await peer.notify({
-        method: 'thread/archived',
-        params: { threadId: params.threadId, seq: result.seq },
-      });
-      return { thread: result.thread };
-    }),
-    'thread/unarchive': route('write', async (peer, params) => {
-      const result = await context.threads.unarchive(params.threadId);
-      await peer.notify({
-        method: 'thread/unarchived',
-        params: {
-          threadId: params.threadId,
-          seq: result.seq,
-          thread: result.thread,
-        },
-      });
-      return { thread: result.thread };
-    }),
+    'thread/archive': route('write', async (_peer, params) => ({
+      thread: await context.threads.archive(params.threadId),
+    })),
+    'thread/unarchive': route('write', async (_peer, params) => ({
+      thread: await context.threads.unarchive(params.threadId),
+    })),
     'thread/delete': route('write', async (_peer, params) => {
       await context.threads.delete(params.threadId);
       return { ok: true };
@@ -315,8 +306,6 @@ export function createThreadRoutes(
     ),
     'turn/start': route('submit', async (_peer, params) => ({
       turn: await context.threads.startTurn(params.threadId, params.input, {
-        ...(params.model === undefined ? {} : { model: params.model }),
-        ...(params.profile === undefined ? {} : { profile: params.profile }),
         ...(params.mode === undefined ? {} : { mode: params.mode }),
       }),
     })),
@@ -324,6 +313,7 @@ export function createThreadRoutes(
       await context.threads.steerTurn(
         params.threadId,
         params.expectedTurnId,
+        params.steerId,
         params.input,
       );
       return { ok: true };
@@ -336,6 +326,7 @@ export function createThreadRoutes(
       ),
     })),
     'thread/compact/start': bind('thread/compact/start'),
+    'thread/compact/interrupt': bind('thread/compact/interrupt'),
     'thread/shellCommand': bind('thread/shellCommand'),
     'thread/goal/get': bind('thread/goal/get'),
     'thread/goal/set': bind('thread/goal/set'),

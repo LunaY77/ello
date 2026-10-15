@@ -9,6 +9,7 @@ import { AppShell, TopBarFrame } from '@/components/layout/AppShell';
 import { ApprovalQueue } from '@/features/approval';
 import { Composer } from '@/features/composer';
 import { WorkingSidebar } from '@/features/files';
+import { NewThreadPicker } from '@/features/thread';
 import { ChatTimeline } from '@/features/timeline';
 import { WorkspaceSidebar } from '@/features/workspace';
 
@@ -31,6 +32,7 @@ export function WorkbenchRoute() {
       <ChatTimeline />
       <ApprovalQueue />
       <Composer />
+      <NewThreadPicker />
     </AppShell>
   );
 }

@@ -59,7 +59,7 @@ const INITIALIZE_PARAMS = {
 };
 
 const INITIALIZE_RESULT = {
-  protocolVersion: 1,
+  protocolVersion: ELLO_PROTOCOL_VERSION,
   serverInfo: { name: 'ello-agent', version: '1.0.0' },
   serverCapabilities: {
     transports: ['stdio'],

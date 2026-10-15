@@ -74,6 +74,17 @@ export interface RpcConnectionLimits {
   readonly maxOutboundBytes: number;
   readonly reservedResponseMessages: number;
   readonly reservedResponseBytes: number;
+  /**
+   * 同时用于 outbox 入场等待和单条消息落到 transport 的上限；超时按“对端已经卡死”处理并关闭连接。
+   *
+   * 慢不等于死：Client 渲染一个大 Thread snapshot 时事件循环可能连续阻塞数秒，
+   * 期间 stdio pipe 不被读取，server 的 write 拿不到 drain。这条超时必须留够这种停顿，
+   * 否则健康的 Client 会被误判成过载并被强制断开。连接内存边界由
+   * maxOutbound* 预算和 maxOutboundMessages 个等待者硬上限保证，不依赖这条超时。
+   *
+   * 两处必须共用同一预算：入场等待若短于单条 write 的上限，一次卡住的 write 会把 outbox
+   * 填满并让入场先失败，单条 write 的宽限就失效了。
+   */
   readonly backpressureTimeoutMs: number;
 }
 
@@ -85,7 +96,7 @@ export const DEFAULT_RPC_CONNECTION_LIMITS = {
   maxOutboundBytes: 8 * 1024 * 1024,
   reservedResponseMessages: 32,
   reservedResponseBytes: 1024 * 1024,
-  backpressureTimeoutMs: 1_000,
+  backpressureTimeoutMs: 60_000,
 } as const satisfies RpcConnectionLimits;
 
 /** initialize 状态只属于单条连接，不能泄漏到全局 Server。 */
@@ -524,7 +535,7 @@ export class ProtocolMessageWriter
       withTimeout(
         this.transport.send(encoded.bytes),
         this.limits.backpressureTimeoutMs,
-        'JSON-RPC transport backpressure timed out.',
+        `Connection peer did not accept an outbound message for ${this.limits.backpressureTimeoutMs} ms.`,
       ),
     );
     this.sendQueue = operation.then(
@@ -871,10 +882,12 @@ export class ServerConnection implements RpcPeer {
     let failure: unknown;
     try {
       await this.reader.finished;
-      if (this.fatalError !== undefined) failure = this.fatalError;
     } catch (error) {
       failure = error;
     }
+    // 强制关闭会 destroy transport 输入，reader 因此以次生错误（例如 stream 的 Premature close）
+    // 结束。真正的致命原因已经记在 fatalError 上，必须优先上报，否则日志里只剩下被掩盖的表象。
+    if (this.fatalError !== undefined) failure = this.fatalError;
     try {
       await this.close('transport ended', failure !== undefined);
     } catch (closeError) {

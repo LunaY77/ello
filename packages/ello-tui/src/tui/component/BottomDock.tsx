@@ -16,7 +16,9 @@ export function BottomDock({
   goal,
   overlay,
   composer,
+  agentSwitcher,
   contextPercent,
+  contextWindow,
 }: {
   readonly model: string;
   readonly mode: TuiModeState;
@@ -25,11 +27,11 @@ export function BottomDock({
   readonly goal?: Goal;
   readonly overlay: ReactNode;
   readonly composer: ReactNode;
+  readonly agentSwitcher?: ReactNode;
   readonly contextPercent?: number;
+  readonly contextWindow?: number;
 }) {
   const theme = useTheme();
-  const tokens =
-    usage !== undefined ? usage.inputTokens + usage.outputTokens : 0;
   const cacheLabel =
     usage === undefined || usage.inputTokens === 0
       ? 'cache unavailable'
@@ -45,36 +47,57 @@ export function BottomDock({
       >
         {composer}
       </Box>
-      <Box justifyContent="space-between">
-        <Box gap={1}>
-          <Text color={theme.textMuted}>{model}</Text>
-          <Text color={modeColor(theme, mode.mode)}>
+      <Box flexDirection="column" width="100%">
+        {/* footer 固定三行：换行会顶高 dynamic frame，触发 Ink 整屏重绘，所以只截断。 */}
+        <Text color={theme.textMuted} wrap="truncate-middle">
+          {model}
+        </Text>
+        <Box gap={1} width="100%">
+          <Text color={modeColor(theme, mode.mode)} wrap="truncate">
             {modeLabel(mode.mode)}
           </Text>
           {contextPercent !== undefined ? (
-            <Text color={theme.textMuted}>context {contextPercent}% left</Text>
+            <Text color={theme.textMuted} wrap="truncate">
+              {contextLabel(usage, contextWindow, contextPercent)}
+            </Text>
           ) : null}
           {mode.mode === 'plan' ? (
-            <Text color={theme.accent}>Shift+Tab to cycle</Text>
+            <Text color={theme.accent} wrap="truncate">
+              Shift+Tab to cycle
+            </Text>
           ) : null}
           {pendingPlanApproval ? (
-            <Text color={theme.warning}>
+            <Text color={theme.warning} wrap="truncate">
               Plan ready · Accept / Chat about this / Deny
             </Text>
           ) : null}
           {goal !== undefined ? (
-            <Text color={theme.accent}>{formatGoal(goal)}</Text>
+            <Text color={theme.accent} wrap="truncate">
+              {formatGoal(goal)}
+            </Text>
           ) : null}
         </Box>
-        <Box gap={1}>
-          <Text color={theme.textMuted}>{cacheLabel}</Text>
-          <Text
-            color={theme.textMuted}
-          >{`${formatTokens(tokens)} tokens`}</Text>
+        <Box gap={1} width="100%">
+          <Text color={theme.textMuted} wrap="truncate">
+            {cacheLabel}
+          </Text>
         </Box>
       </Box>
+      {agentSwitcher}
     </Box>
   );
+}
+
+function contextLabel(
+  usage: Usage | undefined,
+  contextWindow: number | undefined,
+  contextPercent: number,
+): string {
+  const used = usage?.lastInputTokens;
+  if (used === undefined || contextWindow === undefined) {
+    return `context ${contextPercent}% left`;
+  }
+  return `context ${formatTokens(used)} / ${formatTokens(contextWindow)} · ${contextPercent}% left`;
 }
 
 function formatGoal(goal: Goal): string {
@@ -112,5 +135,6 @@ function modeLabel(mode: SessionMode): string {
 }
 
 function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
   return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens);
 }

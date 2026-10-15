@@ -21,7 +21,6 @@ import {
   REPOSITORY_BASELINE_REF,
 } from '../../src/features/workspace/index.js';
 import type { ThreadSnapshot } from '../../src/protocol/v1/index.js';
-import type { ServerNotification } from '../../src/protocol/v1/index.js';
 import { createTestFeatures } from '../support/features.js';
 import { createTestPeer, invokeServiceRoute } from '../support/rpc.js';
 import { createTestStores, type TestStores } from '../support/stores.js';
@@ -121,53 +120,7 @@ describe('ServerServices runtime contracts', () => {
     ).rejects.toMatchObject({ type: 'invalidParams' });
   });
 
-  it('archive 与 unarchive route 在领域提交后向发起连接发布同一 seq', async () => {
-    const storage = createStorage(home);
-    const active = threadSnapshot(home).thread;
-    const archived = { ...active, archived: true };
-    const notifications: ServerNotification[] = [];
-    const service = createTestFeatures({
-      storage,
-      threads: {
-        archive: () => Promise.resolve({ thread: archived, seq: 2 }),
-        unarchive: () => Promise.resolve({ thread: active, seq: 3 }),
-      } as unknown as ThreadFeature,
-      store: {} as ThreadStore,
-      compact: () => Promise.reject(new Error('Unexpected compact request.')),
-    });
-    services.push(service);
-    const peer = createTestPeer({
-      connectionId: 'connection-archive',
-      notify: (notification) => {
-        notifications.push(notification);
-        return Promise.resolve();
-      },
-    });
-
-    await expect(
-      invokeServiceRoute(service, peer, 'thread/archive', {
-        threadId: active.id,
-      }),
-    ).resolves.toEqual({ thread: archived });
-    await expect(
-      invokeServiceRoute(service, peer, 'thread/unarchive', {
-        threadId: active.id,
-      }),
-    ).resolves.toEqual({ thread: active });
-
-    expect(notifications).toEqual([
-      {
-        method: 'thread/archived',
-        params: { threadId: active.id, seq: 2 },
-      },
-      {
-        method: 'thread/unarchived',
-        params: { threadId: active.id, seq: 3, thread: active },
-      },
-    ]);
-  });
-
-  it('未装配 delegation runner 的 Subagent 在目录中明确标记不可用', async () => {
+  it('已装配的 Subagent 在目录中标记为可委派运行时', async () => {
     const storage = createStorage(home);
     const service = createService(storage, threadSnapshot(home));
     const response = (await invokeServiceRoute(
@@ -181,17 +134,17 @@ describe('ServerServices runtime contracts', () => {
         readonly metadata: Record<string, unknown>;
       }[];
     };
-    const unavailable = response.data.filter(
+    const subagents = response.data.filter(
       (agent) => agent.metadata.mode === 'subagent',
     );
 
-    expect(unavailable.length).toBeGreaterThan(0);
-    expect(unavailable).toEqual(
+    expect(subagents.length).toBeGreaterThan(0);
+    expect(subagents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          enabled: false,
+          enabled: true,
           metadata: expect.objectContaining({
-            runtime: 'unavailable:no-delegation-runner',
+            runtime: 'delegation',
           }),
         }),
       ]),
@@ -345,8 +298,6 @@ function threadSnapshot(cwd: string): ThreadSnapshot {
     },
     settings: {
       mode: 'ask-before-changes',
-      profile: 'test',
-      model: 'test:model',
       agent: 'build',
     },
     turns: [],

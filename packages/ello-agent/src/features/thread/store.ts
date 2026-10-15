@@ -89,6 +89,19 @@ export interface ThreadStore {
    */
   read(threadId: string): Promise<ReadonlyArray<ThreadRecord>>;
   /**
+   * 读取 Thread 持久化 store 模块 的 `readArchived` 视图，不转移底层状态所有权。
+   *
+   * Args:
+   * - `threadId`: 目标对象的稳定标识；用于定位唯一状态，未知标识直接失败。
+   *
+   * Returns:
+   * - Promise 在 Thread 持久化 store 模块 的异步读取或状态变更完成后兑现为声明结果。
+   *
+   * Throws:
+   * - 当 Thread 持久化 store 模块 的输入、状态或外部资源不满足契约时直接抛错，并保留底层失败原因。
+   */
+  readArchived(threadId: string): Promise<ReadonlyArray<ThreadRecord>>;
+  /**
    * 按 Thread 持久化 store 模块 的一致性约束执行 `append` 状态变更。
    *
    * Args:
@@ -135,7 +148,7 @@ export interface ThreadStore {
    * Returns:
    * - Promise 在 Thread 持久化 store 模块 的异步读取或状态变更完成后兑现为声明结果。
    */
-  archive(threadId: string): Promise<ThreadArchiveMutation>;
+  archive(threadId: string): Promise<ThreadSummary>;
   /**
    * 按 Thread 持久化 store 模块 的一致性约束执行 `unarchive` 状态变更。
    *
@@ -145,7 +158,7 @@ export interface ThreadStore {
    * Returns:
    * - Promise 在 Thread 持久化 store 模块 的异步读取或状态变更完成后兑现为声明结果。
    */
-  unarchive(threadId: string): Promise<ThreadArchiveMutation>;
+  unarchive(threadId: string): Promise<ThreadSummary>;
   /**
    * 按 Thread 持久化 store 模块 的一致性约束执行 `delete` 状态变更。
    *
@@ -168,11 +181,6 @@ export interface LoadedThreadData {
 
 export interface CreatedThreadData extends LoadedThreadData {
   readonly record: ThreadRecord;
-}
-
-export interface ThreadArchiveMutation {
-  readonly thread: ThreadSummary;
-  readonly seq: number;
 }
 
 /**
@@ -242,6 +250,7 @@ export function createThreadStore(input: {
       }
     },
     read: (threadId) => logs.read(threadId),
+    readArchived: (threadId) => logs.readArchived(threadId),
     append,
     subscribe(threadId, listener) {
       if (subscribed.has(threadId)) {
@@ -259,44 +268,32 @@ export function createThreadStore(input: {
     },
     list: (options) => catalog.list(options),
     async archive(threadId) {
-      const snapshot = projectThreadSnapshot(await logs.read(threadId));
-      if (snapshot.thread.archived) {
-        throw invalidThreadState(threadId, 'is already archived');
-      }
-      if (
-        snapshot.turns.some((turn) => turn.status === 'inProgress') ||
-        snapshot.pendingServerRequests.length > 0
-      ) {
-        throw new AppServerError({
-          type: 'threadBusy',
-          message: `Thread ${threadId} cannot be archived while work is active.`,
-        });
-      }
-      const record = await append(threadId, { kind: 'thread.archived' });
-      return {
-        thread: projectSummary(await logs.read(threadId)),
-        seq: record.seq,
-      };
+      await append(threadId, {
+        kind: 'thread.metadata',
+        archived: true,
+      });
+      await logs.archive(threadId);
+      return projectSummary(await logs.readArchived(threadId));
     },
     async unarchive(threadId) {
-      const snapshot = projectThreadSnapshot(await logs.read(threadId));
-      if (!snapshot.thread.archived) {
-        throw invalidThreadState(threadId, 'is not archived');
-      }
-      const record = await append(threadId, { kind: 'thread.unarchived' });
-      return {
-        thread: projectSummary(await logs.read(threadId)),
-        seq: record.seq,
-      };
+      await logs.unarchive(threadId);
+      await append(threadId, {
+        kind: 'thread.metadata',
+        archived: false,
+      });
+      return projectSummary(await logs.read(threadId));
     },
     async delete(threadId) {
-      if (!(await logs.exists(threadId))) {
+      if (await logs.exists(threadId, false)) {
+        await logs.delete(threadId, false);
+      } else if (await logs.exists(threadId, true)) {
+        await logs.delete(threadId, true);
+      } else {
         throw new AppServerError({
           type: 'threadNotFound',
           message: `Thread ${threadId} does not exist.`,
         });
       }
-      await logs.delete(threadId);
       if (!catalog.delete(threadId)) {
         throw new Error(
           `Thread catalog ${threadId} disappeared before delete.`,
@@ -315,12 +312,8 @@ async function recoverInterruptedThreads(options: {
   readonly leases: ThreadLeaseStore;
 }): Promise<ReadonlySet<string>> {
   const activeThreadIds = new Set<string>();
-  const threadIds = await options.logs.listThreadIds();
+  const threadIds = await options.logs.listThreadIds(false);
   for (const threadId of threadIds) {
-    const initialSnapshot = projectThreadSnapshot(
-      await options.logs.read(threadId),
-    );
-    if (initialSnapshot.thread.archived) continue;
     const lease = await options.leases.tryAcquire(threadId);
     if (lease === undefined) {
       activeThreadIds.add(threadId);
@@ -339,18 +332,35 @@ async function recoverInterruptedThreads(options: {
         (turn) => turn.status === 'inProgress',
       );
       for (const turn of activeTurns) {
+        const recoveredItems: ThreadItem[] = [];
         for (const item of turn.items) {
           const interrupted = interruptItem(item);
-          if (interrupted === null) continue;
-          await options.logs.append(threadId, {
-            kind: 'item.completed',
-            turnId: turn.id,
-            item: interrupted,
-          });
+          recoveredItems.push(interrupted ?? item);
+          if (interrupted !== null) {
+            await options.logs.append(threadId, {
+              kind: 'item.completed',
+              turnId: turn.id,
+              item: interrupted,
+            });
+          }
+          if (
+            interrupted?.type === 'commandRun' &&
+            needsInterruptedToolResult(
+              await options.logs.read(threadId),
+              interrupted,
+            )
+          ) {
+            await options.logs.append(threadId, {
+              kind: 'transcript.entry',
+              turnId: turn.id,
+              role: 'tool',
+              message: interruptedToolResult(interrupted),
+            });
+          }
         }
         await options.logs.append(threadId, {
           kind: 'turn.interrupted',
-          turn: interruptedTurn(turn),
+          turn: interruptedTurn(turn, recoveredItems),
           reason: 'server restarted before the turn reached a terminal state',
         });
       }
@@ -388,14 +398,82 @@ function recoverablePreview(snapshot: ThreadSnapshot): string | undefined {
   return undefined;
 }
 
-function interruptedTurn(turn: Turn): Turn {
+function interruptedTurn(turn: Turn, items: readonly ThreadItem[]): Turn {
   return {
     ...turn,
     status: 'interrupted',
-    items: [],
+    items,
     completedAt: new Date().toISOString(),
     errorCode: 'SERVER_RESTARTED',
   };
+}
+
+function needsInterruptedToolResult(
+  records: readonly ThreadRecord[],
+  item: Extract<ThreadItem, { type: 'commandRun' }>,
+): boolean {
+  let callSeen = false;
+  for (const record of records) {
+    if (record.kind !== 'transcript.entry') continue;
+    const content = messageContent(record.message);
+    for (const part of content) {
+      if (toolPartId(part, 'tool-call') === item.providerToolCallId) {
+        callSeen = true;
+      }
+      if (toolPartId(part, 'tool-result') === item.providerToolCallId) {
+        return false;
+      }
+    }
+  }
+  return callSeen;
+}
+
+function interruptedToolResult(
+  item: Extract<ThreadItem, { type: 'commandRun' }>,
+): Record<string, unknown> {
+  return {
+    role: 'tool',
+    content: [
+      {
+        type: 'tool-result',
+        toolCallId: item.providerToolCallId,
+        toolName: 'command_run',
+        output: {
+          type: 'error-text',
+          value: JSON.stringify({
+            commandRunId: item.id,
+            status: 'interrupted',
+            commands: item.commands.map((command) => ({
+              commandId: command.commandId,
+              name: command.name,
+              status: command.status,
+            })),
+          }),
+        },
+      },
+    ],
+  };
+}
+
+function messageContent(message: unknown): readonly unknown[] {
+  if (typeof message !== 'object' || message === null) return [];
+  const content = Reflect.get(message, 'content');
+  return Array.isArray(content) ? content : [];
+}
+
+function toolPartId(
+  part: unknown,
+  type: 'tool-call' | 'tool-result',
+): string | undefined {
+  if (
+    typeof part !== 'object' ||
+    part === null ||
+    Reflect.get(part, 'type') !== type
+  ) {
+    return undefined;
+  }
+  const id = Reflect.get(part, 'toolCallId');
+  return typeof id === 'string' ? id : undefined;
 }
 
 function interruptItem(item: ThreadItem): ThreadItem | null {
@@ -415,6 +493,18 @@ function interruptItem(item: ThreadItem): ThreadItem | null {
       return item.status === 'inProgress'
         ? { ...item, status: 'failed' }
         : null;
+    case 'commandRun':
+      return item.status === 'inProgress'
+        ? {
+            ...item,
+            status: 'interrupted',
+            commands: item.commands.map((command) =>
+              command.status === 'running'
+                ? { ...command, status: 'interrupted' as const }
+                : command,
+            ),
+          }
+        : null;
     default:
       item satisfies never;
       throw new Error(`Unhandled Thread item: ${String(item)}`);
@@ -426,30 +516,39 @@ async function reconcileThreadCatalog(options: {
   readonly catalog: ThreadCatalogProjection;
   readonly activeThreadIds: ReadonlySet<string>;
 }): Promise<void> {
-  const threadIds = await options.logs.listThreadIds();
+  const [activeIds, archivedIds] = await Promise.all([
+    options.logs.listThreadIds(false),
+    options.logs.listThreadIds(true),
+  ]);
   const logIds = new Set<string>();
-  for (const threadId of threadIds) {
-    logIds.add(threadId);
-    if (options.activeThreadIds.has(threadId)) continue;
-    const records = await options.logs.read(threadId);
-    const snapshot = projectThreadSnapshot(records);
-    const state = options.catalog.state(threadId);
-    if (
-      state === null ||
-      state.seq !== snapshot.seq ||
-      state.archived !== snapshot.thread.archived
-    ) {
-      options.catalog.rebuild(records);
+  for (const [archived, ids] of [
+    [false, activeIds],
+    [true, archivedIds],
+  ] as const) {
+    for (const threadId of ids) {
+      if (logIds.has(threadId)) {
+        throw new AppServerError({
+          type: 'storageCorrupt',
+          message: `Thread ${threadId} has both active and archived logs.`,
+        });
+      }
+      logIds.add(threadId);
+      if (!archived && options.activeThreadIds.has(threadId)) continue;
+      const records = archived
+        ? await options.logs.readArchived(threadId)
+        : await options.logs.read(threadId);
+      const snapshot = projectThreadSnapshot(records);
+      const state = options.catalog.state(threadId);
+      if (
+        state === null ||
+        state.seq !== snapshot.seq ||
+        state.archived !== snapshot.thread.archived
+      ) {
+        options.catalog.rebuild(records);
+      }
     }
   }
   for (const state of options.catalog.states()) {
     if (!logIds.has(state.id)) options.catalog.delete(state.id);
   }
-}
-
-function invalidThreadState(threadId: string, state: string): AppServerError {
-  return new AppServerError({
-    type: 'invalidParams',
-    message: `Thread ${threadId} ${state}.`,
-  });
 }

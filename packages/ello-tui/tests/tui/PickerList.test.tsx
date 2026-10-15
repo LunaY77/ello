@@ -2,18 +2,16 @@ import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
 
 import { OverlayHost } from '../../src/tui/component/OverlayHost.js';
-import { InlineSelect } from '../../src/tui/ui/List.js';
+import { DEFAULT_VISIBLE_ROWS, InlineSelect } from '../../src/tui/ui/List.js';
 import { overlayCallbacks } from '../support/overlay-fixture.js';
 
 describe('bottom dock pickers', () => {
-  it('renders the Codex-style session selector collapsed by default', () => {
+  it('renders the session selector as a scrollable window', () => {
     const output = renderToString(
       <OverlayHost
         {...overlayCallbacks()}
         overlay={{
           type: 'session-selector',
-          action: 'resume',
-          currentCwd: '/repo',
           sessions: Array.from({ length: 8 }, (_, index) => ({
             id: `session-${index}`,
             rootId: `session-${index}`,
@@ -30,14 +28,10 @@ describe('bottom dock pickers', () => {
       { columns: 100 },
     );
 
-    expect(output).toContain('Resume a previous session');
-    expect(output).toContain('Type to search');
-    expect(output).toContain('Cwd [All]');
-    expect(output).toContain('[Updated] Created');
-    expect(output).not.toContain('Session:    session-7');
-    expect(output).not.toContain('Directory:  /repo');
-    expect(output).toContain('Ctrl+E expand/collapse');
-    expect(output).toContain('1 / 8');
+    expect(output).toContain('threads  1-6 of 8');
+    expect(output).toContain('scrollbar  [########--]');
+    expect(output).toContain('session 5');
+    expect(output).not.toContain('session 6');
   });
 
   it('renders only rewindable user entries in the rewind selector', () => {
@@ -82,5 +76,27 @@ describe('bottom dock pickers', () => {
     expect(output).toContain('item 2');
     expect(output).not.toContain('item 3');
     expect(output).toContain('scrollbar  [####------]');
+  });
+
+  it('没有显式 visibleRows 时窗口仍然有界', () => {
+    // model catalog 这类长列表如果全量渲染，bottom dock 会超过终端高度，
+    // Ink 随即每帧整屏重绘（闪屏），composer 与 footer 也会被压扁。
+    const output = renderToString(
+      <InlineSelect
+        label="models"
+        options={Array.from({ length: 60 }, (_, index) => ({
+          value: `model-${index}`,
+          label: `model ${index}`,
+        }))}
+        onChange={() => {}}
+      />,
+      { columns: 100 },
+    );
+
+    expect(output.split('\n').length).toBeLessThanOrEqual(
+      DEFAULT_VISIBLE_ROWS + 3,
+    );
+    expect(output).toContain(`models  1-${DEFAULT_VISIBLE_ROWS} of 60`);
+    expect(output).not.toContain('model 59');
   });
 });

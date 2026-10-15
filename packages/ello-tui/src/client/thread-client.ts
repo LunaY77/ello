@@ -14,11 +14,13 @@ import {
   type ClientServerRequest,
 } from '../api/server-requests.js';
 
+import { AgentTaskClient } from './agent-task-client.js';
 import type {
   ThreadClientEvent,
   ThreadClientListener,
 } from './client-events.js';
 import { reduceNotification, type ClientProjection } from './event-reducer.js';
+import { createSteerId } from './steer-id.js';
 
 export interface ThreadClientOptions {
   readonly server: AppServerClient;
@@ -34,6 +36,7 @@ export class ThreadClient {
   private readonly pendingRequests = new Map<string, ClientServerRequest>();
   private readonly stopNotificationListener: () => void;
   private readonly stopServerRequestListener: () => void;
+  private readonly stopCloseListener: () => void;
   private recoveryTask: Promise<void> | undefined;
 
   constructor(
@@ -65,6 +68,12 @@ export class ThreadClient {
       this.emit({ type: 'serverRequest', request: typedRequest });
       return true;
     });
+    this.stopCloseListener = server.onClose((event) => {
+      if (event.error === undefined) return;
+      this.projection = { ...this.projection, stale: true };
+      this.pendingRequests.clear();
+      this.emit({ type: 'connectionClosed', error: event.error });
+    });
   }
 
   get snapshot(): ThreadSnapshot {
@@ -72,6 +81,11 @@ export class ThreadClient {
   }
   get stale(): boolean {
     return this.projection.stale;
+  }
+
+  /** 为当前 root thread 建立独立的 Agent task 订阅。 */
+  createAgentTaskClient(): Promise<AgentTaskClient> {
+    return AgentTaskClient.connect(this.server, this.threadId);
   }
 
   /**
@@ -122,16 +136,20 @@ export class ThreadClient {
     return result.turn.id;
   }
 
-  async steer(input: string): Promise<void> {
-    return this.steerInput([{ type: 'text', text: input }]);
+  async steer(input: string, steerId = createSteerId()): Promise<void> {
+    return this.steerInput([{ type: 'text', text: input }], steerId);
   }
 
-  async steerInput(input: readonly UserInput[]): Promise<void> {
+  async steerInput(
+    input: readonly UserInput[],
+    steerId = createSteerId(),
+  ): Promise<void> {
     const turn = activeTurn(this.projection.snapshot);
     if (turn === undefined) throw new Error('Thread has no active turn.');
     await this.server.request('turn/steer', {
       threadId: this.threadId,
       expectedTurnId: turn.id,
+      steerId,
       input,
     });
   }
@@ -176,14 +194,6 @@ export class ThreadClient {
     await this.updateSettings({ mode });
   }
 
-  async setProfile(profile: string): Promise<void> {
-    await this.updateSettings({ profile });
-  }
-
-  async setModel(model: string): Promise<void> {
-    await this.updateSettings({ model });
-  }
-
   async startNewThread(): Promise<ThreadClient> {
     const snapshot = await this.server.request('thread/start', {
       cwd: this.cwd,
@@ -212,6 +222,7 @@ export class ThreadClient {
   async close(): Promise<void> {
     this.stopNotificationListener();
     this.stopServerRequestListener();
+    this.stopCloseListener();
     await this.server
       .request('thread/unsubscribe', { threadId: this.threadId })
       .catch(() => undefined);
